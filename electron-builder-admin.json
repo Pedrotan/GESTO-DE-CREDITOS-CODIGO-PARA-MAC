@@ -1,0 +1,69 @@
+{
+    "appId": "com.sistema.tangomaster",
+    "productName": "TangoMasterGen",
+    "compression": "normal",
+    "npmRebuild": false,
+    "directories": {
+        "output": "release-admin"
+    },
+    "files": [
+        "dist-admin/**/*",
+        "dist-electron-admin/**/*",
+        "public_key.json"
+    ],
+    "extraMetadata": {
+        "main": "dist-electron-admin/main.cjs",
+        "type": "commonjs"
+    },
+    "win": {
+        "target": [
+            "nsis"
+        ],
+        "asar": true,
+        "icon": "build/icon.ico",
+        "signAndEditExecutable": true,
+        "verifyUpdateCodeSignature": true
+    },
+    "asarUnpack": [
+        "**/node_modules/better-sqlite3-multiple-ciphers/**/*",
+        "**/node_modules/bindings/**/*",
+        "**/node_modules/file-uri-to-path/**/*",
+        "**/*.node",
+        "dist-electron-admin/db-worker.cjs"
+    ],
+    "mac": {
+        "target": [
+            {
+                "target": "dmg",
+                "arch": [
+                    "arm64"
+                ]
+            },
+            {
+                "target": "zip",
+                "arch": [
+                    "arm64"
+                ]
+            }
+        ],
+        "category": "public.app-category.finance",
+        "icon": "build/icon.png",
+        "hardenedRuntime": true,
+        "gatekeeperAssess": true,
+        "entitlements": "build/entitlements.mac.plist",
+        "entitlementsInherit": "build/entitlements.mac.plist"
+    },
+    "nsis": {
+        "oneClick": false,
+        "allowToChangeInstallationDirectory": true,
+        "perMachine": true,
+        "allowElevation": true,
+        "createDesktopShortcut": true,
+        "createStartMenuShortcut": true,
+        "shortcutName": "TangoMasterGestao",
+        "artifactName": "${productName}_Setup.${ext}",
+        "deleteAppDataOnUninstall": true,
+        "include": "build/installer.nsh",
+        "warningsAsErrors": false
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "strictNullChecks": true
+  },
+  "include": [
+    "src/bibliotecas/calculos-financeiros.ts",
+    "src/bibliotecas/conciliacao-prestacoes.ts",
+    "src/bibliotecas/cronograma-prestacoes.ts",
+    "src/bibliotecas/ledger-financeiro.ts",
+    "src/bibliotecas/payload-licenca.ts",
+    "src/bibliotecas/resultado-backup.ts"
+  ]
+}

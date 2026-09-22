@@ -1,0 +1,131 @@
+import { RepositorioBase } from './RepositorioBase';
+import { Credit } from '@/tipos/credito';
+import { db } from '@/bibliotecas/bd';
+import { toMinorUnits } from '@/bibliotecas/ledger-financeiro';
+
+export class RepositorioCredito extends RepositorioBase {
+    static async findAll(): Promise<any[]> {
+        return await this.query(`
+            SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, 
+                   lateInterestRate, installments, paidInstallments, startDate, dueDate, 
+                   status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt,
+                   requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt,
+                   usuario_id, targetMonthId, supplierId, supplierProfitRate,
+                   principalAmountMinor, currentBalanceMinor, accruedInterestMinor,
+                   lateInterestMinor, totalDueMinor, version, amortizationMethod
+            FROM credits 
+            WHERE deletedAt IS NULL
+        `);
+    }
+
+    static async findDeleted(): Promise<any[]> {
+        return await this.query(`
+            SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, 
+                   lateInterestRate, installments, status, deletedAt, deletedBy, createdAt
+            FROM credits 
+            WHERE deletedAt IS NOT NULL
+        `);
+    }
+
+    static async insert(credit: Credit): Promise<void> {
+        const statement = this.buildInsertStatement(credit);
+        await db.transaction([{ ...statement, expectChanges: 1 }]);
+    }
+
+    static buildInsertStatement(credit: Credit) {
+        const sql = `INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+        const params = [
+            credit.id, credit.clientId, credit.clientName, credit.principalAmount, toMinorUnits(credit.principalAmount), credit.interestRate,
+            credit.lateInterestRate, credit.installments, credit.paidInstallments, credit.currentBalance, toMinorUnits(credit.currentBalance),
+            credit.accruedInterest, toMinorUnits(credit.accruedInterest), credit.lateInterest, toMinorUnits(credit.lateInterest),
+            credit.totalDue, toMinorUnits(credit.totalDue), 0, credit.amortizationMethod || 'FLAT',
+            (credit.startDate && !isNaN(new Date(credit.startDate).getTime())) ? new Date(credit.startDate).toISOString() : new Date().toISOString(),
+            (credit.dueDate && !isNaN(new Date(credit.dueDate).getTime())) ? new Date(credit.dueDate).toISOString() : new Date().toISOString(),
+            credit.status,
+            credit.creditNumber || 1,
+            (credit.createdAt && !isNaN(new Date(credit.createdAt).getTime())) ? new Date(credit.createdAt).toISOString() : new Date().toISOString(),
+            credit.requestedBy || 'Sistema',
+            (credit.requestedAt && !isNaN(new Date(credit.requestedAt).getTime())) ? new Date(credit.requestedAt).toISOString() : new Date().toISOString(),
+            credit.approvedBy || null,
+            credit.approvalNotes || null,
+            credit.usuario_id,
+            credit.targetMonthId || null,
+            credit.supplierId || null,
+            credit.supplierProfitRate ?? null
+        ];
+        return { sql, params };
+    }
+
+    static async update(id: string, updates: Partial<Credit>): Promise<void> {
+        const sql = `UPDATE credits SET 
+            principalAmount = COALESCE(?, principalAmount), 
+            principalAmountMinor = COALESCE(?, principalAmountMinor),
+            interestRate = COALESCE(?, interestRate), 
+            lateInterestRate = COALESCE(?, lateInterestRate), 
+            installments = COALESCE(?, installments), 
+            paidInstallments = COALESCE(?, paidInstallments), 
+            currentBalance = COALESCE(?, currentBalance), 
+            currentBalanceMinor = COALESCE(?, currentBalanceMinor),
+            status = COALESCE(?, status), 
+            accruedInterest = COALESCE(?, accruedInterest), 
+            accruedInterestMinor = COALESCE(?, accruedInterestMinor),
+            lateInterest = COALESCE(?, lateInterest), 
+            lateInterestMinor = COALESCE(?, lateInterestMinor),
+            totalDue = COALESCE(?, totalDue), 
+            totalDueMinor = COALESCE(?, totalDueMinor),
+            daysOverdue = COALESCE(?, daysOverdue), 
+            startDate = COALESCE(?, startDate),
+            dueDate = COALESCE(?, dueDate),
+            approvedBy = COALESCE(?, approvedBy),
+            approvalNotes = COALESCE(?, approvalNotes),
+            requestedBy = COALESCE(?, requestedBy),
+            requestedAt = COALESCE(?, requestedAt),
+            creditNumber = COALESCE(?, creditNumber),
+            paidAt = COALESCE(?, paidAt),
+            usuario_id = COALESCE(?, usuario_id),
+            targetMonthId = COALESCE(?, targetMonthId),
+            supplierId = COALESCE(?, supplierId),
+            supplierProfitRate = COALESCE(?, supplierProfitRate),
+            version = version + 1
+            WHERE id = ? AND version = ?`;
+
+        const params = [
+            updates.principalAmount ?? null, updates.principalAmount == null ? null : toMinorUnits(updates.principalAmount),
+            updates.interestRate ?? null, updates.lateInterestRate ?? null, updates.installments ?? null,
+            updates.paidInstallments ?? null, updates.currentBalance ?? null, updates.currentBalance == null ? null : toMinorUnits(updates.currentBalance),
+            updates.status ?? null, updates.accruedInterest ?? null, updates.accruedInterest == null ? null : toMinorUnits(updates.accruedInterest),
+            updates.lateInterest ?? null, updates.lateInterest == null ? null : toMinorUnits(updates.lateInterest),
+            updates.totalDue ?? null, updates.totalDue == null ? null : toMinorUnits(updates.totalDue), updates.daysOverdue ?? null,
+            (updates.startDate && !isNaN(new Date(updates.startDate).getTime())) ? new Date(updates.startDate).toISOString() : null,
+            (updates.dueDate && !isNaN(new Date(updates.dueDate).getTime())) ? new Date(updates.dueDate).toISOString() : null,
+            updates.approvedBy ?? null,
+            updates.approvalNotes ?? null,
+            updates.requestedBy ?? null,
+            (updates.requestedAt && !isNaN(new Date(updates.requestedAt).getTime())) ? new Date(updates.requestedAt).toISOString() : null,
+            updates.creditNumber ?? null,
+            (updates.paidAt && !isNaN(new Date(updates.paidAt).getTime())) ? new Date(updates.paidAt).toISOString() : null,
+            updates.usuario_id ?? null,
+            updates.targetMonthId ?? null,
+            updates.supplierId ?? null,
+            updates.supplierProfitRate ?? null,
+            id, updates.version ?? 0
+        ];
+        await db.transaction([{ sql, params, expectChanges: 1 }]);
+    }
+
+    static async softDelete(id: string, userId: string, originalState?: string): Promise<void> {
+        await this.execute('UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?', [new Date().toISOString(), userId, originalState, id]);
+    }
+
+    static async restore(id: string): Promise<void> {
+        await this.execute('UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?', [new Date().toISOString(), id]);
+    }
+
+    static async hardDelete(id: string): Promise<void> {
+        await this.execute('DELETE FROM credits WHERE id = ?', [id]);
+    }
+}
+
+
+
+

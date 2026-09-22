@@ -1,0 +1,390 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Primary - Deep Navy Blue for trust and professionalism */
+    --primary: 220 65% 18%;
+    --primary-foreground: 45 100% 96%;
+
+    /* Secondary - Warm Gold for finance and value */
+    --secondary: 38 92% 50%;
+    --secondary-foreground: 220 65% 12%;
+
+    /* Background - Clean light with subtle warmth */
+    --background: 220 20% 97%;
+    --foreground: 220 25% 12%;
+
+    /* Card - Pure white with depth */
+    --card: 0 0% 100%;
+    --card-foreground: 220 25% 12%;
+
+    /* Muted surfaces */
+    --muted: 220 15% 94%;
+    --muted-foreground: 220 10% 45%;
+
+    /* Accent - Teal for actions and highlights */
+    --accent: 175 60% 40%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Popover */
+    --popover: 0 0% 100%;
+    --popover-foreground: 220 25% 12%;
+
+    /* Border */
+    --border: 220 15% 90%;
+    --input: 220 15% 90%;
+    --ring: 220 65% 18%;
+
+    /* Destructive */
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Status colors */
+    --success: 152 69% 40%;
+    --success-foreground: 0 0% 100%;
+    --warning: 38 92% 50%;
+    --warning-foreground: 220 65% 12%;
+    --danger: 0 72% 51%;
+    --danger-foreground: 0 0% 100%;
+    --info: 205 85% 50%;
+    --info-foreground: 0 0% 100%;
+
+    /* Chart colors */
+    --chart-1: 220 65% 25%;
+    --chart-2: 38 92% 50%;
+    --chart-3: 175 60% 40%;
+    --chart-4: 152 69% 40%;
+    --chart-5: 0 72% 51%;
+
+    /* Sidebar */
+    --sidebar-background: 220 65% 12%;
+    --sidebar-foreground: 220 15% 85%;
+    --sidebar-primary: 38 92% 50%;
+    --sidebar-primary-foreground: 220 65% 12%;
+    --sidebar-accent: 220 50% 20%;
+    --sidebar-accent-foreground: 220 15% 95%;
+    --sidebar-border: 220 40% 20%;
+    --sidebar-ring: 38 92% 50%;
+
+    --radius: 0.75rem;
+
+    /* Gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(220 65% 18%) 0%, hsl(220 50% 28%) 100%);
+    --gradient-gold: linear-gradient(135deg, hsl(38 92% 50%) 0%, hsl(30 90% 55%) 100%);
+    --gradient-card: linear-gradient(180deg, hsl(0 0% 100%) 0%, hsl(220 20% 98%) 100%);
+
+    /* Shadows */
+    --shadow-sm: 0 1px 2px 0 hsl(220 25% 12% / 0.05);
+    --shadow-md: 0 4px 6px -1px hsl(220 25% 12% / 0.08), 0 2px 4px -2px hsl(220 25% 12% / 0.05);
+    --shadow-lg: 0 10px 15px -3px hsl(220 25% 12% / 0.1), 0 4px 6px -4px hsl(220 25% 12% / 0.05);
+    --shadow-xl: 0 20px 25px -5px hsl(220 25% 12% / 0.1), 0 8px 10px -6px hsl(220 25% 12% / 0.05);
+    --shadow-gold: 0 4px 14px 0 hsl(38 92% 50% / 0.25);
+  }
+
+  .dark {
+    --primary: 262 83% 58%;
+    --primary-foreground: 210 40% 98%;
+
+    --secondary: 222 15% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    /* Softer Obsidian Background - Slightly lightened for better contrast */
+    --background: 231 16% 8%;
+    --foreground: 210 40% 98%;
+
+    /* Card background - increased contrast from page background */
+    --card: 231 16% 12%;
+    --card-foreground: 210 40% 98%;
+
+    --muted: 222 15% 17%;
+    --muted-foreground: 215 15% 70%;
+
+    --accent: 262 83% 58%;
+    --accent-foreground: 210 40% 98%;
+
+    --popover: 222 15% 13%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Borders - Lightened to be more visible on deep backgrounds */
+    --border: 231 16% 18%;
+    --input: 231 16% 18%;
+    --ring: 262 83% 65%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --sidebar-background: 231 16% 6%;
+    --sidebar-foreground: 220 15% 88%;
+    --sidebar-primary: 262 83% 58%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 231 16% 12%;
+    --sidebar-accent-foreground: 220 15% 98%;
+    --sidebar-border: 231 16% 12%;
+    --sidebar-ring: 262 83% 58%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  html,
+  body,
+  #root {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    margin: 0;
+  }
+
+  html {
+    overflow: hidden;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    min-height: 100vh;
+    overflow: hidden;
+    transition: background-color 0.3s ease, border-color 0.3s ease, color 0.15s ease;
+  }
+
+  #root {
+    min-height: 100vh;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    @apply font-semibold tracking-tight;
+  }
+
+  button,
+  a,
+  .card-elevated {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+}
+
+@layer utilities {
+  .glass {
+    @apply bg-card/80 backdrop-blur-xl border border-border/50;
+  }
+
+  .card-elevated {
+    @apply bg-white dark:bg-slate-900 rounded-2xl sm:rounded-3xl border border-slate-200/80 dark:border-slate-800 shadow-xl shadow-slate-200/40 dark:shadow-none hover:shadow-2xl hover:border-slate-300 dark:hover:border-slate-700 transition-all duration-200;
+  }
+
+  /* ============================================================
+     KPI CARDS - Estilo pastel unificado (todas as paginas)
+     Mesma anatomia e mesma altura em todo o sistema.
+     A COR indica RELEVANCIA / PRIORIDADE:
+       coral  -> Critico / Risco / Vencido           (prioridade 1)
+       amber  -> Atencao / Pendente / A vencer       (prioridade 2)
+       mint   -> Positivo / Concluido / Recebido     (prioridade 3)
+       sky    -> Informativo / Totais neutros        (prioridade 4)
+       purple -> Secundario / Analitico / Historico  (prioridade 5)
+     ============================================================ */
+  .card-kpi-base {
+    @apply relative flex flex-col justify-between select-none overflow-hidden
+           rounded-[20px] p-5
+           h-[152px]
+           border border-black/5 shadow-lg shadow-slate-300/30
+           transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5
+           text-slate-950 dark:text-white dark:border-white/10 dark:shadow-none;
+  }
+
+  /* Prioridade 4 - Informativo / Totais neutros */
+  .card-kpi-sky {
+    @apply card-kpi-base bg-[#93CDF7] hover:bg-[#87C6F5]
+           dark:bg-sky-500/15 dark:hover:bg-sky-500/25;
+  }
+
+  /* Prioridade 3 - Positivo / Sucesso */
+  .card-kpi-mint {
+    @apply card-kpi-base bg-[#9CE3C4] hover:bg-[#8FDDBB]
+           dark:bg-emerald-500/15 dark:hover:bg-emerald-500/25;
+  }
+
+  /* Prioridade 2 - Atencao / Pendente */
+  .card-kpi-amber {
+    @apply card-kpi-base bg-[#FBD38D] hover:bg-[#F9CB7C]
+           dark:bg-amber-500/15 dark:hover:bg-amber-500/25;
+  }
+
+  /* Prioridade 1 - Critico / Risco */
+  .card-kpi-coral {
+    @apply card-kpi-base bg-[#FCA5A5] hover:bg-[#FB9494]
+           dark:bg-rose-500/15 dark:hover:bg-rose-500/25;
+  }
+
+  /* Prioridade 5 - Secundario / Analitico */
+  .card-kpi-purple {
+    @apply card-kpi-base bg-[#EDB8F6] hover:bg-[#E8AAF3]
+           dark:bg-fuchsia-500/15 dark:hover:bg-fuchsia-500/25;
+  }
+
+  /* Aliases semanticos (mesma aparencia, nome pela prioridade) */
+  .card-kpi-critical { @apply card-kpi-coral; }
+  .card-kpi-warning  { @apply card-kpi-amber; }
+  .card-kpi-success  { @apply card-kpi-mint; }
+  .card-kpi-info     { @apply card-kpi-sky; }
+  .card-kpi-neutral  { @apply card-kpi-purple; }
+
+  /* Faixa de cotações: desliza da direita para a esquerda.
+     -50% porque a lista é renderizada em duplicado, por isso ao fim de meio
+     percurso a segunda cópia está exactamente onde a primeira começou. */
+  @keyframes ticker-rtl {
+    from { transform: translateX(0); }
+    to   { transform: translateX(-50%); }
+  }
+
+  .animate-ticker {
+    animation: ticker-rtl 60s linear infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .animate-ticker {
+      animation: none;
+    }
+  }
+
+  .gradient-primary {
+    background: var(--gradient-primary);
+  }
+
+  .gradient-gold {
+    background: var(--gradient-gold);
+  }
+
+  .text-gradient {
+    @apply bg-clip-text text-transparent;
+    background: var(--gradient-gold);
+  }
+
+  .shadow-gold {
+    box-shadow: var(--shadow-gold);
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.5s ease-out forwards;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.5s ease-out forwards;
+  }
+
+  .animate-scale-in {
+    animation: scaleIn 0.3s ease-out forwards;
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes blob {
+  0% {
+    transform: translate(0px, 0px) scale(1);
+  }
+
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+
+  100% {
+    transform: translate(0px, 0px) scale(1);
+  }
+}
+
+.animate-blob {
+  animation: blob 7s infinite;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+/* Custom scrollbar - Using standard CSS for max compatibility */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: hsl(var(--muted) / 0.5);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted-foreground) / 0.3);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+  background: hsl(var(--sidebar-foreground) / 0.2);
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--sidebar-foreground) / 0.3);
+}
+
+/* SweetAlert2 Theme & Z-Index overrides */
+.swal2-container {
+  z-index: 100050 !important;
+}
+
+.tango-swal-popup {
+  font-family: inherit !important;
+  border-radius: 1.5rem !important;
+}
+
+.swal2-styled.swal2-confirm {
+  box-shadow: 0 10px 15px -3px rgba(5, 150, 105, 0.25) !important;
+}
