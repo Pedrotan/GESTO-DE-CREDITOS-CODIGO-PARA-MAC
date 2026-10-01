@@ -51,6 +51,24 @@ const DialogContent = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content> & { overlayClassName?: string }
 >(({ className, overlayClassName, children, ...props }, ref) => {
   const containsDescription = React.Children.toArray(children).some(hasDialogDescription);
+  const { onPointerDownOutside, ...contentProps } = props;
+
+  React.useEffect(() => {
+    // SweetAlert vive no body; o FocusScope do Radix nao deve recuperar o foco do botao OK.
+    const allowSweetAlertFocus = (event: FocusEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const relatedTarget = event.relatedTarget instanceof Element ? event.relatedTarget : null;
+      if (target?.closest('.swal2-container') || relatedTarget?.closest('.swal2-container')) {
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('focusin', allowSweetAlertFocus, true);
+    window.addEventListener('focusout', allowSweetAlertFocus, true);
+    return () => {
+      window.removeEventListener('focusin', allowSweetAlertFocus, true);
+      window.removeEventListener('focusout', allowSweetAlertFocus, true);
+    };
+  }, []);
   
   return (
     <DialogPortal>
@@ -62,7 +80,14 @@ const DialogContent = React.forwardRef<
           className,
         )}
         {...(containsDescription ? {} : { "aria-describedby": undefined })}
-        {...props}
+        {...contentProps}
+        onPointerDownOutside={(event) => {
+          const target = event.detail.originalEvent.target;
+          if (target instanceof Element && target.closest('.swal2-container')) {
+            event.preventDefault();
+          }
+          onPointerDownOutside?.(event);
+        }}
       >
         {children}
         <DialogPrimitive.Close className="absolute right-4 top-4 rounded-lg opacity-90 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-white/10 text-white shadow-sm">
@@ -117,4 +142,3 @@ export {
   DialogTitle,
   DialogDescription,
 };
-

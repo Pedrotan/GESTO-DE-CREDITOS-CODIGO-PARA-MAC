@@ -1,5 +1,4 @@
 import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { Toaster } from "@/componentes/ui/toaster";
 import LoginAdmin from '@/paginas/Admin/LoginAdmin';
 import DashboardAdmin from '@/paginas/Admin/DashboardAdmin';
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -25,7 +24,6 @@ function AppAdmin() {
                         />
                         <Route path="*" element={<Navigate to="/dashboard" />} />
                     </Routes>
-                    <Toaster />
                 </Router>
             </TooltipProvider>
         </QueryClientProvider>

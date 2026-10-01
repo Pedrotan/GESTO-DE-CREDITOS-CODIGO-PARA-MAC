@@ -15,6 +15,26 @@ const customSwal = Swal.mixin({
     }
 });
 
+let notificationQueue: Promise<unknown> = Promise.resolve();
+
+export const notificar = (title: string, message: string, icon: 'success' | 'error' | 'info' = 'info') => {
+    const next = notificationQueue.then(async () => {
+        // Nao substituir uma confirmacao que o utilizador ainda esta a ler.
+        while (Swal.isVisible()) {
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        return customSwal.fire({
+            title,
+            text: message,
+            icon,
+            confirmButtonText: 'OK',
+            confirmButtonColor: icon === 'error' ? '#e11d48' : '#059669'
+        });
+    });
+    notificationQueue = next.then(() => undefined, () => undefined);
+    return next;
+};
+
 /**
  * Dispara um SweetAlert2 de Sucesso com o icónico visto animado
  */

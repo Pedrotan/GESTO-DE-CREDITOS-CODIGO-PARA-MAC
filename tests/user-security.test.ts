@@ -4,6 +4,10 @@ import { assertFinancialPermission, financialStatementTarget, generateTotpForTes
 
 const user = { id: 'u1', name: 'Admin', email: 'admin@example.com', role: 'admin', permissions: '["payments.create"]' };
 
+test('códigos TOTP seguem o vetor público RFC 6238', () => {
+    assert.equal(generateTotpForTest('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 1), '287082');
+});
+
 test('sessão de utilizador é mantida no processo e não expõe segredo MFA', () => {
     const service = new UserSessionService();
     const result = service.begin(10, user);
@@ -53,7 +57,7 @@ test('alterações de utilizadores distinguem perfil próprio de privilégios', 
 
 test('MFA cria sessão apenas após código válido e impede repetição', (t) => {
     const service = new UserSessionService();
-    const now = 1_800_000_000_000;
+    let now = 1_800_000_000_000;
     t.mock.method(Date, 'now', () => now);
     const secret = 'JBSWY3DPEHPK3PXP';
     const begin = service.begin(20, { ...user, twoFactorEnabled: true, twoFactorSecret: secret });
@@ -65,7 +69,9 @@ test('MFA cria sessão apenas após código válido e impede repetição', (t) =
     assert.equal('twoFactorSecret' in (verified.user || {}), false);
     service.revokeSender(20);
     service.begin(20, { ...user, twoFactorEnabled: true, twoFactorSecret: secret });
-    assert.equal(service.verifyTotp(20, user.id, token).authenticated, false);
+    assert.equal(service.verifyTotp(20, user.id, token).reason, 'replayed_code');
+    now += 5 * 60 * 1000 + 1;
+    assert.equal(service.verifyTotp(20, user.id, token).reason, 'challenge_expired');
 });
 
 test('ativa e desativa MFA dentro da sessão sem expor o segredo no utilizador', (t) => {
@@ -87,6 +93,18 @@ test('ativa e desativa MFA dentro da sessão sem expor o segredo no utilizador',
     now += 30_000;
     const disableToken = generateTotpForTest(enrollment.secret, Math.floor(now / 30_000));
     assert.equal(service.verifyMfaForSession(30, enrollment.secret, disableToken), true);
+});
+
+test('distingue código incorreto de QR expirado na ativação MFA', (t) => {
+    const service = new UserSessionService();
+    let now = 1_800_000_000_000;
+    t.mock.method(Date, 'now', () => now);
+    service.begin(31, user, true);
+    const enrollment = service.beginMfaEnrollment(31);
+    assert.equal(service.confirmMfaEnrollment(31, '000000').reason, 'invalid_code');
+    now += 15 * 60 * 1000 + 1;
+    const expiredToken = generateTotpForTest(enrollment.secret, Math.floor(now / 30_000));
+    assert.equal(service.confirmMfaEnrollment(31, expiredToken).reason, 'qr_expired');
 });
 
 test('sessão MFA pode ser concluída uma única vez por recuperação autorizada', () => {

@@ -29,7 +29,7 @@
         "**/node_modules/bindings/**/*",
         "**/node_modules/file-uri-to-path/**/*",
         "**/*.node",
-        "dist-electron-admin/db-worker.cjs"
+        "dist-electron-admin/**/*"
     ],
     "mac": {
         "target": [

@@ -10,7 +10,7 @@ import { PaymentGateway, PaymentReference } from '@/tipos/pagamento';
 import { generateBankQRCode, generateReferenceQRCode } from '@/bibliotecas/payment-qr';
 import { openWhatsApp } from '@/bibliotecas/whatsapp';
 import { Loader2, Printer, Share2, Wallet, QrCode } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/ganchos/usar-toast';
 import { GatewayLogo } from './LogosGateways';
 
 interface GeneratePaymentModalProps {

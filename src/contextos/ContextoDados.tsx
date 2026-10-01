@@ -26,9 +26,10 @@ import { setRemoteSqlConfig } from '@/bibliotecas/adaptador-bd-remoto';
 import { appAdapter } from '@/bibliotecas/adaptador-aplicacao';
 import { getFileUrl } from '@/bibliotecas/utils';
 import { openWhatsApp } from '@/bibliotecas/whatsapp';
-import { generateClientProfilePDF } from '@/bibliotecas/pdf';
+import { generateClientProfilePDF, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary, resolveBrandDark } from '@/bibliotecas/pdf';
 import { resolveLicenseKey, setGlobalLicenseKey } from '@/bibliotecas/licenciamento';
 import { calculateCreditAfterPayment, calculateCreditAfterPaymentRemoval } from '@/bibliotecas/calculos-financeiros';
+import { planConsecutiveInstallments } from '@/bibliotecas/liquidacao-prestacoes';
 import { useToast } from '@/ganchos/usar-toast';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { ServicoCliente } from '@/servicos/ServicoCliente';
@@ -78,6 +79,8 @@ interface ContextoDadosType {
     deleteDocumentFromClient: (clientId: string, docId: string, user?: { id: string; name: string }) => Promise<void>;
     addCredit: (credit: Credit, user?: { id: string; name: string }) => Promise<void>;
     updateCredit: (id: string, updates: Partial<Credit>, user?: { id: string; name: string }) => Promise<void>;
+    adjustCreditCharges: (id: string, accruedInterest: number, lateInterest: number,
+        reason: string, idempotencyKey: string, user?: { id: string; name: string }) => Promise<void>;
     reinforceCredit: (
         creditId: string,
         amount: number,
@@ -391,33 +394,52 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const hydrateLogos = async (settings: any) => {
-        const hydrate = async (p: string | null): Promise<string | null> => {
-            if (!p) return null;
-            // Already a data URI — no conversion needed
-            if (p.startsWith('data:')) return p;
-            // Looks like base64 already embedded (long strings)
-            if (p.length > 500 && !p.includes('/') && !p.includes('\\')) return p;
+        const isElectronEnv = typeof window !== 'undefined' && !!(window as any).electronAPI;
 
-            // It's a file path — convert to base64 data URI
+        const hydrate = async (p: string | null, backupKey?: string): Promise<string | null> => {
+            if (!p) {
+                if (backupKey) {
+                    const fallback = getScopedLocalStorageItem(backupKey);
+                    if (fallback) return fallback;
+                }
+                return null;
+            }
+            // Already a data URI or blob — no conversion needed
+            if (p.startsWith('data:') || p.startsWith('blob:')) return p;
+            // Web URL or relative web asset path
+            if (p.startsWith('http://') || p.startsWith('https://')) return p;
+            if (!isElectronEnv && (p.startsWith('/') || p.endsWith('.png') || p.endsWith('.jpg') || p.endsWith('.jpeg') || p.endsWith('.svg') || p.endsWith('.webp'))) {
+                return p;
+            }
+
+            // Looks like raw base64 without data: header
+            if (p.length > 100 && !p.startsWith('file:') && !p.startsWith('safe-file:') && !p.includes(' ') && /^[A-Za-z0-9+/=]+$/.test(p.substring(0, 50))) {
+                return `data:image/png;base64,${p}`;
+            }
+
+            // In Web mode (Vercel), file:/// paths cannot be hydrated via disk, but we should not wipe them to null
+            if (!isElectronEnv) {
+                if (backupKey) {
+                    const cached = getScopedLocalStorageItem(backupKey);
+                    if (cached) return cached;
+                }
+                return p;
+            }
+
+            // It's a file path in Electron — convert to base64 data URI
             try {
                 const fileUrl = getFileUrl(p);
                 const res = await fetch(fileUrl);
                 if (!res.ok) {
                     console.warn("Hydration fetch failed for", p, res.status, res.statusText);
-                    return null;
+                    return p; // Return original rather than destroying it with null!
                 }
                 const blob = await res.blob();
-                if (blob.size === 0) {
-                    console.warn("Hydration: empty blob for", p);
-                    return null;
-                }
+                if (blob.size === 0) return p;
                 return new Promise<string>((resolve) => {
                     const reader = new FileReader();
                     reader.onloadend = () => resolve(reader.result as string);
-                    reader.onerror = () => {
-                        console.warn("Hydration: FileReader error for", p);
-                        resolve(null as any);
-                    };
+                    reader.onerror = () => resolve(p);
                     reader.readAsDataURL(blob);
                 });
             } catch (e) {
@@ -438,30 +460,30 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                                     ctx.drawImage(img, 0, 0);
                                     resolve(canvas.toDataURL('image/png'));
                                 } else {
-                                    resolve(null);
+                                    resolve(p);
                                 }
-                            } catch (canvasErr) {
-                                console.warn("Hydration canvas fallback failed:", canvasErr);
-                                resolve(null);
+                            } catch {
+                                resolve(p);
                             }
                         };
-                        img.onerror = () => {
-                            console.warn("Hydration img fallback failed for", p);
-                            resolve(null);
-                        };
+                        img.onerror = () => resolve(p);
                         img.src = imgUrl;
                     });
-                } catch (fallbackErr) {
-                    console.warn("Hydration complete failure for", p, fallbackErr);
-                    return null;
+                } catch {
+                    return p;
                 }
             }
         };
+
+        const finalLogo = await hydrate(settings.logo, 'company_logo_backup');
+        const finalReportLogo = await hydrate(settings.reportLogo, 'company_report_logo_backup');
+        const finalWatermarkLogo = await hydrate(settings.watermarkLogo, 'company_watermark_logo_backup');
+
         return {
             ...settings,
-            logo: await hydrate(settings.logo),
-            reportLogo: await hydrate(settings.reportLogo),
-            watermarkLogo: await hydrate(settings.watermarkLogo),
+            logo: finalLogo,
+            reportLogo: finalReportLogo,
+            watermarkLogo: finalWatermarkLogo,
         };
     };
 
@@ -473,7 +495,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const [companySettings, setCompanySettings] = useState<ContextoDadosType['companySettings']>({
         name: 'A Carregar...', nif: '', address: '', logo: null, reportLogo: null, watermarkLogo: null,
         currency: 'AOA', customClauses: '', rescueKey: '', phone: '',
-        primaryColor: [30, 41, 59], secondaryColor: [100, 116, 139], sessionTimeout: 20,
+        primaryColor: BRAND_ORANGE, secondaryColor: BRAND_CHARCOAL, sessionTimeout: 20,
         email: '', whatsapp: '+244900000000', whatsappAutoNotify: false, whatsappVerified: false,
         location: '',
         syncEnabled: false, syncUrl: '', syncApiKey: '', syncPasskey: '', lastSync: '',
@@ -539,8 +561,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     }, [notifications, authRole, activeContextUserId, authUser?.id]);
 
     const refreshData = useCallback(async () => {
+        // A sessao Electron ainda nao tem acesso a consultas protegidas durante o login/MFA.
+        if (window.electronAPI?.userAuthStatus && !authUser?.id) {
+            setIsDataLoading(false);
+            return;
+        }
         try {
-            const safetyTimeout = new Promise(resolve => setTimeout(resolve, 2500));
+            const isElectronEnv = typeof window !== 'undefined' && !!(window as any).electronAPI;
+            const safetyTimeout = new Promise(resolve => setTimeout(resolve, isElectronEnv ? 3500 : 15000));
 
             const loadCriticalData = async () => {
                 await db.init();
@@ -562,8 +590,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 const hydratedSettings = await hydrateLogos({
                     ...Definicoes,
                     name: sanitizedName,
-                    primaryColor: safeParse(Definicoes.primaryColor, [30, 41, 59]),
-                    secondaryColor: safeParse(Definicoes.secondaryColor, [100, 116, 139]),
+                    primaryColor: resolveBrandPrimary(safeParse(Definicoes.primaryColor, BRAND_ORANGE)),
+                    secondaryColor: resolveBrandDark(safeParse(Definicoes.secondaryColor, BRAND_CHARCOAL)),
                     whatsappAutoNotify: Definicoes.whatsappAutoNotify === 1,
                     whatsappVerified: Definicoes.whatsappVerified === 1,
                     syncEnabled: Definicoes.syncEnabled === 1,
@@ -589,45 +617,56 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                     enableMultiTenant: Definicoes.enableMultiTenant !== 0,
                     licenseKey: resolveLicenseKey(Definicoes.licenseKey),
                     location: Definicoes.location || '',
+                    website: Definicoes.website || '',
+                    segment: Definicoes.segment || '',
+                    slogan: Definicoes.slogan || '',
+                    defaultSimulationInterestRate: Definicoes.defaultSimulationInterestRate ?? 3.5,
+                    defaultSimulationAdminFee: Definicoes.defaultSimulationAdminFee ?? 2.0,
+                    defaultSimulationIof: Definicoes.defaultSimulationIof ?? 0.38,
+                    smtpHost: Definicoes.smtpHost || 'smtp.gmail.com',
+                    smtpPort: Definicoes.smtpPort || '587',
+                    smtpUser: Definicoes.smtpUser || Definicoes.email || '',
+                    smtpPassword: Definicoes.smtpPassword || '',
+                    smtpSecure: Boolean(Definicoes.smtpSecure),
+                    smtpFromName: Definicoes.smtpFromName || Definicoes.name || 'Tango ERP',
                 });
+
+                // Se o logotipo estiver em falta ou vazio, restaurar do backup persistente
+                if (!hydratedSettings.logo) {
+                    const backupLogo = getScopedLocalStorageItem('company_logo_backup');
+                    if (backupLogo) hydratedSettings.logo = backupLogo;
+                }
+                if (!hydratedSettings.reportLogo) {
+                    const backupReportLogo = getScopedLocalStorageItem('company_report_logo_backup');
+                    if (backupReportLogo) hydratedSettings.reportLogo = backupReportLogo;
+                }
+                if (!hydratedSettings.watermarkLogo) {
+                    const backupWatermarkLogo = getScopedLocalStorageItem('company_watermark_logo_backup');
+                    if (backupWatermarkLogo) hydratedSettings.watermarkLogo = backupWatermarkLogo;
+                }
 
                 setCompanySettings(hydratedSettings);
                 setScopedLocalStorageItem('cached_company_settings', JSON.stringify({
-                    ...Definicoes,
+                    ...hydratedSettings,
                     name: sanitizedName,
-                    licenseKey: hydratedSettings.licenseKey
                 }));
                 retryCount.current = 0;
             } else if (!Array.isArray(result)) {
                 console.warn("Startup timeout hit! Loading fallback/cached settings to unblock UI.");
-                const ONBOARDING_KEY = scopedStorageKey((window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') ? 'tango_erp_onboarding_dev_v3' : 'tango_erp_onboarding_v3');
-                if (localStorage.getItem(ONBOARDING_KEY)) {
-                    retryCount.current++;
-                    const cached = getScopedLocalStorageItem('cached_company_settings');
-                    if (cached) {
-                        try {
-                            const parsed = JSON.parse(cached);
-                            const parsedName = (!parsed.name || parsed.name === 'Provisório' || parsed.name === 'Empresa' || parsed.name === 'A Carregar...') ? 'Tango Gestão de Créditos' : parsed.name;
-                            setCompanySettings(prev => ({
-                                ...prev,
-                                ...parsed,
-                                licenseKey: resolveLicenseKey(parsed.licenseKey),
-                                name: parsedName
-                            }));
-                            retryCount.current = 0;
-                        } catch (e) { }
-                    }
-
-                    if (retryCount.current > 0 && retryCount.current <= 3) {
+                const cached = getScopedLocalStorageItem('cached_company_settings');
+                if (cached) {
+                    try {
+                        const parsed = JSON.parse(cached);
+                        const parsedName = (!parsed.name || parsed.name === 'Provisório' || parsed.name === 'Empresa' || parsed.name === 'A Carregar...') ? 'Tango Gestão de Créditos' : parsed.name;
                         setCompanySettings(prev => ({
                             ...prev,
-                            name: 'Iniciando Sistema...',
-                            nif: '---'
+                            ...parsed,
+                            logo: parsed.logo || getScopedLocalStorageItem('company_logo_backup') || prev.logo,
+                            licenseKey: resolveLicenseKey(parsed.licenseKey),
+                            name: parsedName
                         }));
-                        setTimeout(refreshData, 5000);
-                    } else if (retryCount.current > 3) {
-                        setCompanySettings(prev => ({ ...prev, name: '' }));
-                    }
+                        retryCount.current = 0;
+                    } catch (e) { }
                 }
             }
 
@@ -759,8 +798,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                     const configToShare = {
                         settings: {
                             ...Definicoes,
-                            primaryColor: safeParse(Definicoes.primaryColor, [30, 41, 59]),
-                            secondaryColor: safeParse(Definicoes.secondaryColor, [100, 116, 139]),
+                            primaryColor: resolveBrandPrimary(safeParse(Definicoes.primaryColor, BRAND_ORANGE)),
+                            secondaryColor: resolveBrandDark(safeParse(Definicoes.secondaryColor, BRAND_CHARCOAL)),
                             whatsappAutoNotify: Definicoes.whatsappAutoNotify === 1,
                             whatsappVerified: Definicoes.whatsappVerified === 1,
                             syncEnabled: Definicoes.syncEnabled === 1,
@@ -808,7 +847,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         } finally {
             setIsDataLoading(false);
         }
-    }, [clients.length, serverInfo?.isRunning]);
+    }, [authUser?.id, clients.length, serverInfo?.isRunning]);
 
     const syncData = async () => {
         if (!companySettings.syncEnabled || !companySettings.syncUrl) return;
@@ -862,6 +901,18 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             licenseKey: resolveLicenseKey(newSettings.licenseKey)
         };
         const hydratedSettings = await hydrateLogos(effectiveSettings);
+
+        // Guardar cópias de segurança dedicadas dos logotipos para nunca serem perdidos
+        if (hydratedSettings.logo && (hydratedSettings.logo.startsWith('data:') || hydratedSettings.logo.startsWith('http') || hydratedSettings.logo.startsWith('/'))) {
+            setScopedLocalStorageItem('company_logo_backup', hydratedSettings.logo);
+        }
+        if (hydratedSettings.reportLogo && (hydratedSettings.reportLogo.startsWith('data:') || hydratedSettings.reportLogo.startsWith('http') || hydratedSettings.reportLogo.startsWith('/'))) {
+            setScopedLocalStorageItem('company_report_logo_backup', hydratedSettings.reportLogo);
+        }
+        if (hydratedSettings.watermarkLogo && (hydratedSettings.watermarkLogo.startsWith('data:') || hydratedSettings.watermarkLogo.startsWith('http') || hydratedSettings.watermarkLogo.startsWith('/'))) {
+            setScopedLocalStorageItem('company_watermark_logo_backup', hydratedSettings.watermarkLogo);
+        }
+
         setCompanySettings(hydratedSettings);
         setScopedLocalStorageItem('cached_company_settings', JSON.stringify(effectiveSettings));
         await addLog('update', 'system', changes.length ? changes.join(', ') : 'Atualizou definições', user?.id, user?.name);
@@ -1023,7 +1074,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     useEffect(() => {
         const initServerInfo = async () => {
-            if ((window as any).electronAPI) {
+            if ((window as any).electronAPI && authUser) {
                 try {
                     const isRunning = await (window as any).electronAPI.isServerRunning();
                     const netInfo = await (window as any).electronAPI.getNetworkInfo();
@@ -1041,9 +1092,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         };
         initServerInfo();
 
-        if ((window as any).electronAPI?.onClientsUpdated) {
-            (window as any).electronAPI.onClientsUpdated((clients: any[]) => setConnectedClients(clients));
-            (window as any).electronAPI.onMasterDiscovered((data: any) => {
+        let unsubscribeClients: (() => void) | undefined;
+        let unsubscribeDiscovery: (() => void) | undefined;
+        if ((window as any).electronAPI?.onClientsUpdated && authUser) {
+            unsubscribeClients = (window as any).electronAPI.onClientsUpdated((clients: any[]) => setConnectedClients(clients));
+            unsubscribeDiscovery = (window as any).electronAPI.onMasterDiscovered((data: any) => {
                 if (!serverInfo?.isRunning) {
                     const discoveryUrl = `http://${data.ip}:3000/sync`;
                     if (companySettings.syncUrl !== discoveryUrl) {
@@ -1080,10 +1133,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         window.addEventListener('auth-user-updated', handleAuthEvent);
 
         return () => {
+            unsubscribeClients?.();
+            unsubscribeDiscovery?.();
             unsubscribe();
             window.removeEventListener('auth-user-updated', handleAuthEvent);
         };
-    }, [refreshData, addNotification, serverInfo?.isRunning, companySettings.syncEnabled, companySettings.syncUrl]);
+    }, [refreshData, addNotification, serverInfo?.isRunning, companySettings.syncEnabled, companySettings.syncUrl, authUser]);
 
     const addClient = async (client: Client, actor?: { id: string, name: string }) => {
         const nif = (client.nif || '').trim();
@@ -1247,53 +1302,26 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         try {
             const targetUserId = activeContextUserId || user?.id || authUser?.id;
             const creditWithUser = { ...credit, usuario_id: targetUserId };
-            const finalCredit = { ...creditWithUser, status: credit.status || 'active' } as Credit;
-            await ServicoFinanceiro.addCredit(finalCredit);
+            let finalCredit = { ...creditWithUser, status: credit.status || 'active' } as Credit;
+            finalCredit = await ServicoFinanceiro.addCredit(finalCredit);
             const nextCredits = [finalCredit, ...credits];
             setCredits(prev => [finalCredit, ...prev]);
             await refreshClientCreditLimit(finalCredit.clientId, nextCredits, payments, user);
 
             if (!['pending_approval', 'rejected', 'cancelled'].includes(finalCredit.status)) {
-                try {
-                    const newContract: Contract = {
-                        id: finalCredit.id,
-                        clientId: finalCredit.clientId,
-                        clientName: finalCredit.clientName,
-                        title: `Contrato de Crédito ${finalCredit.id}`,
-                        value: finalCredit.principalAmount,
-                        startDate: new Date(finalCredit.startDate),
-                        endDate: new Date(finalCredit.dueDate),
-                        status: 'active',
-                        createdAt: new Date(),
-                        usuario_id: targetUserId
-                    };
-                    await addContract(newContract);
-                } catch (contractErr) {
-                    console.warn("[ContextoDados] Falha silenciosa ao auto-gerar contrato:", contractErr);
-                }
+                const newContract: Contract = {
+                    id: finalCredit.id, clientId: finalCredit.clientId, clientName: finalCredit.clientName,
+                    title: `Contrato de Crédito ${finalCredit.id}`, value: finalCredit.principalAmount,
+                    startDate: new Date(finalCredit.startDate), endDate: new Date(finalCredit.dueDate),
+                    status: 'active', createdAt: new Date(), usuario_id: targetUserId
+                };
+                setContracts(prev => [newContract, ...prev]);
             }
-
-            const newState = JSON.parse(JSON.stringify(finalCredit));
-
-            await addLog(
-                'create',
-                'credit',
-                `Concedeu crédito de ${credit.principalAmount} AOA a ${credit.clientName}`,
-                user?.id,
-                user?.name,
-                null,
-                newState,
-                { creditId: credit.id, clientId: credit.clientId }
-            );
-
-            await addNotification({
-                id: crypto.randomUUID(),
-                title: 'Novo Crédito',
-                message: `Crédito de ${credit.principalAmount} AOA concedido a ${credit.clientName}.`,
-                type: 'success',
-                read: false,
-                timestamp: new Date()
-            });
+            setNotifications(prev => [{
+                id: `notification:credit:${finalCredit.id}`, userId: targetUserId,
+                title: 'Novo Crédito', message: `Crédito de ${finalCredit.principalAmount} AOA criado para ${finalCredit.clientName}.`,
+                type: 'success', read: false, timestamp: new Date()
+            }, ...prev]);
 
             performAutoSync();
         } catch (error: any) {
@@ -1355,9 +1383,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             const previousState = JSON.parse(JSON.stringify(credit));
 
             const targetUserId = activeContextUserId || user?.id || authUser?.id;
-        const updateRequest = { ...credit, ...updates, version: credit.version ?? 0, usuario_id: updates.usuario_id || credit.usuario_id || targetUserId };
-        await ServicoFinanceiro.updateCredit(id, updateRequest);
-            const updated = { ...updateRequest, version: (credit.version ?? 0) + 1 };
+            const updateRequest = { ...updates, version: credit.version ?? 0, usuario_id: updates.usuario_id || credit.usuario_id || targetUserId };
+            await ServicoFinanceiro.updateCredit(id, updateRequest);
+            const updated = { ...credit, ...updateRequest, version: (credit.version ?? 0) + 1 };
             const nextCredits = credits.map(c => c.id === id ? updated : c);
             setCredits(prev => prev.map(c => c.id === id ? updated : c));
             await refreshClientCreditLimit(updated.clientId, nextCredits, payments, user);
@@ -1380,6 +1408,22 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             console.error("[ContextoDados] Erro ao atualizar crédito:", error);
             throw new Error(error.message || "Erro ao atualizar dados do crédito.");
         }
+    };
+
+    const adjustCreditCharges = async (id: string, accruedInterest: number, lateInterest: number,
+        reason: string, idempotencyKey: string, user?: { id: string; name: string }) => {
+        const credit = credits.find(item => item.id === id);
+        if (!credit) throw new Error('Crédito não encontrado.');
+        const actor = user || (authUser ? { id: authUser.id, name: authUser.name } : undefined);
+        if (!actor) throw new Error('Sessão de utilizador obrigatória.');
+        const entries = await ServicoFinanceiro.adjustCreditCharges({ credit, accruedInterest, lateInterest,
+            reason, idempotencyKey, actorId: actor.id, actorName: actor.name });
+        const updated = { ...credit, accruedInterest, lateInterest,
+            totalDue: credit.currentBalance + accruedInterest + lateInterest,
+            version: (credit.version ?? 0) + 1 };
+        setCredits(previous => previous.map(item => item.id === id ? updated : item));
+        setAccountingEntries(previous => [...previous, ...entries]);
+        performAutoSync();
     };
 
     const approveCredit = async (id: string, adminId: string, adminName: string, notes?: string) => {
@@ -1492,7 +1536,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const addPayment = async (payment: Payment, user?: { id: string; name: string }) => {
         const targetUserId = activeContextUserId || user?.id || authUser?.id;
         const credit = credits.find(c => c.id === payment.creditId);
-        const allocation = credit ? allocatePaymentByOutstandingBuckets(credit, payment.amount, payments) : {
+        if (!credit) throw new Error('O crédito associado ao pagamento não foi encontrado.');
+        const installmentPlan = payment.installmentCount == null ? null :
+            planConsecutiveInstallments(await ServicoFinanceiro.getCreditInstallments(payment.creditId), payment.installmentCount);
+        if (installmentPlan && Math.round(payment.amount * 100) !== installmentPlan.amountMinor) {
+            throw new Error('O valor não corresponde às prestações consecutivas selecionadas.');
+        }
+        const allocation = installmentPlan ? {
+            allocatedToPrincipal: installmentPlan.principalMinor / 100,
+            allocatedToInterest: installmentPlan.interestMinor / 100,
+            allocatedToLateInterest: installmentPlan.lateInterestMinor / 100
+        } : credit ? allocatePaymentByOutstandingBuckets(credit, payment.amount, payments) : {
             allocatedToLateInterest: payment.allocatedToLateInterest || 0,
             allocatedToInterest: payment.allocatedToInterest || 0,
             allocatedToPrincipal: payment.allocatedToPrincipal || 0,
@@ -1514,30 +1568,21 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             updatedCredit = { ...updatedCredit, paidInstallments: accountingEntry.paidInstallments, version: (credit.version ?? 0) + 1 };
             setAccountingEntries(previous => [...previous, accountingEntry]);
             setCredits(previous => previous.map(item => item.id === credit.id ? updatedCredit! : item));
+            setNotifications(previous => [{
+                id: `notification:payment:${payment.id}`, userId: targetUserId || undefined,
+                title: 'Pagamento Recebido', message: `Recebido pagamento de ${payment.amount} AOA de ${payment.clientName}.`,
+                type: 'success', read: false, timestamp: new Date()
+            }, ...previous]);
         } else {
             await ServicoFinanceiro.addPayment(paymentWithUser);
         }
         const nextPayments = [paymentWithUser, ...payments];
         setPayments(prev => [paymentWithUser, ...prev]);
 
-        const newState = JSON.parse(JSON.stringify(paymentWithUser));
-        await addLog(
-            'create',
-            'payment',
-            `Recebeu pagamento de ${payment.amount} AOA (${payment.method})`,
-            user?.id,
-            user?.name,
-            null,
-            newState,
-            { paymentId: payment.id, creditId: payment.creditId }
-        );
-
         if (credit && updatedCredit) {
             if (updatedCredit.status === 'paid') {
-                const contract = contracts.find(c => c.id === credit.id || c.title.includes(credit.id));
-                if (contract) {
-                    await updateContract(contract.id, { status: 'paid' });
-                }
+                setContracts(previous => previous.map(contract => contract.id === credit.id
+                    ? { ...contract, status: 'paid' } : contract));
             }
 
             await refreshClientCreditLimit(
@@ -1547,15 +1592,6 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 user
             );
         }
-
-        await addNotification({
-            id: crypto.randomUUID(),
-            title: 'Pagamento Recebido',
-            message: `Recebido pagamento de ${payment.amount} AOA de ${payment.clientName}.`,
-            type: 'success',
-            read: false,
-            timestamp: new Date()
-        });
 
         performAutoSync();
     };
@@ -1578,6 +1614,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 setPayments(prev => prev.filter(p => p.id !== id));
                 setDeletedPayments(prev => [deletedPayment, ...prev]);
                 setCredits(previous => previous.map(item => item.id === credit.id ? updatedCredit : item));
+                if (credit.status === 'paid' && updatedCredit.status !== 'paid') {
+                    setContracts(previous => previous.map(contract => contract.id === credit.id
+                        ? { ...contract, status: 'active' } : contract));
+                }
                 setAccountingEntries(previous => [...previous, reversalEntry]);
                 await refreshClientCreditLimit(
                     credit.clientId,
@@ -1624,6 +1664,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 setDeletedPayments(prev => prev.filter(p => p.id !== id));
                 setPayments(prev => [restored, ...prev]);
                 setCredits(previous => previous.map(item => item.id === credit.id ? updatedCredit : item));
+                if (updatedCredit.status === 'paid') {
+                    setContracts(previous => previous.map(contract => contract.id === credit.id
+                        ? { ...contract, status: 'paid' } : contract));
+                }
                 setAccountingEntries(previous => [...previous, restorationEntry]);
                 await refreshClientCreditLimit(
                     credit.clientId,
@@ -2545,6 +2589,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         deleteDocumentFromClient,
         addCredit,
         updateCredit,
+        adjustCreditCharges,
         reinforceCredit,
         deleteCredit,
         approveCredit,

@@ -8,6 +8,7 @@ import { formatCurrency, formatDate, formatPercentage } from '@/bibliotecas/form
 import { Badge } from '@/componentes/ui/badge';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
+import { Textarea } from '@/componentes/ui/textarea';
 import {
   Table,
   TableBody,
@@ -121,7 +122,7 @@ const toNumber = (value: number | undefined | null) => Number(value || 0);
 export default function Credits() {
   const [reinforcementCredit, setReinforcementCredit] = useState<any>(null);
   const { user } = useAuth();
-  const { credits, clients, addCredit, updateCredit, deleteCredit, addPayment, companySettings, payments, closedMonths, closeMonth, reopenMonth, suppliers, calendarTasks, addCalendarTask, deleteCalendarTask } = useData();
+  const { credits, clients, addCredit, adjustCreditCharges, deleteCredit, addPayment, companySettings, payments, closedMonths, closeMonth, reopenMonth, suppliers, calendarTasks, addCalendarTask, deleteCalendarTask } = useData();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
@@ -597,11 +598,11 @@ export default function Credits() {
           const clientCredits = credits.filter(c => c.clientId === client.id && c.status !== 'rejected' && c.status !== 'cancelled');
 
           await addCredit({
-            id: `CR${Math.floor(Math.random() * 10000)}`,
+            id: `CR-${crypto.randomUUID()}`,
             clientId: client.id,
             clientName: client.name,
             principalAmount: principal,
-            currentBalance: totalToReturn,
+            currentBalance: principal,
             interestRate: interestRate,
             lateInterestRate: 0.5, // Padrão
             installments: installments,
@@ -715,31 +716,28 @@ export default function Credits() {
       accruedInterest: credit.accruedInterest,
       lateInterest: credit.lateInterest,
     });
+    setAdjustmentReason('');
+    setAdjustmentKey(crypto.randomUUID());
     setIsAdjustmentDialogOpen(true);
   };
 
   const [adjustments, setAdjustments] = useState({ accruedInterest: 0, lateInterest: 0 });
+  const [adjustmentReason, setAdjustmentReason] = useState('');
+  const [adjustmentKey, setAdjustmentKey] = useState(() => crypto.randomUUID());
 
   const handleAdjustmentSubmit = async () => {
     if (!selectedCredit) return;
 
-    const newTotal = selectedCredit.principalAmount + adjustments.accruedInterest + adjustments.lateInterest;
-    const newBalance = newTotal - (selectedCredit.totalDue - selectedCredit.currentBalance);
-
-    await updateCredit(selectedCredit.id, {
-      accruedInterest: adjustments.accruedInterest,
-      lateInterest: adjustments.lateInterest,
-      totalDue: newTotal,
-      currentBalance: newBalance,
-    }, user ? { id: user.id, name: user.name } : undefined);
-
-    setAlertConfig({
-      isOpen: true,
-      title: "Ajuste Realizado!",
-      description: "Os valores financeiros do crédito foram atualizados manualmente.",
-      type: "success"
-    });
-    setIsAdjustmentDialogOpen(false);
+    try {
+      await adjustCreditCharges(selectedCredit.id, adjustments.accruedInterest, adjustments.lateInterest,
+        adjustmentReason, adjustmentKey, user ? { id: user.id, name: user.name } : undefined);
+      setAlertConfig({ isOpen: true, title: 'Ajuste registado',
+        description: 'O ajuste foi lançado no livro contabilístico com a justificação indicada.', type: 'success' });
+      setIsAdjustmentDialogOpen(false);
+    } catch (error) {
+      setAlertConfig({ isOpen: true, title: 'Ajuste recusado',
+        description: error instanceof Error ? error.message : 'Não foi possível registar o ajuste.', type: 'error' });
+    }
   };
 
   const handleDeleteClick = (credit: Credit) => {
@@ -839,7 +837,7 @@ export default function Credits() {
 
   const executeCreditSave = async (data: any, client: any, totalInterest: number, totalToReturn: number, clientCredits: any[]) => {
     try {
-      const generatedId = `CR${Math.floor(Math.random() * 10000)}`;
+      const generatedId = `CR-${crypto.randomUUID()}`;
       const canApprove = user?.role === 'super_admin' || user?.permissions?.includes('approve_loans');
       const requiresApproval =
         !canApprove ||
@@ -854,7 +852,7 @@ export default function Credits() {
         dueDate: new Date(data.dueDate),
         id: generatedId,
         clientName: client.name,
-        currentBalance: totalToReturn,
+        currentBalance: data.principalAmount,
         paidInstallments: 0,
         daysOverdue: 0,
         accruedInterest: totalInterest,
@@ -1468,15 +1466,15 @@ export default function Credits() {
         {/* 6. Saídas vs Entradas (Hoje - Pega do Calendário) */}
         <div 
           onClick={() => setIsDailyCashFlowOpen(true)}
-          className="card-kpi-slate cursor-pointer hover:scale-[1.02] active:scale-[0.99] group border-2 border-primary/40 relative overflow-hidden transition-all shadow-md hover:shadow-lg"
+          className="card-kpi-flow cursor-pointer hover:scale-[1.02] active:scale-[0.99] group"
         >
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/15 text-primary shrink-0 group-hover:scale-105 transition-transform">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0 group-hover:scale-105 transition-transform">
                 <ArrowDownUp className="h-5 w-5" />
               </div>
               <div>
-                <p className="text-[11px] font-bold text-primary uppercase tracking-wider truncate flex items-center gap-1">
+                <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-300 uppercase tracking-wider truncate flex items-center gap-1">
                   <span className="inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   Hoje no Calendário
                 </p>
@@ -1492,7 +1490,7 @@ export default function Credits() {
                 setIsDailyCashFlowOpen(true);
               }}
               title="Abrir Opções do Dia (Saídas vs Entradas)"
-              className="w-8 h-8 rounded-full bg-primary/15 hover:bg-primary/25 flex items-center justify-center text-primary transition-all hover:scale-110 active:scale-90 cursor-pointer shadow-2xs shrink-0"
+              className="w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 flex items-center justify-center text-slate-950 dark:text-white transition-all hover:scale-110 active:scale-90 cursor-pointer shadow-2xs shrink-0"
             >
               <Eye className="h-3.5 w-3.5" />
             </button>
@@ -1701,15 +1699,19 @@ export default function Credits() {
 
       {/* Create Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Novo Crédito</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-xl font-black text-slate-800 dark:text-white">
+              <PlusCircle className="h-6 w-6 text-primary" />
+              Emissão de Novo Contrato (Crédito)
+            </DialogTitle>
           </DialogHeader>
           <CreditForm
             onSubmit={handleCreateSubmit}
             clients={clients}
             credits={credits}
             onCancel={() => setIsCreateDialogOpen(false)}
+            submitLabel="Solicitar Homologação"
           />
         </DialogContent>
       </Dialog>
@@ -1935,6 +1937,8 @@ export default function Credits() {
               <Input
                 id="adj-interest"
                 type="number"
+                min="0"
+                step="0.01"
                 value={adjustments.accruedInterest}
                 onChange={(e) => setAdjustments(prev => ({ ...prev, accruedInterest: Number(e.target.value) }))}
               />
@@ -1944,12 +1948,20 @@ export default function Credits() {
               <Input
                 id="adj-late"
                 type="number"
+                min="0"
+                step="0.01"
                 value={adjustments.lateInterest}
                 onChange={(e) => setAdjustments(prev => ({ ...prev, lateInterest: Number(e.target.value) }))}
               />
             </div>
+            <div className="grid gap-2">
+              <Label htmlFor="adj-reason">Justificação obrigatória</Label>
+              <Textarea id="adj-reason" value={adjustmentReason}
+                onChange={event => setAdjustmentReason(event.target.value)}
+                maxLength={1000} placeholder="Descreva o motivo e a evidência do ajuste." />
+            </div>
             <div className="p-3 bg-muted rounded-lg text-sm">
-              <p><strong>Novo Total a Pagar:</strong> {formatCurrency(selectedCredit ? selectedCredit.principalAmount + adjustments.accruedInterest + adjustments.lateInterest : 0)}</p>
+              <p><strong>Novo Total a Pagar:</strong> {formatCurrency(selectedCredit ? selectedCredit.currentBalance + adjustments.accruedInterest + adjustments.lateInterest : 0)}</p>
             </div>
           </div>
           <div className="flex justify-end gap-2">

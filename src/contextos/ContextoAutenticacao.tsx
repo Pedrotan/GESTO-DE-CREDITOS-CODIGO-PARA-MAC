@@ -43,9 +43,9 @@ interface ContextoAutenticacaoType {
     refreshSettings: () => Promise<void>;
     syncUsersFromMaster: (url: string, passkey: string) => Promise<void>;
     generate2FASecret: () => Promise<{ secret: string; qrCode: string }>;
-    enable2FA: (secret: string, code: string) => Promise<{ success: boolean; recoveryCodes?: string[] }>;
+    enable2FA: (secret: string, code: string) => Promise<{ success: boolean; reason?: 'session_expired' | 'qr_expired' | 'invalid_code'; recoveryCodes?: string[] }>;
     disable2FA: (code: string) => Promise<boolean>;
-    verify2FA: (userId: string, code: string) => Promise<boolean>;
+    verify2FA: (userId: string, code: string) => Promise<{ authenticated: boolean; reason?: 'challenge_expired' | 'replayed_code' | 'invalid_code' }>;
 }
 
 const ContextoAutenticacao = createContext<ContextoAutenticacaoType | undefined>(undefined);
@@ -65,14 +65,51 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     useEffect(() => {
         const initAuth = async () => {
             try {
-                // Initialize database
-                await db.init();
+                const electronApi = window.electronAPI?.userAuthStatus ? window.electronAPI : null;
+                let initialStatus: any = null;
+                let schemaStatus: any = null;
+                let bootstrap: any = null;
 
-                if (window.electronAPI?.userAuthStatus) {
-                    const status = await window.electronAPI.userAuthStatus();
+                if (electronApi) {
+                    try {
+                        initialStatus = await electronApi.userAuthStatus();
+                    } catch (e) {
+                        console.warn('[Auth] userAuthStatus falhou:', e);
+                    }
+                    try {
+                        schemaStatus = electronApi.dbSchemaStatus ? await electronApi.dbSchemaStatus() : null;
+                    } catch (e) {
+                        console.warn('[Auth] dbSchemaStatus falhou:', e);
+                    }
+                    try {
+                        bootstrap = electronApi.userAuthBootstrapStatus ? await electronApi.userAuthBootstrapStatus() : null;
+                    } catch (e) {
+                        console.warn('[Auth] userAuthBootstrapStatus falhou:', e);
+                    }
+
+                    // Se não estiver autenticado e já existirem utilizadores (ou o esquema já estiver pronto),
+                    // não executar migrações nem consultas protegidas antes do próximo login.
+                    const isSchemaReady = Boolean(schemaStatus?.ready) || Boolean(bootstrap?.hasUsers);
+                    if (isSchemaReady && !initialStatus?.authenticated) {
+                        setHasUsers(Boolean(bootstrap?.hasUsers));
+                        setUser(null);
+                        sessionStorage.removeItem('user');
+                        return;
+                    }
+                }
+
+                const initialization = await db.init();
+                if (initialization?.success === false) throw new Error('Não foi possível inicializar a base de dados.');
+                if (electronApi && !schemaStatus?.ready) {
+                    const currentBootstrap = bootstrap || (await electronApi.userAuthBootstrapStatus());
+                    if (currentBootstrap.hasUsers && electronApi.dbSchemaReady) await electronApi.dbSchemaReady();
+                }
+
+                if (electronApi) {
+                    const status = initialStatus || (await electronApi.userAuthStatus());
                     if (!status.authenticated || !status.user) {
-                        const bootstrap = await window.electronAPI.userAuthBootstrapStatus();
-                        setHasUsers(bootstrap.hasUsers);
+                        const currentBootstrap = bootstrap || (await electronApi.userAuthBootstrapStatus());
+                        setHasUsers(currentBootstrap.hasUsers);
                         setUser(null);
                         sessionStorage.removeItem('user');
                         return;
@@ -139,22 +176,6 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     console.log(`⏱️ [AuthProvider] Usando tempo de sessão padrão: 20 minutos`);
                 }
 
-                // Database Migrations for Security Enhancement
-                const tableInfo = await db.all<{ name: string }>('PRAGMA table_info(users)');
-                const columnNames = tableInfo.map(c => c.name);
-
-                if (!columnNames.includes('failedAttempts')) {
-                    await db.run('ALTER TABLE users ADD COLUMN failedAttempts INTEGER DEFAULT 0');
-                }
-                if (!columnNames.includes('twoFactorEnabled')) {
-                    await db.run('ALTER TABLE users ADD COLUMN twoFactorEnabled BOOLEAN DEFAULT 0');
-                }
-                if (!columnNames.includes('twoFactorSecret')) {
-                    await db.run('ALTER TABLE users ADD COLUMN twoFactorSecret TEXT');
-                }
-                if (!columnNames.includes('blockedAt')) {
-                    await db.run('ALTER TABLE users ADD COLUMN blockedAt TEXT');
-                }
             } catch (error) {
                 console.error('Failed to initialize authentication:', error);
             }
@@ -649,6 +670,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             updateFields.push('password = ?');
             updateValues.push(hashedPassword);
         }
+        if (updates.twoFactorEnabled !== undefined) {
+            updateFields.push('twoFactorEnabled = ?');
+            updateValues.push(updates.twoFactorEnabled ? 1 : 0);
+        }
+        if (updates.twoFactorSecret !== undefined) {
+            updateFields.push('twoFactorSecret = ?');
+            updateValues.push(updates.twoFactorSecret || null);
+        }
         if (updates.signature !== undefined) {
             updateFields.push('signature = ?');
             updateValues.push(updates.signature);
@@ -924,17 +953,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return { secret, qrCode: otpAuthUrl };
     };
 
-    const verify2FA = async (userId: string, token: string): Promise<boolean> => {
+    const verify2FA = async (userId: string, token: string): Promise<{ authenticated: boolean; reason?: 'challenge_expired' | 'replayed_code' | 'invalid_code' }> => {
         if (window.electronAPI?.userAuthVerifyTotp) {
             const result = await window.electronAPI.userAuthVerifyTotp(userId, token);
-            if (!result.authenticated || !result.user) return false;
+            if (!result.authenticated || !result.user) return { authenticated: false, reason: result.reason || 'invalid_code' };
             pendingTwoFactorUser.current = null;
             setUser(result.user as User);
             sessionStorage.setItem('user', JSON.stringify(result.user));
-            return true;
+            return { authenticated: true };
         }
         const u = await db.get<User>('SELECT twoFactorSecret FROM users WHERE id = ?', [userId]);
-        if (!u || !u.twoFactorSecret || pendingTwoFactorUser.current?.id !== userId) return false;
+        if (!u || !u.twoFactorSecret || pendingTwoFactorUser.current?.id !== userId) return { authenticated: false, reason: 'challenge_expired' };
         const valid = await validateTOTP(u.twoFactorSecret, token);
         if (valid) {
             const authenticatedUser = pendingTwoFactorUser.current;
@@ -942,18 +971,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setUser(authenticatedUser);
             sessionStorage.setItem('user', JSON.stringify(authenticatedUser));
         }
-        return valid;
+        return valid ? { authenticated: true } : { authenticated: false, reason: 'invalid_code' };
     };
 
-    const enable2FA = async (secret: string, code: string): Promise<{ success: boolean; recoveryCodes?: string[] }> => {
-        if (!user) return { success: false };
+    const enable2FA = async (secret: string, code: string): Promise<{ success: boolean; reason?: 'session_expired' | 'qr_expired' | 'invalid_code'; recoveryCodes?: string[] }> => {
         if (window.electronAPI?.userAuthMfaEnable) {
             const result = await window.electronAPI.userAuthMfaEnable(code);
-            if (!result.enabled || !result.user) return { success: false };
+            if (!result.enabled || !result.user) return { success: false, reason: result.reason || 'invalid_code' };
             setUser(result.user as User);
             sessionStorage.setItem('user', JSON.stringify(result.user));
             return { success: true, recoveryCodes: result.recoveryCodes };
         }
+        if (!user) return { success: false, reason: 'session_expired' };
         const isValid = await validateTOTP(secret, code);
         if (isValid) {
             await db.run('UPDATE users SET twoFactorEnabled = 1, twoFactorSecret = ? WHERE id = ?', [secret, user.id]);
@@ -962,7 +991,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             sessionStorage.setItem('user', JSON.stringify(updated));
             return { success: true };
         }
-        return { success: false };
+        return { success: false, reason: 'invalid_code' };
     };
 
     const disable2FA = async (code: string): Promise<boolean> => {

@@ -1114,7 +1114,7 @@ export default function DashboardAdmin() {
                 {/* Background Glow */}
                 < div className="pointer-events-none fixed left-56 right-0 top-0 h-64 bg-gradient-to-b from-blue-900/5 to-transparent dark:from-blue-900/10 xl:left-64" />
 
-                <div className="relative z-10 mx-auto w-full max-w-[1920px] p-4 md:p-6 xl:p-8">
+                <div className="relative z-10 w-full px-2 sm:px-4 py-4 md:py-6">
 
                     {/* --- EMPRESAS CLOUD (Tenants & Chaves de Sincronização) --- */}
                     {activeTab === 'empresas' && <GestaoEmpresasCloud />}
@@ -2129,7 +2129,7 @@ export default function DashboardAdmin() {
 
                     {/* --- CONTABILIDADE --- */}
                     {activeTab === 'contabilidade' && (
-                        <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                        <div className="w-full space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                             <div className="flex justify-between items-end">
                                 <div>
                                     <h2 className="text-3xl font-black text-slate-800 dark:text-white">Fluxo de Caixa & Contabilidade</h2>
@@ -2278,7 +2278,7 @@ export default function DashboardAdmin() {
                     {/* --- GUIA DE AJUDA --- */}
                     {
                         activeTab === 'guia' && (
-                            <div className="max-w-6xl mx-auto space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                            <div className="w-full space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                                 <div className="flex justify-between items-end">
                                     <div>
                                         <h2 className="text-4xl font-black text-slate-900 dark:text-white flex items-center gap-3">

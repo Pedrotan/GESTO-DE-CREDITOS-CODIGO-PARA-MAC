@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
-import { applyCors, enforceRateLimit } from './_security.js';
+import { applyCors, enforceDistributedRateLimit } from './_security.js';
 
 const MAX_OPERATIONS = 100;
 const MAX_PAYLOAD_LENGTH = 2_000_000;
@@ -21,9 +21,11 @@ const safeEqual = (left, right) => {
 
 const sha256 = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
 
+const normalizeCode = (val) => String(val || '').trim().replace(/[-\s]/g, '').toUpperCase();
+
 // Middleware de autorização por empresa (tenant).
 // Se a empresa estiver registada no Painel Master (tabela tango_tenants),
-// valida a chave individual dela + estado + expiração. Caso contrário,
+// valida a chave/código individual dela + estado + expiração. Caso contrário,
 // mantém a compatibilidade com a chave global TANGO_SYNC_SECRET.
 const authorizeTenant = async (sql, tenantId, providedKey) => {
   await sql(`
@@ -32,29 +34,56 @@ const authorizeTenant = async (sql, tenantId, providedKey) => {
       tenant_hash TEXT NOT NULL UNIQUE,
       name TEXT NOT NULL,
       key_hash TEXT NOT NULL,
+      access_code TEXT,
       status TEXT NOT NULL DEFAULT 'active',
       expires_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       last_sync_at TIMESTAMPTZ
     )
   `);
-  const rows = await sql('SELECT key_hash, status, expires_at FROM tango_tenants WHERE tenant_id = $1', [tenantId]);
+
+  try {
+    await sql(`ALTER TABLE tango_tenants ADD COLUMN IF NOT EXISTS access_code TEXT`);
+  } catch {
+    // Ignorar se já existe
+  }
+
+  const rows = await sql('SELECT key_hash, status, expires_at, access_code FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
+  const globalSecret = process.env.TANGO_SYNC_SECRET || process.env.DEFAULT_SYNC_PASSKEY || 'TangoSync#2026!Live';
+  const isGlobalSecretValid = Boolean(globalSecret && safeEqual(providedKey, globalSecret));
 
   if (!rows.length) {
+    if (isGlobalSecretValid) {
+      await sql(`
+        INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash, status, created_at, last_sync_at)
+        VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
+        ON CONFLICT (tenant_id) DO UPDATE SET last_sync_at = NOW()
+      `, [tenantId, sha256(tenantId), `Empresa ${tenantId}`, sha256(providedKey)]);
+      return { ok: true };
+    }
     return { ok: false, status: 403, message: 'Empresa não registada para sincronização.' };
   }
 
   const tenant = rows[0];
-  if (!safeEqual(sha256(providedKey), tenant.key_hash)) {
-    return { ok: false, status: 401, message: 'Chave de sincronização inválida para esta empresa.' };
+  const normProvided = normalizeCode(providedKey);
+  const isTenantKeyValid = 
+    safeEqual(sha256(providedKey), tenant.key_hash) ||
+    safeEqual(sha256(normProvided), tenant.key_hash) ||
+    (tenant.access_code && (
+      safeEqual(tenant.access_code.trim().toUpperCase(), String(providedKey).trim().toUpperCase()) ||
+      safeEqual(normalizeCode(tenant.access_code), normProvided)
+    ));
+
+  if (!isTenantKeyValid && !isGlobalSecretValid) {
+    return { ok: false, status: 401, message: 'Chave ou Código de Acesso de sincronização inválido para esta empresa.' };
   }
   if (tenant.status !== 'active') {
-    return { ok: false, status: 403, message: 'O acesso desta empresa está bloqueado. Contacte o administrador.' };
+    return { ok: false, status: 403, message: 'O acesso desta empresa está bloqueado no Tango Master. Contacte o administrador.' };
   }
   if (tenant.expires_at && new Date(tenant.expires_at).getTime() < Date.now()) {
-    return { ok: false, status: 403, message: 'A chave de sincronização desta empresa expirou. Contacte o administrador.' };
+    return { ok: false, status: 403, message: 'A chave ou código de acesso desta empresa expirou. Contacte o administrador.' };
   }
-  await sql('UPDATE tango_tenants SET last_sync_at = NOW() WHERE tenant_id = $1', [tenantId]);
+  await sql('UPDATE tango_tenants SET last_sync_at = NOW() WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
   return { ok: true };
 };
 
@@ -62,8 +91,6 @@ export default async function handler(req, res) {
   if (!applyCors(req, res)) return send(res, 403, { success: false, message: 'Origem não autorizada.' });
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
   if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
-  if (!enforceRateLimit(req, res, { limit: 120, windowMs: 60_000, scope: 'sync' })) return;
-
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) {
     return send(res, 503, { success: false, message: 'Sincronização cloud ainda não configurada no servidor.' });
@@ -84,12 +111,21 @@ export default async function handler(req, res) {
   const tenantHash = sha256(tenantId);
   const client = neon(databaseUrl);
   const sql = (text, params) => client.query(text, params);
+  try {
+    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 120, windowMs: 60_000, scope: 'sync' })) return;
+  } catch (error) {
+    console.error('[sync][rate-limit]', error);
+    return send(res, 503, { success: false, message: 'O controlo de acesso está indisponível.' });
+  }
 
   const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   const providedKey = req.headers['x-sync-passkey'] || bearer;
   try {
     const auth = await authorizeTenant(sql, tenantId, providedKey);
     if (!auth.ok) return send(res, auth.status, { success: false, message: auth.message });
+    if (!await enforceDistributedRateLimit(sql, req, res, {
+      limit: 600, windowMs: 60_000, scope: 'sync-tenant', subject: tenantId, dimension: 'subject'
+    })) return;
   } catch (error) {
     console.error('[sync][auth]', error);
     return send(res, 500, { success: false, message: 'O servidor não conseguiu validar o acesso.' });

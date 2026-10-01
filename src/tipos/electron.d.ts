@@ -1,13 +1,15 @@
 export interface ElectronAPI {
     userAuthLogin: (login: string, password: string) => Promise<{ authenticated: boolean; requires2FA?: boolean; requiresMfaEnrollment?: boolean; notFound?: boolean; userId?: string; user?: any }>;
-    userAuthVerifyTotp: (userId: string, token: string) => Promise<{ authenticated: boolean; replayed?: boolean; user?: any }>;
+    userAuthVerifyTotp: (userId: string, token: string) => Promise<{ authenticated: boolean; reason?: 'challenge_expired' | 'replayed_code' | 'invalid_code'; user?: any }>;
     userAuthStatus: () => Promise<{ authenticated: boolean; user?: any; expiresAt?: string }>;
     userAuthBootstrapStatus: () => Promise<{ hasUsers: boolean }>;
     userAuthLogout: () => Promise<{ authenticated: false }>;
     userAuthMfaBegin: () => Promise<{ secret: string; qrCode: string }>;
-    userAuthMfaEnable: (token: string) => Promise<{ enabled: boolean; user?: any; recoveryCodes?: string[] }>;
+    userAuthMfaEnable: (token: string) => Promise<{ enabled: boolean; reason?: 'session_expired' | 'qr_expired' | 'invalid_code'; user?: any; recoveryCodes?: string[] }>;
     userAuthMfaDisable: (token: string) => Promise<{ disabled: boolean; user?: any }>;
     dbSchemaReady: () => Promise<{ ready: true }>;
+    dbSchemaStatus: () => Promise<{ ready: boolean }>;
+    dbOptimize: () => Promise<{ success: true }>;
     masterAuthStatus: () => Promise<{ configured: boolean; authenticated: boolean; requiresMfa?: boolean; requiresMfaEnrollment?: boolean; unavailable?: boolean; expiresAt: string | null }>;
     masterAuthSetup: (password: string) => Promise<{ configured: boolean; authenticated: boolean; requiresMfaEnrollment?: boolean; expiresAt: string | null }>;
     masterAuthLogin: (password: string) => Promise<{ configured: boolean; authenticated: boolean; requiresMfa?: boolean; requiresMfaEnrollment?: boolean; expiresAt: string | null }>;

@@ -24,6 +24,11 @@ export class RepositorioContabilidade extends RepositorioBase {
     }
 
     static async insert(entry: AccountingEntry): Promise<void> {
+        const statement = this.buildInsertStatement(entry);
+        await this.execute(statement.sql, statement.params);
+    }
+
+    static buildInsertStatement(entry: AccountingEntry) {
         const sql = `INSERT INTO accounting_entries
             (id, timestamp, type, description, clientId, creditId, paymentId, debit, credit,
              amountPrincipal, amountInterest, amountLateInterest, amountTotal,
@@ -42,7 +47,7 @@ export class RepositorioContabilidade extends RepositorioBase {
             entry.integrityHash, entry.previousHash, entry.hashVersion || 2,
             entry.usuario_id
         ];
-        await this.execute(sql, params);
+        return { sql, params };
     }
 }
 

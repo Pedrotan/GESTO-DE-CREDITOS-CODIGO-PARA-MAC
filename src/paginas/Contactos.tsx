@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { useToast } from '@/ganchos/usar-toast';
 import { cn } from '@/bibliotecas/utils';
-import { applyBranding, getCompanySettings } from '@/bibliotecas/pdf';
+import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from '@/bibliotecas/pdf';
 import { format } from 'date-fns';
 
 type CategoriaFiltro = 'TODOS' | 'COMUM' | 'APOSENTADO' | 'ESTRANGEIRO';
@@ -108,24 +108,26 @@ export default function Contactos() {
         // 1. Aplica o cabeçalho institucional completo com Logo, Nome, NIF, Telefone e Email
         applyBranding(doc, config, generatedBy, false);
 
-        const darkGreen: [number, number, number] = [4, 67, 44]; // #04432c
+        const primary = resolveBrandPrimary(config.primaryColor);
+        const dark = BRAND_CHARCOAL;
 
-        // 2. Banner de título do relatório posicionado abaixo do cabeçalho institucional (y: 40)
-        doc.setFillColor(darkGreen[0], darkGreen[1], darkGreen[2]);
-        doc.rect(10, 40, pageWidth - 20, 18, 'F');
+        // 2. Título Executivo com Acento Vertical Laranja (Conforme Imagem de Referência)
+        const titleY = 48;
+        doc.setFillColor(primary[0], primary[1], primary[2]);
+        doc.roundedRect(16, titleY, 3.5, 11, 0.8, 0.8, 'F');
 
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(12);
-        doc.setTextColor(255, 255, 255);
-        doc.text('AGENDA DE CONTACTOS DOS CLIENTES', 16, 48);
+        doc.setFontSize(12.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('AGENDA DE CONTACTOS DOS CLIENTES', 22, titleY + 5);
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
-        doc.setTextColor(203, 213, 225);
-        doc.text(`Total de registos encontrados: ${dados.length}   |   Data: ${format(new Date(), 'dd/MM/yyyy HH:mm')}   |   Operador: ${generatedBy}`, 16, 54);
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Total de registos encontrados: ${dados.length}   |   Data: ${format(new Date(), 'dd/MM/yyyy HH:mm')}   |   Operador: ${generatedBy}`, 22, titleY + 9.5);
 
         autoTable(doc, {
-            startY: 63,
+            startY: 64,
             head: [['#', 'NOME DO CLIENTE', 'NIF / BI', 'TELEFONE', 'CORREIO ELETRÓNICO', 'ENDEREÇO / MORADA']],
             body: dados.map((c, i) => [
                 String(i + 1),
@@ -135,10 +137,10 @@ export default function Contactos() {
                 c.email || '--',
                 c.address || '--'
             ]),
-            theme: 'grid',
-            styles: { fontSize: 8, cellPadding: 2.5, overflow: 'linebreak', textColor: [30, 41, 59] },
-            headStyles: { fillColor: darkGreen, textColor: [255, 255, 255], fontStyle: 'bold' },
-            alternateRowStyles: { fillColor: [248, 250, 252] },
+            theme: 'striped',
+            styles: { fontSize: 8, cellPadding: 2.2, overflow: 'linebreak', textColor: dark },
+            headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+            alternateRowStyles: { fillColor: [250, 250, 252] },
             columnStyles: {
                 0: { cellWidth: 10, halign: 'center' },
                 1: { cellWidth: 65, fontStyle: 'bold' },
@@ -147,7 +149,7 @@ export default function Contactos() {
                 4: { cellWidth: 50 },
                 5: { cellWidth: 'auto' }
             },
-            margin: { left: 10, right: 10, bottom: 20 },
+            margin: { left: 16, right: 14, bottom: 25 },
             didDrawPage: () => applyBranding(doc, config, generatedBy, true)
         });
 

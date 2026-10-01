@@ -6,10 +6,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "ALTER TABLE credits RENAME TO credits_old",
   "ALTER TABLE dictionary RENAME TO dictionary_old",
   "ALTER TABLE payments RENAME TO payments_old",
-  "ALTER TABLE users ADD COLUMN blockedAt TEXT",
-  "ALTER TABLE users ADD COLUMN failedAttempts INTEGER DEFAULT 0",
-  "ALTER TABLE users ADD COLUMN twoFactorEnabled BOOLEAN DEFAULT 0",
-  "ALTER TABLE users ADD COLUMN twoFactorSecret TEXT",
   "CREATE INDEX IF NOT EXISTS idx_accounting_clientId ON accounting_entries(clientId)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_creditId ON accounting_entries(creditId)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_timestamp ON accounting_entries(timestamp)",
@@ -65,7 +61,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS closed_months ( id TEXT PRIMARY KEY, month INTEGER NOT NULL, year INTEGER NOT NULL, capitalApplied REAL NOT NULL, projectedProfit REAL NOT NULL, realizedProfit REAL NOT NULL, overdueAmount REAL NOT NULL, liquidationRate REAL NOT NULL, closedAt TEXT NOT NULL, closedBy TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS collection_messages ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, creditIds TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, attemptNumber INTEGER DEFAULT 1, totalDue REAL DEFAULT 0, sentAt TEXT NOT NULL, sentBy TEXT, legalTriggered INTEGER DEFAULT 0 )",
-  "CREATE TABLE IF NOT EXISTS company_settings ( id INTEGER PRIMARY KEY CHECK(id = 1), name TEXT NOT NULL, nif TEXT, address TEXT, logo TEXT, reportLogo TEXT, licenseKey TEXT, currency TEXT DEFAULT 'AOA', customClauses TEXT, rescueKey TEXT, phone TEXT, primaryColor TEXT, secondaryColor TEXT, watermarkLogo TEXT, sessionTimeout INTEGER DEFAULT 5, email TEXT, whatsapp TEXT, whatsappAutoNotify INTEGER DEFAULT 0, whatsappVerified INTEGER DEFAULT 0, syncEnabled INTEGER DEFAULT 0, syncUrl TEXT, syncApiKey TEXT, syncPasskey TEXT, lastSync TEXT, maintenanceMode INTEGER DEFAULT 0, allowedModulesDuringMaintenance TEXT DEFAULT '[]', enableGatewaysModule INTEGER DEFAULT 1, enableGatewaysModuleAdminOnly INTEGER DEFAULT 0, enableProfileActivity INTEGER DEFAULT 1, enableProfileActivityAdminOnly INTEGER DEFAULT 0, lastBackupDate TEXT, digitalSignatureEnabled INTEGER DEFAULT 1, authorizedSigners TEXT DEFAULT '[]', bankingInfo TEXT DEFAULT '[]', contractTemplates TEXT DEFAULT '[]', installDate TEXT, financialLock INTEGER DEFAULT 0, enableWarrantiesModule INTEGER DEFAULT 1, enableWarrantiesModuleAdminOnly INTEGER DEFAULT 0, enableLegalModule INTEGER DEFAULT 1, enableLegalModuleAdminOnly INTEGER DEFAULT 0, enableScoringModule INTEGER DEFAULT 1, enableScoringModuleAdminOnly INTEGER DEFAULT 0, defaultSimulationInterestRate REAL, defaultSimulationAdminFee REAL, defaultSimulationIof REAL, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPassword TEXT, smtpSecure INTEGER DEFAULT 0, smtpFromName TEXT, location TEXT, enableMultiTenant INTEGER DEFAULT 1 )",
+  "CREATE TABLE IF NOT EXISTS company_settings ( id INTEGER PRIMARY KEY CHECK(id = 1), name TEXT NOT NULL, nif TEXT, address TEXT, logo TEXT, reportLogo TEXT, licenseKey TEXT, currency TEXT DEFAULT 'AOA', customClauses TEXT, rescueKey TEXT, phone TEXT, primaryColor TEXT, secondaryColor TEXT, watermarkLogo TEXT, sessionTimeout INTEGER DEFAULT 5, email TEXT, whatsapp TEXT, whatsappAutoNotify INTEGER DEFAULT 0, whatsappVerified INTEGER DEFAULT 0, syncEnabled INTEGER DEFAULT 0, syncUrl TEXT, syncApiKey TEXT, syncPasskey TEXT, lastSync TEXT, maintenanceMode INTEGER DEFAULT 0, allowedModulesDuringMaintenance TEXT DEFAULT '[]', enableGatewaysModule INTEGER DEFAULT 1, enableGatewaysModuleAdminOnly INTEGER DEFAULT 0, enableProfileActivity INTEGER DEFAULT 1, enableProfileActivityAdminOnly INTEGER DEFAULT 0, lastBackupDate TEXT, digitalSignatureEnabled INTEGER DEFAULT 1, authorizedSigners TEXT DEFAULT '[]', bankingInfo TEXT DEFAULT '[]', contractTemplates TEXT DEFAULT '[]', installDate TEXT, financialLock INTEGER DEFAULT 0, enableWarrantiesModule INTEGER DEFAULT 1, enableWarrantiesModuleAdminOnly INTEGER DEFAULT 0, enableLegalModule INTEGER DEFAULT 1, enableLegalModuleAdminOnly INTEGER DEFAULT 0, enableScoringModule INTEGER DEFAULT 1, enableScoringModuleAdminOnly INTEGER DEFAULT 0, defaultSimulationInterestRate REAL, defaultSimulationAdminFee REAL, defaultSimulationIof REAL, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPassword TEXT, smtpSecure INTEGER DEFAULT 0, smtpFromName TEXT, location TEXT, enableSuppliersModule INTEGER DEFAULT 0, enableSuppliersModuleAdminOnly INTEGER DEFAULT 0, enableMultiTenant INTEGER DEFAULT 1, website TEXT, segment TEXT, slogan TEXT )",
   "CREATE TABLE IF NOT EXISTS contracts ( id TEXT PRIMARY KEY, clientId TEXT, clientName TEXT, title TEXT, value REAL, startDate TEXT, endDate TEXT, status TEXT, terms TEXT, createdAt TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS credit_installments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, installmentNumber INTEGER NOT NULL CHECK(installmentNumber > 0), dueDate TEXT NOT NULL, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL CHECK(interestMinor >= 0), lateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(lateInterestMinor >= 0), paidPrincipalMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidPrincipalMinor >= 0), paidInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidInterestMinor >= 0), paidLateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidLateInterestMinor >= 0), status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','partial','paid','overdue','cancelled')), paidAt TEXT, version INTEGER NOT NULL DEFAULT 0, UNIQUE(creditId, installmentNumber), FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS credit_reinforcements ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), idempotencyKey TEXT NOT NULL UNIQUE, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
@@ -138,6 +134,11 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DROP TABLE dictionary_old",
   "DROP TABLE payments_old",
   "INSERT INTO accounting_entries (id, timestamp, type, description, clientId, creditId, paymentId, debit, credit, amountPrincipal, amountInterest, amountLateInterest, amountTotal, amountPrincipalMinor, amountInterestMinor, amountLateInterestMinor, amountTotalMinor, processedBy, justification, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'credit', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'payment', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'delete', 'payment', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'restore', 'payment', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?, ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -153,6 +154,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO ledger_transactions (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor, totalCreditMinor, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, ?)",
+  "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, 'Novo Crédito', ?, 'success', 0, ?)",
+  "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, 'Pagamento Recebido', ?, 'success', 0, ?)",
   "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, ?, 0, ?)",
   "INSERT INTO notifications (id, userId, title, message, type, source, read, timestamp) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO password_reset_requests (id, userId, userName, email, timestamp, status) VALUES (?, ?, ?, ?, ?, ?)",
@@ -174,7 +177,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT OR IGNORE INTO sync_conflicts (id, entityType, entityId, operation, status, createdAt) VALUES (?, ?, ?, ?, 'pending', ?)",
   "INSERT OR IGNORE INTO user_limits (id, role, maxTransaction, dailyLimit, monthlyLimit, restrictionsEnabled, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR REPLACE INTO closed_months (id, month, year, capitalApplied, projectedProfit, realizedProfit, overdueAmount, liquidationRate, closedAt, closedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  "INSERT OR REPLACE INTO company_settings ( id, name, nif, address, logo, reportLogo, watermarkLogo, currency, customClauses, rescueKey, phone, primaryColor, secondaryColor, email, whatsapp, whatsappAutoNotify, whatsappVerified, syncEnabled, syncUrl, syncApiKey, syncPasskey, lastSync, maintenanceMode, sessionTimeout, allowedModulesDuringMaintenance, enableGatewaysModule, enableProfileActivity, digitalSignatureEnabled, authorizedSigners, bankingInfo, contractTemplates, lastBackupDate, installDate, financialLock, licenseKey, enableGatewaysModuleAdminOnly, enableProfileActivityAdminOnly, enableWarrantiesModule, enableWarrantiesModuleAdminOnly, enableLegalModule, enableLegalModuleAdminOnly, enableScoringModule, enableScoringModuleAdminOnly, location, enableSuppliersModule, enableSuppliersModuleAdminOnly, enableMultiTenant ) VALUES ( 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )",
+  "INSERT OR REPLACE INTO company_settings ( id, name, nif, address, logo, reportLogo, watermarkLogo, currency, customClauses, rescueKey, phone, primaryColor, secondaryColor, email, whatsapp, whatsappAutoNotify, whatsappVerified, syncEnabled, syncUrl, syncApiKey, syncPasskey, lastSync, maintenanceMode, sessionTimeout, allowedModulesDuringMaintenance, enableGatewaysModule, enableProfileActivity, digitalSignatureEnabled, authorizedSigners, bankingInfo, contractTemplates, lastBackupDate, installDate, financialLock, licenseKey, enableGatewaysModuleAdminOnly, enableProfileActivityAdminOnly, enableWarrantiesModule, enableWarrantiesModuleAdminOnly, enableLegalModule, enableLegalModuleAdminOnly, enableScoringModule, enableScoringModuleAdminOnly, location, enableSuppliersModule, enableSuppliersModuleAdminOnly, enableMultiTenant, website, segment, slogan, defaultSimulationInterestRate, defaultSimulationAdminFee, defaultSimulationIof, smtpHost, smtpPort, smtpUser, smtpPassword, smtpSecure, smtpFromName ) VALUES ( 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )",
   "INSERT OR REPLACE INTO company_settings ( id, name, nif, currency, sessionTimeout, installDate ) VALUES (1, ?, ?, ?, ?, ?)",
   "INSERT OR REPLACE INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "PRAGMA integrity_check",
@@ -182,7 +185,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "PRAGMA table_info(credits_old)",
   "PRAGMA table_info(dictionary)",
   "PRAGMA table_info(payments_old)",
-  "PRAGMA table_info(users)",
   "SELECT * FROM accounting_entries ORDER BY timestamp DESC, id DESC LIMIT ?",
   "SELECT * FROM accounting_entries WHERE timestamp < ? OR (timestamp = ? AND id < ?) ORDER BY timestamp DESC, id DESC LIMIT ?",
   "SELECT * FROM audit_logs ORDER BY timestamp DESC, id DESC LIMIT ?",
@@ -233,15 +235,18 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT SUM(marketValue) as total FROM warranties WHERE status = ?",
   "SELECT c.id, c.startDate, c.installments, COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER)) AS principalMinor, MAX(0, COALESCE(c.totalDueMinor, CAST(ROUND(c.totalDue * 100) AS INTEGER)) - COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER))) AS interestMinor FROM credits c WHERE NOT EXISTS (SELECT 1 FROM credit_installments i WHERE i.creditId = c.id)",
   "SELECT id FROM users WHERE email = ?",
-  "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt FROM payments WHERE creditId = ?",
+  "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod FROM credits WHERE deletedAt IS NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL",
-  "SELECT id, dueDate, principalMinor, interestMinor, lateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, dueDate, principalMinor, interestMinor, lateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, entityType, entityId, createdAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 100",
+  "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, name, email, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature FROM users",
   "SELECT id, name, email, username, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature, ip FROM users",
   "SELECT id, name, email, username, role, avatar, status, permissions FROM users",
   "SELECT id, name, role FROM users WHERE LOWER(email) = ?",
   "SELECT id, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
   "SELECT last_insert_rowid() as id",
   "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
@@ -265,17 +270,21 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE contracts SET clientId = COALESCE(?, clientId), clientName = COALESCE(?, clientName), title = COALESCE(?, title), value = COALESCE(?, value), startDate = COALESCE(?, startDate), endDate = COALESCE(?, endDate), status = COALESCE(?, status), terms = COALESCE(?, terms), usuario_id = COALESCE(?, usuario_id) WHERE id = ?",
   "UPDATE contracts SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
+  "UPDATE contracts SET status = 'active' WHERE id = ? AND status = 'paid'",
+  "UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'",
   "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?",
+  "UPDATE credit_installments SET interestMinor = ?, lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credit_installments SET paidPrincipalMinor = ?, paidInterestMinor = ?, paidLateInterestMinor = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credit_installments SET principalMinor = ?, interestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
+  "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = NULL, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
-  "UPDATE credits SET principalAmount = COALESCE(?, principalAmount), principalAmountMinor = COALESCE(?, principalAmountMinor), interestRate = COALESCE(?, interestRate), lateInterestRate = COALESCE(?, lateInterestRate), installments = COALESCE(?, installments), paidInstallments = COALESCE(?, paidInstallments), currentBalance = COALESCE(?, currentBalance), currentBalanceMinor = COALESCE(?, currentBalanceMinor), status = COALESCE(?, status), accruedInterest = COALESCE(?, accruedInterest), accruedInterestMinor = COALESCE(?, accruedInterestMinor), lateInterest = COALESCE(?, lateInterest), lateInterestMinor = COALESCE(?, lateInterestMinor), totalDue = COALESCE(?, totalDue), totalDueMinor = COALESCE(?, totalDueMinor), daysOverdue = COALESCE(?, daysOverdue), startDate = COALESCE(?, startDate), dueDate = COALESCE(?, dueDate), approvedBy = COALESCE(?, approvedBy), approvalNotes = COALESCE(?, approvalNotes), requestedBy = COALESCE(?, requestedBy), requestedAt = COALESCE(?, requestedAt), creditNumber = COALESCE(?, creditNumber), paidAt = COALESCE(?, paidAt), usuario_id = COALESCE(?, usuario_id), targetMonthId = COALESCE(?, targetMonthId), supplierId = COALESCE(?, supplierId), supplierProfitRate = COALESCE(?, supplierProfitRate), version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL",
   "UPDATE credits SET status = ?, approvedBy = ?, approvalNotes = ?, version = version + 1 WHERE id = ? AND status = 'pending_approval' AND version = ?",
+  "UPDATE credits SET targetMonthId = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE internal_messages SET read = 1 WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
@@ -294,6 +303,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE payments SET deletedAt = NULL, deletedBy = NULL, restoredAt = ? WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE payments SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
+  "UPDATE sync_conflicts SET status = ?, resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE user_limits SET maxTransaction = ?, dailyLimit = ?, monthlyLimit = ?, restrictionsEnabled = ?, updatedAt = ? WHERE role = ?",
   "UPDATE users SET failedAttempts = 0, blockedAt = NULL WHERE id = ?",
   "UPDATE users SET failedAttempts = ?, ip = ? WHERE id = ?",
@@ -339,22 +349,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "680b0c5482bd4f774a8634569d2a0dda98950dbbd8137b7355714e2eb8e71ffd",
     "ALTER TABLE payments RENAME TO payments_old"
-  ],
-  [
-    "c49845656d3985f81055469ea991f2ee7686ef4d9d27972b58a8d76c9b033b7b",
-    "ALTER TABLE users ADD COLUMN blockedAt TEXT"
-  ],
-  [
-    "2b96a423be8905ed8f30abb49044624e95d4e3b853686b616bf8a7f5a536233a",
-    "ALTER TABLE users ADD COLUMN failedAttempts INTEGER DEFAULT 0"
-  ],
-  [
-    "5dd7b9bac0df589a64152fd7cb43f03b7f0a5b65b46369bbf533eab4e1ca20f4",
-    "ALTER TABLE users ADD COLUMN twoFactorEnabled BOOLEAN DEFAULT 0"
-  ],
-  [
-    "c3ac37ff318545458d6ef30b6642948816b2a828e30b1c8a7c824b7364f40034",
-    "ALTER TABLE users ADD COLUMN twoFactorSecret TEXT"
   ],
   [
     "4eba0da0606300756dffdca8b07a0d252f08a446666408241b8b2a69b381af57",
@@ -577,8 +571,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS collection_messages ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, creditIds TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, attemptNumber INTEGER DEFAULT 1, totalDue REAL DEFAULT 0, sentAt TEXT NOT NULL, sentBy TEXT, legalTriggered INTEGER DEFAULT 0 )"
   ],
   [
-    "04f5bd2aba40ec671a504232141da3331ca5fe537c2795a0163de2d22e6ba24c",
-    "CREATE TABLE IF NOT EXISTS company_settings ( id INTEGER PRIMARY KEY CHECK(id = 1), name TEXT NOT NULL, nif TEXT, address TEXT, logo TEXT, reportLogo TEXT, licenseKey TEXT, currency TEXT DEFAULT 'AOA', customClauses TEXT, rescueKey TEXT, phone TEXT, primaryColor TEXT, secondaryColor TEXT, watermarkLogo TEXT, sessionTimeout INTEGER DEFAULT 5, email TEXT, whatsapp TEXT, whatsappAutoNotify INTEGER DEFAULT 0, whatsappVerified INTEGER DEFAULT 0, syncEnabled INTEGER DEFAULT 0, syncUrl TEXT, syncApiKey TEXT, syncPasskey TEXT, lastSync TEXT, maintenanceMode INTEGER DEFAULT 0, allowedModulesDuringMaintenance TEXT DEFAULT '[]', enableGatewaysModule INTEGER DEFAULT 1, enableGatewaysModuleAdminOnly INTEGER DEFAULT 0, enableProfileActivity INTEGER DEFAULT 1, enableProfileActivityAdminOnly INTEGER DEFAULT 0, lastBackupDate TEXT, digitalSignatureEnabled INTEGER DEFAULT 1, authorizedSigners TEXT DEFAULT '[]', bankingInfo TEXT DEFAULT '[]', contractTemplates TEXT DEFAULT '[]', installDate TEXT, financialLock INTEGER DEFAULT 0, enableWarrantiesModule INTEGER DEFAULT 1, enableWarrantiesModuleAdminOnly INTEGER DEFAULT 0, enableLegalModule INTEGER DEFAULT 1, enableLegalModuleAdminOnly INTEGER DEFAULT 0, enableScoringModule INTEGER DEFAULT 1, enableScoringModuleAdminOnly INTEGER DEFAULT 0, defaultSimulationInterestRate REAL, defaultSimulationAdminFee REAL, defaultSimulationIof REAL, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPassword TEXT, smtpSecure INTEGER DEFAULT 0, smtpFromName TEXT, location TEXT, enableMultiTenant INTEGER DEFAULT 1 )"
+    "b35621ff31e608427d98fa7b7a7aae5c80e34aa3d5a81b7660cda6027ee2beaa",
+    "CREATE TABLE IF NOT EXISTS company_settings ( id INTEGER PRIMARY KEY CHECK(id = 1), name TEXT NOT NULL, nif TEXT, address TEXT, logo TEXT, reportLogo TEXT, licenseKey TEXT, currency TEXT DEFAULT 'AOA', customClauses TEXT, rescueKey TEXT, phone TEXT, primaryColor TEXT, secondaryColor TEXT, watermarkLogo TEXT, sessionTimeout INTEGER DEFAULT 5, email TEXT, whatsapp TEXT, whatsappAutoNotify INTEGER DEFAULT 0, whatsappVerified INTEGER DEFAULT 0, syncEnabled INTEGER DEFAULT 0, syncUrl TEXT, syncApiKey TEXT, syncPasskey TEXT, lastSync TEXT, maintenanceMode INTEGER DEFAULT 0, allowedModulesDuringMaintenance TEXT DEFAULT '[]', enableGatewaysModule INTEGER DEFAULT 1, enableGatewaysModuleAdminOnly INTEGER DEFAULT 0, enableProfileActivity INTEGER DEFAULT 1, enableProfileActivityAdminOnly INTEGER DEFAULT 0, lastBackupDate TEXT, digitalSignatureEnabled INTEGER DEFAULT 1, authorizedSigners TEXT DEFAULT '[]', bankingInfo TEXT DEFAULT '[]', contractTemplates TEXT DEFAULT '[]', installDate TEXT, financialLock INTEGER DEFAULT 0, enableWarrantiesModule INTEGER DEFAULT 1, enableWarrantiesModuleAdminOnly INTEGER DEFAULT 0, enableLegalModule INTEGER DEFAULT 1, enableLegalModuleAdminOnly INTEGER DEFAULT 0, enableScoringModule INTEGER DEFAULT 1, enableScoringModuleAdminOnly INTEGER DEFAULT 0, defaultSimulationInterestRate REAL, defaultSimulationAdminFee REAL, defaultSimulationIof REAL, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPassword TEXT, smtpSecure INTEGER DEFAULT 0, smtpFromName TEXT, location TEXT, enableSuppliersModule INTEGER DEFAULT 0, enableSuppliersModuleAdminOnly INTEGER DEFAULT 0, enableMultiTenant INTEGER DEFAULT 1, website TEXT, segment TEXT, slogan TEXT )"
   ],
   [
     "6313b99e162ac8fe97464973b99516416612b83e533d00ace673f8843b886323",
@@ -869,6 +863,26 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO accounting_entries (id, timestamp, type, description, clientId, creditId, paymentId, debit, credit, amountPrincipal, amountInterest, amountLateInterest, amountTotal, amountPrincipalMinor, amountInterestMinor, amountLateInterestMinor, amountTotalMinor, processedBy, justification, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
+    "4a15b0901a56594a4692c10e87941cfef1bf94e2f238397453ca24da58e30680",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)"
+  ],
+  [
+    "697f8440de8bfa3c758fa569d1b16345869ae0816dcec4010e8110380787c106",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'credit', ?, ?)"
+  ],
+  [
+    "48b7bb792006efb10144fcf3be2092fdfe6a95cb5230e261e856bcd5ff1dc3a2",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'payment', ?, ?)"
+  ],
+  [
+    "1f89382e7c06a19ae4b013cb5da15ce9e387635ae5321e9b10d726bc311828f8",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'delete', 'payment', ?, ?)"
+  ],
+  [
+    "86be2cdb587d3a3ad5221c135d5ce98b9abaa3986c02d82c24b6d88fe1c6219b",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'restore', 'payment', ?, ?)"
+  ],
+  [
     "7131ff53b8bafaf78006b4db5ded9d8de8003c23f8731d2c2d20e4e8dc16bfba",
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?)"
   ],
@@ -927,6 +941,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "dcb12cb4046ce4da3baea318d3d4cdedec47c9b9dd609021ac8801eb7e4806fd",
     "INSERT INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, ?)"
+  ],
+  [
+    "c9ad7f4741b3d18712b6512f71d276a380c561b04e4c8f4d84720a8eafbe7710",
+    "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, 'Novo Crédito', ?, 'success', 0, ?)"
+  ],
+  [
+    "26b3c50dfd57be5001f290fccbb58d93648b2d0c7f87395200f68bb447f1e86f",
+    "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, 'Pagamento Recebido', ?, 'success', 0, ?)"
   ],
   [
     "40175cbf254825df73b4cadb5c4e3d1b8323b7cc05da9fe3ff4dbb3ffe6dc91b",
@@ -1013,8 +1035,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR REPLACE INTO closed_months (id, month, year, capitalApplied, projectedProfit, realizedProfit, overdueAmount, liquidationRate, closedAt, closedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
-    "df998797996d43d95de71e39e89241d169bd52689fcc448c18c98df931fc6086",
-    "INSERT OR REPLACE INTO company_settings ( id, name, nif, address, logo, reportLogo, watermarkLogo, currency, customClauses, rescueKey, phone, primaryColor, secondaryColor, email, whatsapp, whatsappAutoNotify, whatsappVerified, syncEnabled, syncUrl, syncApiKey, syncPasskey, lastSync, maintenanceMode, sessionTimeout, allowedModulesDuringMaintenance, enableGatewaysModule, enableProfileActivity, digitalSignatureEnabled, authorizedSigners, bankingInfo, contractTemplates, lastBackupDate, installDate, financialLock, licenseKey, enableGatewaysModuleAdminOnly, enableProfileActivityAdminOnly, enableWarrantiesModule, enableWarrantiesModuleAdminOnly, enableLegalModule, enableLegalModuleAdminOnly, enableScoringModule, enableScoringModuleAdminOnly, location, enableSuppliersModule, enableSuppliersModuleAdminOnly, enableMultiTenant ) VALUES ( 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )"
+    "f7de20d6c5d5d9cb06110d6d244d117f297ca6f4e761414559116d40bd5ebee1",
+    "INSERT OR REPLACE INTO company_settings ( id, name, nif, address, logo, reportLogo, watermarkLogo, currency, customClauses, rescueKey, phone, primaryColor, secondaryColor, email, whatsapp, whatsappAutoNotify, whatsappVerified, syncEnabled, syncUrl, syncApiKey, syncPasskey, lastSync, maintenanceMode, sessionTimeout, allowedModulesDuringMaintenance, enableGatewaysModule, enableProfileActivity, digitalSignatureEnabled, authorizedSigners, bankingInfo, contractTemplates, lastBackupDate, installDate, financialLock, licenseKey, enableGatewaysModuleAdminOnly, enableProfileActivityAdminOnly, enableWarrantiesModule, enableWarrantiesModuleAdminOnly, enableLegalModule, enableLegalModuleAdminOnly, enableScoringModule, enableScoringModuleAdminOnly, location, enableSuppliersModule, enableSuppliersModuleAdminOnly, enableMultiTenant, website, segment, slogan, defaultSimulationInterestRate, defaultSimulationAdminFee, defaultSimulationIof, smtpHost, smtpPort, smtpUser, smtpPassword, smtpSecure, smtpFromName ) VALUES ( 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )"
   ],
   [
     "b7ce77dce7c3ab66f20123d2d29a707992458bd1c1244879228a078787b10d71",
@@ -1043,10 +1065,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "43a000d74554f147a72a623e8b5133d8ad0564b7f72345da110139a25d8a3b64",
     "PRAGMA table_info(payments_old)"
-  ],
-  [
-    "2811b0fe8e03d64786a3435cd5cd6dd0663a8f72ea4b6718184afe20f19cb361",
-    "PRAGMA table_info(users)"
   ],
   [
     "9d709421058bad5667f01ced945c9703b47b53837f52aaf3e5ec1985879aac46",
@@ -1249,8 +1267,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id FROM users WHERE email = ?"
   ],
   [
-    "4b62440e57bca24a2d737a9b8da3d67d8a4e053d0ee46f517595eeb15e2bb8dd",
-    "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt FROM payments WHERE creditId = ?"
+    "403bfe52c974d3146335e9226c73cde87702573780bdacba1150b5ef35100196",
+    "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?"
   ],
   [
     "b5062e4958bfe822842c3247a764085441bc96b6c9edfabc215f34f0db9d1e93",
@@ -1261,8 +1279,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL"
   ],
   [
-    "8b48463a631af29b1d3b7eeb5197a9a78e3cfe872ddd2ea96d4c8b77c7193dd7",
-    "SELECT id, dueDate, principalMinor, interestMinor, lateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
+    "51c71b145d0c547697cb99799ff68fd1b7c748fecd5e94654786750f12522ad9",
+    "SELECT id, dueDate, principalMinor, interestMinor, lateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
+  ],
+  [
+    "a7770ae43efe294accb7439f93d4deb0dbfef90fd94fa5ba13c32b6a83e142a7",
+    "SELECT id, entityType, entityId, createdAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 100"
+  ],
+  [
+    "e98f48b365d100b404c42775a95dd65679921d01273ee2fcbe61191b4324fa4b",
+    "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
   ],
   [
     "bd8fcf661f6908aed0c135313077d289f5259a5d23f36d708ffcc54bc4250711",
@@ -1283,6 +1309,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "ff79c9fe765a9c8223eb41a6e341f679d79f3751c335563a77eb214c64008bec",
     "SELECT id, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
+  ],
+  [
+    "a6b9c39cd353d4f69f3ff8d4a67af48cd8a238abb6750cb27f79ca71b63974a1",
+    "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
   ],
   [
     "fcf26680ca3225940c6e6728d753e6488bc5509c1769ca756a54f6a354a6b56f",
@@ -1377,8 +1407,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
   ],
   [
+    "44b3619caa664a3f544412f215d0fa509614f2bd81c1924d0ff322c520d961be",
+    "UPDATE contracts SET status = 'active' WHERE id = ? AND status = 'paid'"
+  ],
+  [
+    "9688c88564d6003a0d1b8aa490de824d7ed160dd86397898316da2199948c230",
+    "UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'"
+  ],
+  [
     "58c1c1f8743ce642d03079eb7e79e9d85185e6475fadd749d0c23778dc717cac",
     "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?"
+  ],
+  [
+    "1b017e8f100ee7127f60e6f32138eca6d0fd3f185dd36363fdf341ba73f5c7ce",
+    "UPDATE credit_installments SET interestMinor = ?, lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?"
   ],
   [
     "87f6588e0de7466e3660eecd5c0622a6a4776a8f83bde3fe7176ccffaf383a79",
@@ -1387,6 +1429,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "7bf64bcbafd625bb2afafac8f8ea96c34f73f140773f75f47ed9157e896a6c63",
     "UPDATE credit_installments SET principalMinor = ?, interestMinor = ?, version = version + 1 WHERE id = ? AND version = ?"
+  ],
+  [
+    "01f65c5d21eace6ca464ea03e2e89f9357e164edc3f4f6d2420a8115f06e6ffb",
+    "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
     "a725143990d6d068b5042e81ee952a0bef767210d8e5e6ac633b401000cf06c5",
@@ -1409,16 +1455,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
-    "bd85f354853ace6e24bb4f14efb68fab2a0bed4cce494e54d0de3d1cf69ce329",
-    "UPDATE credits SET principalAmount = COALESCE(?, principalAmount), principalAmountMinor = COALESCE(?, principalAmountMinor), interestRate = COALESCE(?, interestRate), lateInterestRate = COALESCE(?, lateInterestRate), installments = COALESCE(?, installments), paidInstallments = COALESCE(?, paidInstallments), currentBalance = COALESCE(?, currentBalance), currentBalanceMinor = COALESCE(?, currentBalanceMinor), status = COALESCE(?, status), accruedInterest = COALESCE(?, accruedInterest), accruedInterestMinor = COALESCE(?, accruedInterestMinor), lateInterest = COALESCE(?, lateInterest), lateInterestMinor = COALESCE(?, lateInterestMinor), totalDue = COALESCE(?, totalDue), totalDueMinor = COALESCE(?, totalDueMinor), daysOverdue = COALESCE(?, daysOverdue), startDate = COALESCE(?, startDate), dueDate = COALESCE(?, dueDate), approvedBy = COALESCE(?, approvedBy), approvalNotes = COALESCE(?, approvalNotes), requestedBy = COALESCE(?, requestedBy), requestedAt = COALESCE(?, requestedAt), creditNumber = COALESCE(?, creditNumber), paidAt = COALESCE(?, paidAt), usuario_id = COALESCE(?, usuario_id), targetMonthId = COALESCE(?, targetMonthId), supplierId = COALESCE(?, supplierId), supplierProfitRate = COALESCE(?, supplierProfitRate), version = version + 1 WHERE id = ? AND version = ?"
-  ],
-  [
     "b86f7da2b2e29ca8fe7fc59f5ec8731615f21023afef2ca9fc342220e2fd8c30",
     "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL"
   ],
   [
     "6f3d67c740d21a4982b43cb0344f5f5def0c6c412935e1592514b888c5900e43",
     "UPDATE credits SET status = ?, approvedBy = ?, approvalNotes = ?, version = version + 1 WHERE id = ? AND status = 'pending_approval' AND version = ?"
+  ],
+  [
+    "ca9419bff35cfb1376fbbfd1e9374befcdb2f33bba4e38fdf91727df9da47072",
+    "UPDATE credits SET targetMonthId = ?, version = version + 1 WHERE id = ? AND version = ?"
   ],
   [
     "9d9336ca8747e039dc5456d53c24237c97b0b67f0a54f71ec4221485798c1e6d",
@@ -1491,6 +1537,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "412a0e76763ac238db35ac2f06609d2e94d98cedf78f9e00df73d1332762ef83",
     "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?"
+  ],
+  [
+    "77c3ee44976298ee5f0c83f34ed50c79113628f6a4ae3b6eceaee044d5b7ee02",
+    "UPDATE sync_conflicts SET status = ?, resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'"
   ],
   [
     "bdc6ad979810e386b59e12902affa50ad0ab3eab35a585b5a30252aa77e41505",

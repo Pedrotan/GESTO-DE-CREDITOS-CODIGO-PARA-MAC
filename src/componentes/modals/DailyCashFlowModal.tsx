@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from 'react';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
-import { formatCurrency, formatDate, formatDateTime } from '@/bibliotecas/formatters';
+import { formatCurrency } from '@/bibliotecas/formatters';
 import { generateDailyCashFlowPDF } from '@/bibliotecas/pdf';
 import { getScopedLocalStorageItem, setScopedLocalStorageItem } from '@/bibliotecas/contas';
 import {
@@ -17,6 +17,15 @@ import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
 import { Badge } from '@/componentes/ui/badge';
 import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+    TableFooter
+} from '@/componentes/ui/table';
+import {
     ArrowDownUp,
     ArrowUpRight,
     ArrowDownLeft,
@@ -26,8 +35,14 @@ import {
     Clock,
     Trash2,
     CheckCircle2,
-    Building2,
-    Wallet
+    Wallet,
+    Search,
+    X,
+    Filter,
+    Coins,
+    TrendingUp,
+    FileText,
+    Sparkles
 } from 'lucide-react';
 import { useToast } from '@/ganchos/usar-toast';
 
@@ -49,6 +64,17 @@ interface DailyCashFlowModalProps {
 
 const STORAGE_KEY_MANUAL_ENTRIES = 'tango_daily_manual_cashflow';
 
+const getLocalDateStr = (d: any): string => {
+    if (!d) return '';
+    if (typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.trim())) return d.trim();
+    const dateObj = d instanceof Date ? d : new Date(d);
+    if (isNaN(dateObj.getTime())) return '';
+    const year = dateObj.getFullYear();
+    const month = String(dateObj.getMonth() + 1).padStart(2, '0');
+    const day = String(dateObj.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+};
+
 export function DailyCashFlowModal({
     open,
     onOpenChange,
@@ -58,13 +84,21 @@ export function DailyCashFlowModal({
     const { user } = useAuth();
     const { toast } = useToast();
 
+    const currency = companySettings?.currency || 'AOA';
+
     // Data selecionada no calendário (por defeito hoje: YYYY-MM-DD)
-    const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
+    const todayStr = useMemo(() => getLocalDateStr(new Date()), []);
     const [selectedDate, setSelectedDate] = useState<string>(initialDate || todayStr);
 
     useEffect(() => {
         if (initialDate) setSelectedDate(initialDate);
     }, [initialDate]);
+
+    // Filtros de pesquisa nas abas
+    const [searchInflow, setSearchInflow] = useState('');
+    const [methodFilterInflow, setMethodFilterInflow] = useState('all');
+    const [searchOutflow, setSearchOutflow] = useState('');
+    const [typeFilterOutflow, setTypeFilterOutflow] = useState('all');
 
     // Movimentos manuais avulsos (guardados por conta no localStorage)
     const [manualEntries, setManualEntries] = useState<ManualEntry[]>(() => {
@@ -93,7 +127,7 @@ export function DailyCashFlowModal({
     const [newType, setNewType] = useState<'out' | 'in'>('out');
     const [newMethod, setNewMethod] = useState('Transferência');
 
-    // 1. Saídas do Dia Selecionado
+    // 1. Saídas do Dia Selecionado (com detalhes contratuais e financeiros)
     const dailyOutflows = useMemo(() => {
         const list: Array<{
             id: string;
@@ -101,15 +135,17 @@ export function DailyCashFlowModal({
             clientName: string;
             creditId: string;
             amount: number;
+            interestRate?: number;
+            installments?: number;
             method?: string;
             isManual?: boolean;
         }> = [];
 
         // Créditos concedidos nesta data
         (credits || []).forEach(credit => {
-            if (credit.deletedAt) return false;
+            if (credit.deletedAt) return;
             const rawDate = credit.startDate || credit.createdAt;
-            const dateStr = rawDate ? (rawDate instanceof Date ? rawDate.toISOString() : String(rawDate)).split('T')[0] : '';
+            const dateStr = getLocalDateStr(rawDate);
             if (dateStr === selectedDate) {
                 const timeStr = credit.createdAt ? new Date(credit.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : undefined;
                 list.push({
@@ -118,6 +154,8 @@ export function DailyCashFlowModal({
                     clientName: credit.clientName || 'Cliente',
                     creditId: credit.id,
                     amount: credit.principalAmount || 0,
+                    interestRate: credit.interestRate,
+                    installments: credit.installments,
                     method: 'Desembolso de Crédito',
                     isManual: false
                 });
@@ -140,24 +178,26 @@ export function DailyCashFlowModal({
         return list;
     }, [credits, selectedDate, manualEntries]);
 
-    // 2. Entradas do Dia Selecionado
+    // 2. Entradas do Dia Selecionado (com separação de Capital Amortizado, Juros e Multas)
     const dailyInflows = useMemo(() => {
         const list: Array<{
             id: string;
             time?: string;
             clientName: string;
             receiptId: string;
+            creditId?: string;
             amount: number;
-            method?: string;
+            principal: number;
+            interest: number;
+            lateInterest: number;
+            method: string;
             isManual?: boolean;
         }> = [];
 
         // Pagamentos recebidos nesta data
         (payments || []).forEach(payment => {
-            if (payment.status === 'cancelled' || payment.deletedAt) return false;
-            const dateStr = (payment.paymentDate instanceof Date
-                ? payment.paymentDate.toISOString()
-                : String(payment.paymentDate || '')).split('T')[0];
+            if (payment.status === 'cancelled' || payment.deletedAt) return;
+            const dateStr = getLocalDateStr(payment.paymentDate);
 
             if (dateStr === selectedDate) {
                 const timeStr = payment.paymentDate
@@ -170,12 +210,22 @@ export function DailyCashFlowModal({
                     payment.method === 'deposit' ? 'Depósito' :
                     payment.method || 'Numerário';
 
+                const principal = Number(payment.allocatedToPrincipal || 0);
+                const interest = Number(payment.allocatedToInterest || 0);
+                const lateInterest = Number(payment.allocatedToLateInterest || 0);
+                const totalCalculated = principal + interest + lateInterest;
+                const totalAmount = payment.amount > 0 ? payment.amount : totalCalculated;
+
                 list.push({
                     id: payment.id,
                     time: timeStr,
                     clientName: payment.clientName || 'Cliente',
-                    receiptId: `#${payment.id}`,
-                    amount: payment.amount || 0,
+                    receiptId: payment.reference ? (payment.reference.startsWith('#') ? payment.reference : `#${payment.reference}`) : `#${payment.id}`,
+                    creditId: payment.creditId,
+                    amount: totalAmount,
+                    principal: principal > 0 ? principal : (totalAmount - interest - lateInterest),
+                    interest,
+                    lateInterest,
                     method: methodLabel,
                     isManual: false
                 });
@@ -189,7 +239,11 @@ export function DailyCashFlowModal({
                 time: new Date(m.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 clientName: m.description,
                 receiptId: 'Avulso',
+                creditId: '-',
                 amount: m.amount,
+                principal: m.amount,
+                interest: 0,
+                lateInterest: 0,
                 method: m.method,
                 isManual: true
             });
@@ -198,10 +252,56 @@ export function DailyCashFlowModal({
         return list;
     }, [payments, selectedDate, manualEntries]);
 
-    // Totais do dia selecionado
+    // Totais e Métricas Detalhadas do Dia Selecionado
     const totalOut = useMemo(() => dailyOutflows.reduce((sum, item) => sum + item.amount, 0), [dailyOutflows]);
+    const totalCreditsOut = useMemo(() => dailyOutflows.filter(i => !i.isManual).reduce((sum, item) => sum + item.amount, 0), [dailyOutflows]);
+    const totalManualOut = useMemo(() => dailyOutflows.filter(i => i.isManual).reduce((sum, item) => sum + item.amount, 0), [dailyOutflows]);
+    const countCreditsOut = useMemo(() => dailyOutflows.filter(i => !i.isManual).length, [dailyOutflows]);
+    const countManualOut = useMemo(() => dailyOutflows.filter(i => i.isManual).length, [dailyOutflows]);
+
     const totalIn = useMemo(() => dailyInflows.reduce((sum, item) => sum + item.amount, 0), [dailyInflows]);
+    const totalPrincipalIn = useMemo(() => dailyInflows.reduce((sum, item) => sum + item.principal, 0), [dailyInflows]);
+    const totalInterestIn = useMemo(() => dailyInflows.reduce((sum, item) => sum + item.interest, 0), [dailyInflows]);
+    const totalLateIn = useMemo(() => dailyInflows.reduce((sum, item) => sum + item.lateInterest, 0), [dailyInflows]);
+    const totalProfitIn = useMemo(() => totalInterestIn + totalLateIn, [totalInterestIn, totalLateIn]);
+
     const netFlow = totalIn - totalOut;
+    const coverageRatio = useMemo(() => {
+        if (totalOut === 0) return totalIn > 0 ? 100 : 0;
+        return Math.round((totalIn / totalOut) * 100);
+    }, [totalIn, totalOut]);
+
+    // Filtragem em tempo real das tabelas
+    const filteredInflows = useMemo(() => {
+        const q = searchInflow.toLowerCase().trim();
+        return dailyInflows.filter(item => {
+            const matchesQuery = !q ||
+                item.clientName.toLowerCase().includes(q) ||
+                item.receiptId.toLowerCase().includes(q) ||
+                (item.creditId && item.creditId.toLowerCase().includes(q)) ||
+                item.method.toLowerCase().includes(q);
+
+            const matchesMethod = methodFilterInflow === 'all' || item.method.toLowerCase() === methodFilterInflow.toLowerCase();
+
+            return matchesQuery && matchesMethod;
+        });
+    }, [dailyInflows, searchInflow, methodFilterInflow]);
+
+    const filteredOutflows = useMemo(() => {
+        const q = searchOutflow.toLowerCase().trim();
+        return dailyOutflows.filter(item => {
+            const matchesQuery = !q ||
+                item.clientName.toLowerCase().includes(q) ||
+                item.creditId.toLowerCase().includes(q) ||
+                (item.method && item.method.toLowerCase().includes(q));
+
+            const matchesType = typeFilterOutflow === 'all' ||
+                (typeFilterOutflow === 'credits' && !item.isManual) ||
+                (typeFilterOutflow === 'manual' && item.isManual);
+
+            return matchesQuery && matchesType;
+        });
+    }, [dailyOutflows, searchOutflow, typeFilterOutflow]);
 
     // Adicionar movimento manual avulso
     const handleAddManual = (e: React.FormEvent) => {
@@ -282,12 +382,12 @@ export function DailyCashFlowModal({
 
         (credits || []).forEach(c => {
             const rawDate = c.startDate || c.createdAt;
-            const d = rawDate ? (rawDate instanceof Date ? rawDate.toISOString() : String(rawDate)).split('T')[0] : '';
+            const d = getLocalDateStr(rawDate);
             if (d) datesSet.add(d);
         });
 
         (payments || []).forEach(p => {
-            const d = (p.paymentDate instanceof Date ? p.paymentDate.toISOString() : String(p.paymentDate || '')).split('T')[0];
+            const d = getLocalDateStr(p.paymentDate);
             if (d) datesSet.add(d);
         });
 
@@ -298,30 +398,58 @@ export function DailyCashFlowModal({
         return Array.from(datesSet).sort().reverse().slice(0, 15);
     }, [credits, payments, manualEntries, todayStr]);
 
+    const formattedHeaderDate = useMemo(() => {
+        try {
+            return new Date(selectedDate + 'T00:00:00').toLocaleDateString('pt-PT', {
+                weekday: 'long',
+                day: '2-digit',
+                month: 'long',
+                year: 'numeric'
+            });
+        } catch {
+            return selectedDate;
+        }
+    }, [selectedDate]);
+
     return (
         <Dialog open={open} onOpenChange={onOpenChange}>
-            <DialogContent className="max-w-4xl max-h-[92vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl rounded-2xl bg-background">
-                {/* Cabeçalho */}
-                <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 text-white shrink-0">
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <DialogContent className="max-w-6xl xl:max-w-7xl w-[96vw] max-h-[92vh] flex flex-col p-0 overflow-hidden border-none shadow-2xl rounded-2xl bg-background">
+                {/* Cabeçalho Premium Alargado */}
+                <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-indigo-950 p-6 text-white shrink-0">
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                         <div className="flex items-center gap-4">
-                            <div className="h-12 w-12 rounded-xl bg-white/10 text-white border border-white/20 flex items-center justify-center shrink-0">
-                                <ArrowDownUp className="h-6 w-6" />
+                            <div className="h-12 w-12 rounded-xl bg-white/10 text-white border border-white/20 flex items-center justify-center shrink-0 shadow-inner">
+                                <ArrowDownUp className="h-6 w-6 text-indigo-300" />
                             </div>
                             <div>
-                                <DialogTitle className="text-xl font-black text-white tracking-tight">
+                                <DialogTitle className="text-xl font-black text-white tracking-tight flex items-center gap-2">
                                     Operações do Dia: Saídas vs Entradas
+                                    {selectedDate === todayStr && (
+                                        <Badge className="bg-emerald-500/20 text-emerald-300 border-emerald-500/30 text-[10px] font-bold">
+                                            Hoje
+                                        </Badge>
+                                    )}
                                 </DialogTitle>
-                                <DialogDescription className="text-indigo-200 text-xs mt-0.5">
-                                    Auditoria e conciliação do fluxo diário de tesouraria
+                                <DialogDescription className="text-indigo-200/80 text-xs mt-0.5 capitalize">
+                                    {formattedHeaderDate} • Auditoria e conciliação do fluxo diário de tesouraria
                                 </DialogDescription>
                             </div>
                         </div>
 
-                        {/* Seletor de Data e Botão PDF */}
-                        <div className="flex items-center gap-2">
-                            <div className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-lg border border-white/20 text-xs">
-                                <Calendar className="h-3.5 w-3.5 text-indigo-300" />
+                        {/* Seletor de Data e Ações */}
+                        <div className="flex flex-wrap items-center gap-2">
+                            {selectedDate !== todayStr && (
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => setSelectedDate(todayStr)}
+                                    className="h-8 text-xs bg-white/10 hover:bg-white/20 text-white border-white/20"
+                                >
+                                    Ir para Hoje
+                                </Button>
+                            )}
+                            <div className="flex items-center gap-2 bg-white/10 px-3 py-1.5 rounded-lg border border-white/20 text-xs">
+                                <Calendar className="h-4 w-4 text-indigo-300" />
                                 <input
                                     type="date"
                                     value={selectedDate}
@@ -332,7 +460,7 @@ export function DailyCashFlowModal({
                             <Button
                                 size="sm"
                                 onClick={handleDownloadPDF}
-                                className="gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-xs"
+                                className="h-8 gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs shadow-md"
                             >
                                 <Download className="h-3.5 w-3.5" />
                                 Baixar PDF
@@ -341,171 +469,235 @@ export function DailyCashFlowModal({
                     </div>
                 </div>
 
-                <div className="p-6 overflow-y-auto space-y-5 flex-1">
-                    {/* Cards de Resumo do Dia Selecionado */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        {/* 1. Saídas do Dia */}
-                        <div className="p-4 rounded-xl border bg-card shadow-2xs space-y-1 border-l-4 border-l-rose-500">
+                {/* Conteúdo Principal com Barra de Rolagem */}
+                <div className="p-6 overflow-y-auto space-y-6 flex-1">
+                    {/* 4 Cards de Resumo Executivo e Financeiro com Informações Ricas */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {/* 1. Saídas de Hoje */}
+                        <div className="p-4 rounded-xl border bg-card shadow-xs space-y-2 border-l-4 border-l-rose-500">
                             <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                 <span className="flex items-center gap-1.5">
                                     <ArrowUpRight className="h-4 w-4 text-rose-500" />
                                     Saídas de Hoje
                                 </span>
-                                <Badge variant="outline" className="text-[10px] text-rose-600 border-rose-200">
+                                <Badge variant="outline" className="text-[10px] text-rose-600 border-rose-200 font-bold">
                                     {dailyOutflows.length} operações
                                 </Badge>
                             </div>
-                            <p className="text-2xl font-black text-rose-600 dark:text-rose-400">
-                                {formatCurrency(totalOut, companySettings.currency)}
+                            <p className="text-xl sm:text-2xl font-black text-rose-600 dark:text-rose-400 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
+                                {formatCurrency(totalOut, currency)}
                             </p>
-                            <p className="text-[11px] text-muted-foreground">Créditos desembolsados + saídas</p>
+                            <div className="pt-1.5 border-t border-muted/60 space-y-1 text-[11px] text-muted-foreground">
+                                <div className="flex justify-between items-center">
+                                    <span>Créditos Desembolsados:</span>
+                                    <span className="font-bold text-foreground">{countCreditsOut} ({formatCurrency(totalCreditsOut, currency)})</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span>Despesas / Avulsos:</span>
+                                    <span className="font-semibold">{countManualOut} ({formatCurrency(totalManualOut, currency)})</span>
+                                </div>
+                            </div>
                         </div>
 
-                        {/* 2. Entradas do Dia */}
-                        <div className="p-4 rounded-xl border bg-card shadow-2xs space-y-1 border-l-4 border-l-emerald-500">
+                        {/* 2. Entradas de Hoje */}
+                        <div className="p-4 rounded-xl border bg-card shadow-xs space-y-2 border-l-4 border-l-emerald-500">
                             <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                 <span className="flex items-center gap-1.5">
                                     <ArrowDownLeft className="h-4 w-4 text-emerald-500" />
                                     Entradas de Hoje
                                 </span>
-                                <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-200">
-                                    {dailyInflows.length} pagamentos
+                                <Badge variant="outline" className="text-[10px] text-emerald-600 border-emerald-200 font-bold">
+                                    {dailyInflows.length} recebimentos
                                 </Badge>
                             </div>
-                            <p className="text-2xl font-black text-emerald-600 dark:text-emerald-400">
-                                {formatCurrency(totalIn, companySettings.currency)}
+                            <p className="text-xl sm:text-2xl font-black text-emerald-600 dark:text-emerald-400 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
+                                {formatCurrency(totalIn, currency)}
                             </p>
-                            <p className="text-[11px] text-muted-foreground">Amortizações + recebimentos</p>
+                            <div className="pt-1.5 border-t border-muted/60 space-y-1 text-[11px] text-muted-foreground">
+                                <div className="flex justify-between items-center">
+                                    <span>Capital Amortizado:</span>
+                                    <span className="font-bold text-foreground">{formatCurrency(totalPrincipalIn, currency)}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span>Lucro (Juros/Moras):</span>
+                                    <span className="font-bold text-emerald-600">{formatCurrency(totalProfitIn, currency)}</span>
+                                </div>
+                            </div>
                         </div>
 
-                        {/* 3. Saldo Líquido */}
-                        <div className={`p-4 rounded-xl border bg-card shadow-2xs space-y-1 border-l-4 ${netFlow >= 0 ? 'border-l-teal-500' : 'border-l-amber-500'}`}>
+                        {/* 3. Lucro Realizado do Dia (Juros & Multas) */}
+                        <div className="p-4 rounded-xl border bg-card shadow-xs space-y-2 border-l-4 border-l-indigo-500">
+                            <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                                <span className="flex items-center gap-1.5">
+                                    <Coins className="h-4 w-4 text-indigo-500" />
+                                    Lucro Realizado
+                                </span>
+                                <Badge variant="outline" className="text-[10px] text-indigo-600 border-indigo-200 font-bold">
+                                    Regime Caixa
+                                </Badge>
+                            </div>
+                            <p className="text-xl sm:text-2xl font-black text-indigo-600 dark:text-indigo-400 tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
+                                {formatCurrency(totalProfitIn, currency)}
+                            </p>
+                            <div className="pt-1.5 border-t border-muted/60 space-y-1 text-[11px] text-muted-foreground">
+                                <div className="flex justify-between items-center">
+                                    <span>Juros Cobrados:</span>
+                                    <span className="font-semibold text-foreground">{formatCurrency(totalInterestIn, currency)}</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span>Multas & Moras:</span>
+                                    <span className="font-semibold text-amber-600">{formatCurrency(totalLateIn, currency)}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* 4. Balanço Líquido do Dia */}
+                        <div className={`p-4 rounded-xl border bg-card shadow-xs space-y-2 border-l-4 ${netFlow >= 0 ? 'border-l-teal-500' : 'border-l-amber-500'}`}>
                             <div className="flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                                 <span className="flex items-center gap-1.5">
                                     <Wallet className="h-4 w-4 text-primary" />
                                     Balanço Líquido
                                 </span>
-                                <Badge variant={netFlow >= 0 ? "success" : "destructive"} className="text-[10px]">
-                                    {netFlow >= 0 ? 'Superávit' : 'Déficit'}
+                                <Badge variant={netFlow >= 0 ? "success" : "destructive"} className="text-[10px] font-bold">
+                                    {netFlow >= 0 ? 'SUPERÁVIT' : 'DÉFICIT'}
                                 </Badge>
                             </div>
-                            <p className={`text-2xl font-black ${netFlow >= 0 ? 'text-teal-600 dark:text-teal-400' : 'text-amber-600 dark:text-amber-400'}`}>
-                                {formatCurrency(netFlow, companySettings.currency)}
+                            <p className={`text-xl sm:text-2xl font-black tracking-tight whitespace-nowrap overflow-hidden text-ellipsis ${netFlow >= 0 ? 'text-teal-600 dark:text-teal-400' : 'text-amber-600 dark:text-amber-400'}`}>
+                                {formatCurrency(netFlow, currency)}
                             </p>
-                            <p className="text-[11px] text-muted-foreground">Entradas menos saídas do dia</p>
+                            <div className="pt-1.5 border-t border-muted/60 space-y-1 text-[11px] text-muted-foreground">
+                                <div className="flex justify-between items-center">
+                                    <span>Taxa de Cobertura:</span>
+                                    <span className="font-bold text-foreground">{coverageRatio}%</span>
+                                </div>
+                                <div className="flex justify-between items-center">
+                                    <span>Resultado:</span>
+                                    <span className="font-semibold">{netFlow >= 0 ? 'Fluxo Positivo de Caixa' : 'Necessidade de Tesouraria'}</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
 
                     {/* Abas com Saídas, Entradas, Registar Avulso e Histórico */}
-                    <Tabs defaultValue="outflows" className="w-full">
-                        <TabsList className="grid w-full grid-cols-4">
-                            <TabsTrigger value="outflows" className="gap-1.5 text-xs">
-                                <ArrowUpRight className="h-3.5 w-3.5 text-rose-500" />
-                                Saídas ({dailyOutflows.length})
-                            </TabsTrigger>
-                            <TabsTrigger value="inflows" className="gap-1.5 text-xs">
+                    <Tabs defaultValue="inflows" className="w-full">
+                        <TabsList className="grid w-full grid-cols-4 bg-muted/60 p-1 rounded-xl">
+                            <TabsTrigger value="inflows" className="gap-1.5 text-xs font-bold py-2">
                                 <ArrowDownLeft className="h-3.5 w-3.5 text-emerald-500" />
                                 Entradas ({dailyInflows.length})
                             </TabsTrigger>
-                            <TabsTrigger value="manual" className="gap-1.5 text-xs">
+                            <TabsTrigger value="outflows" className="gap-1.5 text-xs font-bold py-2">
+                                <ArrowUpRight className="h-3.5 w-3.5 text-rose-500" />
+                                Saídas ({dailyOutflows.length})
+                            </TabsTrigger>
+                            <TabsTrigger value="manual" className="gap-1.5 text-xs font-bold py-2">
                                 <Plus className="h-3.5 w-3.5 text-primary" />
                                 Registar Movimento
                             </TabsTrigger>
-                            <TabsTrigger value="history" className="gap-1.5 text-xs">
+                            <TabsTrigger value="history" className="gap-1.5 text-xs font-bold py-2">
                                 <Calendar className="h-3.5 w-3.5 text-indigo-500" />
                                 Histórico de Dias
                             </TabsTrigger>
                         </TabsList>
 
-                        {/* 1. Aba Saídas */}
-                        <TabsContent value="outflows" className="mt-4 space-y-3">
-                            {dailyOutflows.length === 0 ? (
-                                <div className="text-center py-8 border-2 border-dashed rounded-xl bg-muted/10">
-                                    <ArrowUpRight className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
-                                    <p className="text-sm font-semibold text-muted-foreground">Nenhuma saída registada nesta data</p>
-                                    <p className="text-xs text-muted-foreground/80 mt-0.5">
-                                        Nenhum crédito foi desembolsado no dia {selectedDate}.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="border rounded-xl overflow-hidden shadow-2xs">
-                                    <table className="w-full text-xs">
-                                        <thead className="bg-muted/60 text-muted-foreground font-semibold">
-                                            <tr>
-                                                <th className="p-3 text-left">Hora</th>
-                                                <th className="p-3 text-left">Beneficiário / Descrição</th>
-                                                <th className="p-3 text-left">Ref. Crédito</th>
-                                                <th className="p-3 text-left">Canal</th>
-                                                <th className="p-3 text-right">Valor Saído</th>
-                                                <th className="p-3 text-center w-12"></th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {dailyOutflows.map((outflow) => (
-                                                <tr key={outflow.id} className="hover:bg-muted/20 transition-colors">
-                                                    <td className="p-3 font-mono text-muted-foreground">{outflow.time || '-'}</td>
-                                                    <td className="p-3 font-semibold text-foreground">{outflow.clientName}</td>
-                                                    <td className="p-3 font-mono text-primary text-[11px]">{outflow.creditId}</td>
-                                                    <td className="p-3 text-muted-foreground">{outflow.method}</td>
-                                                    <td className="p-3 text-right font-black text-rose-600 dark:text-rose-400">
-                                                        {formatCurrency(outflow.amount, companySettings.currency)}
-                                                    </td>
-                                                    <td className="p-3 text-center">
-                                                        {outflow.isManual && (
-                                                            <Button
-                                                                size="icon"
-                                                                variant="ghost"
-                                                                onClick={() => handleDeleteManual(outflow.id)}
-                                                                className="h-6 w-6 text-muted-foreground hover:text-destructive"
-                                                            >
-                                                                <Trash2 className="h-3 w-3" />
-                                                            </Button>
-                                                        )}
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
-                        </TabsContent>
-
-                        {/* 2. Aba Entradas */}
+                        {/* 1. Aba Entradas (Melhorada e com colunas discriminadas) */}
                         <TabsContent value="inflows" className="mt-4 space-y-3">
-                            {dailyInflows.length === 0 ? (
-                                <div className="text-center py-8 border-2 border-dashed rounded-xl bg-muted/10">
-                                    <ArrowDownLeft className="h-8 w-8 text-muted-foreground/40 mx-auto mb-2" />
-                                    <p className="text-sm font-semibold text-muted-foreground">Nenhuma entrada registada nesta data</p>
-                                    <p className="text-xs text-muted-foreground/80 mt-0.5">
-                                        Nenhum pagamento foi recebido no dia {selectedDate}.
+                            {/* Barra de Pesquisa e Filtro de Métodos */}
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-muted/20 p-3 rounded-xl border">
+                                <div className="relative w-full sm:w-80">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                    <Input
+                                        value={searchInflow}
+                                        onChange={(e) => setSearchInflow(e.target.value)}
+                                        placeholder="Pesquisar por cliente, recibo, crédito..."
+                                        className="pl-9 pr-8 h-9 text-xs"
+                                    />
+                                    {searchInflow && (
+                                        <button
+                                            onClick={() => setSearchInflow('')}
+                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                        >
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <Filter className="h-3.5 w-3.5" />
+                                        <span>Método:</span>
+                                    </div>
+                                    <select
+                                        value={methodFilterInflow}
+                                        onChange={(e) => setMethodFilterInflow(e.target.value)}
+                                        className="h-9 px-3 rounded-lg border bg-background text-xs font-medium focus:outline-hidden cursor-pointer"
+                                    >
+                                        <option value="all">Todos os Métodos</option>
+                                        <option value="numerário">Numerário</option>
+                                        <option value="transferência">Transferência</option>
+                                        <option value="multicaixa">Multicaixa</option>
+                                        <option value="depósito">Depósito</option>
+                                    </select>
+                                    <Badge variant="outline" className="text-[11px] font-semibold">
+                                        {filteredInflows.length} de {dailyInflows.length}
+                                    </Badge>
+                                </div>
+                            </div>
+
+                            {filteredInflows.length === 0 ? (
+                                <div className="text-center py-12 border-2 border-dashed rounded-xl bg-muted/10 space-y-2">
+                                    <ArrowDownLeft className="h-10 w-10 text-muted-foreground/30 mx-auto" />
+                                    <p className="text-sm font-bold text-muted-foreground">Nenhuma entrada encontrada para os filtros selecionados</p>
+                                    <p className="text-xs text-muted-foreground/80">
+                                        {dailyInflows.length === 0
+                                            ? `Nenhum pagamento foi registado no dia ${selectedDate}.`
+                                            : 'Tente alterar os termos de pesquisa ou o filtro de método.'}
                                     </p>
                                 </div>
                             ) : (
-                                <div className="border rounded-xl overflow-hidden shadow-2xs">
-                                    <table className="w-full text-xs">
-                                        <thead className="bg-muted/60 text-muted-foreground font-semibold">
-                                            <tr>
-                                                <th className="p-3 text-left">Hora</th>
-                                                <th className="p-3 text-left">Cliente Pagador</th>
-                                                <th className="p-3 text-left">Recibo</th>
-                                                <th className="p-3 text-left">Método</th>
-                                                <th className="p-3 text-right">Valor Recebido</th>
-                                                <th className="p-3 text-center w-12"></th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {dailyInflows.map((inflow) => (
-                                                <tr key={inflow.id} className="hover:bg-muted/20 transition-colors">
-                                                    <td className="p-3 font-mono text-muted-foreground">{inflow.time || '-'}</td>
-                                                    <td className="p-3 font-semibold text-foreground">{inflow.clientName}</td>
-                                                    <td className="p-3 font-mono text-[11px] text-muted-foreground">{inflow.receiptId}</td>
+                                <div className="border rounded-xl overflow-hidden shadow-xs bg-card">
+                                    <Table>
+                                        <TableHeader className="bg-muted/70">
+                                            <TableRow>
+                                                <TableHead className="w-20 font-bold text-xs">Hora</TableHead>
+                                                <TableHead className="font-bold text-xs">Cliente Pagador</TableHead>
+                                                <TableHead className="font-bold text-xs">Recibo / Ref</TableHead>
+                                                <TableHead className="font-bold text-xs">Ref. Crédito</TableHead>
+                                                <TableHead className="font-bold text-xs">Método / Canal</TableHead>
+                                                <TableHead className="font-bold text-xs text-right">Capital Amortizado</TableHead>
+                                                <TableHead className="font-bold text-xs text-right">Juros & Moras</TableHead>
+                                                <TableHead className="font-bold text-xs text-right">Total Recebido</TableHead>
+                                                <TableHead className="w-12 text-center"></TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody className="divide-y">
+                                            {filteredInflows.map((inflow) => (
+                                                <TableRow key={inflow.id} className="hover:bg-muted/30 transition-colors">
+                                                    <td className="p-3 font-mono text-xs text-muted-foreground">{inflow.time || '-'}</td>
                                                     <td className="p-3">
-                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-foreground border">
-                                                            {inflow.method}
+                                                        <span className="font-bold text-xs text-foreground block">{inflow.clientName}</span>
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <span className="font-mono text-[11px] font-semibold text-primary bg-primary/5 px-2 py-0.5 rounded-md border border-primary/20">
+                                                            {inflow.receiptId}
                                                         </span>
                                                     </td>
-                                                    <td className="p-3 text-right font-black text-emerald-600 dark:text-emerald-400">
-                                                        {formatCurrency(inflow.amount, companySettings.currency)}
+                                                    <td className="p-3">
+                                                        <span className="font-mono text-[11px] text-muted-foreground">
+                                                            {inflow.creditId || '-'}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <Badge variant="secondary" className="text-[10px] font-semibold">
+                                                            {inflow.method}
+                                                        </Badge>
+                                                    </td>
+                                                    <td className="p-3 text-right font-medium text-xs text-foreground/80">
+                                                        {formatCurrency(inflow.principal, currency)}
+                                                    </td>
+                                                    <td className="p-3 text-right font-semibold text-xs text-indigo-600 dark:text-indigo-400">
+                                                        {formatCurrency(inflow.interest + inflow.lateInterest, currency)}
+                                                    </td>
+                                                    <td className="p-3 text-right font-black text-xs text-emerald-600 dark:text-emerald-400">
+                                                        {formatCurrency(inflow.amount, currency)}
                                                     </td>
                                                     <td className="p-3 text-center">
                                                         {inflow.isManual && (
@@ -514,80 +706,226 @@ export function DailyCashFlowModal({
                                                                 variant="ghost"
                                                                 onClick={() => handleDeleteManual(inflow.id)}
                                                                 className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                                                title="Excluir lançamento avulso"
                                                             >
                                                                 <Trash2 className="h-3 w-3" />
                                                             </Button>
                                                         )}
                                                     </td>
-                                                </tr>
+                                                </TableRow>
                                             ))}
-                                        </tbody>
-                                    </table>
+                                        </TableBody>
+                                        <TableFooter className="bg-muted/80 font-bold text-xs">
+                                            <TableRow>
+                                                <TableCell colSpan={5} className="p-3 text-left">
+                                                    TOTAIS DAS ENTRADAS ({filteredInflows.length} operações)
+                                                </TableCell>
+                                                <TableCell className="p-3 text-right text-foreground">
+                                                    {formatCurrency(filteredInflows.reduce((s, i) => s + i.principal, 0), currency)}
+                                                </TableCell>
+                                                <TableCell className="p-3 text-right text-indigo-600 dark:text-indigo-400">
+                                                    {formatCurrency(filteredInflows.reduce((s, i) => s + (i.interest + i.lateInterest), 0), currency)}
+                                                </TableCell>
+                                                <TableCell className="p-3 text-right font-black text-emerald-600 dark:text-emerald-400">
+                                                    {formatCurrency(filteredInflows.reduce((s, i) => s + i.amount, 0), currency)}
+                                                </TableCell>
+                                                <TableCell></TableCell>
+                                            </TableRow>
+                                        </TableFooter>
+                                    </Table>
+                                </div>
+                            )}
+                        </TabsContent>
+
+                        {/* 2. Aba Saídas (Melhorada e com detalhes de crédito) */}
+                        <TabsContent value="outflows" className="mt-4 space-y-3">
+                            {/* Barra de Pesquisa e Filtro de Tipo */}
+                            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-muted/20 p-3 rounded-xl border">
+                                <div className="relative w-full sm:w-80">
+                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                    <Input
+                                        value={searchOutflow}
+                                        onChange={(e) => setSearchOutflow(e.target.value)}
+                                        placeholder="Pesquisar saída por beneficiário, crédito, canal..."
+                                        className="pl-9 pr-8 h-9 text-xs"
+                                    />
+                                    {searchOutflow && (
+                                        <button
+                                            onClick={() => setSearchOutflow('')}
+                                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                                        >
+                                            <X className="h-3.5 w-3.5" />
+                                        </button>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
+                                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                        <Filter className="h-3.5 w-3.5" />
+                                        <span>Tipo:</span>
+                                    </div>
+                                    <select
+                                        value={typeFilterOutflow}
+                                        onChange={(e) => setTypeFilterOutflow(e.target.value)}
+                                        className="h-9 px-3 rounded-lg border bg-background text-xs font-medium focus:outline-hidden cursor-pointer"
+                                    >
+                                        <option value="all">Todas as Saídas</option>
+                                        <option value="credits">Créditos Desembolsados</option>
+                                        <option value="manual">Despesas / Lançamentos Avulsos</option>
+                                    </select>
+                                    <Badge variant="outline" className="text-[11px] font-semibold">
+                                        {filteredOutflows.length} de {dailyOutflows.length}
+                                    </Badge>
+                                </div>
+                            </div>
+
+                            {filteredOutflows.length === 0 ? (
+                                <div className="text-center py-12 border-2 border-dashed rounded-xl bg-muted/10 space-y-2">
+                                    <ArrowUpRight className="h-10 w-10 text-muted-foreground/30 mx-auto" />
+                                    <p className="text-sm font-bold text-muted-foreground">Nenhuma saída encontrada para os filtros selecionados</p>
+                                    <p className="text-xs text-muted-foreground/80">
+                                        {dailyOutflows.length === 0
+                                            ? `Nenhum desembolso ou saída foi registada no dia ${selectedDate}.`
+                                            : 'Tente alterar os termos de pesquisa ou o filtro.'}
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="border rounded-xl overflow-hidden shadow-xs bg-card">
+                                    <Table>
+                                        <TableHeader className="bg-muted/70">
+                                            <TableRow>
+                                                <TableHead className="w-20 font-bold text-xs">Hora</TableHead>
+                                                <TableHead className="font-bold text-xs">Beneficiário / Descrição</TableHead>
+                                                <TableHead className="font-bold text-xs">Ref. Crédito</TableHead>
+                                                <TableHead className="font-bold text-xs">Condições / Prazo</TableHead>
+                                                <TableHead className="font-bold text-xs">Canal / Categoria</TableHead>
+                                                <TableHead className="font-bold text-xs text-right">Montante Desembolsado</TableHead>
+                                                <TableHead className="w-12 text-center"></TableHead>
+                                            </TableRow>
+                                        </TableHeader>
+                                        <TableBody className="divide-y">
+                                            {filteredOutflows.map((outflow) => (
+                                                <TableRow key={outflow.id} className="hover:bg-muted/30 transition-colors">
+                                                    <td className="p-3 font-mono text-xs text-muted-foreground">{outflow.time || '-'}</td>
+                                                    <td className="p-3">
+                                                        <span className="font-bold text-xs text-foreground block">{outflow.clientName}</span>
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <span className="font-mono text-[11px] font-semibold text-primary bg-primary/5 px-2 py-0.5 rounded-md border border-primary/20">
+                                                            {outflow.creditId}
+                                                        </span>
+                                                    </td>
+                                                    <td className="p-3 text-xs text-muted-foreground">
+                                                        {outflow.installments ? (
+                                                            <span className="font-medium text-foreground">
+                                                                {outflow.installments} parcelas • {outflow.interestRate || 0}% juro
+                                                            </span>
+                                                        ) : (
+                                                            <span className="italic text-[11px]">Movimento Avulso</span>
+                                                        )}
+                                                    </td>
+                                                    <td className="p-3">
+                                                        <Badge variant="outline" className={`text-[10px] font-semibold ${outflow.isManual ? 'bg-amber-500/10 text-amber-700 border-amber-300' : 'bg-rose-500/10 text-rose-700 border-rose-300'}`}>
+                                                            {outflow.method}
+                                                        </Badge>
+                                                    </td>
+                                                    <td className="p-3 text-right font-black text-xs text-rose-600 dark:text-rose-400">
+                                                        {formatCurrency(outflow.amount, currency)}
+                                                    </td>
+                                                    <td className="p-3 text-center">
+                                                        {outflow.isManual && (
+                                                            <Button
+                                                                size="icon"
+                                                                variant="ghost"
+                                                                onClick={() => handleDeleteManual(outflow.id)}
+                                                                className="h-6 w-6 text-muted-foreground hover:text-destructive"
+                                                                title="Excluir lançamento avulso"
+                                                            >
+                                                                <Trash2 className="h-3 w-3" />
+                                                            </Button>
+                                                        )}
+                                                    </td>
+                                                </TableRow>
+                                            ))}
+                                        </TableBody>
+                                        <TableFooter className="bg-muted/80 font-bold text-xs">
+                                            <TableRow>
+                                                <TableCell colSpan={5} className="p-3 text-left">
+                                                    TOTAIS DAS SAÍDAS ({filteredOutflows.length} operações)
+                                                </TableCell>
+                                                <TableCell className="p-3 text-right font-black text-rose-600 dark:text-rose-400">
+                                                    {formatCurrency(filteredOutflows.reduce((s, i) => s + i.amount, 0), currency)}
+                                                </TableCell>
+                                                <TableCell></TableCell>
+                                            </TableRow>
+                                        </TableFooter>
+                                    </Table>
                                 </div>
                             )}
                         </TabsContent>
 
                         {/* 3. Registar Movimento Avulso do Dia */}
                         <TabsContent value="manual" className="mt-4">
-                            <form onSubmit={handleAddManual} className="p-5 rounded-xl border bg-muted/20 space-y-4">
+                            <form onSubmit={handleAddManual} className="p-6 rounded-xl border bg-muted/20 space-y-5">
                                 <div className="space-y-1">
                                     <h4 className="text-sm font-bold flex items-center gap-2">
                                         <Plus className="h-4 w-4 text-primary" />
                                         Lançamento Avulso do Dia ({selectedDate})
                                     </h4>
                                     <p className="text-xs text-muted-foreground">
-                                        Registe saídas ou entradas operacionais extraordinárias (ex: taxa bancária, despesa urgente, estorno).
+                                        Registe saídas ou entradas extraordinárias que afetam o caixa diário (ex: taxa bancária, despesa administrativa, suprimento de caixa).
                                     </p>
                                 </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                     <div className="space-y-1.5">
-                                        <Label className="text-xs">Tipo de Movimento</Label>
+                                        <Label className="text-xs font-semibold">Tipo de Movimento</Label>
                                         <div className="grid grid-cols-2 gap-2">
                                             <button
                                                 type="button"
                                                 onClick={() => setNewType('out')}
-                                                className={`py-2 px-3 rounded-lg border text-xs font-bold transition-all ${newType === 'out' ? 'bg-rose-600 text-white border-rose-600' : 'bg-background text-foreground'}`}
+                                                className={`py-2 px-3 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${newType === 'out' ? 'bg-rose-600 text-white border-rose-600 shadow-sm' : 'bg-background text-foreground hover:bg-muted'}`}
                                             >
+                                                <ArrowUpRight className="h-3.5 w-3.5" />
                                                 Saída de Caixa
                                             </button>
                                             <button
                                                 type="button"
                                                 onClick={() => setNewType('in')}
-                                                className={`py-2 px-3 rounded-lg border text-xs font-bold transition-all ${newType === 'in' ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-background text-foreground'}`}
+                                                className={`py-2 px-3 rounded-lg border text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${newType === 'in' ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm' : 'bg-background text-foreground hover:bg-muted'}`}
                                             >
+                                                <ArrowDownLeft className="h-3.5 w-3.5" />
                                                 Entrada de Caixa
                                             </button>
                                         </div>
                                     </div>
 
                                     <div className="space-y-1.5">
-                                        <Label className="text-xs">Forma / Canal</Label>
+                                        <Label className="text-xs font-semibold">Forma / Canal de Pagamento</Label>
                                         <Input
                                             value={newMethod}
                                             onChange={(e) => setNewMethod(e.target.value)}
-                                            placeholder="Ex: Numerário, BAI, Transferência..."
+                                            placeholder="Ex: Numerário, Banco BAI, Transferência..."
                                             className="text-xs h-9"
                                         />
                                     </div>
 
                                     <div className="space-y-1.5 sm:col-span-2">
-                                        <Label className="text-xs">Descrição do Lançamento</Label>
+                                        <Label className="text-xs font-semibold">Descrição do Lançamento</Label>
                                         <Input
                                             value={newDesc}
                                             onChange={(e) => setNewDesc(e.target.value)}
-                                            placeholder="Ex: Pagamento de taxa de transferência, suprimento de caixa..."
+                                            placeholder="Ex: Pagamento de taxa de transferência, suprimento de caixa, combustível..."
                                             className="text-xs h-9"
                                             required
                                         />
                                     </div>
 
                                     <div className="space-y-1.5 sm:col-span-2">
-                                        <Label className="text-xs">Montante ({companySettings.currency})</Label>
+                                        <Label className="text-xs font-semibold">Montante ({currency})</Label>
                                         <Input
                                             value={newAmount}
                                             onChange={(e) => setNewAmount(e.target.value)}
-                                            placeholder="Ex: 25000"
+                                            placeholder="Ex: 50000"
                                             className="text-xs h-9 font-bold"
                                             required
                                         />
@@ -595,9 +933,9 @@ export function DailyCashFlowModal({
                                 </div>
 
                                 <div className="flex justify-end pt-2">
-                                    <Button type="submit" size="sm" className="gap-2 text-xs font-bold bg-primary">
+                                    <Button type="submit" size="sm" className="gap-2 text-xs font-bold bg-primary hover:bg-primary/90 text-primary-foreground px-5 shadow-sm">
                                         <CheckCircle2 className="h-4 w-4" />
-                                        Registar Lançamento
+                                        Registar Lançamento no Fluxo
                                     </Button>
                                 </div>
                             </form>
@@ -605,22 +943,22 @@ export function DailyCashFlowModal({
 
                         {/* 4. Histórico de Dias Anteriores */}
                         <TabsContent value="history" className="mt-4 space-y-3">
-                            <div className="border rounded-xl overflow-hidden shadow-2xs">
-                                <table className="w-full text-xs">
-                                    <thead className="bg-muted/60 text-muted-foreground font-semibold">
-                                        <tr>
-                                            <th className="p-3 text-left">Data do Calendário</th>
-                                            <th className="p-3 text-right">Saídas</th>
-                                            <th className="p-3 text-right">Entradas</th>
-                                            <th className="p-3 text-center">Ação</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y">
+                            <div className="border rounded-xl overflow-hidden shadow-xs bg-card">
+                                <Table>
+                                    <TableHeader className="bg-muted/70">
+                                        <TableRow>
+                                            <TableHead className="font-bold text-xs">Data do Calendário</TableHead>
+                                            <TableHead className="font-bold text-xs text-right">Saídas</TableHead>
+                                            <TableHead className="font-bold text-xs text-right">Entradas</TableHead>
+                                            <TableHead className="font-bold text-xs text-center w-36">Ação</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody className="divide-y">
                                         {recentHistoryDates.map((d) => {
                                             const isCurrent = d === selectedDate;
                                             return (
-                                                <tr key={d} className={`hover:bg-muted/20 transition-colors ${isCurrent ? 'bg-primary/5 font-bold' : ''}`}>
-                                                    <td className="p-3 font-mono flex items-center gap-2">
+                                                <TableRow key={d} className={`hover:bg-muted/30 transition-colors ${isCurrent ? 'bg-primary/5 font-bold' : ''}`}>
+                                                    <td className="p-3 font-mono text-xs flex items-center gap-2">
                                                         <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
                                                         {d}
                                                         {d === todayStr && (
@@ -629,27 +967,27 @@ export function DailyCashFlowModal({
                                                             </Badge>
                                                         )}
                                                     </td>
-                                                    <td className="p-3 text-right text-rose-600 dark:text-rose-400 font-semibold">
-                                                        {d === selectedDate ? formatCurrency(totalOut, companySettings.currency) : '-'}
+                                                    <td className="p-3 text-right text-xs text-rose-600 dark:text-rose-400 font-semibold">
+                                                        {d === selectedDate ? formatCurrency(totalOut, currency) : '-'}
                                                     </td>
-                                                    <td className="p-3 text-right text-emerald-600 dark:text-emerald-400 font-semibold">
-                                                        {d === selectedDate ? formatCurrency(totalIn, companySettings.currency) : '-'}
+                                                    <td className="p-3 text-right text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                                                        {d === selectedDate ? formatCurrency(totalIn, currency) : '-'}
                                                     </td>
                                                     <td className="p-3 text-center">
                                                         <Button
                                                             size="sm"
                                                             variant={isCurrent ? "default" : "outline"}
                                                             onClick={() => setSelectedDate(d)}
-                                                            className="h-7 text-[11px] px-3"
+                                                            className="h-7 text-[11px] px-3 font-semibold"
                                                         >
-                                                            {isCurrent ? "A Selecionado" : "Carregar Dia"}
+                                                            {isCurrent ? "Selecionado" : "Carregar Dia"}
                                                         </Button>
                                                     </td>
-                                                </tr>
+                                                </TableRow>
                                             );
                                         })}
-                                    </tbody>
-                                </table>
+                                    </TableBody>
+                                </Table>
                             </div>
                         </TabsContent>
                     </Tabs>

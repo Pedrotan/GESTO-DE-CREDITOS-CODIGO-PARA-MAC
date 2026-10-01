@@ -14,36 +14,102 @@ const translateRiskLevel = (risk: string): string => {
     return levels[risk.toLowerCase()] || risk.toUpperCase();
 };
 
+export const BRAND_ORANGE: [number, number, number] = [243, 112, 33]; // #F37021 (Laranja Corporativo de Referência)
+export const BRAND_CHARCOAL: [number, number, number] = [43, 45, 47]; // #2B2D2F (Carvão Escuro de Referência)
+export const BRAND_SILVER: [number, number, number] = [229, 231, 235]; // #E5E7EB (Prata / Cinza Claro de Referência)
+
+export const isLegacyOrInvalidColor = (col: any): boolean => {
+    if (!col) return true;
+    let r = 0, g = 0, b = 0;
+    if (Array.isArray(col) && col.length >= 3) {
+        r = Number(col[0]) || 0;
+        g = Number(col[1]) || 0;
+        b = Number(col[2]) || 0;
+    } else if (typeof col === 'string') {
+        const hex = col.trim().toLowerCase().replace(/^#/, '');
+        if (hex.length === 6) {
+            r = parseInt(hex.substring(0, 2), 16) || 0;
+            g = parseInt(hex.substring(2, 4), 16) || 0;
+            b = parseInt(hex.substring(4, 6), 16) || 0;
+        } else if (hex.length === 3) {
+            r = parseInt(hex[0] + hex[0], 16) || 0;
+            g = parseInt(hex[1] + hex[1], 16) || 0;
+            b = parseInt(hex[2] + hex[2], 16) || 0;
+        } else {
+            return true;
+        }
+    } else {
+        return true;
+    }
+
+    // Specific legacy defaults: slate [30, 41, 59], blue [37, 99, 235], dark blue [15, 23, 42], etc.
+    if (r === 30 && g === 41 && b === 59) return true;
+    if (r === 37 && g === 99 && b === 235) return true;
+    if (r === 15 && g === 23 && b === 42) return true;
+    if (r === 0 && g === 50 && b === 100) return true;
+    if (r === 4 && g === 67 && b === 44) return true;
+    if (r === 220 && g === 38 && b === 38) return true;
+
+    // Corporate Brand color is #F37021 [243, 112, 33].
+    // If the color is predominantly blue (b > r) or green (g > r) or dark slate (r < 140), it's not the reference brand.
+    if (b > r || (g > r && g > 150) || r < 140) {
+        return true;
+    }
+
+    return false;
+};
+
+export const resolveBrandPrimary = (col?: any): [number, number, number] => {
+    if (!col || isLegacyOrInvalidColor(col)) return BRAND_ORANGE;
+    return parseRgbColor(col, BRAND_ORANGE);
+};
+
+export const resolveBrandDark = (col?: any): [number, number, number] => {
+    if (!col) return BRAND_CHARCOAL;
+    if (Array.isArray(col)) {
+        if (col[0] === 30 && col[1] === 41 && col[2] === 59) return BRAND_CHARCOAL;
+        if (col[0] === 100 && col[1] === 116 && col[2] === 139) return BRAND_CHARCOAL;
+    }
+    if (typeof col === 'string') {
+        const hex = col.trim().toLowerCase().replace(/^#/, '');
+        if (hex === '1e293b' || hex === '64748b' || hex === '0f172a') return BRAND_CHARCOAL;
+    }
+    return parseRgbColor(col, BRAND_CHARCOAL);
+};
+
 export const getCompanySettings = (providedSettings?: any): CompanySettings => {
+    let settings: any = null;
     if (!providedSettings) {
         try {
             const activeAccountId = localStorage.getItem('tango_active_account_id') || 'default';
             const saved = localStorage.getItem(`cached_company_settings:${activeAccountId}`) || localStorage.getItem('company_settings');
-            if (saved) return JSON.parse(saved);
+            if (saved) settings = JSON.parse(saved);
         } catch (e) { }
+    } else {
+        settings = providedSettings;
     }
 
     return {
-        name: providedSettings?.name || '',
-        nif: providedSettings?.nif || '',
-        address: providedSettings?.address || '',
-        logo: providedSettings?.logo || null,
-        reportLogo: providedSettings?.reportLogo || null,
-        watermarkLogo: providedSettings?.watermarkLogo || null,
-        currency: providedSettings?.currency || 'AOA',
-        customClauses: providedSettings?.customClauses || '',
-        primaryColor: providedSettings?.primaryColor || [255, 127, 0],
-        secondaryColor: providedSettings?.secondaryColor || [30, 41, 59],
-        phone: providedSettings?.phone || '',
-        email: providedSettings?.email || '',
-        whatsapp: providedSettings?.whatsapp || '',
-        digitalSignatureEnabled: providedSettings?.digitalSignatureEnabled || false,
-        authorizedSigners: providedSettings?.authorizedSigners || '[]',
-        sessionTimeout: providedSettings?.sessionTimeout || 5,
-        syncEnabled: providedSettings?.syncEnabled || false,
-        bankingInfo: providedSettings?.bankingInfo || '[]',
-        contractTemplates: providedSettings?.contractTemplates || '[]',
-        location: providedSettings?.location || ''
+        name: settings?.name || '',
+        nif: settings?.nif || '',
+        address: settings?.address || '',
+        logo: settings?.logo || null,
+        reportLogo: settings?.reportLogo || null,
+        watermarkLogo: null, // Keep canvas clean and crisp as in reference image
+        currency: settings?.currency || 'AOA',
+        customClauses: settings?.customClauses || '',
+        primaryColor: resolveBrandPrimary(settings?.primaryColor),
+        secondaryColor: resolveBrandDark(settings?.secondaryColor),
+        phone: settings?.phone || '',
+        email: settings?.email || '',
+        whatsapp: settings?.whatsapp || '',
+        digitalSignatureEnabled: settings?.digitalSignatureEnabled || false,
+        authorizedSigners: settings?.authorizedSigners || '[]',
+        sessionTimeout: settings?.sessionTimeout || 5,
+        syncEnabled: settings?.syncEnabled || false,
+        bankingInfo: settings?.bankingInfo || '[]',
+        contractTemplates: settings?.contractTemplates || '[]',
+        location: settings?.location || ''
     };
 };
 
@@ -138,164 +204,380 @@ export const toTitleCase = (str: string): string => {
         .replace(/^([a-z])/, (m) => m.toUpperCase());
 };
 
+const parseRgbColor = (col: any, fallback: [number, number, number]): [number, number, number] => {
+    if (Array.isArray(col) && col.length >= 3) {
+        return [
+            Math.min(255, Math.max(0, Number(col[0]) || 0)),
+            Math.min(255, Math.max(0, Number(col[1]) || 0)),
+            Math.min(255, Math.max(0, Number(col[2]) || 0))
+        ];
+    }
+    if (typeof col === 'string') {
+        const hex = col.trim().replace(/^#/, '');
+        if (hex.length === 6) {
+            const r = parseInt(hex.substring(0, 2), 16);
+            const g = parseInt(hex.substring(2, 4), 16);
+            const b = parseInt(hex.substring(4, 6), 16);
+            if (!isNaN(r) && !isNaN(g) && !isNaN(b)) return [r, g, b];
+        } else if (hex.length === 3) {
+            const r = parseInt(hex[0] + hex[0], 16);
+            const g = parseInt(hex[1] + hex[1], 16);
+            const b = parseInt(hex[2] + hex[2], 16);
+            if (!isNaN(r) && !isNaN(g) && !isNaN(b)) return [r, g, b];
+        }
+    }
+    return fallback;
+};
+
 export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: string, onlyDecoration: boolean = false) => {
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const isLandscape = pageWidth > pageHeight;
+
+    // Cores exatas do modelo de referência (Laranja Corporativo #F37021 e Carvão Escuro #2B2D2F)
+    const primary = resolveBrandPrimary(config.primaryColor); // #F37021
+    const dark = resolveBrandDark(config.secondaryColor);   // #2B2D2F
+    const lightSilver = BRAND_SILVER;   // #E5E7EB
 
     if (isValidLogoData(config.watermarkLogo)) {
         addWatermark(doc, config.watermarkLogo);
     }
 
-    // Destaque decorativo no topo direito
-    doc.setFillColor(orange[0], orange[1], orange[2]);
-    doc.rect(pageWidth - 65, 0, 65, 13, 'F');
-    doc.setFillColor(black[0], black[1], black[2]);
-    doc.rect(pageWidth - 65, 13, 65, 1.5, 'F');
+    // =========================================================================
+    // =========================================================================
+    // 1. MOTIVO GEOMÉTRICO DO TOPO DIREITO: MOLDURA EM "L" INVERTIDO + CIRCUIT DOTS
+    // =========================================================================
+    const topCutW = isLandscape ? 110 : 85;
+    const barThick = isLandscape ? 9 : 11;
+    const topHorizInnerW = isLandscape ? 82 : 62;
+    const vertBarH = isLandscape ? 60 : 78;
 
-    // Metadados no topo direito
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(6.5);
-    doc.setTextColor(255, 255, 255);
-    doc.text(`Processado por: ${userName || 'Sistema'}`, pageWidth - 8, 5.5, { align: 'right' });
+    // Moldura L Invertida (Laranja Primário #F37021)
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    // 1. Cunha chanfrada no canto superior esquerdo da barra horizontal (45° de cima-esquerda para baixo-direita)
+    doc.triangle(
+        pageWidth - topCutW, 0,
+        pageWidth - topHorizInnerW, 0,
+        pageWidth - topHorizInnerW, barThick,
+        'F'
+    );
+    // 2. Barra horizontal superior
+    doc.rect(pageWidth - topHorizInnerW, 0, topHorizInnerW, barThick, 'F');
+    // 3. Barra vertical direita (corpo superior)
+    doc.rect(pageWidth - barThick, barThick, barThick, vertBarH - 2 * barThick, 'F');
+    // 4. Cunha chanfrada inferior da barra vertical (45° de cima-esquerda para baixo-direita)
+    doc.triangle(
+        pageWidth - barThick, vertBarH - barThick,
+        pageWidth, vertBarH - barThick,
+        pageWidth, vertBarH,
+        'F'
+    );
+
+    // 3 Linhas Circuit com Nós Circulares (Dots) na base branca sob a barra
+    // Conforme a imagem de referência: linha superior mais longa (nó mais à esquerda),
+    // linha média mais curta (nó recuado), linha inferior intermediária.
+    const dot1X = isLandscape ? pageWidth - 85 : pageWidth - 70;
+    const dot2X = isLandscape ? pageWidth - 72 : pageWidth - 58;
+    const dot3X = isLandscape ? pageWidth - 59 : pageWidth - 46;
+    const dot1Y = isLandscape ? 18 : 24;
+    const dot2Y = isLandscape ? 23 : 29;
+    const dot3Y = isLandscape ? 28 : 34;
+
+    // Linha 1: Nó e Linha Laranja (Superior)
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.setDrawColor(primary[0], primary[1], primary[2]);
+    doc.setLineWidth(0.85);
+    doc.circle(dot1X, dot1Y, 1.8, 'F');
+    doc.line(dot1X, dot1Y, pageWidth - barThick, dot1Y);
+
+    // Linha 2: Nó e Linha Carvão Escuro (Média)
+    doc.setFillColor(dark[0], dark[1], dark[2]);
+    doc.setDrawColor(dark[0], dark[1], dark[2]);
+    doc.setLineWidth(0.85);
+    doc.circle(dot2X, dot2Y, 1.8, 'F');
+    doc.line(dot2X, dot2Y, pageWidth - barThick, dot2Y);
+
+    // Linha 3: Nó e Linha Laranja (Inferior)
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.setDrawColor(primary[0], primary[1], primary[2]);
+    doc.setLineWidth(0.85);
+    doc.circle(dot3X, dot3Y, 1.8, 'F');
+    doc.line(dot3X, dot3Y, pageWidth - barThick, dot3Y);
+
+    // =========================================================================
+    // 2. MOTIVO GEOMÉTRICO DA MARGEM ESQUERDA: CHEVRONS A 45° + BARRA VERTICAL
+    // =========================================================================
+    const midY = isLandscape ? 62 : 92;
+    const bandThick = 7.5;
+    const bandH = 8.5;
+    const gap = 2.8;
+
+    // Faixa 1 (Superior - Carvão Escuro #2B2D2F) inclinada a 45°
+    const c1Y = midY;
+    doc.setFillColor(dark[0], dark[1], dark[2]);
+    doc.triangle(0, c1Y, bandThick, c1Y + bandThick, bandThick, c1Y + bandThick + bandH, 'F');
+    doc.triangle(0, c1Y, bandThick, c1Y + bandThick + bandH, 0, c1Y + bandH, 'F');
+
+    // Faixa 2 (Média - Laranja Primário #F37021) inclinada a 45°
+    const c2Y = c1Y + bandH + gap;
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.triangle(0, c2Y, bandThick, c2Y + bandThick, bandThick, c2Y + bandThick + bandH, 'F');
+    doc.triangle(0, c2Y, bandThick, c2Y + bandThick + bandH, 0, c2Y + bandH, 'F');
+
+    // Faixa 3 (Inferior - Laranja Primário): Barra vertical contínua até o rodapé
+    // Inicia com chanfro a 45° idêntico à imagem de referência
+    const c3Y = c2Y + bandH + gap;
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.triangle(0, c3Y, bandThick, c3Y + bandThick, 0, c3Y + bandThick, 'F');
+    doc.rect(0, c3Y + bandThick, bandThick, pageHeight - (c3Y + bandThick), 'F');
+
+    // =========================================================================
+    // 3. MOTIVO GEOMÉTRICO DO RODAPÉ (BARRA CHANFRADA, FAIXA DIAGONAL E CARVÃO)
+    // =========================================================================
+    const footBarH = 8.5;
+    const footBarY = pageHeight - footBarH;
+    const cut1X = isLandscape ? pageWidth - 100 : 142;
+    const stripeW = 9;
+    const gapW = 3.2;
+
+    // 1. Friso Superior Prata / Cinza Elegante com Chanfro (idêntico à imagem de referência)
+    const silverH = 2.2;
+    const silverY = footBarY - silverH;
+    const cutSilverX = cut1X - 6;
+    doc.setFillColor(241, 245, 249);
+    doc.rect(bandThick, silverY, cutSilverX - bandThick - silverH, 0.7, 'F');
+    doc.triangle(cutSilverX - silverH, silverY, cutSilverX, silverY + 0.7, cutSilverX - silverH, silverY + 0.7, 'F');
+    doc.setFillColor(lightSilver[0], lightSilver[1], lightSilver[2]);
+    doc.rect(bandThick, silverY + 0.7, cutSilverX - bandThick - (silverH - 0.7), 1.5, 'F');
+    doc.triangle(cutSilverX - (silverH - 0.7), silverY + 0.7, cutSilverX, footBarY, cutSilverX, silverY + 0.7, 'F');
+
+    // 2. Barra Principal Inferior (Laranja Primário #F37021) com corte a 45°
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.rect(0, footBarY, cut1X, footBarH, 'F');
+    doc.triangle(cut1X, footBarY, cut1X + footBarH, pageHeight, cut1X, pageHeight, 'F');
+
+    // 3. Faixa Diagonal Paralela (Laranja Primário #F37021)
+    const sTop1 = cut1X + gapW;
+    const sTop2 = sTop1 + stripeW;
+    const sBot1 = cut1X + footBarH + gapW;
+    const sBot2 = sBot1 + stripeW;
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.triangle(sTop1, footBarY, sTop2, footBarY, sBot2, pageHeight, 'F');
+    doc.triangle(sTop1, footBarY, sBot2, pageHeight, sBot1, pageHeight, 'F');
+
+    // 4. Bloco Chanfrado Carvão Escuro (#2B2D2F) no Canto Inferior Direito
+    const dTop = sTop2 + gapW;
+    const dBot = sBot2 + gapW;
+    doc.setFillColor(dark[0], dark[1], dark[2]);
+    doc.triangle(dTop, footBarY, dBot, pageHeight, dBot, footBarY, 'F');
+    doc.rect(dBot, footBarY, pageWidth - dBot, footBarH, 'F');
+
+    // =========================================================================
+    // 4. INFORMAÇÕES DE CONTACTO EM 3 COLUNAS COM ÍCONES CIRCULARES
+    // =========================================================================
+    const footInfoY = pageHeight - 17.5;
+    const col1X = isLandscape ? 32 : 26;
+    const col2X = isLandscape ? pageWidth * 0.38 : 82;
+    const col3X = isLandscape ? pageWidth * 0.70 : 138;
+
+    // Helper para desenhar o badge circular laranja
+    const drawBadgeIcon = (x: number, y: number, type: 'phone' | 'web' | 'pin') => {
+        doc.setFillColor(primary[0], primary[1], primary[2]);
+        doc.circle(x, y, 2.0, 'F');
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(255, 255, 255);
+        doc.setLineWidth(0.35);
+
+        if (type === 'phone') {
+            doc.circle(x - 0.3, y - 0.3, 0.6, 'F');
+            doc.line(x - 0.3, y - 0.3, x + 0.5, y + 0.5);
+            doc.circle(x + 0.5, y + 0.5, 0.6, 'F');
+        } else if (type === 'web') {
+            doc.circle(x, y, 1.1);
+            doc.line(x - 1.1, y, x + 1.1, y);
+            doc.line(x, y - 1.1, x, y + 1.1);
+        } else {
+            doc.circle(x, y - 0.4, 0.8, 'F');
+            doc.line(x, y + 0.4, x, y + 1.0);
+        }
+    };
+
+    // Coluna 1: Contactos Telefónicos
+    drawBadgeIcon(col1X, footInfoY + 0.5, 'phone');
     doc.setFont("helvetica", "normal");
-    doc.text(`Emissão: ${formatDateTime(new Date())}`, pageWidth - 8, 9.8, { align: 'right' });
-
-    // Friso lateral decorativo
-    doc.setFillColor(orange[0], orange[1], orange[2]);
-    doc.rect(0, 75, 2.5, 75, 'F');
-
-    // Selo de processamento digital no rodapé (Sem triângulo cortando o texto)
-    doc.setFillColor(orange[0], orange[1], orange[2]);
-    doc.rect(10, pageHeight - 17, pageWidth - 20, 6.5, 'F');
-    
-    doc.setFont("helvetica", "bold");
     doc.setFontSize(6.8);
-    doc.setTextColor(255, 255, 255);
-    doc.text("Documento Processado por Computador", 14, pageHeight - 12.8);
-    
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(config.phone || '+244 941 537 486', col1X + 4.2, footInfoY);
+    doc.text(config.whatsapp || '+244 923 000 000', col1X + 4.2, footInfoY + 3.4);
+
+    // Coluna 2: Website & Email
+    drawBadgeIcon(col2X, footInfoY + 0.5, 'web');
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(6.5);
-    doc.text(`Gerado por: ${userName || 'Sistema'}   •   ${formatDateTime(new Date())}`, pageWidth - 14, pageHeight - 12.8, { align: 'right' });
+    doc.setFontSize(6.8);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text('www.tango.co.ao', col2X + 4.2, footInfoY);
+    const displayEmail = (config.email || 'geral@tango.co.ao').substring(0, 30);
+    doc.text(displayEmail, col2X + 4.2, footInfoY + 3.4);
 
-    // Barra de rodapé corporativo (Com dados da empresa em tamanho reduzido e Title Case)
-    doc.setFillColor(black[0], black[1], black[2]);
-    doc.rect(0, pageHeight - 9, pageWidth, 9, 'F');
-    
-    // Friso decorativo sutil acima da barra escura
-    doc.setFillColor(orange[0], orange[1], orange[2]);
-    doc.rect(0, pageHeight - 9.5, pageWidth, 0.5, 'F');
-
-    // Texto de rodapé com Nome, NIF, Telefone e Email
+    // Coluna 3: Endereço & Localização
+    drawBadgeIcon(col3X, footInfoY + 0.5, 'pin');
     doc.setFont("helvetica", "normal");
-    doc.setFontSize(6.5);
-    doc.setTextColor(241, 245, 249);
-    
-    const companyTitle = toTitleCase(config.name) || 'Digital Norte';
-    const footerParts = [
-        companyTitle,
-        config.nif ? `NIF: ${config.nif}` : null,
-        config.phone ? `Tel: ${config.phone}` : null,
-        config.email ? `Email: ${config.email}` : null
-    ].filter(Boolean);
-    
-    const footerText = footerParts.join('   •   ');
-    doc.text(footerText, pageWidth / 2, pageHeight - 3.5, { align: 'center', maxWidth: pageWidth - 16 });
+    doc.setFontSize(6.8);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    const cleanAddr1 = (config.address || 'Cuanza Norte, N´dalatando').substring(0, 32);
+    doc.text(cleanAddr1, col3X + 4.2, footInfoY);
+    const cleanAddr2 = (config.location || 'Angola').substring(0, 32);
+    doc.text(cleanAddr2, col3X + 4.2, footInfoY + 3.4);
 
-    // CABEÇALHO COMPLETO NA PARTE SUPERIOR (Nome, NIF, Logótipo, Telefone e Email)
+    // =========================================================================
+    // 5. CABEÇALHO COMPLETO NA PÁGINA INICIAL (!onlyDecoration)
+    // =========================================================================
     if (!onlyDecoration) {
         const pdfLogo = isValidLogoData(config.reportLogo) ? config.reportLogo : config.logo;
-        let textStartX = 14;
+        let textStartX = 18;
 
         if (isValidLogoData(pdfLogo)) {
             const imgFormat = detectImageFormat(pdfLogo);
             try {
-                let imgWidth = 30;
-                let imgHeight = 24;
+                let imgWidth = 26;
+                let imgHeight = 18;
                 try {
                     const properties = doc.getImageProperties(pdfLogo);
                     const originalWidth = properties.width;
                     const originalHeight = properties.height;
                     if (originalWidth && originalHeight) {
                         const aspectRatio = originalWidth / originalHeight;
-                        if (aspectRatio > 1.25) {
-                            imgWidth = 32;
-                            imgHeight = 32 / aspectRatio;
+                        if (aspectRatio > 1.3) {
+                            imgWidth = 28;
+                            imgHeight = 28 / aspectRatio;
                         } else {
-                            imgHeight = 24;
-                            imgWidth = 24 * aspectRatio;
+                            imgHeight = 18;
+                            imgWidth = 18 * aspectRatio;
                         }
                     }
                 } catch (err) {
                     console.warn("Could not get logo properties:", err);
                 }
-                const yOffset = 10 + (24 - imgHeight) / 2;
-                doc.addImage(pdfLogo, imgFormat, 14, yOffset, imgWidth, imgHeight, undefined, 'NONE');
-                textStartX = 14 + imgWidth + 5;
+                const yOffset = 12 + (18 - imgHeight) / 2;
+                doc.addImage(pdfLogo, imgFormat, 18, yOffset, imgWidth, imgHeight, undefined, 'NONE');
+                textStartX = 18 + imgWidth + 5;
             } catch (e) {
                 console.warn("Logo skip:", e);
             }
+        } else {
+            // Emblema Geométrico Idêntico ao Modelo da Imagem: Quadrado Laranja com [ | ]
+            doc.setFillColor(primary[0], primary[1], primary[2]);
+            doc.roundedRect(18, 13, 14, 14, 1.8, 1.8, 'F');
+            doc.setFillColor(255, 255, 255);
+            // Barra esquerda
+            doc.rect(20.8, 15.5, 1.6, 9, 'F');
+            doc.rect(20.8, 15.5, 3.2, 1.6, 'F');
+            doc.rect(20.8, 22.9, 3.2, 1.6, 'F');
+            // Barra central
+            doc.rect(24.4, 16.8, 1.2, 6.4, 'F');
+            // Barra direita
+            doc.rect(27.6, 15.5, 1.6, 9, 'F');
+            doc.rect(26.0, 15.5, 3.2, 1.6, 'F');
+            doc.rect(26.0, 22.9, 3.2, 1.6, 'F');
+            textStartX = 37;
         }
 
-        // Informações da Empresa no Cabeçalho Superior
-        const availableWidth = pageWidth - textStartX - 70;
-        const compName = toTitleCase(config.name) || config.name || 'Digital Norte';
+        const maxTitleW = pageWidth - textStartX - (topCutW - 10);
+        const compName = (toTitleCase(config.name) || config.name || 'Digital Norte').toUpperCase();
 
-        // 1. Nome da Empresa (Destaque em Title Case / Maiúsculas e Minúsculas)
-        let nameFontSize = 13;
-        if (compName.length > 45) nameFontSize = 10.5;
-        else if (compName.length > 30) nameFontSize = 11.5;
-
+        // 1. Nome da Empresa (Negrito, Caixa Alta, Carvão Escuro)
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(nameFontSize);
-        doc.setTextColor(black[0], black[1], black[2]);
-        const nameLines = doc.splitTextToSize(compName, availableWidth);
-        doc.text(nameLines, textStartX, 15);
+        doc.setFontSize(13.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        const nameLines = doc.splitTextToSize(compName, maxTitleW);
+        doc.text(nameLines, textStartX, 18.5);
 
-        let curY = 15 + (nameLines.length * 4.8);
-
-        // 2. NIF da Empresa
-        doc.setFontSize(8.5);
+        // 2. Tagline Institucional (Letras espaçadas, estilo "YOUR TAGLINE HERE")
+        const taglineY = 18.5 + (nameLines.length * 4.2);
         doc.setFont("helvetica", "bold");
-        doc.setTextColor(orange[0], orange[1], orange[2]);
-        doc.text(config.nif ? `NIF: ${config.nif}` : "Entidade Registada", textStartX, curY, { maxWidth: availableWidth });
-        curY += 4.5;
+        doc.setFontSize(6.8);
+        doc.setTextColor(115, 125, 135);
+        const tagText = (config.nif ? `NIF: ${config.nif}   •   ` : '') + 'SISTEMA DE GESTÃO DE CRÉDITO';
+        doc.text(tagText, textStartX, taglineY, { maxWidth: maxTitleW });
 
-        // 3. Contactos: Telefone e Email na Parte Superior
-        doc.setFontSize(7.5);
+        // 3. Bloco de Responsável e Data (Estilo Executivo do Modelo)
+        const metaY = Math.max(taglineY + 7.5, 33);
+
+        // Linha divisória vertical fina à esquerda do bloco de responsável (conforme imagem de referência)
+        doc.setDrawColor(210, 215, 225);
+        doc.setLineWidth(0.35);
+        doc.line(textStartX, metaY - 1, textStartX, metaY + 15);
+
+        const infoStartX = textStartX + 2.5;
+
+        // Nome do Titular / Responsável (Laranja Primário em Negrito)
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.2);
+        doc.setTextColor(primary[0], primary[1], primary[2]);
+        doc.text((userName || 'ADMINISTRADOR').toUpperCase(), infoStartX, metaY);
+
+        // Cargo / Departamento (Carvão / Cinza Escuro)
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(6.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text("GESTOR DE CRÉDITO / OPERAÇÕES", infoStartX, metaY + 3.6);
+
+        // Linhas de Contacto Rápido do Responsável
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(6.0);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text("PHONE : ", infoStartX, metaY + 7.2);
         doc.setFont("helvetica", "normal");
-        doc.setTextColor(71, 85, 105);
-        const contactParts = [
-            config.phone ? `Tel: ${config.phone}` : null,
-            config.email ? `Email: ${config.email}` : null
-        ].filter(Boolean);
-        const contactLine = contactParts.join('   |   ') || (config.phone ? `Tel: ${config.phone}` : 'Tel: N/D');
-        doc.text(contactLine, textStartX, curY, { maxWidth: availableWidth });
-        curY += 4;
+        doc.setTextColor(100, 116, 139);
+        doc.text(config.phone || '+244 941 537 486', infoStartX + 9, metaY + 7.2);
 
-        // 4. Endereço (se disponível)
-        if (config.address) {
-            doc.setFontSize(7);
-            doc.setTextColor(100, 116, 139);
-            doc.text(`Endereço: ${config.address}`, textStartX, curY, { maxWidth: availableWidth });
-        }
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text("WEB : ", infoStartX, metaY + 10.4);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text("www.tango.co.ao", infoStartX + 7, metaY + 10.4);
 
-        // 5. Divisor elegante abaixo do cabeçalho
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text("ADDR : ", infoStartX, metaY + 13.6);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text(`${cleanAddr1}, ${cleanAddr2}`, infoStartX + 8, metaY + 13.6);
+
+        // Data Alinhada à Direita (Estilo do Modelo: "DATE : 25-Set-2026" com DATE : em Laranja)
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(7.5);
+        const dateY = isLandscape ? 34 : metaY + 13.6;
+        const datePrefix = "DATE : ";
+        const dateFullStr = `${formatDate(new Date())}`;
+        const prefixW = doc.getTextWidth(datePrefix);
+        const dateW = doc.getTextWidth(dateFullStr);
+        const totalDateW = prefixW + dateW;
+        const dateStartX = pageWidth - (isLandscape ? 16 : 14) - totalDateW;
+        doc.setTextColor(primary[0], primary[1], primary[2]);
+        doc.text(datePrefix, dateStartX, dateY);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text(dateFullStr, dateStartX + prefixW, dateY);
+
+        // Linha Divisória Sutil de Separação
+        const divLineY = isLandscape ? 44 : metaY + 18;
         doc.setDrawColor(226, 232, 240);
-        doc.setLineWidth(0.4);
-        doc.line(12, 35, pageWidth - 12, 35);
+        doc.setLineWidth(0.25);
+        doc.line(18, divLineY, pageWidth - 14, divLineY);
     }
 
-    // Reset text color to default dark slate/black to prevent light gray text bleeding to other elements
-    doc.setTextColor(black[0], black[1], black[2]);
+    // Repor configurações padrão para evitar vazamento de estilos
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.2);
 };
 
 export const generatePaymentReceipt = (payment: any, credit: any, settings?: any, userName?: string) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -367,8 +649,8 @@ export const createDebtCollectionNoticePDF = (
 ): jsPDF => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
     const currency = config.currency || 'AOA';
     const issueDate = new Date();
     const noticeNumber = `NC-${issueDate.getFullYear()}${String(issueDate.getMonth() + 1).padStart(2, '0')}${String(issueDate.getDate()).padStart(2, '0')}-${client.id.slice(-6).toUpperCase()}`;
@@ -509,8 +791,8 @@ export const generateContractPDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     const generatePageFormat = (copyType: string) => {
         applyBranding(doc, config, userName);
@@ -685,8 +967,8 @@ export const generatePromessaContractPDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -836,12 +1118,12 @@ export const generatePromessaContractPDF = (
         cursorY = signatureY;
     }
 
-    doc.setDrawColor(30, 41, 59);
+    doc.setDrawColor(BRAND_CHARCOAL[0], BRAND_CHARCOAL[1], BRAND_CHARCOAL[2]);
     doc.line(30, cursorY, 90, cursorY);
     doc.line(120, cursorY, 180, cursorY);
 
     doc.setFontSize(8);
-    doc.setTextColor(30, 41, 59);
+    doc.setTextColor(BRAND_CHARCOAL[0], BRAND_CHARCOAL[1], BRAND_CHARCOAL[2]);
     doc.setFont("helvetica", "bold");
     doc.text('PROMITENTE CREDORA', 60, cursorY + 5, { align: 'center' });
     doc.text('PROMITENTE DEVEDOR', 150, cursorY + 5, { align: 'center' });
@@ -861,7 +1143,7 @@ export const generatePromessaContractPDF = (
 export const generateAuditLogPDF = (logs: any[], settings?: any, userInfo?: { name?: string, role?: string }) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
+    const orange = resolveBrandPrimary(config.primaryColor);
 
     applyBranding(doc, config, userInfo?.name);
 
@@ -912,7 +1194,7 @@ export const generateClientProfilePDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
+    const orange = resolveBrandPrimary(config.primaryColor);
 
     applyBranding(doc, config, userName);
 
@@ -976,7 +1258,7 @@ export const generateClientProfilePDF = (
                 b.iban,
                 b.holder
             ]),
-            headStyles: { fillColor: [30, 41, 59] },
+            headStyles: { fillColor: BRAND_CHARCOAL },
             theme: 'grid',
             didDrawPage: () => applyBranding(doc, config, userName, true)
         });
@@ -995,7 +1277,7 @@ export const generateClientProfilePDF = (
                 d.type.toUpperCase(),
                 new Date(d.createdAt).toLocaleDateString('pt-AO', { timeZone: 'Africa/Luanda' })
             ]),
-            headStyles: { fillColor: [100, 116, 139] }, // slate-500
+            headStyles: { fillColor: BRAND_CHARCOAL },
             theme: 'striped',
             didDrawPage: () => applyBranding(doc, config, userName, true)
         });
@@ -1041,8 +1323,8 @@ export const generateFinancialAuditPDF = (
     try {
         const doc = new jsPDF();
         const config = getCompanySettings(settings);
-        const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-        const black = [30, 41, 59] as [number, number, number];
+        const orange = resolveBrandPrimary(config.primaryColor);
+        const black = BRAND_CHARCOAL;
 
         applyBranding(doc, config, userName);
 
@@ -1154,83 +1436,134 @@ export const generateAnalyticalReportPDF = (data: {
 }, settings?: any, userName?: string) => {
     const doc = new jsPDF({ orientation: 'landscape' });
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const primary = resolveBrandPrimary(config.primaryColor);
+    const dark = BRAND_CHARCOAL;
+    const orange = primary;
+    const black = dark;
 
     applyBranding(doc, config, userName);
 
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
 
-    doc.setTextColor(0, 0, 0);
+    // 1. Título Executivo com Acento Vertical Laranja (Conforme Imagem de Referência)
+    const titleY = 48;
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.roundedRect(16, titleY, 3.5, 11, 0.8, 0.8, 'F');
+
+    const title = (data.title || 'RELATÓRIO GERENCIAL ANALÍTICO').toUpperCase();
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(20);
-    const title = data.title || 'RELATÓRIO ANALÍTICO COMPLETO';
-    const splitTitle = doc.splitTextToSize(title, pageWidth - 90);
-    doc.text(splitTitle, 20, 55);
+    doc.setFontSize(12.5);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(title, 22, titleY + 5);
 
-    doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(120, 120, 120);
-    const dateY = 55 + (splitTitle.length * 7);
-    doc.text(`Emissão: ${new Date().toLocaleString('pt-AO', { timeZone: 'Africa/Luanda' })}`, 20, dateY);
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Emissão: ${new Date().toLocaleString('pt-AO', { timeZone: 'Africa/Luanda' })}   |   Responsável: ${(userName || 'Sistema').toUpperCase()}`, 22, titleY + 9.5);
 
-    let currentY = dateY + 12;
+    let currentY = titleY + 15;
 
     // Gráfico Visual se fornecido
     if (data.visualImg && data.visualImg.length > 50) {
         try {
             doc.setFont("helvetica", "bold");
-            doc.setFontSize(12);
-            doc.setTextColor(black[0], black[1], black[2]);
-            doc.text("RESUMO VISUAL", 20, currentY);
-            currentY += 5;
-            doc.addImage(data.visualImg, 'UNKNOWN', 15, currentY, pageWidth - 30, 100);
+            doc.setFontSize(10.5);
+            doc.setTextColor(dark[0], dark[1], dark[2]);
+            doc.text("RESUMO VISUAL", 16, currentY);
+            currentY += 4;
+            doc.addImage(data.visualImg, 'UNKNOWN', 16, currentY, pageWidth - 32, 90);
             
             // Colocar as tabelas na página 2
             doc.addPage();
             applyBranding(doc, config, userName, true);
-            currentY = 45;
+            currentY = 40;
         } catch (e) {
             console.error("PDF Visual Chart Error", e);
-            currentY += 10;
         }
     }
 
-    // Tabela de Resumo
+    // 2. Cards de Métricas Gerais (Layout elegante em grid com friso superior laranja)
+    if (data.summary && data.summary.length > 0) {
+        const cardsPerRow = Math.min(data.summary.length, 5);
+        const cardGap = 2.5;
+        const startX = 16;
+        const totalW = pageWidth - startX - 14;
+        const cardW = (totalW - (cardsPerRow - 1) * cardGap) / cardsPerRow;
+        const cardH = 13.5;
+
+        for (let i = 0; i < data.summary.length; i++) {
+            const rowIndex = Math.floor(i / cardsPerRow);
+            const colIndex = i % cardsPerRow;
+            const cx = startX + colIndex * (cardW + cardGap);
+            const cy = currentY + rowIndex * (cardH + cardGap);
+
+            doc.setFillColor(255, 255, 255);
+            doc.setDrawColor(226, 232, 240);
+            doc.setLineWidth(0.3);
+            doc.roundedRect(cx, cy, cardW, cardH, 1.5, 1.5, 'FD');
+
+            // Top stripe laranja de referência
+            doc.setFillColor(primary[0], primary[1], primary[2]);
+            doc.rect(cx + 1.5, cy, cardW - 3, 1.0, 'F');
+
+            // Label
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(5.8);
+            doc.setTextColor(100, 116, 139);
+            doc.text(data.summary[i].label.toUpperCase(), cx + 2.5, cy + 4.8);
+
+            // Value
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(7.5);
+            doc.setTextColor(dark[0], dark[1], dark[2]);
+            doc.text(doc.splitTextToSize(data.summary[i].value, cardW - 4), cx + 2.5, cy + 9.8);
+        }
+
+        const totalRows = Math.ceil(data.summary.length / cardsPerRow);
+        currentY += totalRows * (cardH + cardGap) + 5;
+    }
+
+    // 3. Tabela de Detalhamento de Carteira
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(30, 41, 59);
-    doc.text("MÉTRICAS GERAIS", 20, currentY);
+    doc.setFontSize(10.5);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text("DETALHAMENTO DE CARTEIRA", 16, currentY);
 
     autoTable(doc, {
-        startY: currentY + 5,
-        head: [['Indicador', 'Valor']],
-        body: data.summary.map(s => [s.label, s.value]),
-        headStyles: { fillColor: [40, 40, 40] },
-        theme: 'striped',
-        didDrawPage: () => applyBranding(doc, config, userName, true)
-    });
-
-    currentY = (doc as any).lastAutoTable.finalY + 15;
-
-    // Tabela de Detalhes
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.text("DETALHAMENTO DE CARTEIRA", 20, currentY);
-
-    autoTable(doc, {
-        startY: currentY + 5,
-        head: [['Cliente', 'Principal', 'Saldo', 'Vencimento', 'Estado']],
+        startY: currentY + 3.5,
+        head: [['Cliente', 'Principal Concedido', 'Saldo em Aberto', 'Data Vencimento', 'Estado do Crédito']],
         body: data.credits.map(c => [
-            c.clientName,
-            formatCurrency(c.principalAmount),
-            formatCurrency(c.currentBalance),
+            c.clientName || 'N/A',
+            formatCurrency(c.principalAmount || 0, config.currency),
+            formatCurrency(c.currentBalance || 0, config.currency),
             formatDate(c.dueDate),
             c.status === 'overdue' ? 'ATRASADO' : 'REGULAR'
         ]),
-        headStyles: { fillColor: orange },
-        styles: { fontSize: 8 },
+        headStyles: {
+            fillColor: dark,
+            textColor: [255, 255, 255],
+            fontStyle: 'bold',
+            fontSize: 8.5
+        },
+        alternateRowStyles: { fillColor: [250, 250, 252] },
+        styles: { fontSize: 8, cellPadding: 2.2, textColor: dark },
+        columnStyles: {
+            1: { halign: 'right' },
+            2: { halign: 'right' },
+            3: { halign: 'center' },
+            4: { halign: 'center', fontStyle: 'bold' }
+        },
+        margin: { left: 16, right: 14, bottom: 25 },
+        didParseCell: (hookData: any) => {
+            if (hookData.section === 'body' && hookData.column.index === 4) {
+                if (hookData.cell.raw === 'ATRASADO') {
+                    hookData.cell.styles.textColor = [220, 38, 38];
+                } else {
+                    hookData.cell.styles.textColor = [22, 101, 52];
+                }
+            }
+        },
         didDrawPage: () => applyBranding(doc, config, userName, true)
     });
 
@@ -1241,8 +1574,8 @@ export const generateAnalyticalReportPDF = (data: {
 export const generateGenericReportPDF = (title: string, content: string[], settings?: any, userName?: string) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -1278,7 +1611,7 @@ export const generateGenericReportPDF = (title: string, content: string[], setti
 
         let fontSize = 10;
         let isBold = false;
-        let textColor = [30, 41, 59];
+        let textColor = black;
 
         if (line.startsWith('# ')) {
             fontSize = 16;
@@ -1319,8 +1652,8 @@ export const generateGenericReportPDF = (title: string, content: string[], setti
 export const generateNotificationPDF = (notification: any, settings?: any, userName?: string) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -1416,8 +1749,8 @@ export const generateCreditPaymentHistoryPDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -1532,8 +1865,8 @@ export const generateClientGeneralPaymentHistoryPDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const primaryColor = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const primaryColor = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -1660,8 +1993,8 @@ export const generateDailyCashFlowPDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -1771,8 +2104,8 @@ export const generateUserActivityPDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, generatedBy);
 
@@ -1827,8 +2160,8 @@ export const generateUserActivityPDF = (
 export const generateUserProfilePDF = (targetUser: any, settings?: any, generatedBy?: string) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, generatedBy);
 
@@ -1910,8 +2243,8 @@ export const generateUserProfilePDF = (targetUser: any, settings?: any, generate
 export const generateNotificationsReportPDF = (notifications: any[], settings?: any, userName?: string, customTitle?: string) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -1965,7 +2298,7 @@ export const generateClientListReport = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
+    const orange = resolveBrandPrimary(config.primaryColor);
 
     applyBranding(doc, config, userName);
 
@@ -2026,7 +2359,7 @@ export const generateActiveClientsReport = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
+    const orange = resolveBrandPrimary(config.primaryColor);
 
     applyBranding(doc, config, userName);
 
@@ -2080,7 +2413,7 @@ export const generateBlockedClientsReport = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
+    const orange = resolveBrandPrimary(config.primaryColor);
 
     applyBranding(doc, config, userName);
 
@@ -2132,8 +2465,8 @@ export const generateClientInfoSheetPDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -2285,8 +2618,8 @@ export const generateSimulationPDF = (
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
-    const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-    const black = [30, 41, 59] as [number, number, number];
+    const orange = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
@@ -2333,7 +2666,7 @@ export const generateSimulationPDF = (
 
         doc.setFont("helvetica", "italic");
         doc.setFontSize(10);
-        doc.setTextColor(30, 41, 59); // Dark slate for maximum contrast
+        doc.setTextColor(black[0], black[1], black[2]);
         const wrappedMsg = doc.splitTextToSize(aiAnalysis.message, 160);
         doc.text(wrappedMsg, 25, currentY + 14);
 
@@ -2388,11 +2721,11 @@ export const generateSimulationPDF = (
         const incomeH = (clientInfo.income / maxVal) * chartHeight;
         const paymentH = (simulationData.rows[i].payment / maxVal) * chartHeight;
 
-        // Draw Income Bar (Dark Blue)
-        doc.setFillColor(30, 41, 59);
+        // Draw Income Bar (Carvão Escuro)
+        doc.setFillColor(black[0], black[1], black[2]);
         doc.rect(xPos, chartY - incomeH, barSpace / 4, incomeH, 'F');
 
-        // Draw Payment Bar (Orange/Gold)
+        // Draw Payment Bar (Orange)
         doc.setFillColor(orange[0], orange[1], orange[2]);
         doc.rect(xPos + (barSpace / 4) + 1, chartY - paymentH, barSpace / 4, paymentH, 'F');
 
@@ -2404,7 +2737,7 @@ export const generateSimulationPDF = (
 
     // Legend
     doc.setFontSize(8);
-    doc.setFillColor(30, 41, 59);
+    doc.setFillColor(black[0], black[1], black[2]);
     doc.rect(130, currentY + 5, 3, 3, 'F');
     doc.text("Rendimento", 135, currentY + 8);
     doc.setFillColor(orange[0], orange[1], orange[2]);
@@ -2527,8 +2860,8 @@ export const generateMonthlyConsolidationReport = (
     try {
         const doc = new jsPDF({ orientation: 'landscape' });
         const config = getCompanySettings(settings);
-        const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-        const black = [30, 41, 59] as [number, number, number];
+        const orange = resolveBrandPrimary(config.primaryColor);
+        const black = BRAND_CHARCOAL;
         const pageWidth = doc.internal.pageSize.width;
         const pageHeight = doc.internal.pageSize.height;
 
@@ -2655,8 +2988,8 @@ export const generateAnnualReportPDF = (
     try {
         const doc = new jsPDF({ orientation: 'landscape' });
         const config = getCompanySettings(settings);
-        const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-        const black = [30, 41, 59] as [number, number, number];
+        const orange = resolveBrandPrimary(config.primaryColor);
+        const black = BRAND_CHARCOAL;
         const pageWidth = doc.internal.pageSize.width;
         const pageHeight = doc.internal.pageSize.height;
 
@@ -2752,8 +3085,8 @@ export const generatePeriodReportPDF = (
     try {
         const doc = new jsPDF({ orientation: 'landscape' });
         const config = getCompanySettings(settings);
-        const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-        const black = [30, 41, 59] as [number, number, number];
+        const orange = resolveBrandPrimary(config.primaryColor);
+        const black = BRAND_CHARCOAL;
         const pageWidth = doc.internal.pageSize.width;
         const pageHeight = doc.internal.pageSize.height;
 
@@ -2887,8 +3220,8 @@ export const generateSupplierReportPDF = (
     try {
         const doc = new jsPDF({ orientation: 'landscape' });
         const config = getCompanySettings(settings);
-        const orange = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-        const black = [30, 41, 59] as [number, number, number];
+        const orange = resolveBrandPrimary(config.primaryColor);
+        const black = BRAND_CHARCOAL;
         const pageWidth = doc.internal.pageSize.width;
         const pageHeight = doc.internal.pageSize.height;
 
@@ -3038,8 +3371,8 @@ export const generatePermanentTransferLetterPDF = (
         });
 
         const config = getCompanySettings(settings);
-        const primaryColor = (config.primaryColor as [number, number, number]) || [255, 127, 0];
-        const black = [30, 41, 59] as [number, number, number];
+        const primaryColor = resolveBrandPrimary(config.primaryColor);
+        const black = BRAND_CHARCOAL;
 
         // Apply formal company header/branding
         applyBranding(doc, config, userName);
@@ -3142,7 +3475,7 @@ export const generatePermanentTransferLetterPDF = (
         
         doc.setFont("helvetica", "bold");
         doc.setFontSize(8.5);
-        doc.setTextColor(15, 23, 42);
+        doc.setTextColor(black[0], black[1], black[2]);
         doc.text(letter.clientName || 'O(A) Cliente', 57.5, currentY, { align: 'center' });
         doc.text("Pela Entidade Credora", 152.5, currentY, { align: 'center' });
         currentY += 4;
@@ -3181,4 +3514,169 @@ export const generatePermanentTransferLetterPDF = (
         console.error("Erro ao gerar PDF da Carta de Transferência:", e);
     }
 };
+
+export const exportCompanyCredentialsPDF = (company: {
+    name: string;
+    nif: string;
+    accessCode: string;
+    expiresAt?: string | null;
+    webUrl?: string;
+}) => {
+    try {
+        const doc = new jsPDF();
+        const primaryColor: [number, number, number] = [243, 112, 33]; // #F37021
+        const darkColor: [number, number, number] = [43, 45, 47]; // #2B2D2F
+        const webUrl = company.webUrl || 'https://tango-gestao-creditos.vercel.app';
+
+        // Cabeçalho institucional
+        doc.setFillColor(darkColor[0], darkColor[1], darkColor[2]);
+        doc.rect(0, 0, 210, 38, 'F');
+
+        doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        doc.rect(0, 36, 210, 2.5, 'F');
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(16);
+        doc.setTextColor(255, 255, 255);
+        doc.text("TANGO GESTÃO DE CRÉDITOS ERP", 20, 18);
+
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(220, 220, 220);
+        doc.text("Módulo Central Tango Master Gen • Certificação e Ativação Cloud", 20, 26);
+        doc.text(`Data de Emissão: ${new Date().toLocaleDateString('pt-AO')}`, 190, 26, { align: 'right' });
+
+        // Título do Documento
+        let currentY = 52;
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(15);
+        doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+        doc.text("CREDENCIAL OFICIAL DE ACESSO WEB", 105, currentY, { align: 'center' });
+        currentY += 6;
+
+        doc.setFontSize(9.5);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 116, 139);
+        doc.text("Ficha de Ativação e Homologação de Empresa para Acesso Online", 105, currentY, { align: 'center' });
+        currentY += 12;
+
+        // Caixa Principal de Credenciais
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        doc.setLineWidth(0.8);
+        doc.roundedRect(20, currentY, 170, 78, 3, 3, 'FD');
+
+        const boxStartY = currentY + 10;
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("EMPRESA LICENCIADA:", 28, boxStartY);
+        doc.setFontSize(13);
+        doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+        doc.text(company.name.toUpperCase(), 28, boxStartY + 7);
+
+        doc.setFontSize(8.5);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text("NÚMERO DE IDENTIFICAÇÃO FISCAL (NIF):", 28, boxStartY + 20);
+        doc.setFontSize(12);
+        doc.setFont("courier", "bold");
+        doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+        doc.text(company.nif, 28, boxStartY + 27);
+
+        // Caixa de destaque do Código de Acesso
+        doc.setFillColor(254, 243, 199);
+        doc.setDrawColor(245, 158, 11);
+        doc.setLineWidth(0.6);
+        doc.roundedRect(28, boxStartY + 35, 154, 24, 2, 2, 'FD');
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(180, 83, 9);
+        doc.text("CÓDIGO DE ACESSO E ATIVAÇÃO (TANGOMASTER):", 34, boxStartY + 42);
+
+        doc.setFont("courier", "bold");
+        doc.setFontSize(15);
+        doc.setTextColor(15, 23, 42);
+        doc.text(company.accessCode, 34, boxStartY + 52);
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8);
+        doc.setTextColor(100, 116, 139);
+        const expStr = company.expiresAt ? new Date(company.expiresAt).toLocaleDateString('pt-AO') : 'Vitalício / Permanente';
+        doc.text(`Validade: ${expStr}`, 174, boxStartY + 52, { align: 'right' });
+
+        currentY += 88;
+
+        // Caixa do Link de Acesso
+        doc.setFillColor(241, 245, 249);
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.4);
+        doc.roundedRect(20, currentY, 170, 24, 2, 2, 'FD');
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+        doc.text("LINK DE ACESSO ONLINE (WEB / VERCEL):", 28, currentY + 8);
+
+        doc.setFont("courier", "bold");
+        doc.setFontSize(10.5);
+        doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        doc.text(webUrl, 28, currentY + 16);
+
+        currentY += 34;
+
+        // Instruções de Ativação
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(10);
+        doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
+        doc.text("INSTRUÇÕES PARA ATIVAÇÃO NO PRIMEIRO ACESSO:", 20, currentY);
+        currentY += 7;
+
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(8.5);
+        doc.setTextColor(71, 85, 105);
+
+        const instructions = [
+            `1. Aceda ao endereço ${webUrl} através de qualquer navegador web (Chrome, Edge, Safari, etc.).`,
+            "2. No ecrã de ativação, introduza o NIF da empresa e o Código de Acesso impresso nesta credencial.",
+            "3. O sistema fará a validação instantânea com o Tango Master e desbloqueará a configuração da empresa.",
+            "4. Conclua o assistente inicial (Onboarding) para definir o utilizador Administrador e iniciar o trabalho."
+        ];
+
+        instructions.forEach(step => {
+            doc.text(step, 24, currentY);
+            currentY += 6;
+        });
+
+        currentY += 8;
+
+        // Alerta de Confidencialidade
+        doc.setFillColor(254, 242, 242);
+        doc.setDrawColor(239, 68, 68);
+        doc.setLineWidth(0.4);
+        doc.roundedRect(20, currentY, 170, 22, 2, 2, 'FD');
+
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8);
+        doc.setTextColor(185, 28, 28);
+        doc.text("AVISO DE SEGURANÇA E CONFIDENCIALIDADE:", 28, currentY + 7);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(7.5);
+        doc.setTextColor(127, 29, 29);
+        doc.text("Este código de acesso é confidencial e exclusivo da empresa titulada. O registo das operações é", 28, currentY + 12);
+        doc.text("auditado centralmente pelo Tango Master Gen para efeitos de conformidade e integridade.", 28, currentY + 17);
+
+        // Rodapé
+        doc.setFontSize(7.5);
+        doc.setTextColor(148, 163, 184);
+        doc.line(20, 280, 190, 280);
+        doc.text("TangoMaster Gen • Sistema Integrado de Licenciamento e Gestão de Créditos", 105, 285, { align: 'center' });
+
+        doc.save(`Credencial_Acesso_${company.nif}_${(company.name || 'Empresa').replace(/\s+/g, '_')}.pdf`);
+    } catch (e) {
+        console.error("Erro ao gerar PDF de credenciais da empresa:", e);
+    }
+};
+
 

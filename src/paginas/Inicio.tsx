@@ -4,7 +4,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { formatDateSafe } from '@/bibliotecas/utils';
-import { applyBranding, getCompanySettings } from '@/bibliotecas/pdf';
+import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, BRAND_SILVER, resolveBrandPrimary, resolveBrandDark } from '@/bibliotecas/pdf';
 import { cn } from '../bibliotecas/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/componentes/ui/card';
 import {
@@ -16,7 +16,8 @@ import {
 } from '@/componentes/ui/select';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
-import { formatCurrency } from '@/bibliotecas/formatters';
+import { formatCurrency, getAdaptiveDonutValue } from '@/bibliotecas/formatters';
+import { useToast } from '@/componentes/ui/use-toast';
 import {
   Dialog,
   DialogContent,
@@ -51,7 +52,10 @@ import {
   ShieldPlus,
   Download,
   EyeOff,
-  FileText
+  FileText,
+  BarChart3,
+  Layers,
+  PieChart as PieIcon
 } from 'lucide-react';
 import { LicenseRenewalModal } from '@/componentes/dashboard/LicenseRenewalModal';
 import { subDays, subMonths, isAfter, isBefore, format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from 'date-fns';
@@ -82,6 +86,8 @@ export default function Dashboard() {
 
   // Estado para Ordenação dos Melhores Clientes
   const [clientSort, setClientSort] = useState<'desc' | 'asc'>('desc');
+  const [showFullRevenueDonut, setShowFullRevenueDonut] = useState(false);
+  const [revenueChartTab, setRevenueChartTab] = useState<'donut' | 'monthly' | 'both'>('donut');
 
   // Estado para o Modal de Detalhes
   const [detailsModal, setDetailsModal] = useState<{
@@ -105,6 +111,14 @@ export default function Dashboard() {
   const [investedEndDate, setInvestedEndDate] = useState('');
   const [investedCategoryFilter, setInvestedCategoryFilter] = useState<'all' | 'COMUM' | 'APOSENTADO' | 'ESTRANGEIRO'>('all');
   const [pendingFinancialReport, setPendingFinancialReport] = useState<{ clientRow?: any } | null>(null);
+
+  const { toast } = useToast();
+
+  // --- FILTROS AVANÇADOS DO FLUXO DE CAIXA (SEMANA, MÊS, 1 ANO) ---
+  const [cashFlowPeriodType, setCashFlowPeriodType] = useState<'semana' | 'mes' | 'ano'>('mes');
+  const [cashFlowYear, setCashFlowYear] = useState<number>(new Date().getFullYear());
+  const [cashFlowMonthSelection, setCashFlowMonthSelection] = useState<string>('all'); // 'all' (últimos 6 meses) | 'last12' | '0' a '11'
+  const [cashFlowWeekCount, setCashFlowWeekCount] = useState<number>(8); // 4, 8 ou 12 semanas
 
   // --- CONTROLO DE TRIAL E BOAS-VINDAS ---
   const [showWelcomeModal, setShowWelcomeModal] = useState(false);
@@ -293,6 +307,9 @@ export default function Dashboard() {
     }, 0);
   const totalProfit = payments.reduce((acc, p) => acc + p.allocatedToInterest + p.allocatedToLateInterest, 0);
   const totalCashTotal = payments.reduce((acc, p) => acc + p.amount, 0);
+  const adaptiveRevenue = useMemo(() => {
+    return getAdaptiveDonutValue(totalCashTotal, 'AOA');
+  }, [totalCashTotal]);
   const totalRecoveredCapital = payments.reduce((acc, p) => acc + Number(p.allocatedToPrincipal || 0), 0);
   const totalReceivedInterest = payments.reduce((acc, p) => acc + Number(p.allocatedToInterest || 0), 0);
   const totalReceivedLateInterest = payments.reduce((acc, p) => acc + Number(p.allocatedToLateInterest || 0), 0);
@@ -589,9 +606,9 @@ export default function Dashboard() {
     const config = getCompanySettings(companySettings);
     const generatedBy = user?.name || 'Sistema';
     const currency = config.currency || companySettings?.currency || 'AOA';
-    const primary = Array.isArray(config.primaryColor) ? config.primaryColor as [number, number, number] : [37, 99, 235] as [number, number, number];
-    const dark = [15, 23, 42] as [number, number, number];
-    const subtle = [248, 250, 252] as [number, number, number];
+    const primary = resolveBrandPrimary(config.primaryColor);
+    const dark = resolveBrandDark(config.secondaryColor);
+    const subtle = [250, 250, 252] as [number, number, number];
     const formatMoney = (value: number) => formatCurrency(value, currency);
     const getReferenceLabel = (reference: any) => {
       const raw = String(reference || '-');
@@ -614,24 +631,42 @@ export default function Dashboard() {
     // 1. Aplica cabeçalho institucional completo com Logo, Nome da Empresa, NIF, Telefone e Email
     applyBranding(doc, config, generatedBy, false);
 
-    // 2. Título do Relatório posicionado harmoniosamente abaixo do cabeçalho institucional
-    doc.setFillColor(dark[0], dark[1], dark[2]);
-    doc.rect(10, 40, pageWidth - 20, 18, 'F');
-    doc.setFillColor(primary[0], primary[1], primary[2]);
-    doc.rect(10, 40, 4, 18, 'F');
+    // 2. Título do Relatório com Design Executivo Limpo (sem caixa preta/azul pesada)
+    const titleY = 49;
 
+    // Acento vertical em Laranja Primário (#F37021)
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.roundedRect(16, titleY, 3.5, 11, 0.8, 0.8, 'F');
+
+    // Título Principal em Carvão Escuro (#2B2D2F)
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(255, 255, 255);
-    doc.text(title, 18, 48);
+    doc.setFontSize(12.5);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(title.toUpperCase(), 22, titleY + 5);
+
+    // Subtítulo e Metadados
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.text(`Período: ${profitDateRange.label}   |   Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}   |   Gerado por: ${generatedBy}`, 18, 54);
+    doc.setFontSize(7.2);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Período: ${profitDateRange.label}   |   Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}   |   Gerado por: ${generatedBy}`, 22, titleY + 10);
+
+    // Badge do Modelo à Direita
+    const badgeW = 46;
+    const badgeH = 7;
+    const badgeX = pageWidth - 14 - badgeW;
+    doc.setFillColor(255, 247, 237);
+    doc.setDrawColor(primary[0], primary[1], primary[2]);
+    doc.setLineWidth(0.4);
+    doc.roundedRect(badgeX, titleY + 1, badgeW, badgeH, 1.8, 1.8, 'FD');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.text(includeProfit ? 'MODELO COM LUCROS' : 'MODELO SEM LUCROS', pageWidth - 16, 48, { align: 'right' });
-    doc.setFont('helvetica', 'normal');
-    doc.text(config.name || 'Tango Gestão de Créditos', pageWidth - 16, 54, { align: 'right' });
+    doc.setFontSize(6.8);
+    doc.setTextColor(primary[0], primary[1], primary[2]);
+    doc.text(includeProfit ? 'MODELO COM LUCROS' : 'MODELO SEM LUCROS', badgeX + (badgeW / 2), titleY + 5.5, { align: 'center' });
+
+    // Linha Divisória Fina
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.25);
+    doc.line(16, titleY + 13.5, pageWidth - 14, titleY + 13.5);
 
     const summaryCards = includeProfit
       ? [
@@ -651,22 +686,38 @@ export default function Dashboard() {
         ['Movimentos', String(movements.length)]
       ];
 
-    const cardGap = 3;
-    const cardWidth = (pageWidth - 20 - (summaryCards.length - 1) * cardGap) / summaryCards.length;
-    const cardY = 62;
+    const cardGap = 2.5;
+    const cardStartX = 16;
+    const totalCardsW = pageWidth - cardStartX - 14;
+    const cardWidth = (totalCardsW - (summaryCards.length - 1) * cardGap) / summaryCards.length;
+    const cardY = titleY + 16; // 65
+    const cardH = 14;
+
     summaryCards.forEach(([label, value], index) => {
-      const x = 10 + index * (cardWidth + cardGap);
+      const x = cardStartX + index * (cardWidth + cardGap);
       const isProfitCard = label === 'Lucro total';
-      doc.setDrawColor(isProfitCard ? 22 : 226, isProfitCard ? 163 : 232, isProfitCard ? 74 : 240);
-      doc.setFillColor(isProfitCard ? 240 : subtle[0], isProfitCard ? 253 : subtle[1], isProfitCard ? 244 : subtle[2]);
-      doc.roundedRect(x, cardY, cardWidth, 15, 2, 2, 'FD');
+
+      // Fundo e Borda do card
+      doc.setFillColor(isProfitCard ? 255 : 255, isProfitCard ? 247 : 255, isProfitCard ? 237 : 255);
+      doc.setDrawColor(isProfitCard ? primary[0] : 226, isProfitCard ? primary[1] : 232, isProfitCard ? primary[2] : 240);
+      doc.setLineWidth(isProfitCard ? 0.5 : 0.3);
+      doc.roundedRect(x, cardY, cardWidth, cardH, 1.8, 1.8, 'FD');
+
+      // Top stripe em Laranja de Referência
+      doc.setFillColor(primary[0], primary[1], primary[2]);
+      doc.rect(x + 1.8, cardY, cardWidth - 3.6, 1.2, 'F');
+
+      // Rótulo
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.5);
-      doc.setTextColor(100, 116, 139);
-      doc.text(label.toUpperCase(), x + 2.2, cardY + 4.5);
-      doc.setFontSize(cardWidth < 34 ? 6.5 : 7.2);
-      doc.setTextColor(isProfitCard ? 21 : 15, isProfitCard ? 128 : 23, isProfitCard ? 61 : 42);
-      doc.text(doc.splitTextToSize(value, cardWidth - 4), x + 2.2, cardY + 10.5);
+      doc.setFontSize(6.2);
+      doc.setTextColor(isProfitCard ? primary[0] : 100, isProfitCard ? primary[1] : 116, isProfitCard ? primary[2] : 139);
+      doc.text(label.toUpperCase(), x + 2.5, cardY + 5.2);
+
+      // Valor
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(cardWidth < 36 ? 6.5 : 7.2);
+      doc.setTextColor(isProfitCard ? primary[0] : dark[0], isProfitCard ? primary[1] : dark[1], isProfitCard ? primary[2] : dark[2]);
+      doc.text(doc.splitTextToSize(value, cardWidth - 4), x + 2.5, cardY + 10.5);
     });
 
     const detailHead = includeProfit
@@ -734,13 +785,13 @@ export default function Dashboard() {
       ];
 
     autoTable(doc, {
-      startY: 83,
+      startY: cardY + cardH + 4,
       head: detailHead,
       body: detailBody,
       theme: 'striped',
-      styles: { fontSize: 6.7, cellPadding: 1.35, overflow: 'linebreak', textColor: [71, 85, 105] },
+      styles: { fontSize: 6.7, cellPadding: 1.4, overflow: 'linebreak', textColor: [51, 65, 85] },
       headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
-      alternateRowStyles: { fillColor: [248, 250, 252] },
+      alternateRowStyles: { fillColor: [250, 250, 252] },
       columnStyles: {
         2: { cellWidth: 30 },
         5: { cellWidth: 25 },
@@ -754,7 +805,7 @@ export default function Dashboard() {
           12: { halign: 'right' }
         } : {})
       },
-      margin: { left: 10, right: 10, bottom: 24 },
+      margin: { left: 16, right: 14, bottom: 25 },
       didParseCell: (data: any) => {
         if (data.section !== 'body') return;
 
@@ -765,6 +816,18 @@ export default function Dashboard() {
           }
           if (data.cell.raw === 'Empréstimo concedido') {
             data.cell.styles.textColor = [29, 78, 216];
+            data.cell.styles.fontStyle = 'bold';
+          }
+        }
+
+        // Destaque para juros e lucro
+        if (includeProfit) {
+          if (data.column.index === 10) { // Juros
+            data.cell.styles.textColor = [22, 101, 52];
+            data.cell.styles.fontStyle = 'bold';
+          }
+          if (data.column.index === 12) { // Lucro
+            data.cell.styles.textColor = primary;
             data.cell.styles.fontStyle = 'bold';
           }
         }
@@ -845,8 +908,8 @@ export default function Dashboard() {
     const generatedBy = user?.name || 'Sistema';
     const currency = config.currency || companySettings?.currency || 'AOA';
     const formatMoney = (value: number) => formatCurrency(value, currency);
-    const primary = Array.isArray(config.primaryColor) ? config.primaryColor as [number, number, number] : [37, 99, 235] as [number, number, number];
-    const dark = [15, 23, 42] as [number, number, number];
+    const primary = resolveBrandPrimary(config.primaryColor);
+    const dark = resolveBrandDark(config.secondaryColor);
     const pageTitle = 'Relatório de investimentos disponibilizados em créditos';
 
     const totals = {
@@ -882,18 +945,29 @@ export default function Dashboard() {
     // 1. Aplica cabeçalho institucional completo com Logo, Nome da Empresa, NIF, Telefone e Email
     applyBranding(doc, config, generatedBy, false);
 
-    // 2. Título do Relatório posicionado abaixo do cabeçalho institucional
-    doc.setFillColor(dark[0], dark[1], dark[2]);
-    doc.rect(10, 40, pageWidth - 20, 18, 'F');
+    // 2. Título do Relatório com Design Executivo Limpo
+    const titleY = 49;
+
+    // Acento vertical em Laranja Primário (#F37021)
     doc.setFillColor(primary[0], primary[1], primary[2]);
-    doc.rect(10, 40, 4, 18, 'F');
+    doc.roundedRect(16, titleY, 3.5, 11, 0.8, 0.8, 'F');
+
+    // Título Principal em Carvão Escuro (#2B2D2F)
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(13);
-    doc.setTextColor(255, 255, 255);
-    doc.text(pageTitle, 18, 48);
+    doc.setFontSize(12.5);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(pageTitle.toUpperCase(), 22, titleY + 5);
+
+    // Subtítulo e Metadados
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    doc.text(`Período: ${investedDateRange.label}   |   Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}   |   Gerado por: ${generatedBy}`, 18, 54);
+    doc.setFontSize(7.2);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Período: ${investedDateRange.label}   |   Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}   |   Gerado por: ${generatedBy}`, 22, titleY + 10);
+
+    // Linha Divisória Fina
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.25);
+    doc.line(16, titleY + 13.5, pageWidth - 14, titleY + 13.5);
 
     const summaryCards = [
       ['Créditos', String(rows.length)],
@@ -903,25 +977,39 @@ export default function Dashboard() {
       ['Lucro previsto total', formatMoney(totals.expectedProfit)],
       ['Lucro a realizar', formatMoney(totals.remainingProfit)]
     ];
-    const cardGap = 3;
-    const cardWidth = (pageWidth - 20 - (summaryCards.length - 1) * cardGap) / summaryCards.length;
-    const cardY = 62;
+    const cardGap = 2.5;
+    const cardStartX = 16;
+    const totalCardsW = pageWidth - cardStartX - 14;
+    const cardWidth = (totalCardsW - (summaryCards.length - 1) * cardGap) / summaryCards.length;
+    const cardY = titleY + 16; // 65
+    const cardH = 14;
+
     summaryCards.forEach(([label, value], index) => {
-      const x = 10 + index * (cardWidth + cardGap);
-      doc.setFillColor(248, 250, 252);
-      doc.setDrawColor(226, 232, 240);
-      doc.roundedRect(x, cardY, cardWidth, 15, 2, 2, 'FD');
+      const x = cardStartX + index * (cardWidth + cardGap);
+      const isProfitCard = label.includes('Lucro');
+
+      doc.setFillColor(isProfitCard ? 255 : 255, isProfitCard ? 247 : 255, isProfitCard ? 237 : 255);
+      doc.setDrawColor(isProfitCard ? primary[0] : 226, isProfitCard ? primary[1] : 232, isProfitCard ? primary[2] : 240);
+      doc.setLineWidth(isProfitCard ? 0.5 : 0.3);
+      doc.roundedRect(x, cardY, cardWidth, cardH, 1.8, 1.8, 'FD');
+
+      // Top stripe em Laranja
+      doc.setFillColor(primary[0], primary[1], primary[2]);
+      doc.rect(x + 1.8, cardY, cardWidth - 3.6, 1.2, 'F');
+
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.5);
-      doc.setTextColor(100, 116, 139);
-      doc.text(label.toUpperCase(), x + 2, cardY + 4.5);
-      doc.setFontSize(7.2);
-      doc.setTextColor(15, 23, 42);
-      doc.text(doc.splitTextToSize(value, cardWidth - 4), x + 2, cardY + 10.5);
+      doc.setFontSize(6.2);
+      doc.setTextColor(isProfitCard ? primary[0] : 100, isProfitCard ? primary[1] : 116, isProfitCard ? primary[2] : 139);
+      doc.text(label.toUpperCase(), x + 2.5, cardY + 5.2);
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(cardWidth < 36 ? 6.5 : 7.2);
+      doc.setTextColor(isProfitCard ? primary[0] : dark[0], isProfitCard ? primary[1] : dark[1], isProfitCard ? primary[2] : dark[2]);
+      doc.text(doc.splitTextToSize(value, cardWidth - 4), x + 2.5, cardY + 10.5);
     });
 
     autoTable(doc, {
-      startY: 82,
+      startY: cardY + cardH + 4,
       head: [['Mês', 'Créditos', 'Total investido', 'Lucro realizado no período', 'Lucro previsto total']],
       body: monthlyRows.length > 0
         ? monthlyRows.map(row => [
@@ -932,15 +1020,16 @@ export default function Dashboard() {
           formatMoney(row.expectedProfit)
         ])
         : [['-', '0', formatMoney(0), formatMoney(0), formatMoney(0)]],
-      theme: 'grid',
-      styles: { fontSize: 7, cellPadding: 1.5 },
-      headStyles: { fillColor: [30, 64, 175], textColor: [255, 255, 255] },
+      theme: 'striped',
+      styles: { fontSize: 7, cellPadding: 1.5, textColor: [51, 65, 85] },
+      headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+      alternateRowStyles: { fillColor: [250, 250, 252] },
       columnStyles: {
         2: { halign: 'right' },
         3: { halign: 'right' },
         4: { halign: 'right' }
       },
-      margin: { left: 10, right: 10, bottom: 24 },
+      margin: { left: 16, right: 14, bottom: 25 },
       didDrawPage: () => applyBranding(doc, config, generatedBy, true)
     });
 
@@ -994,7 +1083,7 @@ export default function Dashboard() {
         10: { halign: 'right' },
         13: { halign: 'center' }
       },
-      margin: { left: 10, right: 10, bottom: 24 },
+      margin: { left: 16, right: 14, bottom: 25 },
       didParseCell: (data: any) => {
         if (data.section !== 'body' || data.column.index !== 13) return;
         const statusInfo = Object.values(creditStatusLabels).find(item => item.label === data.cell.raw);
@@ -1013,52 +1102,248 @@ export default function Dashboard() {
     doc.save(`${cleanName}.pdf`);
   };
 
-  // 2. Tendências de Fluxo de Caixa (Últimos 6 Meses)
+  // Constantes de meses para o Fluxo de Caixa
+  const CF_MONTH_SHORT_NAMES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+  const CF_MONTH_FULL_NAMES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+  // 2. Tendências de Fluxo de Caixa (Semana, Mês e Manter de 1 Ano)
   const getCashFlowData = () => {
-    const months = [];
-    const today = new Date();
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
-      months.push(d);
+    if (cashFlowPeriodType === 'semana') {
+      // Agrupamento por Semanas (Últimas N semanas)
+      const weeks: any[] = [];
+      const now = new Date();
+      for (let i = cashFlowWeekCount - 1; i >= 0; i--) {
+        const endDay = subDays(now, i * 7);
+        const startDay = subDays(endDay, 6);
+        startDay.setHours(0, 0, 0, 0);
+        endDay.setHours(23, 59, 59, 999);
+
+        const weekPayments = payments.filter(p => {
+          if (p.status === 'cancelled' || p.deletedAt) return false;
+          if (!isValidDate(p.paymentDate)) return false;
+          const pDate = new Date(p.paymentDate);
+          return pDate >= startDay && pDate <= endDay;
+        });
+
+        const weekCredits = credits.filter(c => {
+          if (c.deletedAt) return false;
+          if (!isValidDate(c.startDate)) return false;
+          const cDate = new Date(c.startDate);
+          return cDate >= startDay && cDate <= endDay;
+        });
+
+        const entry = weekPayments.reduce((acc, p) => acc + p.amount, 0);
+        const output = weekCredits.reduce((acc, c) => acc + c.principalAmount, 0);
+        const count = weekCredits.length;
+        const avgTicket = count > 0 ? output / count : 0;
+
+        weeks.push({
+          name: `Sem ${cashFlowWeekCount - i} (${format(startDay, 'dd/MM')})`,
+          shortName: `Sem ${cashFlowWeekCount - i}`,
+          fullPeriod: `${format(startDay, 'dd/MM/yyyy')} a ${format(endDay, 'dd/MM/yyyy')}`,
+          Entradas: entry,
+          Saidas: output,
+          TicketMedio: avgTicket,
+          payments: weekPayments,
+          credits: weekCredits,
+        });
+      }
+      return weeks;
     }
-    return months.map(date => {
-      const monthStr = date.toLocaleString('default', { month: 'short' });
-      const monthPayments = payments.filter(p => {
-        if (p.status === 'cancelled' || p.deletedAt) return false;
-        const credit = credits.find(c => c.id === p.creditId);
-        if (credit?.targetMonthId) {
-          const [yearStr, monthStr] = credit.targetMonthId.split('-');
-          return parseInt(yearStr) === date.getFullYear() && (parseInt(monthStr) - 1) === date.getMonth();
-        }
-        if (!isValidDate(p.paymentDate)) return false;
-        const pDate = new Date(p.paymentDate);
-        return pDate.getMonth() === date.getMonth() && pDate.getFullYear() === date.getFullYear();
+
+    if (cashFlowPeriodType === 'ano') {
+      // Agrupamento Anual (1 Ano Completo - 12 Meses)
+      const targetYear = cashFlowYear;
+      return CF_MONTH_SHORT_NAMES.map((mName, mIdx) => {
+        const monthPayments = payments.filter(p => {
+          if (p.status === 'cancelled' || p.deletedAt) return false;
+          const credit = credits.find(c => c.id === p.creditId);
+          if (credit?.targetMonthId) {
+            const [yStr, mStr] = credit.targetMonthId.split('-');
+            return parseInt(yStr) === targetYear && (parseInt(mStr) - 1) === mIdx;
+          }
+          if (!isValidDate(p.paymentDate)) return false;
+          const pDate = new Date(p.paymentDate);
+          return pDate.getFullYear() === targetYear && pDate.getMonth() === mIdx;
+        });
+
+        const monthCredits = credits.filter(c => {
+          if (c.deletedAt) return false;
+          if (c.targetMonthId) {
+            const [yStr, mStr] = c.targetMonthId.split('-');
+            return parseInt(yStr) === targetYear && (parseInt(mStr) - 1) === mIdx;
+          }
+          if (!isValidDate(c.startDate)) return false;
+          const cDate = new Date(c.startDate);
+          return cDate.getFullYear() === targetYear && cDate.getMonth() === mIdx;
+        });
+
+        const entry = monthPayments.reduce((acc, p) => acc + p.amount, 0);
+        const output = monthCredits.reduce((acc, c) => acc + c.principalAmount, 0);
+        const count = monthCredits.length;
+        const avgTicket = count > 0 ? output / count : 0;
+
+        return {
+          name: mName,
+          shortName: mName,
+          fullPeriod: `${CF_MONTH_FULL_NAMES[mIdx]} de ${targetYear}`,
+          Entradas: entry,
+          Saidas: output,
+          TicketMedio: avgTicket,
+          payments: monthPayments,
+          credits: monthCredits,
+        };
       });
-      const monthCredits = credits.filter(c => {
-        if (c.deletedAt) return false;
-        if (c.targetMonthId) {
-          const [yearStr, monthStr] = c.targetMonthId.split('-');
-          return parseInt(yearStr) === date.getFullYear() && (parseInt(monthStr) - 1) === date.getMonth();
-        }
-        if (!isValidDate(c.startDate)) return false;
-        const cDate = new Date(c.startDate);
-        return cDate.getMonth() === date.getMonth() && cDate.getFullYear() === date.getFullYear();
+    }
+
+    // Agrupamento por Mês
+    if (cashFlowMonthSelection === 'all') {
+      // Últimos 6 meses
+      const months: any[] = [];
+      const today = new Date();
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        months.push(d);
+      }
+      return months.map(date => {
+        const mIdx = date.getMonth();
+        const mYear = date.getFullYear();
+        const monthPayments = payments.filter(p => {
+          if (p.status === 'cancelled' || p.deletedAt) return false;
+          const credit = credits.find(c => c.id === p.creditId);
+          if (credit?.targetMonthId) {
+            const [yStr, mStr] = credit.targetMonthId.split('-');
+            return parseInt(yStr) === mYear && (parseInt(mStr) - 1) === mIdx;
+          }
+          if (!isValidDate(p.paymentDate)) return false;
+          const pDate = new Date(p.paymentDate);
+          return pDate.getMonth() === mIdx && pDate.getFullYear() === mYear;
+        });
+        const monthCredits = credits.filter(c => {
+          if (c.deletedAt) return false;
+          if (c.targetMonthId) {
+            const [yStr, mStr] = c.targetMonthId.split('-');
+            return parseInt(yStr) === mYear && (parseInt(mStr) - 1) === mIdx;
+          }
+          if (!isValidDate(c.startDate)) return false;
+          const cDate = new Date(c.startDate);
+          return cDate.getMonth() === mIdx && cDate.getFullYear() === mYear;
+        });
+
+        const entry = monthPayments.reduce((acc, p) => acc + p.amount, 0);
+        const output = monthCredits.reduce((acc, c) => acc + c.principalAmount, 0);
+        const count = monthCredits.length;
+        const avgTicket = count > 0 ? output / count : 0;
+
+        return {
+          name: CF_MONTH_SHORT_NAMES[mIdx],
+          shortName: CF_MONTH_SHORT_NAMES[mIdx],
+          fullPeriod: `${CF_MONTH_FULL_NAMES[mIdx]} de ${mYear}`,
+          Entradas: entry,
+          Saidas: output,
+          TicketMedio: avgTicket,
+          payments: monthPayments,
+          credits: monthCredits,
+        };
       });
+    } else if (cashFlowMonthSelection === 'last12') {
+      // Últimos 12 meses
+      const months: any[] = [];
+      const today = new Date();
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        months.push(d);
+      }
+      return months.map(date => {
+        const mIdx = date.getMonth();
+        const mYear = date.getFullYear();
+        const monthPayments = payments.filter(p => {
+          if (p.status === 'cancelled' || p.deletedAt) return false;
+          const credit = credits.find(c => c.id === p.creditId);
+          if (credit?.targetMonthId) {
+            const [yStr, mStr] = credit.targetMonthId.split('-');
+            return parseInt(yStr) === mYear && (parseInt(mStr) - 1) === mIdx;
+          }
+          if (!isValidDate(p.paymentDate)) return false;
+          const pDate = new Date(p.paymentDate);
+          return pDate.getMonth() === mIdx && pDate.getFullYear() === mYear;
+        });
+        const monthCredits = credits.filter(c => {
+          if (c.deletedAt) return false;
+          if (c.targetMonthId) {
+            const [yStr, mStr] = c.targetMonthId.split('-');
+            return parseInt(yStr) === mYear && (parseInt(mStr) - 1) === mIdx;
+          }
+          if (!isValidDate(c.startDate)) return false;
+          const cDate = new Date(c.startDate);
+          return cDate.getMonth() === mIdx && cDate.getFullYear() === mYear;
+        });
 
-      const entry = monthPayments.reduce((acc, p) => acc + p.amount, 0);
-      const output = monthCredits.reduce((acc, c) => acc + c.principalAmount, 0);
+        const entry = monthPayments.reduce((acc, p) => acc + p.amount, 0);
+        const output = monthCredits.reduce((acc, c) => acc + c.principalAmount, 0);
+        const count = monthCredits.length;
+        const avgTicket = count > 0 ? output / count : 0;
 
-      // Cálculo do Ticket Médio
-      const count = monthCredits.length;
-      const avgTicket = count > 0 ? output / count : 0;
+        return {
+          name: `${CF_MONTH_SHORT_NAMES[mIdx]}/${String(mYear).slice(-2)}`,
+          shortName: CF_MONTH_SHORT_NAMES[mIdx],
+          fullPeriod: `${CF_MONTH_FULL_NAMES[mIdx]} de ${mYear}`,
+          Entradas: entry,
+          Saidas: output,
+          TicketMedio: avgTicket,
+          payments: monthPayments,
+          credits: monthCredits,
+        };
+      });
+    } else {
+      // Mês específico selecionado dividido em períodos internos
+      const mIdx = parseInt(cashFlowMonthSelection);
+      const targetYear = cashFlowYear;
+      const daysInMonth = new Date(targetYear, mIdx + 1, 0).getDate();
 
-      return {
-        name: monthStr,
-        Entradas: entry,
-        Saidas: output,
-        TicketMedio: avgTicket,
-      };
-    });
+      const segments = [
+        { label: '01-07', start: 1, end: 7 },
+        { label: '08-14', start: 8, end: 14 },
+        { label: '15-21', start: 15, end: 21 },
+        { label: '22-28', start: 22, end: 28 },
+        { label: `29-${daysInMonth}`, start: 29, end: daysInMonth },
+      ];
+
+      return segments.map(seg => {
+        const segStart = new Date(targetYear, mIdx, seg.start, 0, 0, 0);
+        const segEnd = new Date(targetYear, mIdx, seg.end, 23, 59, 59);
+
+        const segPayments = payments.filter(p => {
+          if (p.status === 'cancelled' || p.deletedAt) return false;
+          if (!isValidDate(p.paymentDate)) return false;
+          const pDate = new Date(p.paymentDate);
+          return pDate >= segStart && pDate <= segEnd;
+        });
+
+        const segCredits = credits.filter(c => {
+          if (c.deletedAt) return false;
+          if (!isValidDate(c.startDate)) return false;
+          const cDate = new Date(c.startDate);
+          return cDate >= segStart && cDate <= segEnd;
+        });
+
+        const entry = segPayments.reduce((acc, p) => acc + p.amount, 0);
+        const output = segCredits.reduce((acc, c) => acc + c.principalAmount, 0);
+        const count = segCredits.length;
+        const avgTicket = count > 0 ? output / count : 0;
+
+        return {
+          name: `${seg.label} ${CF_MONTH_SHORT_NAMES[mIdx]}`,
+          shortName: seg.label,
+          fullPeriod: `${seg.label} de ${CF_MONTH_FULL_NAMES[mIdx]} de ${targetYear}`,
+          Entradas: entry,
+          Saidas: output,
+          TicketMedio: avgTicket,
+          payments: segPayments,
+          credits: segCredits,
+        };
+      });
+    }
   };
   const cashFlowData = getCashFlowData();
 
@@ -1074,6 +1359,23 @@ export default function Dashboard() {
       mediaMensal
     };
   }, [cashFlowData]);
+
+  const cashFlowDescription = useMemo(() => {
+    if (cashFlowPeriodType === 'semana') {
+      return `Entradas vs Saídas nas últimas ${cashFlowWeekCount} semanas`;
+    }
+    if (cashFlowPeriodType === 'ano') {
+      return `Entradas vs Saídas nos 12 meses de ${cashFlowYear} (1 Ano Completo)`;
+    }
+    if (cashFlowMonthSelection === 'all') {
+      return 'Entradas vs Saídas nos últimos 6 meses';
+    }
+    if (cashFlowMonthSelection === 'last12') {
+      return 'Entradas vs Saídas nos últimos 12 meses';
+    }
+    const mIdx = parseInt(cashFlowMonthSelection);
+    return `Entradas vs Saídas detalhadas de ${CF_MONTH_FULL_NAMES[mIdx]} de ${cashFlowYear}`;
+  }, [cashFlowPeriodType, cashFlowWeekCount, cashFlowYear, cashFlowMonthSelection]);
 
   const cashFlowDetailItems = [
     {
@@ -1098,13 +1400,198 @@ export default function Dashboard() {
       textColor: cashFlowTotals.saldoLiquido >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'
     },
     {
-      label: 'Média Mensal Entradas',
+      label: cashFlowPeriodType === 'semana' ? 'Média Semanal' : cashFlowPeriodType === 'ano' ? 'Média Anual (Mês)' : 'Média por Intervalo',
       value: cashFlowTotals.mediaMensal,
-      description: 'Volume médio mensal de entrada de caixa',
+      description: 'Volume médio periódico de entrada de caixa',
       color: 'bg-blue-500',
       textColor: 'text-blue-600 dark:text-blue-400'
     }
   ];
+
+  // Exportação em PDF do Fluxo de Caixa
+  const exportCashFlowPDF = () => {
+    try {
+      const config = getCompanySettings(companySettings);
+      const generatedBy = user?.name || 'Sistema';
+      const currency = config.currency || companySettings?.currency || 'AOA';
+      const formatMoney = (value: number) => formatCurrency(value, currency);
+      const primary = resolveBrandPrimary(config.primaryColor);
+      const dark = resolveBrandDark(config.secondaryColor);
+
+      const doc = new jsPDF({ orientation: 'portrait' });
+      const pageWidth = doc.internal.pageSize.getWidth();
+
+      applyBranding(doc, config, generatedBy, false);
+
+      const titleY = 48;
+      // Marcador visual laranja institucional
+      doc.setFillColor(primary[0], primary[1], primary[2]);
+      doc.roundedRect(16, titleY, 3.5, 11, 0.8, 0.8, 'F');
+
+      // Título
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(13);
+      doc.setTextColor(dark[0], dark[1], dark[2]);
+      doc.text('RELATÓRIO DE FLUXO DE CAIXA: ENTRADAS VS SAÍDAS', 22, titleY + 5);
+
+      // Subtítulo e período
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8.5);
+      doc.setTextColor(100, 116, 139);
+      doc.text(`Modalidade: ${cashFlowDescription}  |  Emissão: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 22, titleY + 9.5);
+
+      // Caixas de Resumo KPI no PDF
+      const kpiY = titleY + 14;
+      const cardWidth = (pageWidth - 32 - 9) / 4;
+      const cardHeight = 16;
+
+      const kpiItems = [
+        { label: 'TOTAL DE ENTRADAS', value: formatMoney(cashFlowTotals.totalEntradas), color: [34, 197, 94] },
+        { label: 'TOTAL DE SAÍDAS', value: formatMoney(cashFlowTotals.totalSaidas), color: [239, 68, 68] },
+        { label: 'SALDO OPERACIONAL', value: formatMoney(cashFlowTotals.saldoLiquido), color: cashFlowTotals.saldoLiquido >= 0 ? primary : [245, 158, 11] },
+        { label: 'MÉDIA DO PERÍODO', value: formatMoney(cashFlowTotals.mediaMensal), color: [14, 165, 233] },
+      ];
+
+      kpiItems.forEach((kpi, idx) => {
+        const x = 16 + idx * (cardWidth + 3);
+        doc.setFillColor(248, 250, 252);
+        doc.setDrawColor(226, 232, 240);
+        doc.roundedRect(x, kpiY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(6.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(kpi.label, x + 3.5, kpiY + 5);
+
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
+        doc.text(kpi.value, x + 3.5, kpiY + 12);
+      });
+
+      // Tabela 1: Balanço Consolidado do Período
+      autoTable(doc, {
+        startY: kpiY + cardHeight + 6,
+        head: [['Período / Intervalo', 'Entradas Arrecadadas', 'Saídas (Empréstimos)', 'Saldo Líquido', 'Ticket Médio']],
+        body: [
+          ...cashFlowData.map(item => [
+            item.fullPeriod || item.name,
+            formatMoney(item.Entradas),
+            formatMoney(item.Saidas),
+            formatMoney(item.Entradas - item.Saidas),
+            formatMoney(item.TicketMedio)
+          ]),
+          [
+            'TOTAL GERAL CONSOLIDADO',
+            formatMoney(cashFlowTotals.totalEntradas),
+            formatMoney(cashFlowTotals.totalSaidas),
+            formatMoney(cashFlowTotals.saldoLiquido),
+            '-'
+          ]
+        ],
+        theme: 'striped',
+        styles: { fontSize: 7.5, cellPadding: 2, textColor: [51, 65, 85] },
+        headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+        alternateRowStyles: { fillColor: [248, 250, 252] },
+        columnStyles: {
+          1: { halign: 'right' },
+          2: { halign: 'right' },
+          3: { halign: 'right' },
+          4: { halign: 'right' }
+        },
+        didParseCell: (data: any) => {
+          if (data.row.index === cashFlowData.length) {
+            data.cell.styles.fontStyle = 'bold';
+            data.cell.styles.fillColor = [241, 245, 249];
+            if (data.column.index === 1) data.cell.styles.textColor = [34, 197, 94];
+            if (data.column.index === 2) data.cell.styles.textColor = [239, 68, 68];
+          }
+        },
+        margin: { left: 16, right: 16, bottom: 25 },
+        didDrawPage: () => applyBranding(doc, config, generatedBy, true)
+      });
+
+      // Tabela 2: Movimentações do Período
+      const allMovements: Array<{ date: string; type: 'Entrada' | 'Saída'; desc: string; ref: string; amount: number; method: string }> = [];
+      cashFlowData.forEach(item => {
+        (item.payments || []).forEach((p: any) => {
+          const client = clients.find(c => c.id === p.clientId) || credits.find(c => c.id === p.creditId);
+          allMovements.push({
+            date: p.paymentDate,
+            type: 'Entrada',
+            desc: (client as any)?.name || (client as any)?.clientName || 'Pagamento de Prestação',
+            ref: p.receiptNumber || p.id?.substring(0, 8) || 'Recibo',
+            amount: p.amount,
+            method: p.paymentMethod || 'Transferência'
+          });
+        });
+        (item.credits || []).forEach((c: any) => {
+          allMovements.push({
+            date: c.startDate,
+            type: 'Saída',
+            desc: c.clientName || 'Empréstimo Concedido',
+            ref: c.id?.substring(0, 8) || 'Contrato',
+            amount: c.principalAmount,
+            method: c.receiveMethod || 'Transferência'
+          });
+        });
+      });
+
+      allMovements.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      if (allMovements.length > 0) {
+        autoTable(doc, {
+          startY: ((doc as any).lastAutoTable?.finalY || 100) + 8,
+          head: [['Data', 'Tipo', 'Beneficiário / Descrição', 'Referência', 'Método', 'Montante']],
+          body: allMovements.slice(0, 40).map(m => [
+            isValidDate(m.date) ? format(new Date(m.date), 'dd/MM/yyyy') : '-',
+            m.type,
+            m.desc,
+            m.ref,
+            m.method,
+            formatMoney(m.amount)
+          ]),
+          theme: 'striped',
+          styles: { fontSize: 7, cellPadding: 1.8, textColor: [51, 65, 85] },
+          headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+          alternateRowStyles: { fillColor: [248, 250, 252] },
+          columnStyles: {
+            0: { cellWidth: 20 },
+            1: { cellWidth: 18, halign: 'center' },
+            5: { halign: 'right' }
+          },
+          didParseCell: (data: any) => {
+            if (data.column.index === 1 && data.section === 'body') {
+              if (data.cell.raw === 'Entrada') {
+                data.cell.styles.textColor = [34, 197, 94];
+                data.cell.styles.fontStyle = 'bold';
+              } else {
+                data.cell.styles.textColor = [239, 68, 68];
+                data.cell.styles.fontStyle = 'bold';
+              }
+            }
+          },
+          margin: { left: 16, right: 16, bottom: 25 },
+          didDrawPage: () => applyBranding(doc, config, generatedBy, true)
+        });
+      }
+
+      const cleanName = `Relatorio_Fluxo_de_Caixa_${cashFlowPeriodType}_${cashFlowYear}`;
+      doc.save(`${cleanName}.pdf`);
+
+      toast({
+        title: "Relatório de Fluxo de Caixa",
+        description: "Documento PDF descarregado com sucesso.",
+      });
+    } catch (err) {
+      console.error("Erro ao gerar PDF do fluxo de caixa:", err);
+      toast({
+        title: "Erro ao gerar PDF",
+        description: "Não foi possível gerar o relatório de fluxo de caixa.",
+        variant: "destructive"
+      });
+    }
+  };
 
   // 3. Distribuição de Risco (Pie)
   const getRiskData = () => {
@@ -1120,36 +1607,93 @@ export default function Dashboard() {
   const riskData = getRiskData();
 
   // 4. Revenue Breakdown (Donut) & Payment Methods
+  const capitalPct = totalCashTotal > 0 ? (totalRecoveredCapital / totalCashTotal) * 100 : 0;
+  const jurosPct = totalCashTotal > 0 ? (totalReceivedInterest / totalCashTotal) * 100 : 0;
+  const multasPct = totalCashTotal > 0 ? (totalReceivedLateInterest / totalCashTotal) * 100 : 0;
+  const profitMarginRate = totalCashTotal > 0 ? ((totalReceivedInterest + totalReceivedLateInterest) / totalCashTotal) * 100 : 0;
+
   const revenueBreakdown = [
-    { name: 'Capital', value: totalRecoveredCapital, fill: '#3b82f6' },
-    { name: 'Juros', value: totalReceivedInterest, fill: '#22c55e' },
-    { name: 'Multas', value: totalReceivedLateInterest, fill: '#f97316' },
+    { name: 'Capital', value: totalRecoveredCapital, fill: '#3b82f6', percent: capitalPct },
+    { name: 'Juros', value: totalReceivedInterest, fill: '#10b981', percent: jurosPct },
+    { name: 'Multas', value: totalReceivedLateInterest, fill: '#f59e0b', percent: multasPct },
   ].filter(i => i.value > 0);
+
+  const getMonthlyRevenueBreakdown = () => {
+    const months = [];
+    const today = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      months.push(d);
+    }
+    return months.map(date => {
+      const monthStr = date.toLocaleString('default', { month: 'short' });
+      const monthPayments = payments.filter(p => {
+        if (p.status === 'cancelled' || p.deletedAt) return false;
+        const credit = credits.find(c => c.id === p.creditId);
+        if (credit?.targetMonthId) {
+          const [yearStr, monthStr] = credit.targetMonthId.split('-');
+          return parseInt(yearStr) === date.getFullYear() && (parseInt(monthStr) - 1) === date.getMonth();
+        }
+        if (!isValidDate(p.paymentDate)) return false;
+        const pDate = new Date(p.paymentDate);
+        return pDate.getMonth() === date.getMonth() && pDate.getFullYear() === date.getFullYear();
+      });
+
+      const capital = monthPayments.reduce((acc, p) => acc + Number(p.allocatedToPrincipal || 0), 0);
+      const juros = monthPayments.reduce((acc, p) => acc + Number(p.allocatedToInterest || 0), 0);
+      const multas = monthPayments.reduce((acc, p) => acc + Number(p.allocatedToLateInterest || 0), 0);
+
+      return {
+        name: monthStr,
+        Capital: capital,
+        Juros: juros,
+        Multas: multas,
+        Total: capital + juros + multas
+      };
+    });
+  };
+  const monthlyRevenueBreakdown = useMemo(() => getMonthlyRevenueBreakdown(), [payments, credits, isValidDate]);
 
   const revenueDetailItems = [
     {
       label: 'Capital recuperado',
       value: totalRecoveredCapital,
+      percentage: `${capitalPct.toFixed(1)}%`,
+      barWidth: capitalPct,
+      barColor: 'bg-blue-500',
       description: 'Parte dos pagamentos que voltou ao caixa',
-      color: 'bg-blue-500'
+      color: 'bg-blue-500',
+      textColor: 'text-blue-600 dark:text-blue-400'
     },
     {
       label: 'Juros recebidos',
       value: totalReceivedInterest,
+      percentage: `${jurosPct.toFixed(1)}%`,
+      barWidth: jurosPct,
+      barColor: 'bg-emerald-500',
       description: 'Rendimento direto dos contratos',
-      color: 'bg-green-500'
+      color: 'bg-emerald-500',
+      textColor: 'text-emerald-600 dark:text-emerald-400'
     },
     {
       label: 'Multas recebidas',
       value: totalReceivedLateInterest,
+      percentage: `${multasPct.toFixed(1)}%`,
+      barWidth: multasPct,
+      barColor: 'bg-amber-500',
       description: 'Juros de mora e penalizações recebidas',
-      color: 'bg-orange-500'
+      color: 'bg-amber-500',
+      textColor: 'text-amber-600 dark:text-amber-400'
     },
     {
       label: 'Investido em créditos',
       value: totalDisbursed,
-      description: `${activeCredits.length} ${activeCredits.length === 1 ? 'crédito aberto' : 'créditos abertos'} · retorno ${investmentReturnRate.toFixed(1)}%`,
-      color: 'bg-slate-900'
+      percentage: `${investmentReturnRate.toFixed(1)}% ret.`,
+      barWidth: Math.min(100, investmentReturnRate),
+      barColor: 'bg-indigo-500',
+      description: `${activeCredits.length} ${activeCredits.length === 1 ? 'crédito aberto' : 'créditos abertos'} · retorno médio`,
+      color: 'bg-indigo-600',
+      textColor: 'text-indigo-600 dark:text-indigo-400'
     }
   ];
 
@@ -1639,25 +2183,141 @@ export default function Dashboard() {
 
         {/* Gráfico de Área de Fluxo de Caixa */}
         <Card className="col-span-4 card-elevated flex flex-col justify-between h-full">
-          <CardHeader className="pb-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <CardTitle className="flex items-center gap-2 text-lg">
-                <div className="p-1.5 bg-primary/10 rounded-lg text-primary">
-                  <TrendingUp className="h-5 w-5" />
-                </div>
-                Fluxo de Caixa
-              </CardTitle>
-              <CardDescription>Entradas vs Saídas nos últimos 6 meses</CardDescription>
+          <CardHeader className="pb-2 flex flex-col gap-3">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <div className="p-1.5 bg-primary/10 rounded-lg text-primary">
+                    <TrendingUp className="h-5 w-5" />
+                  </div>
+                  Fluxo de Caixa
+                </CardTitle>
+                <CardDescription>{cashFlowDescription}</CardDescription>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={exportCashFlowPDF}
+                  className="h-8 gap-1.5 text-xs font-bold text-primary hover:text-primary hover:bg-primary/10 border-primary/25 shadow-xs"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  Baixar PDF
+                </Button>
+                <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
+                  <ArrowUpRight className="h-3.5 w-3.5" />
+                  {formatCurrency(cashFlowTotals.totalEntradas)}
+                </span>
+                <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800">
+                  <ArrowDownRight className="h-3.5 w-3.5" />
+                  {formatCurrency(cashFlowTotals.totalSaidas)}
+                </span>
+              </div>
             </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
-                <ArrowUpRight className="h-3.5 w-3.5" />
-                {formatCurrency(cashFlowTotals.totalEntradas)}
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800">
-                <ArrowDownRight className="h-3.5 w-3.5" />
-                {formatCurrency(cashFlowTotals.totalSaidas)}
-              </span>
+
+            {/* Barra de Filtros: Por Semana | Por Mês | Manter de 1 Ano */}
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-border/40">
+              <div className="inline-flex items-center rounded-lg bg-muted/70 p-1 border">
+                <button
+                  type="button"
+                  onClick={() => setCashFlowPeriodType('semana')}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all",
+                    cashFlowPeriodType === 'semana'
+                      ? "bg-background text-foreground shadow-xs font-bold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Por Semana
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCashFlowPeriodType('mes')}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all",
+                    cashFlowPeriodType === 'mes'
+                      ? "bg-background text-foreground shadow-xs font-bold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  Por Mês
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCashFlowPeriodType('ano')}
+                  className={cn(
+                    "px-2.5 py-1 text-xs font-semibold rounded-md transition-all",
+                    cashFlowPeriodType === 'ano'
+                      ? "bg-background text-foreground shadow-xs font-bold"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  1 Ano (Anual)
+                </button>
+              </div>
+
+              {/* Sub-seletores contextuais */}
+              <div className="flex items-center gap-2">
+                {cashFlowPeriodType === 'semana' && (
+                  <Select value={String(cashFlowWeekCount)} onValueChange={(val) => setCashFlowWeekCount(Number(val))}>
+                    <SelectTrigger className="h-8 text-xs w-[145px]">
+                      <SelectValue placeholder="Intervalo" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="4">Últimas 4 Semanas</SelectItem>
+                      <SelectItem value="8">Últimas 8 Semanas</SelectItem>
+                      <SelectItem value="12">Últimas 12 Semanas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+
+                {cashFlowPeriodType === 'mes' && (
+                  <div className="flex items-center gap-1.5">
+                    <Select value={cashFlowMonthSelection} onValueChange={setCashFlowMonthSelection}>
+                      <SelectTrigger className="h-8 text-xs w-[135px]">
+                        <SelectValue placeholder="Visualização" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Últimos 6 Meses</SelectItem>
+                        <SelectItem value="last12">Últimos 12 Meses</SelectItem>
+                        {CF_MONTH_FULL_NAMES.map((name, idx) => (
+                          <SelectItem key={idx} value={String(idx)}>
+                            {name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Select value={String(cashFlowYear)} onValueChange={(val) => setCashFlowYear(Number(val))}>
+                      <SelectTrigger className="h-8 text-xs w-[85px]">
+                        <SelectValue placeholder="Ano" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[2026, 2025, 2024, 2023].map((y) => (
+                          <SelectItem key={y} value={String(y)}>
+                            {y}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+
+                {cashFlowPeriodType === 'ano' && (
+                  <Select value={String(cashFlowYear)} onValueChange={(val) => setCashFlowYear(Number(val))}>
+                    <SelectTrigger className="h-8 text-xs w-[120px]">
+                      <SelectValue placeholder="Ano" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {[2026, 2025, 2024, 2023].map((y) => (
+                        <SelectItem key={y} value={String(y)}>
+                          Ano {y} (12M)
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
             </div>
           </CardHeader>
 
@@ -1713,54 +2373,339 @@ export default function Dashboard() {
           </CardContent>
         </Card>
 
-        {/* Donut de Detalhamento de Receita */}
+        {/* Donut de Detalhamento de Receita & Evolução da Composição */}
         <Card className="col-span-3 card-elevated flex flex-col justify-between h-full">
-          <CardHeader className="pb-0">
-            <CardTitle className="text-lg">Composição da Receita</CardTitle>
-            <CardDescription>Distribuição dos recebimentos, juros e investimentos</CardDescription>
-          </CardHeader>
+          <CardHeader className="pb-2">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+              <div>
+                <CardTitle className="text-base font-bold flex items-center gap-2">
+                  <div className="p-1.5 bg-primary/10 rounded-lg text-primary">
+                    <PieIcon className="h-4 w-4" />
+                  </div>
+                  Composição da Receita
+                </CardTitle>
+                <CardDescription className="text-xs">Distribuição dos recebimentos, juros e investimentos</CardDescription>
+              </div>
 
-          <CardContent className="flex flex-col gap-4 pt-4 flex-1 justify-between">
-            <div className="relative h-[250px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={revenueBreakdown}
-                    cx="50%"
-                    cy="45%"
-                    innerRadius={78}
-                    outerRadius={102}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {revenueBreakdown.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.fill} strokeWidth={0} />
-                    ))}
-                  </Pie>
-                  <Tooltip formatter={(val: number) => formatCurrency(val)} />
-                  <Legend verticalAlign="bottom" height={32} iconType="circle" />
-                </PieChart>
-              </ResponsiveContainer>
-
-              {/* Texto Central */}
-              <div className="absolute top-[45%] left-1/2 transform -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none w-[160px]">
-                <span className="text-xl font-black block leading-tight truncate px-2 text-foreground" title={formatCurrency(totalCashTotal)}>
-                  {formatCurrency(totalCashTotal).replace(',00', '')}
-                </span>
-                <span className="text-[10px] text-muted-foreground font-bold uppercase tracking-[0.15em] opacity-80">Total Recebido</span>
+              {/* Seletor de Modo de Visualização do Gráfico */}
+              <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800 p-0.5 rounded-lg border border-slate-200/60 dark:border-slate-700/60 self-start sm:self-auto">
+                <button
+                  type="button"
+                  onClick={() => setRevenueChartTab('donut')}
+                  className={cn(
+                    "px-2.5 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer",
+                    revenueChartTab === 'donut'
+                      ? "bg-white dark:bg-slate-900 text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Gráfico circular tipo donut"
+                >
+                  Circular
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRevenueChartTab('monthly')}
+                  className={cn(
+                    "px-2.5 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer",
+                    revenueChartTab === 'monthly'
+                      ? "bg-white dark:bg-slate-900 text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Evolução mensal em barras empilhadas"
+                >
+                  Evolução
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRevenueChartTab('both')}
+                  className={cn(
+                    "px-2.5 py-1 text-[11px] font-bold rounded-md transition-all cursor-pointer",
+                    revenueChartTab === 'both'
+                      ? "bg-white dark:bg-slate-900 text-foreground shadow-xs"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                  title="Ver gráfico circular e gráfico mensal juntos"
+                >
+                  Completo
+                </button>
               </div>
             </div>
 
+            {/* Badges de Destaque Financeiro */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2">
+              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800">
+                <span className="h-1.5 w-1.5 rounded-full bg-blue-500" />
+                Capital: {capitalPct.toFixed(1)}%
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                Juros: {jurosPct.toFixed(1)}%
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
+                <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                Multas: {multasPct.toFixed(1)}%
+              </span>
+              <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-black bg-purple-50 text-purple-700 border border-purple-200 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-800 ml-auto">
+                Margem: +{profitMarginRate.toFixed(1)}%
+              </span>
+            </div>
+          </CardHeader>
+
+          <CardContent className="flex flex-col gap-4 pt-3 flex-1 justify-between">
+            {/* Gráfico 1: Donut Circular Perfeito e Completo (Sem cortes no topo e perfeitamente centralizado) */}
+            {(revenueChartTab === 'donut' || revenueChartTab === 'both') && (
+              <div className="flex flex-col items-center justify-center w-full">
+                <div className="relative h-[225px] w-full flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart margin={{ top: 12, right: 12, bottom: 12, left: 12 }}>
+                      {/* Anel de Guia e Moldura de Fundo - 100% visível sem cortes */}
+                      <Pie
+                        data={[{ value: 100 }]}
+                        dataKey="value"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={66}
+                        outerRadius={92}
+                        fill="transparent"
+                        stroke="#e2e8f0"
+                        strokeWidth={1.5}
+                        strokeDasharray="4 4"
+                        className="dark:stroke-slate-800"
+                        isAnimationActive={false}
+                        legendType="none"
+                      />
+                      <Pie
+                        data={[{ value: 100 }]}
+                        dataKey="value"
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={68}
+                        outerRadius={90}
+                        fill="rgba(148, 163, 184, 0.10)"
+                        stroke="none"
+                        isAnimationActive={false}
+                        legendType="none"
+                      />
+
+                      {/* Fatias Ativas com Cantos Arredondados e Borda Nítida */}
+                      <Pie
+                        data={revenueBreakdown.length > 0 ? revenueBreakdown : [{ name: 'Sem dados', value: 1, fill: '#cbd5e1' }]}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={68}
+                        outerRadius={90}
+                        cornerRadius={6}
+                        paddingAngle={revenueBreakdown.length > 1 ? 4 : 0}
+                        dataKey="value"
+                        stroke="var(--card, #ffffff)"
+                        strokeWidth={3}
+                      >
+                        {revenueBreakdown.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.fill} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(val: number, name: string) => [
+                          formatCurrency(val),
+                          `${name} (${totalCashTotal > 0 ? ((val / totalCashTotal) * 100).toFixed(1) : 0}%)`
+                        ]}
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: '1px solid #e2e8f0',
+                          boxShadow: '0 8px 24px rgba(0,0,0,0.08)'
+                        }}
+                      />
+                    </PieChart>
+                  </ResponsiveContainer>
+
+                  {/* Texto Central Adaptativo & Interativo - Perfeitamente alinhado ao centro matemático */}
+                  <div
+                    onClick={() => setShowFullRevenueDonut(prev => !prev)}
+                    className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center cursor-pointer select-none px-2 max-w-[145px] group transition-all duration-200 hover:scale-105 active:scale-95 z-10"
+                    title={`${formatCurrency(totalCashTotal)} · Clique para alternar entre formato compacto e completo`}
+                  >
+                    <div className="flex flex-col items-center justify-center">
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300 border border-slate-200/80 dark:border-slate-700 mb-1">
+                        Total Recebido
+                      </span>
+
+                      {!showFullRevenueDonut ? (
+                        <div className="flex items-baseline justify-center gap-1 leading-none my-0.5">
+                          <span className={cn(
+                            "font-black tracking-tight text-blue-600 dark:text-blue-400 drop-shadow-xs transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300",
+                            adaptiveRevenue.fontSize
+                          )}>
+                            {adaptiveRevenue.main}
+                          </span>
+                          {adaptiveRevenue.suffix && (
+                            <span className="text-xs font-black text-indigo-600 dark:text-indigo-400 uppercase">
+                              {adaptiveRevenue.suffix}
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className={cn(
+                          "font-black leading-tight text-blue-600 dark:text-blue-400 px-1 break-words drop-shadow-xs transition-colors group-hover:text-blue-700 dark:group-hover:text-blue-300 my-0.5",
+                          adaptiveRevenue.fullRawNumber.length <= 9 ? "text-lg" :
+                          adaptiveRevenue.fullRawNumber.length <= 12 ? "text-base" :
+                          adaptiveRevenue.fullRawNumber.length <= 15 ? "text-sm" : "text-xs"
+                        )}>
+                          {adaptiveRevenue.fullRawNumber}
+                        </span>
+                      )}
+
+                      <span className="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-0.5">
+                        {adaptiveRevenue.currency}
+                      </span>
+
+                      {totalCashTotal > 0 && (
+                        <span className="text-[9px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-200/50 mt-1">
+                          +{profitMarginRate.toFixed(1)}% margem
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Legenda Customizada Nítida sem Artefatos "0 0" */}
+                <div className="flex flex-wrap items-center justify-center gap-4 pt-1 pb-1">
+                  {(revenueBreakdown.length > 0 ? revenueBreakdown : [{ name: 'Sem dados', value: 0, fill: '#cbd5e1', percent: 100 }]).map((item, idx) => (
+                    <div key={`rev-legend-${idx}`} className="flex items-center gap-1.5">
+                      <span className="h-2.5 w-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: item.fill }} />
+                      <span className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                        {item.name} ({item.percent.toFixed(1)}%)
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Gráfico 2: Barra Linear Proporcional Empilhada */}
+            <div className="rounded-xl border bg-slate-50/80 dark:bg-slate-900/50 p-3">
+              <div className="flex items-center justify-between text-[11px] font-bold text-muted-foreground mb-1.5">
+                <span className="uppercase tracking-wider flex items-center gap-1.5">
+                  <Layers className="h-3.5 w-3.5 text-primary" />
+                  Distribuição Proporcional
+                </span>
+                <span className="text-foreground font-black">{formatCurrency(totalCashTotal)}</span>
+              </div>
+
+              {/* Barra Empilhada Multicor */}
+              <div className="h-3 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden flex shadow-inner">
+                {capitalPct > 0 && (
+                  <div
+                    style={{ width: `${capitalPct}%` }}
+                    className="h-full bg-blue-500 hover:brightness-110 transition-all cursor-pointer"
+                    title={`Capital Recuperado: ${formatCurrency(totalRecoveredCapital)} (${capitalPct.toFixed(1)}%)`}
+                  />
+                )}
+                {jurosPct > 0 && (
+                  <div
+                    style={{ width: `${jurosPct}%` }}
+                    className="h-full bg-emerald-500 hover:brightness-110 transition-all cursor-pointer"
+                    title={`Juros Recebidos: ${formatCurrency(totalReceivedInterest)} (${jurosPct.toFixed(1)}%)`}
+                  />
+                )}
+                {multasPct > 0 && (
+                  <div
+                    style={{ width: `${multasPct}%` }}
+                    className="h-full bg-amber-500 hover:brightness-110 transition-all cursor-pointer"
+                    title={`Multas Recebidas: ${formatCurrency(totalReceivedLateInterest)} (${multasPct.toFixed(1)}%)`}
+                  />
+                )}
+              </div>
+
+              {/* Legenda com Chips Exatos */}
+              <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-2 border-t border-border/40 text-[11px]">
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-blue-500" />
+                  <span className="text-muted-foreground font-medium">Capital:</span>
+                  <span className="font-bold text-foreground">{capitalPct.toFixed(1)}%</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                  <span className="text-muted-foreground font-medium">Juros:</span>
+                  <span className="font-bold text-foreground">{jurosPct.toFixed(1)}%</span>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <span className="h-2 w-2 rounded-full bg-amber-500" />
+                  <span className="text-muted-foreground font-medium">Multas:</span>
+                  <span className="font-bold text-foreground">{multasPct.toFixed(1)}%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Gráfico 3: Evolução Mensal em Barras Empilhadas */}
+            {(revenueChartTab === 'monthly' || revenueChartTab === 'both') && (
+              <div className="rounded-xl border bg-slate-50/70 dark:bg-slate-900/40 p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5">
+                    <BarChart3 className="h-3.5 w-3.5 text-primary" />
+                    Evolução Mensal da Composição
+                  </div>
+                  <span className="text-[10px] text-muted-foreground font-medium">Últimos 6 meses</span>
+                </div>
+                <div className="h-[220px] w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={monthlyRevenueBreakdown} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.15} />
+                      <XAxis dataKey="name" axisLine={false} tickLine={false} fontSize={11} />
+                      <YAxis
+                        axisLine={false}
+                        tickLine={false}
+                        fontSize={10}
+                        tickFormatter={(val) =>
+                          val >= 1000000000 ? `${(val / 1000000000).toFixed(1)}Bi` :
+                          val >= 1000000 ? `${(val / 1000000).toFixed(1)}M` :
+                          val >= 1000 ? `${(val / 1000).toFixed(0)}k` : val
+                        }
+                      />
+                      <Tooltip
+                        formatter={(val: number, name: string) => [formatCurrency(val), name]}
+                        contentStyle={{
+                          borderRadius: '12px',
+                          border: '1px solid #e2e8f0',
+                          boxShadow: '0 8px 24px rgba(0,0,0,0.08)'
+                        }}
+                      />
+                      <Legend verticalAlign="top" height={26} iconType="circle" wrapperStyle={{ fontSize: '11px' }} />
+                      <Bar dataKey="Capital" name="Capital" stackId="rev" fill="#3b82f6" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="Juros" name="Juros" stackId="rev" fill="#10b981" radius={[0, 0, 0, 0]} />
+                      <Bar dataKey="Multas" name="Multas" stackId="rev" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
+
+            {/* 4 Cartões de Detalhamento com Progresso e Indicadores Enriquecidos */}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {revenueDetailItems.map((item) => (
-                <div key={item.label} className="rounded-xl border bg-slate-50/70 p-3 dark:bg-slate-900/40">
-                  <div className="mb-2 flex items-center gap-2">
-                    <span className={cn("h-2.5 w-2.5 rounded-full", item.color)} />
-                    <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{item.label}</span>
+                <div key={item.label} className="rounded-xl border bg-slate-50/70 p-3 dark:bg-slate-900/40 hover:bg-slate-100/60 dark:hover:bg-slate-800/40 transition-colors">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", item.color)} />
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground truncate">{item.label}</span>
+                    </div>
+                    {item.percentage && (
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded-md bg-black/5 dark:bg-white/10 text-foreground shrink-0">
+                        {item.percentage}
+                      </span>
+                    )}
                   </div>
-                  <div className="truncate text-base font-black text-foreground" title={formatCurrency(item.value)}>
+                  <div className={cn("truncate text-base font-black tracking-tight", item.textColor || "text-foreground")} title={formatCurrency(item.value)}>
                     {formatCurrency(item.value)}
                   </div>
+                  {/* Micro barra de progresso */}
+                  {item.barWidth !== undefined && (
+                    <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-800 overflow-hidden mt-1.5">
+                      <div
+                        style={{ width: `${Math.min(100, Math.max(0, item.barWidth))}%` }}
+                        className={cn("h-full rounded-full transition-all duration-500", item.barColor || item.color)}
+                      />
+                    </div>
+                  )}
                   <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
                     {item.description}
                   </p>
@@ -2095,12 +3040,12 @@ export default function Dashboard() {
         }}
       >
         <DialogContent className={cn(
-          "flex flex-col",
+          "flex flex-col p-5 sm:p-7 overflow-hidden",
           detailsModal.type === 'profits'
-            ? "w-[95vw] max-w-6xl max-h-[88vh]"
+            ? "w-[96vw] max-w-7xl max-h-[92vh]"
             : detailsModal.type === 'invested'
-              ? "w-[95vw] max-w-6xl max-h-[88vh]"
-            : "max-w-4xl max-h-[80vh]"
+              ? "w-[96vw] max-w-7xl max-h-[92vh]"
+            : "max-w-4xl max-h-[85vh]"
         )}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-lg font-bold">
@@ -2182,70 +3127,72 @@ export default function Dashboard() {
                 </div>
               </div>
 
-              <div className="mt-4 min-h-0 flex-1 overflow-auto rounded-lg border">
-                <Table>
-                  <TableHeader className="sticky top-0 bg-muted/50">
-                    <TableRow>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Registro</TableHead>
-                      <TableHead>Pagamentos</TableHead>
-                      <TableHead>Valor Recebido</TableHead>
-                      <TableHead className="text-green-600">Juros</TableHead>
-                      <TableHead className="text-orange-600">Multas</TableHead>
-                      <TableHead>Lucro Total</TableHead>
-                      <TableHead>Último Pagamento</TableHead>
-                      <TableHead className="text-right">Ação</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredProfitClientRows.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={9} className="h-32 text-center text-sm text-muted-foreground">
-                          Nenhum cliente encontrado com lucro realizado.
-                        </TableCell>
+              <div className="mt-4 min-h-0 flex-1 overflow-x-auto overflow-y-auto rounded-xl border bg-card shadow-xs">
+                <div className="min-w-[1050px] p-1 pb-4">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-muted/90 backdrop-blur-xs z-10">
+                      <TableRow className="border-b">
+                        <TableHead className="min-w-[170px] whitespace-nowrap pl-4">Cliente</TableHead>
+                        <TableHead className="min-w-[110px] whitespace-nowrap">Registro</TableHead>
+                        <TableHead className="min-w-[90px] whitespace-nowrap text-center">Pagamentos</TableHead>
+                        <TableHead className="min-w-[150px] whitespace-nowrap text-right">Valor Recebido</TableHead>
+                        <TableHead className="min-w-[140px] whitespace-nowrap text-right text-emerald-600 dark:text-emerald-400">Juros</TableHead>
+                        <TableHead className="min-w-[120px] whitespace-nowrap text-right text-orange-600 dark:text-orange-400">Multas</TableHead>
+                        <TableHead className="min-w-[150px] whitespace-nowrap text-right text-primary font-bold">Lucro Total</TableHead>
+                        <TableHead className="min-w-[120px] whitespace-nowrap text-center">Último Pagamento</TableHead>
+                        <TableHead className="min-w-[130px] whitespace-nowrap text-right pr-4">Ação</TableHead>
                       </TableRow>
-                    )}
-                    {filteredProfitClientRows.map(row => (
-                      <TableRow key={row.key}>
-                        <TableCell>
-                          <div className="font-semibold">{row.clientName}</div>
-                          <div className="text-[11px] text-muted-foreground">{row.phone || row.email || 'Sem contacto'}</div>
-                        </TableCell>
-                        <TableCell className="text-xs">{row.registerNumber}</TableCell>
-                        <TableCell className="text-xs font-semibold">{row.payments.length}</TableCell>
-                        <TableCell className="text-xs font-bold">{formatCurrency(row.totalPaid)}</TableCell>
-                        <TableCell className="text-xs font-semibold text-green-600">{formatCurrency(row.totalInterest)}</TableCell>
-                        <TableCell className="text-xs font-semibold text-orange-600">{formatCurrency(row.totalLateInterest)}</TableCell>
-                        <TableCell className="text-xs font-black text-primary">{formatCurrency(row.totalProfit)}</TableCell>
-                        <TableCell className="text-xs">
-                          {isValidDate(row.lastPaymentDate) ? new Date(row.lastPaymentDate).toLocaleDateString() : '-'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <div className="flex justify-end gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-2"
-                              onClick={() => setSelectedProfitClient(row)}
-                            >
-                              <Eye className="h-4 w-4" />
-                              Ver Detalhes
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="gap-2"
-                              onClick={() => openFinancialReportOptions(row)}
-                              title="Baixar histórico deste cliente"
-                            >
-                              <Download className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody className="divide-y">
+                      {filteredProfitClientRows.length === 0 && (
+                        <TableRow>
+                          <TableCell colSpan={9} className="h-32 text-center text-sm text-muted-foreground">
+                            Nenhum cliente encontrado com lucro realizado.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {filteredProfitClientRows.map(row => (
+                        <TableRow key={row.key} className="hover:bg-muted/40 transition-colors h-14">
+                          <TableCell className="whitespace-nowrap pl-4">
+                            <div className="font-semibold text-slate-800 dark:text-slate-100">{row.clientName}</div>
+                            <div className="text-[11px] text-muted-foreground">{row.phone || row.email || 'Sem contacto'}</div>
+                          </TableCell>
+                          <TableCell className="text-xs whitespace-nowrap font-medium">{row.registerNumber}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap font-semibold text-center">{row.payments.length}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap font-bold text-right">{formatCurrency(row.totalPaid)}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap font-bold text-emerald-600 dark:text-emerald-400 text-right">{formatCurrency(row.totalInterest)}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap font-bold text-orange-600 dark:text-orange-400 text-right">{formatCurrency(row.totalLateInterest)}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap font-black text-primary text-sm text-right">{formatCurrency(row.totalProfit)}</TableCell>
+                          <TableCell className="text-xs whitespace-nowrap text-center">
+                            {isValidDate(row.lastPaymentDate) ? format(new Date(row.lastPaymentDate), 'dd/MM/yyyy') : '-'}
+                          </TableCell>
+                          <TableCell className="text-right whitespace-nowrap pr-4">
+                            <div className="flex justify-end gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-2 font-medium"
+                                onClick={() => setSelectedProfitClient(row)}
+                              >
+                                <Eye className="h-4 w-4 text-primary" />
+                                Ver Detalhes
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="gap-2"
+                                onClick={() => openFinancialReportOptions(row)}
+                                title="Baixar histórico deste cliente"
+                              >
+                                <Download className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             </>
           ) : (
@@ -2613,15 +3560,20 @@ export default function Dashboard() {
       </Dialog>
 
       <Dialog open={!!selectedProfitClient} onOpenChange={(open) => !open && setSelectedProfitClient(null)}>
-        <DialogContent className="flex max-h-[86vh] w-[94vw] max-w-5xl flex-col">
+        <DialogContent className="flex max-h-[92vh] w-[96vw] max-w-7xl flex-col p-5 sm:p-7 overflow-hidden">
           <DialogHeader>
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <DialogTitle className="flex items-center gap-2 text-lg font-bold">
-                <Eye className="h-5 w-5 text-primary" />
-                Detalhes de Pagamento - {selectedProfitClient?.clientName}
-              </DialogTitle>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
+              <div>
+                <DialogTitle className="flex items-center gap-2.5 text-xl font-bold tracking-tight">
+                  <Eye className="h-5 w-5 text-primary" />
+                  Detalhes de Pagamento &mdash; <span className="text-primary">{selectedProfitClient?.clientName}</span>
+                </DialogTitle>
+                <DialogDescription className="text-xs text-muted-foreground mt-1">
+                  Histórico completo de pagamentos, amortização de capital, juros e lucro apurado ({selectedProfitClient?.payments.length || 0} movimento{selectedProfitClient?.payments.length === 1 ? '' : 's'}).
+                </DialogDescription>
+              </div>
               {selectedProfitClient && (
-                <Button className="gap-2" onClick={() => openFinancialReportOptions(selectedProfitClient)}>
+                <Button className="gap-2 font-semibold shadow-xs shrink-0" onClick={() => openFinancialReportOptions(selectedProfitClient)}>
                   <Download className="h-4 w-4" />
                   Baixar histórico
                 </Button>
@@ -2631,66 +3583,90 @@ export default function Dashboard() {
 
           {selectedProfitClient && (
             <>
-              <div className="mt-4 grid gap-3 md:grid-cols-4">
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-[10px] font-bold uppercase text-muted-foreground">Registro</p>
-                  <p className="mt-1 text-sm font-bold">{selectedProfitClient.registerNumber}</p>
+              <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5">
+                <div className="rounded-xl border bg-muted/40 p-3.5 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Registro</p>
+                  <p className="mt-1 text-base font-bold whitespace-nowrap">{selectedProfitClient.registerNumber}</p>
                 </div>
-                <div className="rounded-lg border bg-muted/30 p-3">
-                  <p className="text-[10px] font-bold uppercase text-muted-foreground">Valor Recebido</p>
-                  <p className="mt-1 text-sm font-bold">{formatCurrency(selectedProfitClient.totalPaid)}</p>
+                <div className="rounded-xl border bg-card p-3.5 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Valor Recebido</p>
+                  <p className="mt-1 text-base font-black text-slate-900 dark:text-white whitespace-nowrap">{formatCurrency(selectedProfitClient.totalPaid)}</p>
                 </div>
-                <div className="rounded-lg border bg-green-50 p-3 text-green-700 dark:bg-green-950/30 dark:text-green-300">
-                  <p className="text-[10px] font-bold uppercase">Juros</p>
-                  <p className="mt-1 text-sm font-bold">{formatCurrency(selectedProfitClient.totalInterest)}</p>
+                <div className="rounded-xl border border-emerald-200/60 bg-emerald-50/60 p-3.5 text-emerald-800 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-300 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider">Juros Recebidos</p>
+                  <p className="mt-1 text-base font-black whitespace-nowrap">{formatCurrency(selectedProfitClient.totalInterest)}</p>
                 </div>
-                <div className="rounded-lg border bg-orange-50 p-3 text-orange-700 dark:bg-orange-950/30 dark:text-orange-300">
-                  <p className="text-[10px] font-bold uppercase">Multas</p>
-                  <p className="mt-1 text-sm font-bold">{formatCurrency(selectedProfitClient.totalLateInterest)}</p>
+                <div className="rounded-xl border border-orange-200/60 bg-orange-50/60 p-3.5 text-orange-800 dark:border-orange-900/40 dark:bg-orange-950/30 dark:text-orange-300 shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider">Multas / Mora</p>
+                  <p className="mt-1 text-base font-black whitespace-nowrap">{formatCurrency(selectedProfitClient.totalLateInterest)}</p>
+                </div>
+                <div className="col-span-2 sm:col-span-2 md:col-span-4 lg:col-span-1 rounded-xl border border-primary/30 bg-primary/10 p-3.5 text-primary shadow-xs">
+                  <p className="text-[10px] font-bold uppercase tracking-wider">Lucro Realizado</p>
+                  <p className="mt-1 text-base font-black whitespace-nowrap">{formatCurrency((selectedProfitClient.totalInterest || 0) + (selectedProfitClient.totalLateInterest || 0))}</p>
                 </div>
               </div>
 
-              <div className="mt-4 min-h-0 flex-1 overflow-auto rounded-lg border">
-                <Table>
-                  <TableHeader className="sticky top-0 bg-muted/50">
-                    <TableRow>
-                      <TableHead>Data</TableHead>
-                      <TableHead>Crédito</TableHead>
-                      <TableHead>Método</TableHead>
-                      <TableHead>Referência</TableHead>
-                      <TableHead>Pago</TableHead>
-                      <TableHead>Capital</TableHead>
-                      <TableHead className="text-green-600">Juros</TableHead>
-                      <TableHead className="text-orange-600">Multas</TableHead>
-                      <TableHead>Lucro</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {[...selectedProfitClient.payments]
-                      .sort((a: any, b: any) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime())
-                      .map((payment: any) => {
-                        const credit = credits.find(c => c.id === payment.creditId);
-                        const profit = (payment.allocatedToInterest || 0) + (payment.allocatedToLateInterest || 0);
+              <div className="mt-4 min-h-0 flex-1 overflow-x-auto overflow-y-auto rounded-xl border bg-card shadow-xs">
+                <div className="min-w-[1100px] p-1 pb-4">
+                  <Table>
+                    <TableHeader className="sticky top-0 bg-muted/90 backdrop-blur-xs z-10">
+                      <TableRow className="border-b">
+                        <TableHead className="min-w-[120px] whitespace-nowrap pl-4 font-bold text-xs uppercase">Data</TableHead>
+                        <TableHead className="min-w-[180px] whitespace-nowrap font-bold text-xs uppercase">Crédito</TableHead>
+                        <TableHead className="min-w-[130px] whitespace-nowrap font-bold text-xs uppercase">Método</TableHead>
+                        <TableHead className="min-w-[150px] whitespace-nowrap font-bold text-xs uppercase">Referência</TableHead>
+                        <TableHead className="min-w-[160px] whitespace-nowrap font-bold text-xs uppercase text-right">Pago</TableHead>
+                        <TableHead className="min-w-[160px] whitespace-nowrap font-bold text-xs uppercase text-right">Capital</TableHead>
+                        <TableHead className="min-w-[150px] whitespace-nowrap font-bold text-xs uppercase text-right text-emerald-600 dark:text-emerald-400">Juros</TableHead>
+                        <TableHead className="min-w-[130px] whitespace-nowrap font-bold text-xs uppercase text-right text-orange-600 dark:text-orange-400">Multas</TableHead>
+                        <TableHead className="min-w-[160px] whitespace-nowrap font-bold text-xs uppercase text-right text-primary pr-4">Lucro</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody className="divide-y">
+                      {[...selectedProfitClient.payments]
+                        .sort((a: any, b: any) => new Date(b.paymentDate).getTime() - new Date(a.paymentDate).getTime())
+                        .map((payment: any) => {
+                          const credit = credits.find(c => c.id === payment.creditId);
+                          const profit = (payment.allocatedToInterest || 0) + (payment.allocatedToLateInterest || 0);
 
-                        return (
-                          <TableRow key={payment.id}>
-                            <TableCell className="text-xs">{isValidDate(payment.paymentDate) ? new Date(payment.paymentDate).toLocaleDateString() : '-'}</TableCell>
-                            <TableCell className="text-xs">
-                              <div className="font-semibold">{credit?.id || payment.creditId}</div>
-                              <div className="text-[11px] text-muted-foreground">{credit ? formatCurrency(credit.principalAmount) : 'Contrato não encontrado'}</div>
-                            </TableCell>
-                            <TableCell className="text-xs">{paymentMethodLabels[payment.method] || payment.method}</TableCell>
-                            <TableCell className="text-xs">{payment.reference || payment.id}</TableCell>
-                            <TableCell className="text-xs font-bold">{formatCurrency(payment.amount)}</TableCell>
-                            <TableCell className="text-xs">{formatCurrency(payment.allocatedToPrincipal || 0)}</TableCell>
-                            <TableCell className="text-xs font-semibold text-green-600">{formatCurrency(payment.allocatedToInterest || 0)}</TableCell>
-                            <TableCell className="text-xs font-semibold text-orange-600">{formatCurrency(payment.allocatedToLateInterest || 0)}</TableCell>
-                            <TableCell className="text-xs font-black text-primary">{formatCurrency(profit)}</TableCell>
-                          </TableRow>
-                        );
-                      })}
-                  </TableBody>
-                </Table>
+                          return (
+                            <TableRow key={payment.id} className="hover:bg-muted/40 transition-colors h-14">
+                              <TableCell className="text-xs whitespace-nowrap font-medium pl-4">
+                                {isValidDate(payment.paymentDate) ? format(new Date(payment.paymentDate), 'dd/MM/yyyy') : '-'}
+                              </TableCell>
+                              <TableCell className="text-xs whitespace-nowrap">
+                                <div className="font-bold text-slate-800 dark:text-slate-100">{credit?.id || payment.creditId}</div>
+                                <div className="text-[11px] text-muted-foreground">{credit ? `Principal: ${formatCurrency(credit.principalAmount)}` : 'Contrato não encontrado'}</div>
+                              </TableCell>
+                              <TableCell className="text-xs whitespace-nowrap">
+                                <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground border">
+                                  {paymentMethodLabels[payment.method] || payment.method}
+                                </span>
+                              </TableCell>
+                              <TableCell className="text-xs whitespace-nowrap font-mono text-muted-foreground">
+                                {payment.reference || payment.id}
+                              </TableCell>
+                              <TableCell className="text-xs font-bold text-slate-900 dark:text-white whitespace-nowrap text-right">
+                                {formatCurrency(payment.amount)}
+                              </TableCell>
+                              <TableCell className="text-xs text-slate-700 dark:text-slate-300 whitespace-nowrap text-right">
+                                {formatCurrency(payment.allocatedToPrincipal || 0)}
+                              </TableCell>
+                              <TableCell className="text-xs font-bold text-emerald-600 dark:text-emerald-400 whitespace-nowrap text-right">
+                                {formatCurrency(payment.allocatedToInterest || 0)}
+                              </TableCell>
+                              <TableCell className="text-xs font-bold text-orange-600 dark:text-orange-400 whitespace-nowrap text-right">
+                                {formatCurrency(payment.allocatedToLateInterest || 0)}
+                              </TableCell>
+                              <TableCell className="text-xs font-black text-primary text-sm whitespace-nowrap text-right pr-4">
+                                {formatCurrency(profit)}
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
             </>
           )}

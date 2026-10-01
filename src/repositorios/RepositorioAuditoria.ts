@@ -31,7 +31,12 @@ export class RepositorioAuditoria extends RepositorioBase {
     }
 
     static async ensureSchema(): Promise<void> {
+        if (this.schemaEnsured) return;
         try {
+            if (typeof window !== 'undefined' && (window as any).electronAPI?.userAuthStatus) {
+                const status = await (window as any).electronAPI.userAuthStatus();
+                if (!status?.authenticated) return;
+            }
             // Check which columns exist
             const tableInfo = await this.query<{ name: string }>('PRAGMA table_info(audit_logs)');
             const existingColumns = new Set(tableInfo.map(col => col.name));
@@ -51,6 +56,7 @@ export class RepositorioAuditoria extends RepositorioBase {
                 await this.execute("ALTER TABLE audit_logs ADD COLUMN metadata TEXT");
                 console.log('✅ [RepositorioAuditoria] Coluna metadata adicionada');
             }
+            this.schemaEnsured = true;
         } catch (e) {
             console.warn('[RepositorioAuditoria] Erro ao verificar/adicionar colunas:', e);
         }

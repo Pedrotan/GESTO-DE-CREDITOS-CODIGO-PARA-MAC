@@ -94,6 +94,110 @@ export const formatAngolanPhone = (value: string): string => {
   return formatted;
 };
 
+export interface AdaptiveDonutValue {
+  main: string;
+  suffix: string;
+  currency: string;
+  fullFormatted: string;
+  fullRawNumber: string;
+  isCompact: boolean;
+  fontSize: string;
+}
+
+/**
+ * Formata um montante financeiro para exibição adaptativa no centro de gráficos Donut/círculos,
+ * garantindo legibilidade imediata sem reticências ou cortes de texto.
+ */
+export const getAdaptiveDonutValue = (value: number | string | undefined | null, currency: string = 'AOA'): AdaptiveDonutValue => {
+  const num = Number(value || 0);
+  const abs = Math.abs(num);
+  const fullFormatted = formatCurrency(num, currency);
+  const fullRawNumber = fullFormatted.replace(',00', '').replace(/\s*AOA/i, '').trim();
+
+  // Triliões (>= 1.000.000.000.000)
+  if (abs >= 1_000_000_000_000) {
+    const formatted = (num / 1_000_000_000_000).toLocaleString('pt-AO', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 2,
+    });
+    return {
+      main: formatted,
+      suffix: 'Tri',
+      currency,
+      fullFormatted,
+      fullRawNumber,
+      isCompact: true,
+      fontSize: 'text-2xl',
+    };
+  }
+
+  // Biliões / Mil Milhões (>= 1.000.000.000) - Ex: 67 600 000 000 -> 67,60 Bi
+  if (abs >= 1_000_000_000) {
+    const formatted = (num / 1_000_000_000).toLocaleString('pt-AO', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 2,
+    });
+    return {
+      main: formatted,
+      suffix: 'Bi',
+      currency,
+      fullFormatted,
+      fullRawNumber,
+      isCompact: true,
+      fontSize: 'text-2xl',
+    };
+  }
+
+  // Milhões (>= 1.000.000) - Ex: 15 600 000 -> 15,60 Mi
+  if (abs >= 1_000_000) {
+    const formatted = (num / 1_000_000).toLocaleString('pt-AO', {
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 2,
+    });
+    return {
+      main: formatted,
+      suffix: 'Mi',
+      currency,
+      fullFormatted,
+      fullRawNumber,
+      isCompact: true,
+      fontSize: 'text-2xl',
+    };
+  }
+
+  // Centenas de Milhares (>= 100.000) - Ex: 450 000 -> 450 mil
+  if (abs >= 100_000) {
+    const formatted = (num / 1_000).toLocaleString('pt-AO', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 1,
+    });
+    return {
+      main: formatted,
+      suffix: 'mil',
+      currency,
+      fullFormatted,
+      fullRawNumber,
+      isCompact: true,
+      fontSize: 'text-2xl',
+    };
+  }
+
+  // Menor que 100.000 (Ex: 25 000 ou 1 500)
+  const formatted = num.toLocaleString('pt-AO', {
+    minimumFractionDigits: num % 1 === 0 ? 0 : 2,
+    maximumFractionDigits: 2,
+  });
+  return {
+    main: formatted,
+    suffix: '',
+    currency,
+    fullFormatted,
+    fullRawNumber,
+    isCompact: false,
+    fontSize: formatted.length > 8 ? 'text-lg' : 'text-xl',
+  };
+};
+
 
 
 

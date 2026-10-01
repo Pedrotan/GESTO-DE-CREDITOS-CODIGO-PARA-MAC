@@ -34,7 +34,16 @@ export function formatDateSafe(
 
 export function getFileUrl(path: string | null | undefined): string {
   if (!path) return "";
-  if (path.startsWith('data:') || path.startsWith('file:') || path.startsWith('safe-file:')) return path;
+  if (
+    path.startsWith('data:') ||
+    path.startsWith('file:') ||
+    path.startsWith('safe-file:') ||
+    path.startsWith('http://') ||
+    path.startsWith('https://') ||
+    path.startsWith('blob:')
+  ) {
+    return path;
+  }
   
   // Normalizar barras invertidas do Windows para barras normais
   const normalizedPath = path.replace(/\\/g, '/');
@@ -46,7 +55,10 @@ export function getFileUrl(path: string | null | undefined): string {
   if (isElectron) {
     return hasDriveLetter ? `safe-file:///${encodedPath}` : `safe-file://${encodedPath}`;
   } else {
-    return hasDriveLetter ? `file:///${encodedPath}` : `file://${encodedPath}`;
+    // No browser web (Vercel), caminhos relativos devem ser servidos via HTTP/HTTPS da origem web
+    if (normalizedPath.startsWith('/')) return normalizedPath;
+    if (!hasDriveLetter) return `/${normalizedPath}`;
+    return normalizedPath;
   }
 }
 

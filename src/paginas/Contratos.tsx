@@ -161,19 +161,12 @@ export default function Contracts() {
     );
 
     const handleRenew = (contract: any) => {
-        setSelectedContract(contract);
-        const credit = credits.find(c => c.id === contract.id);
-
-        setPrefillContractData({
-            clientId: contract.clientId,
-            principalAmount: contract.value,
-            interestRate: credit?.interestRate || 10,
-            lateInterestRate: credit?.lateInterestRate || 1,
-            installments: credit?.installments || 1,
-            startDate: new Date().toISOString().split('T')[0],
-            dueDate: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
+        setAlertConfig({
+            isOpen: true,
+            title: 'Renovação indisponível',
+            description: `A renovação do contrato ${contract.id} exige uma política aprovada de reestruturação e um novo plano com aprovação. Os valores do contrato original permanecem protegidos.`,
+            type: 'info'
         });
-        setIsCreateDialogOpen(true);
     };
 
     const handleViewPromessaContract = (contract: any) => {
@@ -253,34 +246,8 @@ export default function Contracts() {
     };
 
     const handleRenewSubmit = async (data: any) => {
-        try {
-            if (!prefillContractData || !selectedContract) {
-                toast({ title: "Erro", description: "Contrato original não identificado.", variant: "destructive" });
-                return;
-            }
-
-            await updateCredit(selectedContract.id, {
-                principalAmount: data.principalAmount,
-                interestRate: data.interestRate,
-                lateInterestRate: data.lateInterestRate,
-                installments: data.installments,
-                startDate: data.startDate,
-                dueDate: data.dueDate,
-                status: 'active'
-            });
-
-            setIsCreateDialogOpen(false);
-            setPrefillContractData(null);
-            setSelectedContract(null);
-
-            toast({ title: "Contrato Renovado", description: "As condições do crédito foram atualizadas." });
-        } catch (error: any) {
-            toast({
-                title: "Erro ao renovar",
-                description: error.message || "Falha ao atualizar registro.",
-                variant: 'destructive',
-            });
-        }
+        void data;
+        toast({ title: 'Renovação indisponível', description: 'É necessária uma política aprovada de reestruturação.', variant: 'destructive' });
     };
 
     const handleSaveClauses = async () => {
@@ -372,7 +339,7 @@ export default function Contracts() {
             </div>
 
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-                <DialogContent className="max-w-3xl">
+                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>Renovar Contrato</DialogTitle>
                         <DialogDescription>
@@ -881,6 +848,5 @@ export default function Contracts() {
         </MainLayout >
     );
 }
-
 
 

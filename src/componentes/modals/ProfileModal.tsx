@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter }
 import { ROLES } from '@/tipos/autenticacao';
 import { AlertModal } from '@/componentes/ui/AlertModal';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/componentes/ui/dialog';
-import { Camera, Mail, Shield, User, Clock, Globe, Activity, Calendar, Eye, EyeOff, Smartphone, ShieldCheck, QrCode } from 'lucide-react';
+import { Camera, Mail, Shield, User, Clock, Globe, Activity, Calendar, Eye, EyeOff, Smartphone, ShieldCheck, QrCode, ShieldAlert } from 'lucide-react';
 import { useToast } from '@/ganchos/usar-toast';
 import QRCode from 'qrcode';
 import { formatDateTimeFull } from '@/bibliotecas/formatters';
@@ -186,44 +186,50 @@ export function ProfileModal({ isOpen, onClose }: { isOpen: boolean; onClose: ()
         }
     };
 
-    const handleDisable2FA = async () => {
-        setAlertConfig({
-            isOpen: true,
-            title: "Desativar 2FA?",
-            description: "A sua conta ficará menos segura sem a autenticação de dois fatores. Tem a certeza que deseja continuar?",
-            type: "warning",
-            showCancel: true,
-            onConfirm: () => {
-                setTwoFactorStep('verify');
-                setIs2FAModalOpen(true);
-            }
-        });
+    const handleDisable2FA = () => {
+        setVerificationCode('');
+        setTwoFactorStep('verify');
+        setIs2FAModalOpen(true);
     };
 
     const handleConfirmDisable = async () => {
+        if (!verificationCode || verificationCode.length !== 6) {
+            toast({
+                title: "Código Incompleto",
+                description: "Por favor introduza o código de 6 dígitos da sua aplicação autenticadora.",
+                variant: "destructive"
+            });
+            return;
+        }
+
         setIs2FALoading(true);
         try {
             const success = await disable2FA(verificationCode);
             if (success) {
                 setIs2FAModalOpen(false);
+                setVerificationCode('');
+                toast({
+                    title: "2FA Desativado",
+                    description: "A autenticação de dois fatores foi desativada com sucesso.",
+                });
                 setAlertConfig({
                     isOpen: true,
-                    title: "2FA Desativado",
-                    description: "A autenticação de dois fatores foi desativada.",
-                    type: "warning"
+                    title: "2FA Desativado com Sucesso",
+                    description: "A autenticação de dois fatores foi desativada da sua conta.",
+                    type: "warning",
+                    showCancel: false
                 });
-                setVerificationCode('');
             } else {
                 toast({
-                    title: "Código Inválido",
-                    description: "O código introduzido está incorreto.",
+                    title: "Código Incorreto",
+                    description: "O código introduzido é inválido ou expirou. Verifique o seu aplicativo autenticador.",
                     variant: "destructive"
                 });
             }
-        } catch (error) {
+        } catch (error: any) {
             toast({
-                title: "Erro",
-                description: "Falha ao desativar 2FA.",
+                title: "Erro ao Desativar",
+                description: error?.message || "Falha ao desativar o 2FA.",
                 variant: "destructive"
             });
         } finally {
@@ -642,25 +648,48 @@ export function ProfileModal({ isOpen, onClose }: { isOpen: boolean; onClose: ()
 
             </DialogContent>
 
-            {/* 2FA Setup Dialog */}
+            {/* 2FA Setup & Deactivate Dialog */}
             <Dialog open={is2FAModalOpen} onOpenChange={setIs2FAModalOpen}>
                 <DialogContent className="max-w-md p-0 overflow-hidden">
-                    <DialogHeader className="p-8 text-center bg-gradient-to-b from-primary/20 to-transparent border-b border-border/50 relative">
-                        <div className="mx-auto h-16 w-16 rounded-[1.5rem] bg-white shadow-2xl shadow-primary/20 flex items-center justify-center mb-4 ring-4 ring-primary/10">
-                            <QrCode className="h-8 w-8 text-primary animate-pulse" />
+                    <DialogHeader className={cn(
+                        "p-8 text-center border-b border-border/50 relative",
+                        user?.twoFactorEnabled && twoFactorStep === 'verify'
+                            ? "bg-gradient-to-b from-rose-500/15 to-transparent"
+                            : "bg-gradient-to-b from-primary/20 to-transparent"
+                    )}>
+                        <div className={cn(
+                            "mx-auto h-16 w-16 rounded-[1.5rem] bg-white shadow-2xl flex items-center justify-center mb-4 ring-4",
+                            user?.twoFactorEnabled && twoFactorStep === 'verify'
+                                ? "shadow-rose-500/20 ring-rose-500/10 text-rose-600"
+                                : "shadow-primary/20 ring-primary/10 text-primary"
+                        )}>
+                            {user?.twoFactorEnabled && twoFactorStep === 'verify' ? (
+                                <ShieldAlert className="h-8 w-8 animate-pulse text-rose-600" />
+                            ) : (
+                                <QrCode className="h-8 w-8 animate-pulse text-primary" />
+                            )}
                         </div>
                         <DialogTitle className="text-2xl font-black tracking-tight mb-2">
-                            {twoFactorStep === 'setup' ? "Configurar 2FA" : twoFactorStep === 'verify' ? "Verificar 2FA" : "Códigos de recuperação"}
+                            {user?.twoFactorEnabled && twoFactorStep === 'verify'
+                                ? "Desativar 2FA"
+                                : twoFactorStep === 'setup'
+                                    ? "Configurar 2FA"
+                                    : twoFactorStep === 'verify'
+                                        ? "Verificar 2FA"
+                                        : "Códigos de recuperação"}
                         </DialogTitle>
                         <DialogDescription className="text-sm font-medium">
-                            {twoFactorStep === 'setup'
-                                ? "Siga os passos abaixo para ativar a proteção extra."
-                                : twoFactorStep === 'verify' ? "Introduza o código do seu aplicativo para confirmar."
-                                    : "Guarde estes códigos num local seguro. Cada código só pode ser usado uma vez."}
+                            {user?.twoFactorEnabled && twoFactorStep === 'verify'
+                                ? "Introduza o código da sua aplicação autenticadora para confirmar a desativação da proteção."
+                                : twoFactorStep === 'setup'
+                                    ? "Siga os passos abaixo para ativar a proteção extra."
+                                    : twoFactorStep === 'verify'
+                                        ? "Introduza o código do seu aplicativo para confirmar."
+                                        : "Guarde estes códigos num local seguro. Cada código só pode ser usado uma vez."}
                         </DialogDescription>
                     </DialogHeader>
 
-                    <div className="p-8 space-y-8">
+                    <div className="p-8 space-y-6">
                         {twoFactorStep === 'recovery' ? (
                             <div className="space-y-6">
                                 <div className="grid grid-cols-2 gap-3 rounded-2xl border bg-muted/30 p-5">
@@ -717,6 +746,14 @@ export function ProfileModal({ isOpen, onClose }: { isOpen: boolean; onClose: ()
                             </div>
                         ) : (
                             <div className="space-y-6 text-center">
+                                {user?.twoFactorEnabled && (
+                                    <div className="rounded-xl bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 p-3.5 text-xs text-rose-800 dark:text-rose-300 text-left flex items-start gap-2.5">
+                                        <ShieldAlert className="h-4 w-4 text-rose-600 shrink-0 mt-0.5" />
+                                        <span>
+                                            <strong>Aviso de Segurança:</strong> Ao desativar, a sua conta deixará de exigir o código de verificação no início de sessão, reduzindo o nível de proteção.
+                                        </span>
+                                    </div>
+                                )}
                                 <div className="space-y-2">
                                     <Label htmlFor="verificationCode" className="text-xs font-bold uppercase text-muted-foreground">Código de 6 Dígitos</Label>
                                     <Input
@@ -733,17 +770,36 @@ export function ProfileModal({ isOpen, onClose }: { isOpen: boolean; onClose: ()
                                     Introduza o código de verificação gerado pelo seu aplicativo autenticador.
                                 </p>
                                 <div className="flex gap-3">
-                                    {!user.twoFactorEnabled && (
-                                        <Button variant="outline" className="flex-1" onClick={() => setTwoFactorStep('setup')}>
-                                            Voltar
-                                        </Button>
-                                    )}
                                     <Button
-                                        className="flex-[2] h-12 font-bold"
-                                        disabled={verificationCode.length !== 6 || is2FALoading}
-                                        onClick={user.twoFactorEnabled ? handleConfirmDisable : handleVerifyAndEnable}
+                                        variant="outline"
+                                        type="button"
+                                        className="flex-1 font-semibold"
+                                        onClick={() => {
+                                            if (!user?.twoFactorEnabled) {
+                                                setTwoFactorStep('setup');
+                                            } else {
+                                                setIs2FAModalOpen(false);
+                                                setVerificationCode('');
+                                            }
+                                        }}
                                     >
-                                        {is2FALoading ? "Verificando..." : user.twoFactorEnabled ? "Desativar Agora" : "Ativar Proteção"}
+                                        {!user?.twoFactorEnabled ? "Voltar" : "Cancelar"}
+                                    </Button>
+                                    <Button
+                                        type="button"
+                                        variant={user?.twoFactorEnabled ? "destructive" : "default"}
+                                        className={cn(
+                                            "flex-[2] h-12 font-bold",
+                                            user?.twoFactorEnabled && "bg-rose-600 hover:bg-rose-700 text-white shadow-md"
+                                        )}
+                                        disabled={verificationCode.length !== 6 || is2FALoading}
+                                        onClick={user?.twoFactorEnabled ? handleConfirmDisable : handleVerifyAndEnable}
+                                    >
+                                        {is2FALoading
+                                            ? "A verificar..."
+                                            : user?.twoFactorEnabled
+                                                ? "Desativar Agora"
+                                                : "Ativar Proteção"}
                                     </Button>
                                 </div>
                             </div>
@@ -755,9 +811,11 @@ export function ProfileModal({ isOpen, onClose }: { isOpen: boolean; onClose: ()
             <AlertModal
                 isOpen={alertConfig.isOpen}
                 onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
+                onConfirm={alertConfig.onConfirm}
                 title={alertConfig.title}
                 description={alertConfig.description}
                 type={alertConfig.type === 'success_premium' ? 'success' : alertConfig.type}
+                showCancel={alertConfig.showCancel}
             />
         </Dialog>
     );

@@ -33,7 +33,7 @@ import {
 import { Badge } from '@/componentes/ui/badge';
 import { Checkbox } from '@/componentes/ui/checkbox';
 import { Trash2, UserPlus, ShieldAlert, KeyRound, Lock, Download, Upload, FileText, Bell, Eye, EyeOff, ShieldCheck, ShieldX, Users as UsersIcon } from 'lucide-react';
-import { toast } from 'sonner';
+import { toast } from '@/ganchos/usar-toast';
 import { generateExcelTemplate, parseExcelFile } from '@/bibliotecas/ExcelHelper';
 import { AlertModal } from '@/componentes/ui/AlertModal';
 import { generateUserProfilePDF, generateGenericReportPDF, generateNotificationsReportPDF } from '@/bibliotecas/pdf';

@@ -2,7 +2,7 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { applyBranding, getCompanySettings } from './pdf';
+import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from './pdf';
 
 interface LixeiraReportData {
     deletedClients: any[];
@@ -29,24 +29,29 @@ export const generateLixeiraReport = (data: LixeiraReportData) => {
 
     const doc = new jsPDF();
     const config = getCompanySettings(companySettings);
+    const primary = resolveBrandPrimary(config.primaryColor);
+    const dark = BRAND_CHARCOAL;
 
-    // Apply branding
+    // 1. Aplica o branding institucional completo
     applyBranding(doc, config, userName);
 
     const pageWidth = doc.internal.pageSize.getWidth();
-    let yPos = 85;
+    const pageHeight = doc.internal.pageSize.getHeight();
 
-    // Title
-    doc.setFontSize(18);
+    // 2. Título Executivo com Acento Vertical Laranja (Conforme Imagem de Referência)
+    let yPos = 52;
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.roundedRect(16, yPos, 3.5, 11, 0.8, 0.8, 'F');
+
+    doc.setFontSize(13);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(30, 41, 59); // slate-800
-    doc.text('RELATÓRIO DE ITENS ELIMINADOS (LIXEIRA)', pageWidth / 2, yPos, { align: 'center' });
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text('RELATÓRIO DE ITENS ELIMINADOS (LIXEIRA)', 22, yPos + 5);
 
-    yPos += 12;
-    doc.setFontSize(10);
+    doc.setFontSize(7.5);
     doc.setFont('helvetica', 'normal');
-    doc.setTextColor(100, 116, 139); // slate-500
-    doc.text(`Emitido em: ${format(new Date(), "dd 'de' MMMM 'de' yyyy', às' HH:mm", { locale: ptBR })}`, pageWidth / 2, yPos, { align: 'center' });
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Emitido em: ${format(new Date(), "dd 'de' MMMM 'de' yyyy', às' HH:mm", { locale: ptBR })}   |   Responsável: ${(userName || 'Sistema').toUpperCase()}`, 22, yPos + 9.5);
 
     yPos += 20;
 
@@ -62,9 +67,6 @@ export const generateLixeiraReport = (data: LixeiraReportData) => {
         return format(d, "dd/MM/yyyy HH:mm", { locale: ptBR });
     };
 
-    // Combine all deleted items for a summary table or separate sections
-    // I'll go with separate sections for clarity as per "all details" request
-
     const sections = [
         { title: 'CLIENTES ELIMINADOS', data: deletedClients, headers: ['Nome', 'NIF/BI', 'Eliminado Em', 'Por'] },
         { title: 'CRÉDITOS ELIMINADOS', data: deletedCredits, headers: ['ID/Cliente', 'Montante', 'Eliminado Em', 'Por'] },
@@ -75,17 +77,21 @@ export const generateLixeiraReport = (data: LixeiraReportData) => {
 
     sections.forEach(section => {
         if (section.data.length > 0) {
-            if (yPos > 240) {
+            if (yPos > pageHeight - 50) {
                 doc.addPage();
                 applyBranding(doc, config, undefined, true);
-                yPos = 40;
+                yPos = 38;
             }
 
-            doc.setFontSize(12);
+            // Acento de Seção Laranja
+            doc.setFillColor(primary[0], primary[1], primary[2]);
+            doc.rect(16, yPos - 3, 2.5, 7, 'F');
+
+            doc.setFontSize(10.5);
             doc.setFont('helvetica', 'bold');
-            doc.setTextColor(15, 23, 42);
-            doc.text(section.title, 20, yPos);
-            yPos += 5;
+            doc.setTextColor(dark[0], dark[1], dark[2]);
+            doc.text(section.title, 22, yPos + 2);
+            yPos += 7;
 
             autoTable(doc, {
                 startY: yPos,
@@ -109,26 +115,28 @@ export const generateLixeiraReport = (data: LixeiraReportData) => {
                     return [];
                 }),
                 theme: 'striped',
-                headStyles: { fillColor: [30, 41, 59], fontSize: 9 },
-                styles: { fontSize: 8 },
-                margin: { left: 20, right: 20 },
+                headStyles: { fillColor: dark, textColor: [255, 255, 255], fontSize: 8.5, fontStyle: 'bold' },
+                alternateRowStyles: { fillColor: [250, 250, 252] },
+                styles: { fontSize: 8, cellPadding: 2.5, textColor: dark },
+                margin: { left: 16, right: 14 },
+                didDrawPage: () => applyBranding(doc, config, undefined, true)
             });
 
-            yPos = (doc as any).lastAutoTable.finalY + 15;
+            yPos = (doc as any).lastAutoTable.finalY + 14;
         }
     });
 
-    if (yPos > 250) {
+    if (yPos > pageHeight - 35) {
         doc.addPage();
         applyBranding(doc, config, undefined, true);
-        yPos = 40;
+        yPos = 38;
     }
 
-    // Summary footer inside PDF
-    doc.setFontSize(10);
+    // Nota de rodapé sutil
+    doc.setFontSize(8.5);
     doc.setFont('helvetica', 'italic');
     doc.setTextColor(100, 116, 139);
-    doc.text('Nota: Este relatório contém registos de itens em estado de retenção temporária (30 dias).', 20, yPos);
+    doc.text('Nota: Este relatório contém registos de itens em estado de retenção temporária (30 dias).', 16, yPos);
 
     const filename = `Relatorio_Lixeira_${format(new Date(), 'yyyyMMdd_HHmm')}.pdf`;
     doc.save(filename);

@@ -66,7 +66,7 @@ const systemSlides = [
 ];
 
 export default function Login() {
-    const { login, verify2FA, hasUsers, generate2FASecret, enable2FA } = useAuth();
+    const { login, logout, verify2FA, hasUsers, generate2FASecret, enable2FA } = useAuth();
     const { companySettings } = useData();
     const navigate = useNavigate();
     const [email, setEmail] = useState('');
@@ -100,7 +100,15 @@ export default function Login() {
     const [twoFactorCode, setTwoFactorCode] = useState('');
     const [requiredMfaSetup, setRequiredMfaSetup] = useState<{ secret: string; qrDataUrl: string } | null>(null);
     const [requiredMfaToken, setRequiredMfaToken] = useState('');
+    const [mfaSetupError, setMfaSetupError] = useState('');
     const [requiredRecoveryCodes, setRequiredRecoveryCodes] = useState<string[]>([]);
+
+    const refreshRequiredMfaSetup = async () => {
+        const enrollment = await generate2FASecret();
+        setRequiredMfaSetup({ secret: enrollment.secret, qrDataUrl: await QRCode.toDataURL(enrollment.qrCode) });
+        setRequiredMfaToken('');
+        setMfaSetupError('');
+    };
 
     // Support modal state
     const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
@@ -124,8 +132,7 @@ export default function Login() {
             }
         } catch (error: any) {
             if (error.message && error.message.startsWith('MFA_SETUP_REQUIRED:')) {
-                const enrollment = await generate2FASecret();
-                setRequiredMfaSetup({ secret: enrollment.secret, qrDataUrl: await QRCode.toDataURL(enrollment.qrCode) });
+                await refreshRequiredMfaSetup();
                 return;
             }
             if (error.message && error.message.startsWith('2FA_REQUIRED:')) {
@@ -159,17 +166,25 @@ export default function Login() {
         e.preventDefault();
         setLoading(true);
         try {
-            const isValid = await verify2FA(twoFactorUserId, twoFactorCode);
-            if (isValid) {
+            const result = await verify2FA(twoFactorUserId, twoFactorCode);
+            if (result.authenticated) {
                 handleLoginSuccess();
             } else {
-                setErrorMessage('Código 2FA inválido. Tente novamente.');
+                if (result.reason === 'challenge_expired') {
+                    setRequires2FA(false);
+                    setTwoFactorUserId('');
+                    setErrorMessage('A verificação expirou. Introduza novamente a palavra-passe para receber uma nova tentativa de 2FA.');
+                } else if (result.reason === 'replayed_code') {
+                    setErrorMessage('Este código já foi utilizado. Aguarde o próximo código de 6 dígitos no autenticador e tente novamente.');
+                } else {
+                    setErrorMessage('O código não corresponde à conta configurada. Confirme que escolheu a entrada TangoGestaoCreditosERP no autenticador e que a hora do computador e do telemóvel está automática. Se trocou de QR, use a entrada mais recente ou um código de recuperação.');
+                }
+                setTwoFactorCode('');
                 setIsErrorModalOpen(true);
             }
         } catch (error: any) {
             if (error.message && error.message.startsWith('MFA_SETUP_REQUIRED:')) {
-                const enrollment = await generate2FASecret();
-                setRequiredMfaSetup({ secret: enrollment.secret, qrDataUrl: await QRCode.toDataURL(enrollment.qrCode) });
+                await refreshRequiredMfaSetup();
                 setIsRecoveryModalOpen(false);
                 return;
             }
@@ -187,11 +202,17 @@ export default function Login() {
         try {
             const result = await enable2FA(requiredMfaSetup.secret, requiredMfaToken);
             if (!result.success) {
-                setErrorMessage('Código MFA inválido ou expirado.');
-                setIsErrorModalOpen(true);
+                setMfaSetupError(result.reason === 'qr_expired'
+                    ? 'Este QR expirou. Gere um novo QR, substitua a entrada antiga no telemóvel e use o novo código.'
+                    : result.reason === 'session_expired'
+                        ? 'A sessão expirou. Volte ao início de sessão e introduza a sua palavra-passe novamente.'
+                        : 'Os 6 dígitos não correspondem ao QR atual. Abra a entrada TangoGestaoCreditosERP no telemóvel, confirme a hora automática e tente o código mais recente.');
                 return;
             }
+            setMfaSetupError('');
             setRequiredRecoveryCodes(result.recoveryCodes || []);
+        } catch (error: any) {
+            setMfaSetupError(error?.message || 'Não foi possível ativar o MFA. Volte ao início de sessão e tente novamente.');
         } finally {
             setLoading(false);
         }
@@ -299,7 +320,7 @@ export default function Login() {
                             <div className="grid h-14 w-14 place-items-center rounded-xl border-2 border-[#2563eb] overflow-hidden bg-white shadow-md shadow-blue-500/5 shrink-0">
                                 {!logoError ? (
                                     <img
-                                        src="logo-app.png"
+                                        src={companySettings?.logo ? (companySettings.logo.startsWith('data:') ? companySettings.logo : `${getFileUrl(companySettings.logo)}?t=${Date.now()}`) : 'logo-app.png'}
                                         alt="Logo"
                                         className="h-full w-full object-contain p-1"
                                         onError={() => setLogoError(true)}
@@ -367,7 +388,7 @@ export default function Login() {
                                         </Link>
                                     </div>
 
-                                    {!hasUsers && !isPublicWebBuild && (
+                                    {!hasUsers && (
                                         <div className="p-3.5 bg-amber-50/90 border border-amber-200/80 rounded-2xl text-center space-y-2">
                                             <p className="text-xs text-amber-900 font-semibold">
                                                 Nenhum utilizador encontrado na base de dados.
@@ -528,11 +549,11 @@ export default function Login() {
 
             {/* Error Modal */}
             <Dialog open={Boolean(requiredMfaSetup)} onOpenChange={() => undefined}>
-                <DialogContent className="sm:max-w-[480px] border-none bg-white p-0 overflow-hidden shadow-2xl [&>button]:hidden">
+                <DialogContent className="sm:max-w-[480px] max-h-[90vh] border-none bg-white p-0 overflow-y-auto shadow-2xl [&>button]:hidden">
                     <DialogHeader className="bg-gradient-to-br from-blue-700 to-indigo-700 p-7 text-white">
                         <DialogTitle className="text-center text-2xl font-black text-white">MFA obrigatório</DialogTitle>
                         <DialogDescription className="text-center text-white/80">
-                            Super administradores devem ativar o segundo fator antes de entrar.
+                            Para proteger a conta de super administrador, o acesso exige um código do seu telemóvel além da palavra-passe.
                         </DialogDescription>
                     </DialogHeader>
                     {requiredRecoveryCodes.length > 0 ? (
@@ -549,15 +570,42 @@ export default function Login() {
                         </div>
                     ) : (
                         <form className="space-y-5 p-7" onSubmit={handleRequiredMfaSetup}>
+                            <ol className="list-decimal space-y-1 pl-5 text-sm text-slate-700">
+                                <li>Abra o Portador de Chaves no iPhone ou uma aplicação de códigos, como Google ou Microsoft Authenticator.</li>
+                                <li>Adicione uma conta lendo este QR. Procure a entrada TangoGestaoCreditosERP e o código de 6 dígitos que muda a cada 30 segundos.</li>
+                                <li>Introduza abaixo o código atual para concluir a ativação.</li>
+                            </ol>
                             <div className="flex justify-center">
                                 {requiredMfaSetup?.qrDataUrl && <img src={requiredMfaSetup.qrDataUrl} alt="Código QR para configurar MFA" className="h-48 w-48" />}
                             </div>
+                            <p className="text-center text-xs text-slate-500">Se não conseguir ler o QR, introduza esta chave manualmente na aplicação:</p>
                             <code className="block break-all rounded-xl bg-slate-50 p-3 text-center text-xs font-bold select-all">{requiredMfaSetup?.secret}</code>
+                            <p className="text-center text-sm text-slate-600">
+                                Este QR expira após 15 minutos. Um QR novo substitui o anterior.
+                            </p>
+                            {mfaSetupError && <p role="alert" className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">{mfaSetupError}</p>}
                             <Input value={requiredMfaToken} onChange={event => setRequiredMfaToken(event.target.value.replace(/\D/g, '').slice(0, 6))}
                                 placeholder="Código de 6 dígitos" className="h-14 text-center text-2xl tracking-[0.35em]" autoFocus />
                             <Button type="submit" className="w-full" disabled={loading || requiredMfaToken.length !== 6}>
                                 {loading ? 'A ativar...' : 'Ativar MFA e continuar'}
                             </Button>
+                            <Button type="button" variant="outline" className="w-full" disabled={loading} onClick={async () => {
+                                setLoading(true);
+                                try {
+                                    await refreshRequiredMfaSetup();
+                                } catch (error: any) {
+                                    setErrorMessage(error?.message || 'Não foi possível gerar um novo QR. Inicie sessão novamente.');
+                                    setIsErrorModalOpen(true);
+                                } finally {
+                                    setLoading(false);
+                                }
+                            }}>Gerar novo QR</Button>
+                            <Button type="button" variant="ghost" className="w-full" disabled={loading} onClick={async () => {
+                                await logout();
+                                setRequiredMfaSetup(null);
+                                setRequiredMfaToken('');
+                                setMfaSetupError('');
+                            }}>Voltar ao início de sessão</Button>
                         </form>
                     )}
                 </DialogContent>

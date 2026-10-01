@@ -24,17 +24,46 @@ export const scopedStorageKey = (key: string, accountId = getActiveAccountIdFrom
 
 export const getScopedLocalStorageItem = (key: string) => {
     if (typeof localStorage === 'undefined') return null;
-    return localStorage.getItem(scopedStorageKey(key));
+    try {
+        return localStorage.getItem(scopedStorageKey(key));
+    } catch (e) {
+        console.warn(`[Storage] Failed to read ${key} from localStorage:`, e);
+        return null;
+    }
 };
 
 export const setScopedLocalStorageItem = (key: string, value: string) => {
     if (typeof localStorage === 'undefined') return;
-    localStorage.setItem(scopedStorageKey(key), value);
+    try {
+        localStorage.setItem(scopedStorageKey(key), value);
+    } catch (e) {
+        console.warn(`[Storage] Failed to write ${key} to localStorage:`, e);
+        // Se a quota do localStorage for excedida (comum na web quando há logotipos em base64)
+        if (key === 'cached_company_settings') {
+            try {
+                const parsed = JSON.parse(value);
+                // Salvar versão reduzida sem os dados binários pesados de imagens para não perder os textos
+                const stripped = {
+                    ...parsed,
+                    logo: parsed.logo && parsed.logo.length > 5000 ? null : parsed.logo,
+                    reportLogo: parsed.reportLogo && parsed.reportLogo.length > 5000 ? null : parsed.reportLogo,
+                    watermarkLogo: parsed.watermarkLogo && parsed.watermarkLogo.length > 5000 ? null : parsed.watermarkLogo,
+                };
+                localStorage.setItem(scopedStorageKey(key), JSON.stringify(stripped));
+            } catch {
+                // Silencioso se mesmo a versão reduzida falhar
+            }
+        }
+    }
 };
 
 export const removeScopedLocalStorageItem = (key: string) => {
     if (typeof localStorage === 'undefined') return;
-    localStorage.removeItem(scopedStorageKey(key));
+    try {
+        localStorage.removeItem(scopedStorageKey(key));
+    } catch (e) {
+        console.warn(`[Storage] Failed to remove ${key} from localStorage:`, e);
+    }
 };
 
 const clearAccountRuntimeState = (nextAccountId: string) => {

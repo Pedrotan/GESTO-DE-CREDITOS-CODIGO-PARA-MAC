@@ -1,4 +1,4 @@
-import { applyCors, enforceRateLimit, requireSecret } from './_security.js';
+import { applyCors, enforceDistributedRateLimit, requireSecret } from './_security.js';
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -232,7 +232,16 @@ export default async function handler(req, res) {
   if (!applyCors(req, res)) return send(res, 403, { success: false, message: 'Origem não autorizada.' });
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
   if (req.method !== 'GET') return send(res, 405, { success: false, message: 'Método não permitido.' });
-  if (!enforceRateLimit(req, res, { limit: 30, windowMs: 60_000, scope: 'lookup' })) return;
+  if (!process.env.DATABASE_URL) return send(res, 503, { success: false, message: 'Consulta de documentos ainda não configurada.' });
+  try {
+    const { neon } = await import('@neondatabase/serverless');
+    const client = neon(process.env.DATABASE_URL);
+    const sql = (text, params) => client.query(text, params);
+    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 30, windowMs: 60_000, scope: 'lookup' })) return;
+  } catch (error) {
+    console.error('[lookup][rate-limit]', error);
+    return send(res, 503, { success: false, message: 'O controlo de acesso está indisponível.' });
+  }
   if (!requireSecret(req, process.env.TANGO_LOOKUP_API_KEY)) return send(res, 401, { success: false, message: 'Autenticação obrigatória.' });
 
   const document = String(req.query?.document || '').trim().toUpperCase().replace(/\s+/g, '');

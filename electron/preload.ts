@@ -142,6 +142,8 @@ const api = Object.freeze({
         token: ensureText(token, 'CÃ³digo MFA', 6)
     }),
     dbSchemaReady: () => ipcRenderer.invoke('db-schema-ready'),
+    dbSchemaStatus: () => ipcRenderer.invoke('db-schema-status'),
+    dbOptimize: () => ipcRenderer.invoke('db-optimize'),
     dbExecute: (sql: string, params?: SqlParams) => {
         const normalizedSql = normalizeSql(sql);
         assertSqlKind(normalizedSql, WRITE_SQL, 'dbExecute');

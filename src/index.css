@@ -229,6 +229,12 @@
            dark:bg-fuchsia-500/15 dark:hover:bg-fuchsia-500/25;
   }
 
+  /* Fluxo de caixa: fundo informativo com saídas e entradas destacadas. */
+  .card-kpi-flow {
+    @apply card-kpi-base bg-[#C6D9F7] hover:bg-[#B9D0F5]
+           dark:bg-indigo-500/20 dark:hover:bg-indigo-500/30;
+  }
+
   /* Aliases semanticos (mesma aparencia, nome pela prioridade) */
   .card-kpi-critical { @apply card-kpi-coral; }
   .card-kpi-warning  { @apply card-kpi-amber; }
@@ -378,6 +384,7 @@
 /* SweetAlert2 Theme & Z-Index overrides */
 .swal2-container {
   z-index: 100050 !important;
+  pointer-events: auto !important;
 }
 
 .tango-swal-popup {

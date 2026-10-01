@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { applyCors, enforceRateLimit, requireSecret, safeEqual } from '../vercel-api/_security.js';
+import { applyCors, enforceDistributedRateLimit, enforceRateLimit, requireSecret, safeEqual } from '../vercel-api/_security.js';
 
 const response = () => ({
     headers: {},
@@ -33,4 +33,20 @@ test('limitador bloqueia excesso', () => {
     const blocked = response();
     assert.equal(enforceRateLimit(req, blocked, { limit: 1, windowMs: 60_000, scope: 'test' }), false);
     assert.equal(blocked.statusCode, 429);
+});
+
+test('limitador distribuído partilha a contagem e falha fechado', async () => {
+    let count = 0;
+    const sql = async (query, params) => {
+        if (query.startsWith('CREATE TABLE')) return [];
+        assert.equal(params[1], 60_000);
+        return [{ request_count: ++count, reset_epoch: Math.floor(Date.now() / 1000) + 60 }];
+    };
+    const req = { headers: { 'x-forwarded-for': '203.0.113.123' }, socket: {} };
+    assert.equal(await enforceDistributedRateLimit(sql, req, response(), { limit: 1, windowMs: 60_000, scope: 'test-distributed' }), true);
+    const blocked = response();
+    assert.equal(await enforceDistributedRateLimit(sql, req, blocked, { limit: 1, windowMs: 60_000, scope: 'test-distributed' }), false);
+    assert.equal(blocked.statusCode, 429);
+    await assert.rejects(() => enforceDistributedRateLimit(async () => { throw new Error('database unavailable'); }, req, response(),
+        { limit: 1, windowMs: 60_000, scope: 'test-distributed' }), /database unavailable/);
 });

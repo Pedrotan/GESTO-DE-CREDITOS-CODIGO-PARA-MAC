@@ -3,6 +3,7 @@ import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useSearchParams } from 'react-router-dom';
 import { formatDateSafe } from '@/bibliotecas/utils';
 import { formatAngolanPhone } from '@/bibliotecas/formatters';
+import { resolveBrandPrimary, resolveBrandDark, BRAND_ORANGE, BRAND_CHARCOAL } from '@/bibliotecas/pdf';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
@@ -112,6 +113,7 @@ import { validateLicense, getLicenseTypeName, getMachineId } from '@/bibliotecas
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ServicoAutoBackup, AutoBackupConfig, AutoBackupLog } from '@/servicos/ServicoAutoBackup';
+import { ConflictReview } from '@/componentes/sync/ConflictReview';
 
 const SUPPORT_PHONE = "+244 941537486";
 const SYSTEM_NAME = "Tango Gestão de Créditos";
@@ -155,40 +157,98 @@ export default function Settings() {
     const reportLogoInputRef = useRef<HTMLInputElement>(null);
     const watermarkLogoInputRef = useRef<HTMLInputElement>(null);
 
+    const compressImage = (file: File, maxWidth = 800, maxHeight = 800, quality = 0.85): Promise<string> => {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                const result = event.target?.result as string;
+                if (!result) {
+                    resolve("");
+                    return;
+                }
+                if (file.type === 'image/svg+xml') {
+                    resolve(result);
+                    return;
+                }
+                const img = new Image();
+                img.onload = () => {
+                    let { width, height } = img;
+                    if (width <= maxWidth && height <= maxHeight && file.size < 150 * 1024) {
+                        resolve(result);
+                        return;
+                    }
+                    if (width > maxWidth || height > maxHeight) {
+                        if (width / maxWidth > height / maxHeight) {
+                            height = Math.round((height * maxWidth) / width);
+                            width = maxWidth;
+                        } else {
+                            width = Math.round((width * maxHeight) / height);
+                            height = maxHeight;
+                        }
+                    }
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.max(1, width);
+                    canvas.height = Math.max(1, height);
+                    const ctx = canvas.getContext('2d');
+                    if (!ctx) {
+                        resolve(result);
+                        return;
+                    }
+                    ctx.drawImage(img, 0, 0, width, height);
+                    const isPng = file.type === 'image/png';
+                    const outputType = isPng ? 'image/png' : 'image/jpeg';
+                    resolve(canvas.toDataURL(outputType, isPng ? undefined : quality));
+                };
+                img.onerror = () => resolve(result);
+                img.src = result;
+            };
+            reader.onerror = () => resolve("");
+            reader.readAsDataURL(file);
+        });
+    };
+
     const handleWebFileChange = (type: 'logo' | 'report' | 'watermark') => async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        const reader = new FileReader();
-        reader.onload = async (event) => {
-            const base64Data = event.target?.result as string;
+        try {
+            const base64Data = await compressImage(file, 800, 800, 0.85);
             if (!base64Data) return;
 
-            try {
-                // Save file to disk for backup (Electron), but always use base64 for state/DB
-                if ((window as any).electronAPI?.saveLogo) {
-                    await (window as any).electronAPI.saveLogo(type, base64Data);
-                }
-                // Always store the base64 data URI directly
-                if (type === 'logo') setLogoPreview(base64Data);
-                else if (type === 'report') setReportLogoPreview(base64Data);
-                else setWatermarkLogoPreview(base64Data);
-                toastNotify({ title: "Sucesso", description: "Imagem carregada com sucesso." });
-            } catch (err) {
-                console.error("Erro ao processar imagem:", err);
-                toastNotify({ title: "Erro", description: "Falha ao processar imagem", variant: "destructive" });
-            } finally {
-                e.target.value = '';
+            // Save file to disk for backup (Electron), but always use base64 for state/DB
+            if ((window as any).electronAPI?.saveLogo) {
+                await (window as any).electronAPI.saveLogo(type, base64Data);
             }
-        };
-        reader.readAsDataURL(file);
+            // Always store the base64 data URI directly
+            if (type === 'logo') setLogoPreview(base64Data);
+            else if (type === 'report') setReportLogoPreview(base64Data);
+            else setWatermarkLogoPreview(base64Data);
+            toastNotify({ title: "Sucesso", description: "Imagem carregada e otimizada com sucesso." });
+        } catch (err) {
+            console.error("Erro ao processar imagem:", err);
+            toastNotify({ title: "Erro", description: "Falha ao processar imagem", variant: "destructive" });
+        } finally {
+            e.target.value = '';
+        }
     };
 
     const formatImageURL = (pathOrData: string | null) => {
         if (!pathOrData) return "";
-        if (pathOrData.startsWith('data:')) return pathOrData;
+        if (
+            pathOrData.startsWith('data:') ||
+            pathOrData.startsWith('blob:') ||
+            pathOrData.startsWith('http://') ||
+            pathOrData.startsWith('https://')
+        ) {
+            return pathOrData;
+        }
 
-        // File path — convert to safe-file:// URL with cache busting
+        const isElectronEnv = typeof window !== 'undefined' && !!(window as any).electronAPI;
+        if (!isElectronEnv) {
+            return pathOrData.startsWith('/') ? pathOrData : `/${pathOrData}`;
+        }
+
+        // File path no Electron — converter para safe-file:// URL com cache busting
         const url = getFileUrl(pathOrData);
         const [base, query] = url.split('?');
         const timestamp = `t=${Date.now()}`;
@@ -208,8 +268,8 @@ export default function Settings() {
         currency: companySettings?.currency || 'AOA',
         rescueKey: companySettings?.rescueKey || 'TANGO-RECOVERY-2026',
         phone: companySettings?.phone || '',
-        primaryColor: companySettings?.primaryColor ? rgbToHex(companySettings.primaryColor) : '#1e293b',
-        secondaryColor: companySettings?.secondaryColor ? rgbToHex(companySettings.secondaryColor) : '#64748b',
+        primaryColor: rgbToHex(resolveBrandPrimary(companySettings?.primaryColor)),
+        secondaryColor: rgbToHex(resolveBrandDark(companySettings?.secondaryColor)),
         sessionTimeout: companySettings?.sessionTimeout || 5,
         email: companySettings?.email || '',
         whatsapp: companySettings?.whatsapp || '',
@@ -622,8 +682,8 @@ export default function Settings() {
                 currency: companySettings.currency || 'AOA',
                 rescueKey: companySettings.rescueKey || 'TANGO-RECOVERY-2026',
                 phone: companySettings.phone || '',
-                primaryColor: companySettings.primaryColor ? rgbToHex(companySettings.primaryColor) : '#1e293b',
-                secondaryColor: companySettings.secondaryColor ? rgbToHex(companySettings.secondaryColor) : '#64748b',
+                primaryColor: rgbToHex(resolveBrandPrimary(companySettings.primaryColor)),
+                secondaryColor: rgbToHex(resolveBrandDark(companySettings.secondaryColor)),
                 sessionTimeout: companySettings.sessionTimeout || 5,
                 email: companySettings.email || '',
                 whatsapp: companySettings.whatsapp || '',
@@ -835,6 +895,12 @@ export default function Settings() {
                 defaultSimulationInterestRate: Number(formData.defaultSimulationInterestRate),
                 defaultSimulationAdminFee: Number(formData.defaultSimulationAdminFee),
                 defaultSimulationIof: Number(formData.defaultSimulationIof),
+                smtpHost: formData.smtpHost?.trim() || 'smtp.gmail.com',
+                smtpPort: String(formData.smtpPort || '587').trim(),
+                smtpUser: formData.smtpUser?.trim() || '',
+                smtpPassword: formData.smtpPassword || '',
+                smtpSecure: Boolean(formData.smtpSecure),
+                smtpFromName: formData.smtpFromName?.trim() || formData.name?.trim() || 'Tango ERP',
             }, user ? { id: user.id, name: user.name } : undefined);
 
             // Partilhar configuração com o backend se for Master
@@ -940,7 +1006,11 @@ export default function Settings() {
 
     const handleOptimizeDB = async () => {
         try {
-            await sqlite.exec('VACUUM');
+            if (window.electronAPI?.dbOptimize) {
+                await window.electronAPI.dbOptimize();
+            } else {
+                await sqlite.exec('VACUUM');
+            }
             setAlertConfig({
                 isOpen: true,
                 title: "Sistema Otimizado",
@@ -1644,7 +1714,7 @@ export default function Settings() {
                                             setAlertConfig(prev => ({ ...prev, isOpen: false }));
                                             await updateCompanySettings({
                                                 logo: null, reportLogo: null, watermarkLogo: null,
-                                                primaryColor: [30, 41, 59], secondaryColor: [100, 116, 139]
+                                                primaryColor: BRAND_ORANGE, secondaryColor: BRAND_CHARCOAL
                                             });
                                             setAlertConfig({
                                                 isOpen: true,
@@ -3197,6 +3267,7 @@ export default function Settings() {
                             )}
                         </CardFooter>
                     </Card>
+                    <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
                 </TabsContent>
 
                 {/* Assinaturas */}
@@ -3498,4 +3569,3 @@ export default function Settings() {
         </MainLayout >
     );
 }
-

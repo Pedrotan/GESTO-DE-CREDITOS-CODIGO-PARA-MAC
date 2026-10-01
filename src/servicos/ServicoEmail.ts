@@ -8,7 +8,7 @@ export const ServicoEmail = {
      */
     getPremiumTemplate: (client: Client, settings: CompanySettings, subtitle: string) => {
         // Converte primaryColor (que pode ser number[] do dashboard) para string Hex
-        let primaryColor = "#2563eb"; // Default
+        let primaryColor = "#F37021"; // Default Laranja Corporativo
         if (settings.primaryColor) {
             if (Array.isArray(settings.primaryColor) && settings.primaryColor.length >= 3) {
                 const [r, g, b] = settings.primaryColor;
@@ -31,7 +31,7 @@ export const ServicoEmail = {
                     body { font-family: 'Segoe UI', Arial, sans-serif; line-height: 1.6; color: #334155; margin: 0; padding: 0; background-color: #f8fafc; }
                     .container { max-width: 600px; margin: 20px auto; background: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
                     .header { padding: 30px; text-align: center; }
-                    .hero { background: linear-gradient(135deg, ${primaryColor}, #1d4ed8); padding: 40px 30px; text-align: left; color: #ffffff; border-radius: 0 0 40px 0; margin-bottom: 30px; }
+                    .hero { background: linear-gradient(135deg, ${primaryColor}, #c2410c); padding: 40px 30px; text-align: left; color: #ffffff; border-radius: 0 0 40px 0; margin-bottom: 30px; }
                     .hero h1 { font-size: 24px; margin: 0; line-height: 1.2; font-weight: 800; }
                     .content { padding: 0 30px 30px 30px; }
                     .greeting { font-size: 18px; font-weight: 600; margin-bottom: 15px; }
@@ -47,7 +47,7 @@ export const ServicoEmail = {
                     .agent-name { font-weight: 700; color: white; margin: 0; font-size: 16px; }
                     .agent-title { font-size: 12px; color: #bfdbfe; margin: 0; }
                     .social-links { text-align: center; margin-bottom: 20px; }
-                    .social-link { display: inline-block; margin: 0 10px; text-decoration: none; color: white; background: #2563eb; width: 32px; height: 32px; line-height: 32px; border-radius: 16px; font-size: 14px; }
+                    .social-link { display: inline-block; margin: 0 10px; text-decoration: none; color: white; background: ${primaryColor}; width: 32px; height: 32px; line-height: 32px; border-radius: 16px; font-size: 14px; }
                     .legal { font-size: 10px; color: #94a3b8; text-align: center; padding: 20px; }
                 </style>
             </head>
@@ -58,7 +58,7 @@ export const ServicoEmail = {
                     </div>
 
                     <div class="hero">
-                        <h1>Uma plataforma única para <span style="color: #60a5fa;">integrar e coordenar</span> todas as etapas da sua gestão de crédito.</h1>
+                        <h1>Uma plataforma única para <span style="color: #fed7aa;">integrar e coordenar</span> todas as etapas da sua gestão de crédito.</h1>
                     </div>
 
                     <div class="content">
@@ -66,7 +66,7 @@ export const ServicoEmail = {
                         <p>Na <strong>${companyName}</strong>, entendemos os desafios da gestão financeira e trazemos soluções que simplificam e otimizam as suas operações diárias.</p>
                         <p>${subtitle}</p>
 
-                        <h2 style="font-size: 20px; color: #1e293b; margin-top: 35px;">Com a ${companyName.toLowerCase()} você tem:</h2>
+                        <h2 style="font-size: 20px; color: #2B2D2F; margin-top: 35px;">Com a ${companyName.toLowerCase()} você tem:</h2>
                         
                         <div class="feature-list">
                             <div class="feature-item">

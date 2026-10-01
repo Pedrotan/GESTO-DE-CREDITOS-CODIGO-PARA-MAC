@@ -13,6 +13,7 @@ type PendingEnrollment = { secret: string; expiresAt: number };
 const IDLE_TTL_MS = 30 * 60 * 1000;
 const ABSOLUTE_TTL_MS = 8 * 60 * 60 * 1000;
 const MFA_TTL_MS = 5 * 60 * 1000;
+const MFA_ENROLLMENT_TTL_MS = 15 * 60 * 1000;
 
 const decodeBase32 = (value: string) => {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -72,19 +73,19 @@ export class UserSessionService {
     const pending = this.pendingMfa.get(senderId);
     if (!pending || pending.expiresAt <= Date.now() || pending.user.id !== userId) {
       this.pendingMfa.delete(senderId);
-      return { authenticated: false };
+      return { authenticated: false, reason: 'challenge_expired' as const };
     }
-    if (typeof token !== 'string' || !/^\d{6}$/u.test(token)) return { authenticated: false };
+    if (typeof token !== 'string' || !/^\d{6}$/u.test(token)) return { authenticated: false, reason: 'invalid_code' as const };
     const currentCounter = Math.floor(Date.now() / 30_000);
     for (const counter of [currentCounter - 1, currentCounter, currentCounter + 1]) {
       if (totpForCounter(pending.secret, counter) !== token) continue;
-      if ((this.lastTotpCounter.get(userId) ?? -1) >= counter) return { authenticated: false, replayed: true };
+      if ((this.lastTotpCounter.get(userId) ?? -1) >= counter) return { authenticated: false, reason: 'replayed_code' as const };
       this.lastTotpCounter.set(userId, counter);
       this.pendingMfa.delete(senderId);
       this.createSession(senderId, pending.user);
       return { authenticated: true, user: pending.user };
     }
-    return { authenticated: false };
+    return { authenticated: false, reason: 'invalid_code' as const };
   }
 
   hasPendingMfa(senderId: number, userId: string) {
@@ -112,7 +113,7 @@ export class UserSessionService {
     }
     const user: any = session.user;
     const secret = encodeBase32(crypto.randomBytes(20));
-    this.pendingEnrollment.set(senderId, { secret, expiresAt: Date.now() + MFA_TTL_MS });
+    this.pendingEnrollment.set(senderId, { secret, expiresAt: Date.now() + MFA_ENROLLMENT_TTL_MS });
     const issuer = 'TangoGestaoCreditosERP';
     const account = String(user.email || user.username || user.id);
     const qrCode = `otpauth://totp/${encodeURIComponent(issuer)}:${encodeURIComponent(account)}?secret=${secret}&issuer=${encodeURIComponent(issuer)}`;
@@ -123,15 +124,17 @@ export class UserSessionService {
     const session = this.sessions.get(senderId);
     if (!session || Math.min(session.idleExpiresAt, session.absoluteExpiresAt) <= Date.now()) {
       this.sessions.delete(senderId);
-      return { confirmed: false };
+      return { confirmed: false, reason: 'session_expired' as const };
     }
     const user: any = session.user;
     const pending = this.pendingEnrollment.get(senderId);
     if (!pending || pending.expiresAt <= Date.now()) {
       this.pendingEnrollment.delete(senderId);
-      return { confirmed: false };
+      return { confirmed: false, reason: 'qr_expired' as const };
     }
-    if (!this.verifySecretToken(String(user.id), pending.secret, token, true)) return { confirmed: false };
+    if (!this.verifySecretToken(String(user.id), pending.secret, token, true)) {
+      return { confirmed: false, reason: 'invalid_code' as const };
+    }
     this.pendingEnrollment.delete(senderId);
     return { confirmed: true, secret: pending.secret, user };
   }

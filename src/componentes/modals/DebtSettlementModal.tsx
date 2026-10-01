@@ -28,50 +28,51 @@ export function DebtSettlementModal({
         const pageWidth = doc.internal.pageSize.getWidth();
         const pageHeight = doc.internal.pageSize.getHeight();
 
-        // --- Colors ---
-        const primaryColor = [220, 38, 38]; // Red-600 (Tango Red)
-        const secondaryColor = [249, 115, 22]; // Orange-500
-        const darkText = [31, 41, 55]; // Gray-800
-        const lightText = [107, 114, 128]; // Gray-500
+        // --- Colors do Modelo de Referência ---
+        const primaryColor = [243, 112, 33]; // #F37021 (Laranja Corporativo de Referência)
+        const secondaryColor = [43, 45, 47]; // #2B2D2F (Carvão Escuro de Referência)
+        const darkText = [43, 45, 47];
+        const lightText = [100, 116, 139];
         const white = [255, 255, 255];
 
         // --- Header Background ---
         doc.setFillColor(secondaryColor[0], secondaryColor[1], secondaryColor[2]);
-        doc.rect(0, 0, pageWidth, 60, "F");
+        doc.rect(0, 0, pageWidth, 55, "F");
 
-        // Gradient-like overlay (simple rect for now, jsPDF gradient is complex)
+        // Accent stripe Laranja Corporativo
         doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-        doc.rect(pageWidth / 2, 0, pageWidth / 2, 60, "F"); // Split header
+        doc.rect(0, 52, pageWidth, 3, "F");
 
         // --- Header Content ---
+        doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+        doc.setFontSize(28);
+        doc.setFont("helvetica", "bold");
+        doc.text("PARABÉNS!", 20, 24);
+
         doc.setTextColor(white[0], white[1], white[2]);
-        doc.setFontSize(32);
-        doc.setFont("helvetica", "bold");
-        doc.text("PARABÉNS!", 20, 25);
-
-        doc.setFontSize(14);
+        doc.setFontSize(11);
         doc.setFont("helvetica", "normal");
-        doc.text("CRÉDITO TOTALMENTE", 20, 38);
-        doc.setFontSize(22);
+        doc.text("CRÉDITO TOTALMENTE", 20, 34);
+        doc.setFontSize(18);
         doc.setFont("helvetica", "bold");
-        doc.text("LIQUIDADO", 20, 48);
+        doc.text("LIQUIDADO COM SUCESSO", 20, 44);
 
-        // Badge Icon (simulated)
-        const badgeX = pageWidth - 40;
-        const badgeY = 30;
+        // Badge Icon
+        const badgeX = pageWidth - 35;
+        const badgeY = 27;
         doc.setFillColor(255, 255, 255);
-        doc.circle(badgeX, badgeY, 18, "F");
+        doc.circle(badgeX, badgeY, 15, "F");
         doc.setLineWidth(1);
         doc.setDrawColor(primaryColor[0], primaryColor[1], primaryColor[2]);
-        doc.circle(badgeX, badgeY, 16, "S");
+        doc.circle(badgeX, badgeY, 13.5, "S");
 
-        doc.setFontSize(24);
+        doc.setFontSize(16);
         doc.setTextColor(primaryColor[0], primaryColor[1], primaryColor[2]);
         doc.setFont("helvetica", "bold");
-        doc.text("OK", badgeX, badgeY + 2.5, { align: "center" }); // "OK" instead of checkmark to be safe
+        doc.text("OK", badgeX, badgeY + 2, { align: "center" });
 
         // --- Body Content ---
-        let currentY = 80;
+        let currentY = 75;
 
         // Greeting
         doc.setFontSize(20);

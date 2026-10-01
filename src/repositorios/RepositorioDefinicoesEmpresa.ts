@@ -8,6 +8,10 @@ export class RepositorioDefinicoesEmpresa extends RepositorioBase {
     static async update(id: number, sql: string, params: any[]): Promise<void> {
         await this.execute(sql, params);
     }
+
+    static async executeDirect(sql: string): Promise<void> {
+        await this.execute(sql, []);
+    }
 }
 
 

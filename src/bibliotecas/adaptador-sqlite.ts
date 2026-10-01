@@ -18,7 +18,7 @@ export type SqlTransactionStatement = {
 };
 
 const loadFromIDB = (): Promise<Uint8Array | null> => {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
         const req = indexedDB.open(IDB_NAME, 1);
         req.onupgradeneeded = (e: any) => {
             const db = e.target.result;
@@ -38,9 +38,9 @@ const loadFromIDB = (): Promise<Uint8Array | null> => {
                     }
                 } else resolve(null);
             };
-            req.onerror = () => resolve(null);
+            req.onerror = () => reject(req.error || new Error('Falha ao ler a base de dados local.'));
         };
-        req.onerror = () => resolve(null);
+        req.onerror = () => reject(req.error || new Error('Falha ao abrir o armazenamento local.'));
     });
 };
 
@@ -84,7 +84,6 @@ const initDB = async (): Promise<Database> => {
 
     const SQL = await sqlPromise;
 
-    let hadPersistedData = false;
     try {
         let persisted: Uint8Array | null = null;
 
@@ -106,7 +105,6 @@ const initDB = async (): Promise<Database> => {
         }
 
         if (persisted) {
-            hadPersistedData = true;
             db = new SQL.Database(persisted);
             await createTables();
         } else {
@@ -115,11 +113,9 @@ const initDB = async (): Promise<Database> => {
         }
     } catch (e) {
         console.error('Falha ao carregar a base de dados persistida.', e);
-        if (hadPersistedData) {
-            throw new Error('A base de dados local está corrompida ou incompatível. A abertura foi interrompida para evitar perda silenciosa de dados.');
-        }
-        db = new SQL.Database();
-        await createTables();
+        db?.close();
+        db = null;
+        throw new Error('A base de dados local não pôde ser aberta ou migrada. Os dados existentes foram preservados. Restaure um backup válido ou repare o armazenamento antes de continuar.');
     }
 
     if ((window as any).electronAPI?.dbSchemaReady) {
@@ -171,7 +167,8 @@ const createTables = async () => {
                 console.log(`[Migration] Added column ${column} to ${table}`);
             }
         } catch (e) {
-            console.warn(`[Migration Error] Failed to check/add column ${column} to ${table}:`, e);
+            console.error('[Migration] Erro ao adicionar coluna:', e);
+            throw new Error(`Falha na migração da coluna ${table}.${column}.`);
         }
     };
 
@@ -556,7 +553,12 @@ const createTables = async () => {
             smtpSecure INTEGER DEFAULT 0,
             smtpFromName TEXT,
             location TEXT,
-            enableMultiTenant INTEGER DEFAULT 1
+            enableSuppliersModule INTEGER DEFAULT 0,
+            enableSuppliersModuleAdminOnly INTEGER DEFAULT 0,
+            enableMultiTenant INTEGER DEFAULT 1,
+            website TEXT,
+            segment TEXT,
+            slogan TEXT
         );
 
         CREATE TABLE IF NOT EXISTS warranties (
@@ -1041,11 +1043,21 @@ const createTables = async () => {
             ['$2b$10$62r5b52lBESpvNHOfibFve4320qWghaZhi6rtHOV.naEISwrPU3ru']);
     });
 
+    await applyMigration(2026092301, 'reviewable-sync-conflicts', async () => {
+        await safeAddColumn('sync_conflicts', 'resolutionNote', 'TEXT');
+        await safeAddColumn('sync_conflicts', 'resolvedBy', 'TEXT');
+        await safeAddColumn('sync_conflicts', 'resolvedAt', 'TEXT');
+    });
+
     // safeAddColumns for migrations
     await safeAddColumn("users", "status", "TEXT DEFAULT 'active'");
     await safeAddColumn("users", "lastSeen", "TEXT");
     await safeAddColumn("users", "permissions", "TEXT");
     await safeAddColumn("users", "username", "TEXT");
+    await safeAddColumn("users", "failedAttempts", "INTEGER DEFAULT 0");
+    await safeAddColumn("users", "twoFactorEnabled", "BOOLEAN DEFAULT 0");
+    await safeAddColumn("users", "twoFactorSecret", "TEXT");
+    await safeAddColumn("users", "blockedAt", "TEXT");
     await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)");
     await safeAddColumn("users", "ip", "TEXT");
     await safeAddColumn("users", "signature", "TEXT");
@@ -1179,6 +1191,9 @@ const createTables = async () => {
     await safeAddColumn("company_settings", "enableSuppliersModule", "INTEGER DEFAULT 0");
     await safeAddColumn("company_settings", "enableSuppliersModuleAdminOnly", "INTEGER DEFAULT 0");
     await safeAddColumn("company_settings", "enableMultiTenant", "INTEGER DEFAULT 1");
+    await safeAddColumn("company_settings", "website", "TEXT");
+    await safeAddColumn("company_settings", "segment", "TEXT");
+    await safeAddColumn("company_settings", "slogan", "TEXT");
 
     await safeAddColumn("credits", "supplierId", "TEXT");
     await safeAddColumn("credits", "supplierProfitRate", "REAL");
@@ -1332,7 +1347,30 @@ export const sqlite = {
 
                 if (currentIsElectron) {
                     console.log('[SQLite Adapter] Initializing Electron IPC (better-sqlite3)');
-                    await createTables();
+                    // O processo principal mantém este estado após um reload do renderer.
+                    // Repetir DDL depois do login seria rejeitado e poderia interromper o arranque.
+                    let isReady = false;
+                    try {
+                        const schemaStatus = await (window as any).electronAPI?.dbSchemaStatus?.();
+                        isReady = Boolean(schemaStatus?.ready);
+                    } catch (schemaErr) {
+                        console.warn('[SQLite Adapter] dbSchemaStatus indisponível:', schemaErr);
+                        try {
+                            const bootstrap = await (window as any).electronAPI?.userAuthBootstrapStatus?.();
+                            if (bootstrap?.hasUsers) isReady = true;
+                        } catch {
+                            // manter false
+                        }
+                    }
+
+                    if (!isReady) {
+                        await createTables();
+                        try {
+                            await (window as any).electronAPI?.dbSchemaReady?.();
+                        } catch (readyErr) {
+                            console.warn('[SQLite Adapter] Erro ao invocar dbSchemaReady:', readyErr);
+                        }
+                    }
                     // @ts-ignore
                     window.sqliteInitialized = true;
                     return { success: true };
@@ -1444,6 +1482,17 @@ export const sqlite = {
 
     exec: async (sql: string): Promise<void> => {
         if (isElectron) {
+            const trimmed = sql.trim();
+            if (/^VACUUM\b/i.test(trimmed)) {
+                if ((window as any).electronAPI?.dbOptimize) {
+                    await (window as any).electronAPI.dbOptimize();
+                    return;
+                }
+            }
+            if (/^(INSERT|UPDATE|DELETE|REPLACE)\b/i.test(trimmed)) {
+                await (window as any).electronAPI.dbExecute(sql, []);
+                return;
+            }
             await (window as any).electronAPI.dbExec(sql);
             return;
         }

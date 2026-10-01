@@ -1,6 +1,4 @@
 import { Suspense, lazy, useEffect, useState } from "react";
-import { Toaster } from "@/componentes/ui/toaster";
-import { Toaster as Sonner } from "@/componentes/ui/sonner";
 import { TooltipProvider } from "@/componentes/ui/tooltip";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useData } from "@/contextos/ContextoDados";
@@ -90,6 +88,21 @@ import { db } from "@/bibliotecas/bd";
 const AppContent = () => {
   const { companySettings, isDataLoading } = useData();
   const [forceReady, setForceReady] = useState(false);
+  const [tenantAuthorized, setTenantAuthorized] = useState(() => {
+    return !isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true';
+  });
+
+  useEffect(() => {
+    const handleAuth = () => {
+      setTenantAuthorized(!isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true');
+    };
+    window.addEventListener('tango_tenant_authorized', handleAuth);
+    window.addEventListener('storage', handleAuth);
+    return () => {
+      window.removeEventListener('tango_tenant_authorized', handleAuth);
+      window.removeEventListener('storage', handleAuth);
+    };
+  }, []);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -149,17 +162,22 @@ const AppContent = () => {
 
   return (
     <TooltipProvider>
-      <OnboardingWizard />
       <LigacaoEmpresaWeb />
-      <Toaster />
-      <Sonner />
+      {tenantAuthorized && <OnboardingWizard />}
       <HashRouter>
         <BackupReminder />
         <AutoBackupManager />
         <Suspense fallback={suspenseFallback}>
           <Routes>
             <Route path="/entrar" element={<Entrar />} />
-            <Route path="/onboarding" element={<OnboardingWizard forceShow={true} />} />
+            <Route
+              path="/onboarding"
+              element={
+                !tenantAuthorized
+                  ? <Navigate to="/entrar" replace />
+                  : <OnboardingWizard forceShow={true} />
+              }
+            />
             <Route path="/esqueci-senha" element={<EsqueciSenha />} />
             <Route
               path="/ativacao"
@@ -174,31 +192,23 @@ const AppContent = () => {
               }
             />
 
-            {/* Módulo Mestre (Oculto) — indisponível na web pública */}
+            {/* Módulo Mestre (Tango Master) */}
             <Route
               path="/tango-master"
               element={
-                isPublicWebBuild ? (
-                  <Navigate to="/entrar" replace />
-                ) : (
-                  <Suspense fallback={suspenseFallback}>
-                    <LoginAdmin />
-                  </Suspense>
-                )
+                <Suspense fallback={suspenseFallback}>
+                  <LoginAdmin />
+                </Suspense>
               }
             />
             <Route
               path="/tango-master/dashboard"
               element={
-                isPublicWebBuild ? (
-                  <Navigate to="/entrar" replace />
-                ) : (
-                  <Suspense fallback={suspenseFallback}>
-                    <MasterProtectedRoute>
-                      <DashboardAdmin />
-                    </MasterProtectedRoute>
-                  </Suspense>
-                )
+                <Suspense fallback={suspenseFallback}>
+                  <MasterProtectedRoute>
+                    <DashboardAdmin />
+                  </MasterProtectedRoute>
+                </Suspense>
               }
             />
             <Route

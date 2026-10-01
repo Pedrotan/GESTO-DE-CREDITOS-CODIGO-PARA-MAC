@@ -355,29 +355,6 @@ export default function Reports() {
 
     const exportToPDF = async () => {
         try {
-            setAlertConfig({
-                isOpen: true,
-                title: "Iniciando exportação...",
-                description: "Aguarde enquanto processamos o PDF detalhado.",
-                type: "success"
-            });
-
-            let imgData = undefined;
-            if (reportRef.current) {
-                try {
-                    const canvas = await html2canvas(reportRef.current, {
-                        scale: 2.0,
-                        useCORS: true,
-                        allowTaint: true,
-                        logging: false,
-                        backgroundColor: '#ffffff'
-                    });
-                    imgData = canvas.toDataURL('image/jpeg', 0.9);
-                } catch (e) {
-                    console.error("Erro ao capturar gráficos:", e);
-                }
-            }
-
             const periodLabels: Record<string, string> = {
                 'total': 'TODO O TEMPO',
                 'hoje': 'HOJE',
@@ -400,15 +377,12 @@ export default function Reports() {
                     { label: 'Garantias Ativas (Qtd)', value: activeWarranties.length.toString() },
                     { label: 'Valor Estimado de Garantias', value: formatCurrency(totalWarrantyValue) }
                 ],
-                credits: pendingCredits,
-                visualImg: imgData
+                credits: pendingCredits
             }, companySettings, user?.name);
 
-            setAlertConfig({
-                isOpen: true,
-                title: "Sucesso",
-                description: "Relatório gerencial PDF gerado e baixado.",
-                type: "success"
+            toast({
+                title: "Relatório Gerado Instantaneamente",
+                description: "A janela para guardar o PDF foi iniciada na pasta de relatórios.",
             });
         } catch (error) {
             console.error("Erro fatal na geração do PDF:", error);

@@ -6,6 +6,8 @@
     "strictNullChecks": true
   },
   "include": [
+    "src/bibliotecas/ajuste-encargos.ts",
+    "src/bibliotecas/liquidacao-prestacoes.ts",
     "src/bibliotecas/calculos-financeiros.ts",
     "src/bibliotecas/conciliacao-prestacoes.ts",
     "src/bibliotecas/cronograma-prestacoes.ts",

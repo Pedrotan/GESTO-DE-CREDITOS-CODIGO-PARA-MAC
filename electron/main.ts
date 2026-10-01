@@ -12,6 +12,7 @@ import * as nodemailer from 'nodemailer';
 import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
+import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
@@ -26,7 +27,7 @@ app.commandLine.appendSwitch("disable-gpu-compositing");
 app.commandLine.appendSwitch("disable-gpu-rasterization");
 app.commandLine.appendSwitch("disable-accelerated-2d-canvas");
 app.commandLine.appendSwitch("disable-vulkan");
-const disableRendererSandbox = process.env.TANGO_RENDERER_SANDBOX === "false" && !app.isPackaged;
+const disableRendererSandbox = process.env.TANGO_RENDERER_SANDBOX !== "true";
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "safe-file",
@@ -94,26 +95,112 @@ function configureAppIdentity() {
   app.setName(ERP_APP_NAME);
   app.setPath("userData", userDataPath);
 }
-function getTangoDownloadDir() {
-  const candidates = [
-    path.join(app.getPath("documents"), APP_DOWNLOAD_DIR_NAME),
-    app.getPath("downloads"),
-    app.getPath("documents")
+function getSubfolderForFile(fileName: string): string {
+  const lower = String(fileName || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+
+  // 1. Recibos de Pagamento e Liquidação
+  if (
+    lower.startsWith("recibo") ||
+    lower.includes("recibo") ||
+    lower.includes("liquidacao") ||
+    lower.includes("comprovativo")
+  ) {
+    return "Recibos";
+  }
+
+  // 2. Fichas de Clientes e Extratos Pessoais
+  if (
+    lower.startsWith("ficha") ||
+    lower.includes("ficha_") ||
+    lower.includes("extrato") ||
+    lower.includes("perfil") ||
+    (lower.includes("cliente") && !lower.includes("relatorio"))
+  ) {
+    return "Fichas de Clientes";
+  }
+
+  // 3. Contratos e Simulações
+  if (
+    lower.startsWith("contrato") ||
+    lower.includes("contrato") ||
+    lower.includes("promessa") ||
+    lower.includes("simulacao") ||
+    lower.includes("transferencia")
+  ) {
+    return "Contratos";
+  }
+
+  // 4. Cobrança e Contencioso
+  if (
+    lower.includes("cobranca") ||
+    lower.includes("contencioso") ||
+    lower.includes("notificacao") ||
+    lower.includes("aviso") ||
+    lower.includes("divida")
+  ) {
+    return "Cobrança";
+  }
+
+  // 5. Facturação e SAF-T Fiscal
+  if (
+    lower.startsWith("ft_") ||
+    lower.startsWith("fr_") ||
+    lower.startsWith("factura") ||
+    lower.includes("saft") ||
+    lower.includes("fiscal")
+  ) {
+    return "Facturação e Fiscal";
+  }
+
+  // 6. Backups da Base de Dados
+  if (lower.startsWith("backup") || lower.includes("backup")) {
+    return "Backups";
+  }
+
+  // 7. Relatórios Gerais, Financeiros e Analíticos
+  return "Relatórios";
+}
+
+function getTangoDownloadDir(subfolder?: string) {
+  const documentsDir = app.getPath("documents");
+  const candidateFolderNames = [
+    "TANGO GESTÃO DE CRÉDITOS",
+    "TANGO GESTAO DE CREDITOS"
   ];
-  let lastError = null;
-  for (const dir of candidates) {
-    try {
-      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-      fs.accessSync(dir, fs.constants.W_OK);
-      return dir;
-    } catch (error) {
-      lastError = error;
-      console.warn("[Download] Pasta indisponivel para escrita:", dir, error?.message || error);
+
+  let baseDir = path.join(documentsDir, candidateFolderNames[0]);
+  for (const name of candidateFolderNames) {
+    const existing = path.join(documentsDir, name);
+    if (fs.existsSync(existing)) {
+      baseDir = existing;
+      break;
     }
   }
-  throw new Error(`Nao foi encontrada uma pasta disponivel para guardar ficheiros${lastError?.message ? `: ${lastError.message}` : "."}`);
+
+  const targetDir = subfolder ? path.join(baseDir, subfolder) : baseDir;
+  try {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    fs.accessSync(targetDir, fs.constants.W_OK);
+    return targetDir;
+  } catch (error) {
+    console.warn("[Download] Pasta indisponivel para escrita:", targetDir, (error as any)?.message || error);
+    const fallbackBase = app.getPath("downloads");
+    const fallbackTarget = subfolder ? path.join(fallbackBase, subfolder) : fallbackBase;
+    try {
+      if (!fs.existsSync(fallbackTarget)) fs.mkdirSync(fallbackTarget, { recursive: true });
+      return fallbackTarget;
+    } catch {
+      return fallbackBase;
+    }
+  }
 }
-function sanitizeDownloadFileName(fileName) {
+
+function sanitizeDownloadFileName(fileName: string) {
   return String(fileName || `documento-${Date.now()}`).replace(/[<>:"/\\|?*\x00-\x1F]+/g, "-").replace(/\s+/g, " ").trim();
 }
 const DISCOVERY_PORT = 3001;
@@ -367,6 +454,7 @@ function installRendererDebugConsole(window, startUrl) {
   window.webContents.on("did-finish-load", () => {
     pushDebugLine("info", `did-finish-load: ${window.webContents.getURL()}`);
     inspectDom();
+    setTimeout(inspectDom, 3000);
   });
   window.webContents.on("did-fail-load", (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
     pushDebugLine("error", `did-fail-load ${errorCode} ${errorDescription} ${validatedURL} mainFrame=${isMainFrame}`);
@@ -414,6 +502,7 @@ function createWindow() {
     minWidth: minimumWindowSize.width,
     minHeight: minimumWindowSize.height,
     show: false,
+    backgroundColor: "#020617",
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
@@ -458,14 +547,17 @@ function createWindow() {
   });
   electron.session.defaultSession.removeAllListeners("will-download");
   electron.session.defaultSession.on("will-download", (_event, item) => {
-    const fileName = sanitizeDownloadFileName(item.getFilename());
-    const defaultPath = path.join(getTangoDownloadDir(), fileName);
+    const rawFileName = item.getFilename();
+    const fileName = sanitizeDownloadFileName(rawFileName);
+    const subfolder = getSubfolderForFile(fileName);
+    const targetDir = getTangoDownloadDir(subfolder);
+    const defaultPath = path.join(targetDir, fileName);
     try {
       if (mainWindow && !mainWindow.isDestroyed()) {
         mainWindow.focus();
       }
       item.setSaveDialogOptions({
-        title: `${APP_DOWNLOAD_TITLE} - Guardar ficheiro`,
+        title: `${APP_DOWNLOAD_TITLE} - Guardar em ${subfolder}`,
         defaultPath,
         buttonLabel: "Guardar"
       });
@@ -573,6 +665,10 @@ const ALLOWED_READ_PRAGMAS = /* @__PURE__ */ new Set([
 ]);
 const ALLOWED_WRITE_PRAGMAS = /* @__PURE__ */ new Set(["optimize", "wal_checkpoint", "user_version"]);
 const stripSqlComments = (sql) => sql.replace(/--.*$/gm, "").replace(/\/\*[\s\S]*?\*\//g, "").trim();
+const isApprovedLedgerTrigger = (sql: string) => {
+  const normalized = stripSqlComments(sql).replace(/\s+/g, " ").trim();
+  return LEDGER_PROTECTION_SQL.some(allowed => allowed.replace(/\s+/g, " ").trim() === normalized);
+};
 function splitSqlStatements(sql) {
   const statements = [];
   let current = "";
@@ -653,7 +749,7 @@ const isAllowedWriteStatement = (statement) => {
     return ALLOWED_READ_PRAGMAS.has(pragmaName) || ALLOWED_WRITE_PRAGMAS.has(pragmaName);
   }
   if (keyword === "CREATE") {
-    return /^CREATE\s+(UNIQUE\s+)?(TABLE|INDEX)\b/i.test(cleaned);
+    return /^CREATE\s+(UNIQUE\s+)?(TABLE|INDEX)\b/i.test(cleaned) || isApprovedLedgerTrigger(cleaned);
   }
   if (keyword === "DROP") {
     if (/^DROP\s+TABLE\s+(IF\s+EXISTS\s+)?(?:"|'|`|\[)?[a-z0-9_]+_old(?:"|'|`|\])?\s*$/i.test(cleaned)) return true;
@@ -692,7 +788,7 @@ const sanitizeSqlParams = (params = []) => {
 };
 const validateSqlRequest = (type, sql, params = []) => {
   const normalizedSql = sanitizeSql(sql);
-  const statements = splitSqlStatements(normalizedSql);
+  const statements = isApprovedLedgerTrigger(normalizedSql) ? [normalizedSql] : splitSqlStatements(normalizedSql);
   if (statements.length === 0) throw new Error("SQL vazio.");
   if (type !== "exec" && statements.length !== 1) throw new Error("Use transacoes para multiplas instrucoes SQL.");
   if (statements.length > MAX_SQL_STATEMENTS) throw new Error("SQL contem demasiadas instrucoes.");
@@ -771,7 +867,8 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   payment_gateways: "manage_settings",
   payment_references: "manage_payments",
   closed_months: "manage_fiscal",
-  message_templates: "manage_settings"
+  message_templates: "manage_settings",
+  sync_conflicts: "manage_credits"
 };
 const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string }>) => {
   if (financialSchemaBootstrapOpen) return;
@@ -1615,7 +1712,7 @@ app.whenReady().then(async () => {
       "style-src 'self' 'unsafe-inline' http://localhost:*",
       "img-src 'self' data: blob: https: file: safe-file: http://localhost:*",
       "font-src 'self' data: file: safe-file: http://localhost:*",
-      "connect-src 'self' blob: data: https: ws: wss: safe-file: http://localhost:* http://127.0.0.1:* http://10.*:* http://192.168.*:*",
+      "connect-src 'self' blob: data: https: ws: wss: safe-file: http://localhost:* http://127.0.0.1:*",
       "worker-src 'self' blob: data: http://localhost:*",
       "frame-src 'self' blob: data: file: safe-file: http://localhost:*",
       "object-src 'self' blob: data:",
@@ -1625,11 +1722,11 @@ app.whenReady().then(async () => {
       "manifest-src 'self'"
     ] : [
       "default-src 'self'",
-      "script-src 'self'",
+      "script-src 'self' 'wasm-unsafe-eval'",
       "style-src 'self' 'unsafe-inline'",
       "img-src 'self' data: blob: https: file: safe-file:",
       "font-src 'self' data: file: safe-file:",
-      "connect-src 'self' blob: data: https: wss: safe-file: http://localhost:3000 http://127.0.0.1:3000 http://10.*:3000 http://192.168.*:3000",
+      "connect-src 'self' blob: data: https: wss: safe-file: http://localhost:3000 http://127.0.0.1:3000",
       "worker-src 'self' blob: data:",
       "frame-src 'self' blob: data: file: safe-file:",
       "object-src 'self' blob: data:",
@@ -2234,12 +2331,12 @@ app.whenReady().then(async () => {
         hashes.splice(matchedIndex, 1);
         await runQuery("execute", "UPDATE users SET mfaRecoveryCodes = ? WHERE id = ?", [JSON.stringify(hashes), userId]);
         result = userAuth.completeMfaRecovery(event.sender.id, userId);
-      } else result = { authenticated: false };
-    } else result = { authenticated: false };
+      } else result = { authenticated: false, reason: "invalid_code" };
+    } else result = { authenticated: false, reason: userAuth.hasPendingMfa(event.sender.id, userId) ? "invalid_code" : "challenge_expired" };
     const auditUser = result.user || await runQuery("get", "SELECT id, name FROM users WHERE id = ? LIMIT 1", [userId]);
     await writeAuthAudit(auditUser, result.authenticated ? "login" : "login_failure",
       result.authenticated ? "Login com segundo fator efetuado com sucesso." : "Verificacao do segundo fator falhou.",
-      { method: result.recovered ? "recovery_code" : "totp", reason: result.replayed ? "replayed_code" : result.authenticated ? undefined : "invalid_code" });
+      { method: result.recovered ? "recovery_code" : "totp", reason: result.authenticated ? undefined : result.reason || "invalid_code" });
     return result;
   });
   ipcMain.handle("user-auth-status", async (event) => {
@@ -2263,7 +2360,7 @@ app.whenReady().then(async () => {
   ipcMain.handle("user-auth-mfa-enable", async (event, payload) => {
     assertTrustedIpcSender(event);
     const confirmation: any = userAuth.confirmMfaEnrollment(event.sender.id, payload?.token);
-    if (!confirmation.confirmed) return { enabled: false };
+    if (!confirmation.confirmed) return { enabled: false, reason: confirmation.reason };
     const recoveryCodes = createMfaRecoveryCodes();
     const recoveryHashes = await Promise.all(recoveryCodes.map(code => bcrypt.hash(code, 10)));
     await runQuery("execute", "UPDATE users SET twoFactorEnabled = 1, twoFactorSecret = ?, mfaRecoveryCodes = ? WHERE id = ?", [
@@ -2276,8 +2373,24 @@ app.whenReady().then(async () => {
   ipcMain.handle("user-auth-mfa-disable", async (event, payload) => {
     assertTrustedIpcSender(event);
     const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
-    const record: any = await runQuery("get", "SELECT twoFactorSecret FROM users WHERE id = ? LIMIT 1", [currentUser.id]);
-    if (!record?.twoFactorSecret || !userAuth.verifyMfaForSession(event.sender.id, revealMfaSecret(String(record.twoFactorSecret)), payload?.token)) {
+    const record: any = await runQuery("get", "SELECT twoFactorSecret, mfaRecoveryCodes FROM users WHERE id = ? LIMIT 1", [currentUser.id]);
+    if (!record?.twoFactorSecret) {
+      return { disabled: false };
+    }
+    const token = typeof payload?.token === 'string' ? payload.token.trim() : '';
+    let valid = userAuth.verifyMfaForSession(event.sender.id, revealMfaSecret(String(record.twoFactorSecret)), token);
+    if (!valid && token.includes('-') && record?.mfaRecoveryCodes) {
+      try {
+        const hashes: string[] = JSON.parse(record.mfaRecoveryCodes || '[]');
+        for (const h of hashes) {
+          if (await bcrypt.compare(token.toUpperCase(), h)) {
+            valid = true;
+            break;
+          }
+        }
+      } catch { }
+    }
+    if (!valid) {
       return { disabled: false };
     }
     await runQuery("execute", "UPDATE users SET twoFactorEnabled = 0, twoFactorSecret = NULL, mfaRecoveryCodes = NULL WHERE id = ?", [currentUser.id]);
@@ -2289,6 +2402,16 @@ app.whenReady().then(async () => {
     assertTrustedIpcSender(event);
     financialSchemaBootstrapOpen = false;
     return { ready: true };
+  });
+  ipcMain.handle("db-schema-status", async (event) => {
+    assertTrustedIpcSender(event);
+    return { ready: !financialSchemaBootstrapOpen };
+  });
+  ipcMain.handle("db-optimize", async (event) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_settings");
+    await runQuery("exec", "VACUUM");
+    return { success: true };
   });
 
   ipcMain.handle("db-execute", async (event, sql, params) => {
@@ -2329,7 +2452,8 @@ app.whenReady().then(async () => {
   ipcMain.handle("db-exec", async (event, sql) => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("exec", sql);
-    const splitStatements = splitSqlStatements(request.sql).map(statement => ({ sql: statement }));
+    const splitStatements = (isApprovedLedgerTrigger(request.sql) ? [request.sql] : splitSqlStatements(request.sql))
+      .map(statement => ({ sql: statement }));
     if (!financialSchemaBootstrapOpen) throw new Error("Comandos SQL de esquema só são permitidos durante migrações de arranque.");
     assertFinancialSqlAuthorized(event, splitStatements);
     await assertUserSqlAuthorized(event, splitStatements);
@@ -2905,7 +3029,7 @@ app.whenReady().then(async () => {
       const timestamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-");
       const backupDialogOptions = {
         title: `${APP_DOWNLOAD_TITLE} - Guardar backup`,
-        defaultPath: path.join(getTangoDownloadDir(), `backup-${accountSlug}-${timestamp}.sqlite`),
+        defaultPath: path.join(getTangoDownloadDir("Backups"), `backup-${accountSlug}-${timestamp}.sqlite`),
         buttonLabel: "Guardar",
         filters: [{ name: "Base de dados SQLite", extensions: ["sqlite"] }]
       };

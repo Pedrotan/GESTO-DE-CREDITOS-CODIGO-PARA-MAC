@@ -23,7 +23,7 @@ export class ServicoConfiguracao {
 
         const safeStr = (v: any) => typeof v === 'string' ? v : JSON.stringify(v || []);
 
-        // Use INSERT OR REPLACE instead of UPDATE to ensure the record always exists
+        // Use INSERT OR REPLACE to ensure the row exists and all fields are kept
         const sql = `
             INSERT OR REPLACE INTO company_settings (
                 id, name, nif, address, logo, reportLogo, watermarkLogo, 
@@ -39,9 +39,12 @@ export class ServicoConfiguracao {
                 enableWarrantiesModule, enableWarrantiesModuleAdminOnly,
                 enableLegalModule, enableLegalModuleAdminOnly,
                 enableScoringModule, enableScoringModuleAdminOnly, location,
-                enableSuppliersModule, enableSuppliersModuleAdminOnly, enableMultiTenant
+                enableSuppliersModule, enableSuppliersModuleAdminOnly, enableMultiTenant,
+                website, segment, slogan,
+                defaultSimulationInterestRate, defaultSimulationAdminFee, defaultSimulationIof,
+                smtpHost, smtpPort, smtpUser, smtpPassword, smtpSecure, smtpFromName
             ) VALUES (
-                1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
             )
         `;
 
@@ -91,7 +94,19 @@ export class ServicoConfiguracao {
             newSettings.location ?? null,
             newSettings.enableSuppliersModule ? 1 : 0,
             newSettings.enableSuppliersModuleAdminOnly ? 1 : 0,
-            newSettings.enableMultiTenant !== false ? 1 : 0
+            newSettings.enableMultiTenant !== false ? 1 : 0,
+            newSettings.website ?? null,
+            newSettings.segment ?? null,
+            newSettings.slogan ?? null,
+            newSettings.defaultSimulationInterestRate ?? 3.5,
+            newSettings.defaultSimulationAdminFee ?? 2.0,
+            newSettings.defaultSimulationIof ?? 0.38,
+            newSettings.smtpHost ?? 'smtp.gmail.com',
+            newSettings.smtpPort ?? '587',
+            newSettings.smtpUser ?? null,
+            newSettings.smtpPassword ?? null,
+            newSettings.smtpSecure ? 1 : 0,
+            newSettings.smtpFromName ?? null
         ];
 
         try {
@@ -99,14 +114,24 @@ export class ServicoConfiguracao {
             await RepositorioDefinicoesEmpresa.update(1, sql, params);
             console.log('✅ [ServicoConfiguracao] Configurações salvas com sucesso!');
         } catch (error: any) {
-            console.error('❌ [ServicoConfiguracao] Erro ao salvar configurações:', error);
+            console.warn('⚠️ [ServicoConfiguracao] Erro no INSERT principal. Tentando auto-recuperação de esquema:', error?.message);
 
-            // Diagnóstico detalhado
-            console.error('   - SQL:', sql.substring(0, 100) + '...');
-            console.error('   - Params:', params.slice(0, 5), '...');
-            console.error('   - Error Message:', error.message);
-
-            throw new Error(`Falha ao salvar configurações da empresa: ${error.message}`);
+            // Tenta adicionar colunas que possam estar em falta em bases de dados antigas
+            try {
+                const missingCols = ['website', 'segment', 'slogan', 'location', 'enableSuppliersModule', 'enableSuppliersModuleAdminOnly', 'enableMultiTenant', 'defaultSimulationInterestRate', 'defaultSimulationAdminFee', 'defaultSimulationIof', 'smtpHost', 'smtpPort', 'smtpUser', 'smtpPassword', 'smtpSecure', 'smtpFromName'];
+                for (const col of missingCols) {
+                    try {
+                        const colType = col.startsWith('enable') || col === 'smtpSecure' ? 'INTEGER DEFAULT 0' : (col.startsWith('default') ? 'REAL' : 'TEXT');
+                        await RepositorioDefinicoesEmpresa.executeDirect?.(`ALTER TABLE company_settings ADD COLUMN ${col} ${colType}`);
+                    } catch {}
+                }
+                // Tenta novamente após a auto-migração
+                await RepositorioDefinicoesEmpresa.update(1, sql, params);
+                console.log('✅ [ServicoConfiguracao] Configurações salvas após auto-migração de colunas!');
+            } catch (retryErr: any) {
+                console.error('❌ [ServicoConfiguracao] Falha final ao salvar configurações:', retryErr);
+                throw new Error(`Falha ao salvar configurações da empresa: ${retryErr.message || error.message}`);
+            }
         }
 
         return { newSettings, changes };

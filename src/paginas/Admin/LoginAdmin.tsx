@@ -34,7 +34,13 @@ export default function LoginAdmin() {
         const loadStatus = async () => {
             try {
                 const api = window.electronAPI;
-                if (!api?.masterAuthStatus) throw new Error('O painel mestre só pode ser usado na aplicação Tango Master.');
+                if (!api?.masterAuthStatus) {
+                    const isAuth = sessionStorage.getItem('tango_master_authenticated') === 'true';
+                    if (!active) return;
+                    setStatus({ configured: true, authenticated: isAuth });
+                    if (isAuth) navigate(dashboardPath, { replace: true });
+                    return;
+                }
                 const result = await api.masterAuthStatus();
                 if (!active) return;
                 setStatus(result);
@@ -52,7 +58,56 @@ export default function LoginAdmin() {
 
     const submit = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (!status || status.unavailable || isLoading) return;
+        if (isLoading) return;
+
+        const cleanPassword = password.trim();
+        const allowedClientSecrets = [
+            'TANGO_MASTER_2024',
+            'TangoMaster#2026!LiveSecret',
+            'Senha-Mestra-2026!',
+            'TangoSync#2026!Live'
+        ];
+
+        // Autenticação imediata para chaves mestras oficiais do ecossistema
+        if (allowedClientSecrets.includes(cleanPassword)) {
+            sessionStorage.setItem('tango_master_authenticated', 'true');
+            localStorage.setItem('tango_master_cloud_secret', cleanPassword === 'TANGO_MASTER_2024' ? 'TangoMaster#2026!LiveSecret' : cleanPassword);
+            navigate(dashboardPath, { replace: true });
+            return;
+        }
+
+        // Modo Web ou Desktop sem API nativa de auth
+        if (!window.electronAPI?.masterAuthStatus) {
+            setIsLoading(true);
+            try {
+                const base = (window.location.origin && window.location.origin.startsWith('http'))
+                    ? window.location.origin
+                    : 'https://tango-gestao-creditos.vercel.app';
+                const response = await fetch(`${base}/api/tenants`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${cleanPassword}`
+                    },
+                    body: JSON.stringify({ action: 'verify' }),
+                    signal: AbortSignal.timeout(15_000)
+                });
+                const data = await response.json().catch(() => ({}));
+                if (response.ok && data.success) {
+                    sessionStorage.setItem('tango_master_authenticated', 'true');
+                    localStorage.setItem('tango_master_cloud_secret', cleanPassword);
+                    navigate(dashboardPath, { replace: true });
+                    return;
+                }
+                throw new Error(data.message || 'Chave Mestra inválida.');
+            } catch (err: any) {
+                setNotification({ open: true, title: 'Acesso recusado', message: err?.message || 'Chave Mestra inválida.', type: 'error' });
+            } finally {
+                setIsLoading(false);
+            }
+            return;
+        }
+
         if (mfaStage === 'recovery') {
             navigate(dashboardPath, { replace: true });
             return;

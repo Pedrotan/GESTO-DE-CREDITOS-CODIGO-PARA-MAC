@@ -23,8 +23,23 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
     const isSecondaryAccount = activeAccountId !== 'default';
     const { companySettings, updateCompanySettings } = useData();
     const { user, updateUser, users, hasUsers, addUser, syncUsersFromMaster } = useAuth();
-    const [step, setStep] = useState(isSecondaryAccount ? 4 : 1);
+    const [step, setStep] = useState(isSecondaryAccount ? 4 : (isPublicWebBuild ? 2 : 1));
     const [dismissed, setDismissed] = useState(false);
+    const [tenantAuthorized, setTenantAuthorized] = useState(() => {
+        return !isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true';
+    });
+
+    React.useEffect(() => {
+        const handleAuthUpdate = () => {
+            setTenantAuthorized(!isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true');
+        };
+        window.addEventListener('tango_tenant_authorized', handleAuthUpdate);
+        window.addEventListener('storage', handleAuthUpdate);
+        return () => {
+            window.removeEventListener('tango_tenant_authorized', handleAuthUpdate);
+            window.removeEventListener('storage', handleAuthUpdate);
+        };
+    }, []);
     const [onboardingMode, setOnboardingMode] = useState<'standard' | 'connect'>('standard');
     const [serverIp, setServerIp] = useState('');
     const [syncPasskey, setSyncPasskey] = useState('');
@@ -35,9 +50,9 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
 
     // Form States
     const [acceptedTerms, setAcceptedTerms] = useState(false);
-    const [companyName, setCompanyName] = useState('');
+    const [companyName, setCompanyName] = useState(() => localStorage.getItem('tango_active_tenant_name') || '');
     const [nifType, setNifType] = useState<'SINGULAR' | 'COLECTIVO'>('COLECTIVO');
-    const [nif, setNif] = useState('');
+    const [nif, setNif] = useState(() => localStorage.getItem('tango_active_tenant_id') || '');
     const [enableMultiTenant, setEnableMultiTenant] = useState(false);
 
     const formatNIF = (value: string, type: 'SINGULAR' | 'COLECTIVO') => {
@@ -389,8 +404,9 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
 
     const isTangoMaster = typeof window !== 'undefined' && window.location.hash.includes('tango-master');
     const isOnboardingRoute = typeof window !== 'undefined' && window.location.hash.includes('onboarding');
-    const showOnboarding = !dismissed && (forceShow || (!isFullySetup && !isTangoMaster) || (isOnboardingRoute && !localStorage.getItem(ONBOARDING_KEY)));
-    const visibleSteps = isSecondaryAccount ? [4, 6, 7] : [1, 2, 3, 4, 5, 6, 7];
+    const isWebTenantAuthorized = !isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true';
+    const showOnboarding = !dismissed && isWebTenantAuthorized && (forceShow || (!isFullySetup && !isTangoMaster) || (isOnboardingRoute && !localStorage.getItem(ONBOARDING_KEY)));
+    const visibleSteps = isSecondaryAccount ? [4, 6, 7] : (isPublicWebBuild ? [2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5, 6, 7]);
 
     const handleNext = async () => {
         if (step === 1) {
@@ -538,6 +554,13 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
             });
 
             // Concluir e redirecionar para o ecrã de login
+            if (isPublicWebBuild) {
+                try {
+                    await syncCloudNow();
+                } catch (syncErr) {
+                    console.warn('[Onboarding] Sincronização inicial cloud:', syncErr);
+                }
+            }
             localStorage.setItem(ONBOARDING_KEY, 'true');
             localStorage.setItem('last_app_version', CURRENT_APP_VERSION);
             setDismissed(true);
@@ -565,8 +588,13 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
     const isStillLoading = companySettings.name === 'Iniciando Sistema...' || companySettings.name === 'A Carregar...';
     const isReallyMissing = isFullySetup && !companySettings.name;
 
-    // Se já foi concluído mas ainda está a carregar/tentar, mostramos um estado de recuperação discreto
-    if (isFullySetup && isStillLoading) {
+    // Gatekeeper Web: Se não for previamente autorizado pelo Tango Master Gen, o Onboarding não pode renderizar nada!
+    if (!tenantAuthorized) {
+        return null;
+    }
+
+    // As consultas protegidas só podem carregar os dados após o início de sessão.
+    if (isFullySetup && isStillLoading && user) {
         return (
             <div className="fixed inset-0 z-[100] bg-slate-50/90 backdrop-blur-sm flex flex-col items-center justify-center animate-in fade-in transition-all">
                 <div className="flex flex-col items-center gap-4 max-w-xs text-center">
@@ -575,9 +603,9 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                         <div className="absolute inset-0 border-t-4 border-primary rounded-full animate-spin"></div>
                     </div>
                     <div className="space-y-2">
-                        <h3 className="text-lg font-bold text-slate-800">Recuperando Sessão</h3>
+                        <h3 className="text-lg font-bold text-slate-800">A carregar dados da empresa</h3>
                         <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                            O banco de dados está a demorar mais que o habitual. Estamos a tentar restabelecer a ligação...
+                            A sessão foi iniciada. Aguarde enquanto preparamos os dados da empresa.
                         </p>
                     </div>
                     <Button
@@ -586,7 +614,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                         onClick={() => window.location.reload()}
                         className="mt-4 text-xs text-primary underline underline-offset-4"
                     >
-                        Pressionar Recarregamento Forçado
+                        Recarregar aplicação
                     </Button>
                 </div>
             </div>
@@ -594,7 +622,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
     }
 
     // Se já foi concluído e as definições REALMENTE faltam (não é apenas loading)
-    if (isFullySetup && isReallyMissing) {
+    if (isFullySetup && isReallyMissing && user) {
         return (
             <div className="fixed inset-0 z-[50] bg-background flex flex-col items-center justify-center p-4 text-center animate-in fade-in">
                 <div className="max-w-md space-y-4">
@@ -1060,6 +1088,21 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                 isSecondaryAccount ? "xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.92fr)] xl:items-start" : "grid-cols-1"
                             )}>
                                 <div className={cn("space-y-4", isSecondaryAccount ? "rounded-2xl border bg-card/60 p-5 shadow-sm" : "")}>
+                                {isPublicWebBuild && (
+                                    <div className="p-4 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 border-2 border-emerald-300 dark:border-emerald-800 flex items-center gap-3.5 text-xs text-emerald-800 dark:text-emerald-300 font-semibold mb-3 shadow-sm">
+                                        <div className="p-2 rounded-xl bg-emerald-500 text-white shadow-sm shrink-0">
+                                            <ShieldCheck className="h-5 w-5" />
+                                        </div>
+                                        <div>
+                                            <p className="font-black text-sm uppercase tracking-tight text-emerald-900 dark:text-emerald-200">
+                                                Empresa Homologada via Tango Master Gen
+                                            </p>
+                                            <p className="text-[11px] opacity-90 mt-0.5">
+                                                O NIF e a Razão Social foram validados pelo Administrador e vinculados à licença de uso Web.
+                                            </p>
+                                        </div>
+                                    </div>
+                                )}
                                 <div className="space-y-3">
                                     <Label className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Tipo de Contribuinte (NIF)</Label>
                                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1093,6 +1136,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                             value={nif}
                                             onChange={handleNifChange}
                                             className="h-12 sm:h-14 text-base sm:text-lg border-2 uppercase font-mono flex-1"
+                                            readOnly={isPublicWebBuild}
                                             maxLength={nifType === 'COLECTIVO' ? 15 : 20}
                                             autoFocus
                                         />
@@ -1123,6 +1167,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                         placeholder={nifType === 'COLECTIVO' ? "Ex: Micro-Finanças Luanda, Lda" : "Ex: Pedro José Morais"}
                                         value={companyName}
                                         onChange={(e) => setCompanyName(e.target.value)}
+                                        readOnly={isPublicWebBuild}
                                         className="h-12 sm:h-14 text-base sm:text-lg border-2 focus-visible:ring-primary font-semibold"
                                     />
                                     <p className="text-xs text-muted-foreground flex items-center gap-1">

@@ -244,7 +244,9 @@ const sanitizeSqlParams = (params: unknown = []) => {
 
 const validateSqlRequest = (type: DbOperationType, sql: unknown, params: unknown = []) => {
     const normalizedSql = sanitizeSql(sql);
-    const statements = splitSqlStatements(normalizedSql);
+    const statements = LEDGER_PROTECTION_SQL.some(allowed =>
+        allowed.replace(/\s+/g, ' ').trim() === normalizedSql.replace(/\s+/g, ' ').trim()
+    ) ? [normalizedSql] : splitSqlStatements(normalizedSql);
 
     if (statements.length === 0) throw new Error('SQL vazio.');
     if (type !== 'exec' && statements.length !== 1) throw new Error('Use transacoes para multiplas instrucoes SQL.');

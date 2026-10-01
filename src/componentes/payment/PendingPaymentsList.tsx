@@ -8,7 +8,7 @@ import { Badge } from '@/componentes/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/componentes/ui/dialog';
 import { CheckCircle, XCircle, Upload, Clock, Eye, AlertCircle } from 'lucide-react';
 import { PaymentReference } from '@/tipos/pagamento';
-import { toast } from 'sonner';
+import { toast } from '@/ganchos/usar-toast';
 
 export function PendingPaymentsList() {
     const { paymentReferences, validatePaymentReference, uploadPaymentProof, clients, credits } = useData();

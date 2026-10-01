@@ -3,7 +3,7 @@ import autoTable from 'jspdf-autotable';
 import QRCode from 'qrcode';
 import { EInvoiceData } from './eInvoiceGenerator';
 import { SAFTOptions } from './saftGenerator';
-import { applyBranding, getCompanySettings } from './pdf';
+import { applyBranding, getCompanySettings, BRAND_CHARCOAL } from './pdf';
 
 const safeDate = (date: Date | string | undefined): Date => {
     if (!date) return new Date();
@@ -86,7 +86,7 @@ export const generateInvoicePDF = async (data: EInvoiceData): Promise<void> => {
             ]
         ],
         theme: 'striped',
-        headStyles: { fillColor: (config.primaryColor as [number, number, number]) || [255, 127, 0], textColor: 255 },
+        headStyles: { fillColor: (config.primaryColor as [number, number, number]) || [243, 112, 33], textColor: 255 },
         styles: { fontSize: 9, cellPadding: 4 },
         didDrawPage: () => applyBranding(doc, config, undefined, true) // Apenas decoração nas novas páginas
     });
@@ -244,7 +244,7 @@ export const generateSaftReportPDF = async (companySettings: any, period: SAFTOp
         body: summaryData,
         theme: 'striped',
         headStyles: {
-            fillColor: [40, 40, 40],
+            fillColor: BRAND_CHARCOAL,
             textColor: [255, 255, 255],
             fontStyle: 'bold'
         },

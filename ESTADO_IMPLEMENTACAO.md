@@ -1,6 +1,6 @@
-# Estado da implementação — 22 de setembro de 2026
+# Estado da implementação — 23 de setembro de 2026
 
-O trabalho executável no workspace para estabilizar o produto e fechar os bloqueadores do `PLANO_DE_IMPLEMENTACAO.md` foi implementado. A aplicação compila, o baseline de qualidade está limpo e os fluxos críticos têm testes automatizados. As ações que exigem contas, infraestrutura, certificados ou validação humana estão enumeradas em `docs/SEGURANCA_E_OPERACAO.md` e não são simuladas como concluídas.
+Esta página regista as entregas técnicas realizadas até 23 de setembro de 2026. **O plano completo continua parcialmente implementado.** A verificação por fase, com lacunas também executáveis no workspace, está em `AUDITORIA_PLANO_IMPLEMENTACAO.md`. A aplicação compila, o baseline configurado de qualidade está limpo e parte dos fluxos críticos tem testes automatizados. As ações que exigem contas, infraestrutura, certificados ou validação humana estão enumeradas em `docs/SEGURANCA_E_OPERACAO.md`.
 
 ## Segurança e confiança
 
@@ -22,6 +22,13 @@ O trabalho executável no workspace para estabilizar o produto e fechar os bloqu
 - Backups usam envelope cifrado versionado, checksum, publicação atómica, chave de recuperação portátil e validação antes da restauração. A web descarrega bytes reais da base.
 - Desinstalação não apaga dados por omissão; importação e reset exigem confirmação reforçada e backup de segurança.
 
+## Parcelas por cliente e arranque Electron
+
+- A modal de detalhes do cliente separa créditos ativos com cronograma mensal de créditos liquidados no histórico. Cada crédito liquidado mantém código, principal, total contratual do cronograma, taxa, número de prestações, datas de liquidação e recibos.
+- A liquidação de uma ou várias prestações usa sempre as mais antigas em aberto. O serviço volta a validar quantidade, montante e componentes contra o cronograma antes da transação; liquidação total é recusada se saldo e cronograma divergirem.
+- A quitação altera o estado do crédito e do contrato na mesma transação; estorno e reposição revertem ou repõem o estado do contrato quando aplicável.
+- A CSP permite apenas a compilação WebAssembly necessária ao SQLite da web. O arranque `electron:dev` usa uma exceção de sandbox limitada ao modo de desenvolvimento neste Windows; a aplicação empacotada mantém o sandbox. A validação de SQL aceita apenas os triggers imutáveis conhecidos durante a migração inicial.
+
 ## Cloud, desempenho e operação
 
 - A sincronização cloud deixou de transportar SQL. O envelope cifrado contém comandos versionados identificados por hash ou snapshots com tabela/colunas validadas.
@@ -37,7 +44,7 @@ O trabalho executável no workspace para estabilizar o produto e fechar os bloqu
 |---|---|
 | ESLint | zero erros e zero avisos |
 | TypeScript | aplicação, Electron e domínio financeiro em modo strict aprovados |
-| Testes unitários/segurança | 40 aprovados |
+| Testes unitários/segurança | 45 aprovados |
 | Build web | aprovado; orçamento de bundle aprovado |
 | Build Electron | aprovado |
 | Integração Electron | aprovada: backup/restauração, rollback, cadeia, dupla entrada e imutabilidade |

@@ -577,13 +577,13 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
 
             const totalInterest = (data.principalAmount * data.interestRate) / 100;
             const totalToReturn = data.principalAmount + totalInterest;
-            const generatedId = `CR${Math.floor(Math.random() * 10000)}`;
+            const generatedId = `CR-${crypto.randomUUID()}`;
 
             await addCredit({
                 ...data,
                 id: generatedId,
                 clientName: selectedClient.name,
-                currentBalance: totalToReturn,
+                currentBalance: data.principalAmount,
                 paidInstallments: 0,
                 daysOverdue: 0,
                 accruedInterest: totalInterest,
@@ -593,12 +593,6 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                 status: 'active',
                 requestedBy: user?.name || 'Sistema',
                 creditNumber: nextCycle
-            }, user ? { id: user.id, name: user.name } : undefined);
-
-            // Atualizar limites do cliente
-            await updateClient(selectedClient.id, {
-                usedCredit: (selectedClient.usedCredit || 0) + data.principalAmount,
-                availableCredit: (selectedClient.availableCredit || 0) - data.principalAmount
             }, user ? { id: user.id, name: user.name } : undefined);
 
             setAlertConfig({
@@ -1205,7 +1199,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     setCreditPrefillAmount(undefined);
                 }
             }}>
-                <DialogContent className="max-w-2xl">
+                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
                     <DialogHeader>
                         <DialogTitle>
                             {creditPrefillAmount !== undefined ? 'Conceder Restante do Valor' : 'Novo Ciclo de Crédito'}

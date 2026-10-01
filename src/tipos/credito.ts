@@ -171,6 +171,8 @@ export interface Payment {
   allocatedToPrincipal: number;
   allocatedToPrincipalMinor?: number;
   idempotencyKey?: string;
+  /** Pedido transitório: liquida sempre as N prestações mais antigas em aberto. */
+  installmentCount?: number;
   method: 'cash' | 'transfer' | 'reference';
   reference?: string;
   paymentDate: Date;
@@ -311,7 +313,7 @@ export interface Simulation {
   createdAt: Date | string;
 }
 
-export type AccountingAccount = 'cash' | 'bank' | 'portfolio' | 'revenue_interest' | 'revenue_late_interest' | 'equity' | 'provision' | 'expenses' | 'capital' | 'pdd';
+export type AccountingAccount = 'cash' | 'bank' | 'portfolio' | 'receivable_interest' | 'receivable_late_interest' | 'revenue_interest' | 'revenue_late_interest' | 'equity' | 'provision' | 'expenses' | 'capital' | 'pdd';
 
 export interface AccountingEntry {
   id: string;

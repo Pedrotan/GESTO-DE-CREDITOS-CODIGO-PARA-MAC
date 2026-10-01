@@ -18,6 +18,7 @@ import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import { PaymentSlipModal } from './PaymentSlipModal';
+import { ClientCreditInstallments } from './ClientCreditInstallments';
 import { useState } from 'react';
 
 interface ClientDetailsModalProps {
@@ -162,12 +163,15 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
                 </DialogHeader>
 
                 <Tabs defaultValue="overview" className="mt-6">
-                    <TabsList className="grid w-full grid-cols-4">
+                    <div className="overflow-x-auto">
+                    <TabsList className="flex w-max min-w-full justify-start">
                         <TabsTrigger value="overview">Visão Geral</TabsTrigger>
+                        <TabsTrigger value="installments">Crédito Ativo</TabsTrigger>
                         <TabsTrigger value="credits">Histórico de Créditos</TabsTrigger>
                         <TabsTrigger value="payments">Extrato & Pagamentos</TabsTrigger>
                         <TabsTrigger value="documents">Documentos</TabsTrigger>
                     </TabsList>
+                    </div>
 
                     <TabsContent value="overview" className="space-y-6 mt-4">
                         {/* Personal Info Grid */}
@@ -350,33 +354,12 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
                         </div>
                     </TabsContent>
 
+                    <TabsContent value="installments">
+                        <ClientCreditInstallments credits={clientCredits} payments={clientPayments} />
+                    </TabsContent>
+
                     <TabsContent value="credits">
-                        <div className="space-y-4 text-sm mt-4">
-                            {clientCredits.length === 0 ? (
-                                <p className="text-center text-muted-foreground py-8">Nenhum crédito associado.</p>
-                            ) : (
-                                clientCredits.map(credit => (
-                                    <div key={credit.id} className="flex items-center justify-between border-2 border-slate-200 p-5 rounded-xl bg-white shadow-sm hover:border-primary/30 transition-all">
-                                        <div className="space-y-1">
-                                            <p className="font-display text-xl font-bold text-slate-900">{formatCurrency(credit.principalAmount)}</p>
-                                            <div className="flex items-center gap-2 text-slate-500 font-medium">
-                                                <Calendar className="h-3.5 w-3.5" />
-                                                <span>{formatDate(credit.startDate)} até {formatDate(credit.dueDate)}</span>
-                                            </div>
-                                        </div>
-                                        <div className="text-right space-y-2">
-                                            <Badge variant={credit.status === 'paid' ? 'success' : credit.status === 'active' ? 'primary' : 'destructive'} className="px-3 py-1 font-bold text-xs uppercase tracking-wider">
-                                                {credit.status === 'paid' ? 'Totalmente Liquidado' : (credit.status === 'active' && credit.paidInstallments > 0 ? 'Em Liquidação' : (credit.status === 'active' ? 'Em Aberto' : 'Em Atraso'))}
-                                            </Badge>
-                                            <div className="flex flex-col items-end">
-                                                <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">Saldo Devedor Atual</span>
-                                                <span className="font-display text-lg font-black text-destructive">{formatCurrency(credit.currentBalance)}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
+                        <ClientCreditInstallments credits={clientCredits} payments={clientPayments} history />
                     </TabsContent>
 
                     {/* Extrato & Histórico Geral de Pagamentos */}

@@ -53,6 +53,7 @@ import { calculateClientScore, getRatingColor, ClientScore } from '@/bibliotecas
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { format } from 'date-fns';
 import { formatCurrency } from '@/bibliotecas/formatters';
+import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from '@/bibliotecas/pdf';
 
 const RATING_COLORS = {
     'Excelente': '#22c55e',
@@ -249,21 +250,32 @@ export default function Scoring() {
 
     const handleExportPDF = () => {
         const doc = new jsPDF();
+        const config = getCompanySettings();
+        const primary = resolveBrandPrimary(config.primaryColor);
+        const dark = BRAND_CHARCOAL;
+        applyBranding(doc, config, undefined, false);
 
-        // Cabeçalho
-        doc.setFontSize(20);
-        doc.setTextColor(40, 44, 52);
-        doc.text('Relatório Geral de Scoring e Risco', 14, 22);
+        // Cabeçalho Executivo com Acento Laranja
+        const titleY = 48;
+        doc.setFillColor(primary[0], primary[1], primary[2]);
+        doc.roundedRect(16, titleY, 3.5, 11, 0.8, 0.8, 'F');
 
-        doc.setFontSize(10);
-        doc.setTextColor(100);
-        doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 30);
-        doc.text(`Total de Clientes Avaliados: ${stats.totalClients}`, 14, 36);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(13);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('Relatório Geral de Scoring e Risco', 22, titleY + 5);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(`Total de Clientes Avaliados: ${stats.totalClients}   |   Data: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 22, titleY + 9.5);
 
         // Estatísticas
-        doc.setFontSize(14);
-        doc.setTextColor(0);
-        doc.text('Resumo da Carteira', 14, 50);
+        let currentY = titleY + 18;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('Resumo da Carteira', 16, currentY);
 
         const summaryData = [
             ['Métrica', 'Valor', 'Percentagem'],
@@ -273,15 +285,23 @@ export default function Scoring() {
         ];
 
         autoTable(doc, {
-            startY: 55,
+            startY: currentY + 3.5,
             head: [summaryData[0]],
             body: summaryData.slice(1),
             theme: 'striped',
-            headStyles: { fillColor: [40, 100, 200] }
+            headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+            alternateRowStyles: { fillColor: [250, 250, 252] },
+            styles: { fontSize: 8.5, cellPadding: 2.5, textColor: dark },
+            margin: { left: 16, right: 14 },
+            didDrawPage: () => applyBranding(doc, config, undefined, true)
         });
 
         // Tabela de Distribuição
-        doc.text('Distribuição por Rating', 14, ((doc as any).lastAutoTable?.finalY || 100) + 15);
+        const distStartY = ((doc as any).lastAutoTable?.finalY || 100) + 10;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('Distribuição por Rating', 16, distStartY);
 
         const distData = Object.entries(stats.distribution).map(([rating, count]) => [
             rating,
@@ -290,14 +310,23 @@ export default function Scoring() {
         ]);
 
         autoTable(doc, {
-            startY: ((doc as any).lastAutoTable?.finalY || 120) + 20,
+            startY: distStartY + 3.5,
             head: [['Rating', 'Quantidade', 'Percentagem']],
             body: distData,
-            theme: 'grid'
+            theme: 'striped',
+            headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+            alternateRowStyles: { fillColor: [250, 250, 252] },
+            styles: { fontSize: 8.5, cellPadding: 2.5, textColor: dark },
+            margin: { left: 16, right: 14 },
+            didDrawPage: () => applyBranding(doc, config, undefined, true)
         });
 
         // Top 10 Clientes
-        doc.text('Top 10 Clientes (Melhores Scores)', 14, ((doc as any).lastAutoTable?.finalY || 180) + 15);
+        const topStartY = ((doc as any).lastAutoTable?.finalY || 160) + 10;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('Top 10 Clientes (Melhores Scores)', 16, topStartY);
 
         const topData = filteredClients.slice(0, 10).map((c, i) => [
             (i + 1).toString(),
@@ -308,10 +337,15 @@ export default function Scoring() {
         ]);
 
         autoTable(doc, {
-            startY: ((doc as any).lastAutoTable?.finalY || 200) + 20,
+            startY: topStartY + 3.5,
             head: [['#', 'Cliente', 'NIF', 'Score', 'Rating']],
             body: topData,
-            styles: { fontSize: 9 }
+            theme: 'striped',
+            headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+            alternateRowStyles: { fillColor: [250, 250, 252] },
+            styles: { fontSize: 8.5, cellPadding: 2.5, textColor: dark },
+            margin: { left: 16, right: 14, bottom: 25 },
+            didDrawPage: () => applyBranding(doc, config, undefined, true)
         });
 
         doc.save(`relatorio_scoring_geral_${format(new Date(), 'yyyy-MM-dd')}.pdf`);
@@ -321,28 +355,44 @@ export default function Scoring() {
         if (!selectedClient) return;
 
         const doc = new jsPDF();
+        const config = getCompanySettings();
+        const primary = resolveBrandPrimary(config.primaryColor);
+        const dark = BRAND_CHARCOAL;
+        applyBranding(doc, config, undefined, false);
         const client = selectedClient;
 
-        // Cabeçalho
-        doc.setFontSize(18);
-        doc.text(`Relatório de Análise de Risco - ${client.name}`, 14, 20);
+        // Cabeçalho Executivo com Acento Laranja
+        const titleY = 48;
+        doc.setFillColor(primary[0], primary[1], primary[2]);
+        doc.roundedRect(16, titleY, 3.5, 11, 0.8, 0.8, 'F');
 
-        doc.setFontSize(10);
-        doc.text(`Gerado em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 14, 28);
-        doc.text(`NIF: ${client.nif}`, 14, 34);
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(13);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text(`Relatório de Análise de Risco - ${client.name}`, 22, titleY + 5);
+
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(7.5);
+        doc.setTextColor(100, 116, 139);
+        doc.text(`NIF: ${client.nif}   |   Emitido em: ${format(new Date(), 'dd/MM/yyyy HH:mm')}`, 22, titleY + 9.5);
 
         // Score Principal
-        doc.setFontSize(14);
-        doc.text('Avaliação Geral', 14, 50);
+        let curY = titleY + 18;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('Avaliação Geral', 16, curY);
 
-        doc.setFontSize(12);
+        doc.setFontSize(10);
         doc.setTextColor(RATING_COLORS[client.score.rating]);
-        doc.text(`Score: ${client.score.score} / 1000 (${client.score.rating})`, 14, 60);
-        doc.setTextColor(0, 0, 0); // Reset color
+        doc.text(`Score: ${client.score.score} / 1000 (${client.score.rating})`, 16, curY + 6);
 
         // Breakdown
-        doc.setFontSize(14);
-        doc.text('Detalhamento do Score', 14, 80);
+        curY += 14;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('Detalhamento do Score', 16, curY);
 
         const breakdownData = [
             ['Fator', 'Pontuação', 'Máximo'],
@@ -353,16 +403,23 @@ export default function Scoring() {
         ];
 
         autoTable(doc, {
-            startY: 85,
+            startY: curY + 3.5,
             head: [breakdownData[0]],
             body: breakdownData.slice(1),
-            styles: { fontSize: 10 },
-            headStyles: { fillColor: [60, 60, 60] }
+            theme: 'striped',
+            headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+            alternateRowStyles: { fillColor: [250, 250, 252] },
+            styles: { fontSize: 8.5, cellPadding: 2.5, textColor: dark },
+            margin: { left: 16, right: 14 },
+            didDrawPage: () => applyBranding(doc, config, undefined, true)
         });
 
         // Métricas
-        doc.setFontSize(14);
-        doc.text('Métricas Financeiras', 14, 140);
+        const metricsStartY = ((doc as any).lastAutoTable?.finalY || 135) + 8;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('Métricas Financeiras', 16, metricsStartY);
 
         const metricsData = [
             ['Métrica', 'Valor'],
@@ -374,22 +431,31 @@ export default function Scoring() {
         ];
 
         autoTable(doc, {
-            startY: 145,
+            startY: metricsStartY + 3.5,
             head: [metricsData[0]],
             body: metricsData.slice(1),
-            styles: { fontSize: 10 },
-            headStyles: { fillColor: [40, 100, 200] }
+            theme: 'striped',
+            headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
+            alternateRowStyles: { fillColor: [250, 250, 252] },
+            styles: { fontSize: 8.5, cellPadding: 2.5, textColor: dark },
+            margin: { left: 16, right: 14 },
+            didDrawPage: () => applyBranding(doc, config, undefined, true)
         });
 
         // Recomendação
-        doc.setFontSize(14);
-        doc.text('Recomendações do Sistema', 14, 210);
-        doc.setFontSize(10);
+        const recStartY = ((doc as any).lastAutoTable?.finalY || 190) + 8;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10.5);
+        doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text('Recomendações do Sistema', 16, recStartY);
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(8.5);
+        doc.setTextColor(100, 116, 139);
 
         if (selectedClientAnalysis) {
-            doc.text(`- Limite de Crédito Sugerido: ${formatCurrency(selectedClientAnalysis.suggestedLimit)}`, 14, 220);
-            doc.text(`- Taxa de Juros Recomendada: ${selectedClientAnalysis.pricing.rate}`, 14, 226);
-            doc.text(`- Aprovação: ${selectedClientAnalysis.pricing.approval}`, 14, 232);
+            doc.text(`- Limite de Crédito Sugerido: ${formatCurrency(selectedClientAnalysis.suggestedLimit)}`, 16, recStartY + 6);
+            doc.text(`- Taxa de Juros Recomendada: ${selectedClientAnalysis.pricing.rate}`, 16, recStartY + 11);
+            doc.text(`- Aprovação: ${selectedClientAnalysis.pricing.approval}`, 16, recStartY + 16);
         }
 
         doc.save(`analise_risco_${client.nif}.pdf`);

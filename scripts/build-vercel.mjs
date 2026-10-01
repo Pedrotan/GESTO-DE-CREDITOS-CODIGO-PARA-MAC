@@ -17,8 +17,13 @@ const build = spawnSync(
   {
     cwd: rootDir,
     stdio: 'inherit',
-    // Flag de build web pública: bloqueia onboarding público e módulo master
-    env: { ...process.env, VITE_PUBLIC_WEB: 'true' }
+    // Flag de build web pública com credenciais pré-configuradas do master
+    env: { 
+      ...process.env, 
+      VITE_PUBLIC_WEB: 'true',
+      VITE_DEFAULT_TENANT_ID: process.env.DEFAULT_TENANT_ID || '',
+      VITE_DEFAULT_SYNC_PASSKEY: process.env.DEFAULT_SYNC_PASSKEY || ''
+    }
   }
 );
 

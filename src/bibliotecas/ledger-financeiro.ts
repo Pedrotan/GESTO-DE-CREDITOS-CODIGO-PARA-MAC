@@ -111,3 +111,31 @@ export async function buildDisbursementAccountingEntry(input: {
     };
     return { ...entry, integrityHash: await calculateLedgerHash(entry) };
 }
+
+export async function buildChargeAdjustmentEntry(input: {
+    id: string; creditId: string; clientId?: string; component: 'interest' | 'late_interest';
+    deltaMinor: number; processedBy: string; usuario_id?: string; justification: string;
+}, previousHash: string, timestamp = new Date()) {
+    if (!Number.isSafeInteger(input.deltaMinor) || input.deltaMinor === 0) throw new Error('Ajuste de encargos inválido.');
+    if (!/^[a-f0-9]{64}$/iu.test(previousHash)) throw new Error('Hash contabilístico anterior inválido.');
+    const amount = Math.abs(input.deltaMinor);
+    const increasing = input.deltaMinor > 0;
+    const receivable = input.component === 'interest' ? 'receivable_interest' : 'receivable_late_interest';
+    const revenue = input.component === 'interest' ? 'revenue_interest' : 'revenue_late_interest';
+    const entry = {
+        id: input.id, timestamp, timestampIso: timestamp.toISOString(),
+        type: input.component === 'interest' ? 'interest_accrual' as const : 'late_interest' as const,
+        description: `${increasing ? 'Acréscimo' : 'Redução'} de ${input.component === 'interest' ? 'juro' : 'juro de mora'} no crédito ${input.creditId}`,
+        clientId: input.clientId, creditId: input.creditId, paymentId: undefined,
+        debit: increasing ? receivable : revenue, credit: increasing ? revenue : receivable,
+        amountPrincipal: 0, amountInterest: input.component === 'interest' ? amount / 100 : 0,
+        amountLateInterest: input.component === 'late_interest' ? amount / 100 : 0,
+        amountTotal: amount / 100, amountPrincipalMinor: 0,
+        amountInterestMinor: input.component === 'interest' ? amount : 0,
+        amountLateInterestMinor: input.component === 'late_interest' ? amount : 0,
+        amountTotalMinor: amount, processedBy: input.processedBy,
+        justification: input.justification, previousHash, usuario_id: input.usuario_id,
+        hashVersion: 2
+    };
+    return { ...entry, integrityHash: await calculateLedgerHash(entry) };
+}
