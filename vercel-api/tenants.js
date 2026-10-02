@@ -81,6 +81,13 @@ const toPublicTenant = (row) => ({
   operations: row.operations !== undefined ? Number(row.operations) : undefined
 });
 
+// Remove diferenças invisíveis ao copiar a chave: espaços, aspas envolventes e formas Unicode.
+const normalizeSecret = (value) => String(value ?? '')
+  .normalize('NFC')
+  .trim()
+  .replace(/^(['"`])(.*)\1$/su, '$2')
+  .trim();
+
 export default async function handler(req, res) {
   if (!applyCors(req, res)) return send(res, 403, { success: false, message: 'Origem não autorizada.' });
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
@@ -88,16 +95,22 @@ export default async function handler(req, res) {
   
   const databaseUrl = process.env.DATABASE_URL;
   // Apenas a chave mestra configurada no servidor é aceite; sem ela o painel fica indisponível.
-  const masterSecret = String(process.env.TANGO_MASTER_SECRET || '').trim();
+  const masterSecret = normalizeSecret(process.env.TANGO_MASTER_SECRET);
 
   if (!databaseUrl || !masterSecret) {
     return send(res, 503, { success: false, message: 'Painel Master ainda não configurado no servidor.' });
   }
 
+  // O corpo JSON chega em UTF-8; os cabeçalhos HTTP são lidos em latin1, o que altera acentos.
   const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-  const provided = (bearer || req.headers['x-master-secret'] || '').trim();
+  const header = bearer || String(req.headers['x-master-secret'] || '');
+  const candidates = [
+    req.body?.masterSecret,
+    header,
+    Buffer.from(header, 'latin1').toString('utf8')
+  ].map(normalizeSecret).filter(Boolean);
 
-  if (!safeEqual(provided, masterSecret)) {
+  if (!candidates.some(candidate => safeEqual(candidate, masterSecret))) {
     return send(res, 401, { success: false, message: 'Chave mestra inválida. Use o valor de TANGO_MASTER_SECRET configurado no projeto na Vercel.' });
   }
 

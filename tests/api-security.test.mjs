@@ -72,6 +72,17 @@ test('API de empresas só aceita a chave mestra configurada e falha fechada sem 
         for (const legacy of ['TangoMaster#2026!LiveSecret', 'TANGO_MASTER_2024', 'Senha-Mestra-2026!', 'TangoSync#2026!Live']) {
             assert.equal((await call(legacy)).statusCode, 401, legacy);
         }
+        // A chave correta passa a autenticação (falha depois apenas no acesso à base de dados de teste).
+        const accepted = async request => {
+            const res = response();
+            await tenants({ method: 'POST', headers: {}, ...request }, res).catch(() => undefined);
+            return res.statusCode !== 401;
+        };
+        process.env.TANGO_MASTER_SECRET = ' "Chave-Mestra-Açúcar-2026" \n';
+        assert.equal(await accepted({ body: { action: 'list', masterSecret: 'Chave-Mestra-Açúcar-2026' } }), true);
+        const latin1Header = Buffer.from('Bearer Chave-Mestra-Açúcar-2026', 'utf8').toString('latin1');
+        assert.equal(await accepted({ headers: { authorization: latin1Header }, body: { action: 'list' } }), true);
+        assert.equal(await accepted({ body: { action: 'list', masterSecret: 'Chave-Mestra-Acucar-2026' } }), false);
     } finally {
         for (const [key, value] of [['DATABASE_URL', previous.db], ['TANGO_MASTER_SECRET', previous.master]]) {
             if (value === undefined) delete process.env[key]; else process.env[key] = value;

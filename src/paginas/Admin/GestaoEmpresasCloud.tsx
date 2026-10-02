@@ -152,13 +152,17 @@ export default function GestaoEmpresasCloud() {
         const base = serverUrl.trim().replace(/\/+$/, '');
         if (!base.startsWith('http')) throw new Error('Indique o URL do servidor (ex.: https://tango-gestao-creditos.vercel.app).');
         
+        const secret = masterSecret.trim();
+        if (!secret) throw new Error('Indique a Chave Mestra do Tango Master.');
+        // No corpo a chave segue em UTF-8; o cabeçalho só aceita texto latin1 (sem acentos especiais).
+        const headerSafe = /^[\x20-\x7e]*$/.test(secret);
         const response = await fetch(`${base}/api/tenants`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${masterSecret.trim()}`
+                ...(headerSafe ? { 'Authorization': `Bearer ${secret}` } : {})
             },
-            body: JSON.stringify({ action, ...payload }),
+            body: JSON.stringify({ action, ...payload, masterSecret: secret }),
             signal: AbortSignal.timeout(20_000)
         });
         const data = await response.json().catch(() => ({}));
