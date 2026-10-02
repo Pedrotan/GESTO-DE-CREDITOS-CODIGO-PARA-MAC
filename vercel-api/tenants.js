@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
+import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 
 // API de administração de empresas (tenants) e chaves de sincronização.
 // Uso exclusivo do Painel Master. Protegida por TANGO_MASTER_SECRET
@@ -151,6 +152,27 @@ export default async function handler(req, res) {
       return send(res, 200, { success: true, tenants: rows.map(toPublicTenant) });
     }
 
+    if (action === 'list-requests') {
+      await ensureRegistrationRequestsTable(sql);
+      const requests = await sql(`SELECT * FROM tango_registration_requests
+        WHERE status = 'pending' OR handled_at > NOW() - INTERVAL '30 days'
+        ORDER BY (status = 'pending') DESC, created_at DESC LIMIT 200`);
+      return send(res, 200, { success: true, requests: requests.map(toPublicRequest) });
+    }
+
+    if (action === 'resolve-request') {
+      const requestId = String(body.requestId || '');
+      const status = String(body.status || '');
+      if (!/^[0-9a-f-]{36}$/iu.test(requestId) || !['approved', 'rejected'].includes(status)) {
+        return send(res, 400, { success: false, message: 'Pedido ou decisão inválidos.' });
+      }
+      await ensureRegistrationRequestsTable(sql);
+      const updated = await sql(`UPDATE tango_registration_requests SET status = $2, handled_at = NOW(), updated_at = NOW()
+        WHERE id = $1 RETURNING *`, [requestId, status]);
+      if (!updated.length) return send(res, 404, { success: false, message: 'Pedido de cadastro não encontrado.' });
+      return send(res, 200, { success: true, request: toPublicRequest(updated[0]) });
+    }
+
     if (!tenantId || tenantId.length > 200) {
       return send(res, 400, { success: false, message: 'Identificação da empresa (NIF) inválida.' });
     }
@@ -173,7 +195,10 @@ export default async function handler(req, res) {
          VALUES ($1, $2, $3, $4, $5, 'active', $6)`,
         [tenantId, tenantHash, name, sha256(normKey), code, expiresAt]
       );
-      
+      await ensureRegistrationRequestsTable(sql);
+      await sql(`UPDATE tango_registration_requests SET status = 'approved', handled_at = NOW(), updated_at = NOW()
+        WHERE nif = $1 AND status = 'pending'`, [tenantId]);
+
       return send(res, 200, { 
         success: true, 
         key: code, 

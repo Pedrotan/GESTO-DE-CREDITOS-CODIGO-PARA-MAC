@@ -109,3 +109,43 @@ async function loadHandlerWithoutNeon(file) {
     rmSync(outdir, { recursive: true, force: true });
     return module.default;
 }
+
+test('pedido de cadastro valida e normaliza os dados antes de chegar à base de dados', async () => {
+    const { parseRegistrationRequest } = await import('../vercel-api/_pedidos-cadastro.js');
+    const valid = parseRegistrationRequest({
+        nif: '500.320.7439', companyName: '  Digital Norte, Lda ', contactName: 'Pedro', phone: '+244 923 000 000', email: '', message: ''
+    });
+    assert.deepEqual(valid.value, {
+        nif: '5003207439', companyName: 'Digital Norte, Lda', contactName: 'Pedro',
+        phone: '+244 923 000 000', email: null, message: null
+    });
+    assert.match(parseRegistrationRequest({ nif: '123', companyName: 'X', contactName: 'Y', phone: '1' }).error, /NIF/);
+    assert.match(parseRegistrationRequest({ nif: '5003207439', companyName: 'Empresa', contactName: 'Pedro', phone: 'abc' }).error, /telefone/);
+    assert.match(parseRegistrationRequest({ nif: '5003207439', companyName: 'Empresa', contactName: 'Pedro', phone: '923000000', email: 'x' }).error, /email/);
+    assert.match(parseRegistrationRequest({ nif: '5003207439', companyName: 'E'.repeat(201), contactName: 'Pedro', phone: '923000000' }).error, /nome da empresa/);
+});
+
+test('rotas públicas de estado e cadastro recusam dados inválidos sem tocar na base de dados', async () => {
+    const companyStatus = await loadHandlerWithoutNeon('company-status.js');
+    const registration = await loadHandlerWithoutNeon('registration-request.js');
+    const previous = process.env.DATABASE_URL;
+    try {
+        delete process.env.DATABASE_URL;
+        const unconfigured = response();
+        await companyStatus({ method: 'POST', headers: {}, body: { nif: '5003207439' } }, unconfigured);
+        assert.equal(unconfigured.statusCode, 503);
+
+        process.env.DATABASE_URL = 'postgres://test';
+        const badNif = response();
+        await companyStatus({ method: 'POST', headers: {}, body: { nif: '12' } }, badNif);
+        assert.equal(badNif.statusCode, 400);
+        const badRequest = response();
+        await registration({ method: 'POST', headers: {}, body: { nif: '5003207439', companyName: 'Empresa' } }, badRequest);
+        assert.equal(badRequest.statusCode, 400);
+        const wrongMethod = response();
+        await registration({ method: 'GET', headers: {} }, wrongMethod);
+        assert.equal(wrongMethod.statusCode, 405);
+    } finally {
+        if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous;
+    }
+});

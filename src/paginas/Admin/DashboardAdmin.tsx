@@ -57,7 +57,8 @@ import {
     CreditCard,
     Cloud
 } from 'lucide-react';
-import GestaoEmpresasCloud from './GestaoEmpresasCloud';
+import GestaoEmpresasCloud, { type CloudTenant, type SubscriptionPayment } from './GestaoEmpresasCloud';
+import { subscriptionState } from '@/bibliotecas/subscricao';
 import { LicenseType, getLicenseTypeName } from '@/bibliotecas/licenciamento';
 import { formatDateSafe } from '@/bibliotecas/utils';
 import { formatAngolanPhone } from '@/bibliotecas/formatters';
@@ -1072,7 +1073,37 @@ export default function DashboardAdmin() {
     };
 
     // --- SIDEBAR ---
-    const SidebarItem = ({ id, icon: Icon, label }: { id: typeof activeTab, icon: any, label: string }) => (
+    // Pagamentos de subscrições web registados no Tango Master entram na Contabilidade.
+    const handleSubscriptionPayment = (payment: SubscriptionPayment) => {
+        const record: FinanceRecord = {
+            id: crypto.randomUUID(),
+            date: new Date().toISOString(),
+            clientName: payment.clientName,
+            clientNif: payment.clientNif,
+            plan: payment.plan,
+            value: payment.value,
+            licenseId: payment.referenceId
+        };
+        setFinancialRecords(previous => {
+            const updated = [record, ...previous];
+            localStorage.setItem('tango_master_finance', JSON.stringify(updated));
+            return updated;
+        });
+    };
+
+    // Subscrições web a expirar ou expiradas (lista guardada pelo separador Empresas Cloud).
+    const subscriptionAlerts = (() => {
+        try {
+            const saved: CloudTenant[] = JSON.parse(localStorage.getItem('tango_master_registered_tenants') || '[]');
+            return saved
+                .map(tenant => ({ tenant, state: subscriptionState(tenant.expiresAt) }))
+                .filter(({ state }) => state.kind === 'expiring' || state.kind === 'expired');
+        } catch {
+            return [];
+        }
+    })();
+
+    const SidebarItem = ({ id, icon: Icon, label, badge }: { id: typeof activeTab, icon: any, label: string, badge?: number }) => (
         <button
             onClick={() => setActiveTab(id)}
             className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm mb-1
@@ -1082,6 +1113,11 @@ export default function DashboardAdmin() {
         >
             <Icon className="h-5 w-5" />
             {label}
+            {badge ? (
+                <span className="ml-auto rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-black text-white" aria-label={`${badge} subscrições a renovar`}>
+                    {badge}
+                </span>
+            ) : null}
         </button>
     );
 
@@ -1104,7 +1140,7 @@ export default function DashboardAdmin() {
                         <SidebarItem id="painel" icon={LayoutDashboard} label="Visão Geral" />
                         <SidebarItem id="relatorios" icon={BarChart3} label="Relatórios" />
                         <SidebarItem id="licenciamento" icon={Key} label="Gerar Licenças" />
-                        <SidebarItem id="empresas" icon={Cloud} label="Empresas Cloud" />
+                        <SidebarItem id="empresas" icon={Cloud} label="Empresas Cloud" badge={subscriptionAlerts.length} />
                         <SidebarItem id="precos" icon={FileText} label="Gestão de Preços" />
                         <SidebarItem id="perfil" icon={Settings} label="Perfil & Configurações" />
                         <SidebarItem id="contabilidade" icon={CreditCard} label="Contabilidade" />
@@ -1149,11 +1185,30 @@ export default function DashboardAdmin() {
                 <div className="relative z-10 w-full px-2 sm:px-4 py-4 md:py-6">
 
                     {/* --- EMPRESAS CLOUD (Tenants & Chaves de Sincronização) --- */}
-                    {activeTab === 'empresas' && <GestaoEmpresasCloud />}
+                    {activeTab === 'empresas' && <GestaoEmpresasCloud onSubscriptionPayment={handleSubscriptionPayment} />}
 
                     {/* --- PAINEL --- */}
                     {activeTab === 'painel' && (
                         <div className="space-y-6">
+                            {subscriptionAlerts.length > 0 && (
+                                <div role="status" className="flex flex-col gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200 sm:flex-row sm:items-center sm:justify-between">
+                                    <div className="flex items-start gap-3">
+                                        <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                                        <div className="text-sm">
+                                            <p className="font-black">{subscriptionAlerts.length} {subscriptionAlerts.length === 1 ? 'subscrição precisa' : 'subscrições precisam'} de renovação</p>
+                                            <p className="text-xs">
+                                                {subscriptionAlerts.slice(0, 3).map(({ tenant, state }) => state.kind === 'expired'
+                                                    ? `${tenant.name} (expirada)`
+                                                    : `${tenant.name} (${state.kind === 'expiring' ? state.daysLeft : 0} dias)`).join(' · ')}
+                                                {subscriptionAlerts.length > 3 ? ' …' : ''}
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <Button size="sm" onClick={() => setActiveTab('empresas')} className="shrink-0 bg-amber-600 font-bold text-white hover:bg-amber-700">
+                                        Ver empresas
+                                    </Button>
+                                </div>
+                            )}
                             <div className="flex justify-between items-end mb-6">
                                 <div>
                                     <h2 className="text-3xl font-black text-slate-800 dark:text-white tracking-tight">Painel de Controlo</h2>

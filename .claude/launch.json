@@ -2,6 +2,12 @@
   "version": "0.0.1",
   "configurations": [
     {
+      "name": "web-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["vite", "--port", "8081", "--strictPort"],
+      "port": 8081
+    },
+    {
       "name": "vercel-web-preview",
       "runtimeExecutable": "npx",
       "runtimeArgs": [
@@ -14,6 +20,20 @@
         "--strictPort"
       ],
       "port": 4173
+    },
+    {
+      "name": "master-admin-preview",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "preview",
+        "--outDir",
+        "dist-admin",
+        "--port",
+        "4174",
+        "--strictPort"
+      ],
+      "port": 4174
     }
   ]
 }

@@ -6,6 +6,7 @@ import { useAuth } from "@/contextos/ContextoAutenticacao";
 import { MaintenanceGuard } from "@/componentes/MaintenanceGuard";
 import { OnboardingWizard } from "@/componentes/layout/OnboardingWizard";
 import { LigacaoEmpresaWeb } from "@/componentes/layout/LigacaoEmpresaWeb";
+import { GuardaSubscricaoWeb } from "@/componentes/layout/GuardaSubscricaoWeb";
 import { BackupReminder } from "@/componentes/layout/BackupReminder";
 import { AutoBackupManager } from "@/componentes/layout/AutoBackupManager";
 import { SplashScreen } from "@/componentes/layout/SplashScreen";
@@ -163,6 +164,7 @@ const AppContent = () => {
   return (
     <TooltipProvider>
       <LigacaoEmpresaWeb />
+      {isPublicWebBuild && tenantAuthorized && <GuardaSubscricaoWeb />}
       {tenantAuthorized && <OnboardingWizard />}
       <HashRouter>
         <BackupReminder />

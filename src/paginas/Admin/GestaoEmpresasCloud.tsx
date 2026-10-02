@@ -5,10 +5,11 @@ import { Label } from '@/componentes/ui/label';
 import {
     Cloud, Building2, KeyRound, Copy, RefreshCw, Loader2, ShieldCheck, ShieldOff,
     Trash2, Plus, CheckCircle, AlertTriangle, Link2, Eye, EyeOff, CalendarClock,
-    Search, FileDown, MessageSquare, Check, Sparkles, Shield
+    Search, FileDown, MessageSquare, Check, Sparkles, Shield, ClipboardList, Phone, Mail, X
 } from 'lucide-react';
 import { ServicoAngolaAPI } from '@/servicos/ServicoAngolaAPI';
 import { exportCompanyCredentialsPDF } from '@/bibliotecas/pdf';
+import { RENEWAL_PERIODS, extendSubscription, parsePaidAmount, subscriptionState, type RenewalPeriod } from '@/bibliotecas/subscricao';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 
@@ -27,6 +28,19 @@ export type CloudTenant = {
     operations?: number;
 };
 
+export type RegistrationRequest = {
+    id: string;
+    nif: string;
+    companyName: string;
+    contactName: string;
+    phone: string;
+    email: string | null;
+    message: string | null;
+    status: 'pending' | 'approved' | 'rejected';
+    createdAt: string;
+    handledAt: string | null;
+};
+
 const URL_KEY = 'tango_master_cloud_url';
 const SECRET_KEY = 'tango_master_cloud_secret';
 const LOCAL_TENANTS_KEY = 'tango_master_registered_tenants';
@@ -42,7 +56,12 @@ const generateFriendlyCode = () => {
     return `TG-${p1}-${p2}`;
 };
 
-export default function GestaoEmpresasCloud() {
+/** Pagamento de subscrição a registar na Contabilidade do Tango Master. */
+export type SubscriptionPayment = { clientName: string; clientNif: string; plan: string; value: number; referenceId: string };
+
+const periodLabel = (period: RenewalPeriod) => RENEWAL_PERIODS.find(item => item.key === period)?.label || period;
+
+export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubscriptionPayment?: (payment: SubscriptionPayment) => void } = {}) {
     const [serverUrl, setServerUrl] = useState(() => localStorage.getItem(URL_KEY) || 'https://tango-gestao-creditos.vercel.app');
     const [masterSecret, setMasterSecret] = useState(() => localStorage.getItem(SECRET_KEY) || '');
     const [showSecret, setShowSecret] = useState(false);
@@ -58,6 +77,8 @@ export default function GestaoEmpresasCloud() {
 
     const [isLoading, setIsLoading] = useState(false);
     const [busyTenant, setBusyTenant] = useState('');
+    const [requests, setRequests] = useState<RegistrationRequest[]>([]);
+    const [busyRequest, setBusyRequest] = useState('');
     const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
     // Formulário de Cadastro da Empresa
@@ -67,6 +88,7 @@ export default function GestaoEmpresasCloud() {
     const [accessCode, setAccessCode] = useState(() => generateFriendlyCode());
     const [expiryOption, setExpiryOption] = useState<'1m' | '3m' | '6m' | '1y' | 'lifetime' | 'custom'>('1y');
     const [customExpiry, setCustomExpiry] = useState('');
+    const [paidAmount, setPaidAmount] = useState('');
     const [isSearchingNIF, setIsSearchingNIF] = useState(false);
     const [nifFoundSource, setNifFoundSource] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
@@ -187,6 +209,8 @@ export default function GestaoEmpresasCloud() {
 
             setTenants(merged);
             localStorage.setItem(LOCAL_TENANTS_KEY, JSON.stringify(merged));
+            const requestData = await api('list-requests').catch(() => ({ requests: [] }));
+            setRequests(requestData.requests || []);
             notify('success', 'Lista de empresas sincronizada com sucesso.');
         } catch (e: any) {
             notify('error', e.message || 'Falha ao carregar lista de empresas.');
@@ -194,6 +218,48 @@ export default function GestaoEmpresasCloud() {
             setIsLoading(false);
         }
     };
+
+    // Pedidos de cadastro feitos na página pública da versão web
+    const applyRequest = (request: RegistrationRequest) => {
+        const isCompany = /^d{10}$/.test(request.nif);
+        setNifType(isCompany ? 'COLECTIVO' : 'SINGULAR');
+        setNewNif(request.nif);
+        setNewName(request.companyName);
+        setNifFoundSource('Pedido de cadastro');
+        document.getElementById('registar-empresa')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        notify('success', `Dados do pedido de ${request.companyName} colocados no formulário. Confirme e cadastre.`);
+    };
+
+    const rejectRequest = async (request: RegistrationRequest) => {
+        const confirmation = await Swal.fire({
+            title: 'Rejeitar pedido?',
+            text: `O pedido de ${request.companyName} (NIF ${request.nif}) será marcado como rejeitado.`,
+            icon: 'warning',
+            showCancelButton: true,
+            confirmButtonText: 'Rejeitar',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#dc2626'
+        });
+        if (!confirmation.isConfirmed) return;
+        setBusyRequest(request.id);
+        try {
+            const data = await api('resolve-request', { requestId: request.id, status: 'rejected' });
+            setRequests(previous => previous.map(item => item.id === request.id ? data.request : item));
+            notify('success', 'Pedido de cadastro rejeitado.');
+        } catch (e: any) {
+            notify('error', e.message || 'Falha ao rejeitar o pedido.');
+        } finally {
+            setBusyRequest('');
+        }
+    };
+
+    const pendingRequests = requests.filter(request => request.status === 'pending');
+
+    // Ao abrir o separador com a chave já guardada, carrega empresas e pedidos pendentes.
+    useEffect(() => {
+        if (masterSecret.trim() && serverUrl.trim().startsWith('http')) void loadTenants();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // Calcular data de expiração selecionada
     const calculateExpiryDate = () => {
@@ -225,6 +291,11 @@ export default function GestaoEmpresasCloud() {
         }
         if (!cleanCode || cleanCode.length < 4) {
             notify('error', 'O Código de Acesso deve ter pelo menos 4 caracteres.');
+            return;
+        }
+        const paid = parsePaidAmount(paidAmount);
+        if (paid === null) {
+            notify('error', 'Indique o valor pago pela subscrição (use 0 se for gratuita).');
             return;
         }
 
@@ -265,8 +336,18 @@ export default function GestaoEmpresasCloud() {
             const updatedTenants = [newRecord, ...tenants.filter(t => t.tenantId !== cleanNif)];
             setTenants(updatedTenants);
             localStorage.setItem(LOCAL_TENANTS_KEY, JSON.stringify(updatedTenants));
+            // O servidor marca como aprovado o pedido pendente com o mesmo NIF.
+            setRequests(previous => previous.map(item => item.nif === cleanNif && item.status === 'pending'
+                ? { ...item, status: 'approved', handledAt: new Date().toISOString() } : item));
+
+            if (paid > 0) onSubscriptionPayment?.({
+                clientName: cleanName, clientNif: cleanNif,
+                plan: `Subscrição Web — ${periodLabel(expiryOption as RenewalPeriod)}`,
+                value: paid, referenceId: `web:${cleanNif}:${Date.now()}`
+            });
 
             // Reset do formulário
+            setPaidAmount('');
             setNewNif('');
             setNewName('');
             setNifFoundSource(null);
@@ -291,6 +372,53 @@ export default function GestaoEmpresasCloud() {
             notify('success', nextStatus === 'blocked' ? `Acesso de "${tenant.name}" bloqueado.` : `Acesso de "${tenant.name}" reativado.`);
         } catch (e: any) {
             notify('error', e.message);
+        } finally {
+            setBusyTenant('');
+        }
+    };
+
+    const handleRenew = async (tenant: CloudTenant) => {
+        const options = RENEWAL_PERIODS.map(item => `<option value="${item.key}"${item.key === '1y' ? ' selected' : ''}>${item.label}</option>`).join('');
+        const result = await Swal.fire({
+            title: 'Renovar subscrição',
+            html: `<p style="font-size:13px;color:#64748b;margin-bottom:12px">${tenant.name.replace(/[<>&"]/g, '')} · validade atual: ${formatDate(tenant.expiresAt)}</p>
+                <label for="renew-period" style="display:block;text-align:left;font-size:12px;font-weight:700;margin:0 4px 4px">Período</label>
+                <select id="renew-period" class="swal2-select" style="width:100%;margin:0 0 12px">${options}</select>
+                <label for="renew-amount" style="display:block;text-align:left;font-size:12px;font-weight:700;margin:0 4px 4px">Valor pago (AOA)</label>
+                <input id="renew-amount" class="swal2-input" inputmode="decimal" placeholder="Ex.: 25 000" style="width:100%;margin:0">`,
+            showCancelButton: true,
+            confirmButtonText: 'Renovar',
+            cancelButtonText: 'Cancelar',
+            confirmButtonColor: '#f37021',
+            focusConfirm: false,
+            preConfirm: () => {
+                const period = (document.getElementById('renew-period') as HTMLSelectElement).value as RenewalPeriod;
+                const value = parsePaidAmount((document.getElementById('renew-amount') as HTMLInputElement).value);
+                if (value === null) {
+                    Swal.showValidationMessage('Indique o valor pago (use 0 se for gratuito).');
+                    return false;
+                }
+                return { period, value };
+            }
+        });
+        if (!result.isConfirmed || !result.value) return;
+        const { period, value } = result.value as { period: RenewalPeriod; value: number };
+        const expiresAt = extendSubscription(tenant.expiresAt, period);
+
+        setBusyTenant(tenant.tenantId);
+        try {
+            await api('update', { tenantId: tenant.tenantId, expiresAt });
+            const updated = tenants.map(t => t.tenantId === tenant.tenantId ? { ...t, expiresAt } : t);
+            setTenants(updated);
+            localStorage.setItem(LOCAL_TENANTS_KEY, JSON.stringify(updated));
+            if (value > 0) onSubscriptionPayment?.({
+                clientName: tenant.name, clientNif: tenant.tenantId,
+                plan: `Renovação Web — ${periodLabel(period)}`,
+                value, referenceId: `web:${tenant.tenantId}:${Date.now()}`
+            });
+            notify('success', `Subscrição de "${tenant.name}" renovada até ${formatDate(expiresAt)}.`);
+        } catch (e: any) {
+            notify('error', e.message || 'Falha ao renovar a subscrição.');
         } finally {
             setBusyTenant('');
         }
@@ -548,8 +676,46 @@ export default function GestaoEmpresasCloud() {
                 </div>
             </div>
 
+            {/* Pedidos de cadastro recebidos pela página pública */}
+            {pendingRequests.length > 0 && (
+                <div className="rounded-3xl border border-orange-200 bg-orange-50/60 p-6 shadow-sm dark:border-orange-900/40 dark:bg-orange-950/10">
+                    <h3 className="mb-1 flex items-center gap-2 text-lg font-black text-slate-900 dark:text-white">
+                        <ClipboardList className="h-5 w-5 text-[#F37021]" /> Pedidos de Cadastro Pendentes ({pendingRequests.length})
+                    </h3>
+                    <p className="mb-4 text-xs text-slate-500 dark:text-slate-400">
+                        Empresas que pediram acesso na página da versão web. Aprove para preencher o formulário de cadastro.
+                    </p>
+                    <ul className="space-y-3">
+                        {pendingRequests.map(request => (
+                            <li key={request.id} className="flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 md:flex-row md:items-center md:justify-between">
+                                <div className="min-w-0 space-y-1">
+                                    <p className="truncate font-bold text-slate-900 dark:text-white">{request.companyName}</p>
+                                    <p className="font-mono text-xs text-slate-500">NIF {request.nif}</p>
+                                    <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
+                                        <span>{request.contactName}</span>
+                                        <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {request.phone}</span>
+                                        {request.email && <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3" /> {request.email}</span>}
+                                        <span className="text-slate-400">{new Date(request.createdAt).toLocaleString('pt-PT')}</span>
+                                    </p>
+                                    {request.message && <p className="text-xs italic text-slate-500">“{request.message}”</p>}
+                                </div>
+                                <div className="flex shrink-0 gap-2">
+                                    <Button size="sm" onClick={() => applyRequest(request)} className="gap-1.5 bg-[#F37021] font-bold text-white hover:bg-orange-600">
+                                        <Check className="h-4 w-4" /> Aprovar e cadastrar
+                                    </Button>
+                                    <Button size="sm" variant="outline" disabled={busyRequest === request.id} onClick={() => rejectRequest(request)}
+                                        className="gap-1.5 font-bold text-red-600 hover:bg-red-50">
+                                        {busyRequest === request.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <X className="h-4 w-4" />} Rejeitar
+                                    </Button>
+                                </div>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            )}
+
             {/* Formulário de Cadastro da Empresa com Busca de NIF */}
-            <div className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div id="registar-empresa" className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex items-center justify-between mb-5">
                     <div>
                         <h3 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
@@ -680,13 +846,27 @@ export default function GestaoEmpresasCloud() {
                                 </button>
                             ))}
                         </div>
+                        <div className="mt-3 max-w-xs space-y-1.5">
+                            <Label htmlFor="paid-amount" className="text-xs font-bold text-slate-600 dark:text-slate-300">
+                                Valor pago pela subscrição (AOA) *
+                            </Label>
+                            <Input
+                                id="paid-amount"
+                                inputMode="decimal"
+                                value={paidAmount}
+                                onChange={(e) => setPaidAmount(e.target.value)}
+                                placeholder="Ex.: 25 000 (0 se gratuita)"
+                                className="h-11 rounded-xl font-bold"
+                            />
+                            <p className="text-[11px] text-slate-400">Fica registado na Contabilidade do Tango Master.</p>
+                        </div>
                     </div>
                 </div>
 
                 <div className="mt-6 flex flex-col sm:flex-row items-center gap-3 pt-4 border-t border-slate-100 dark:border-slate-800">
                     <Button
                         onClick={handleCreate}
-                        disabled={isCreating || !newName.trim() || !newNif.trim()}
+                        disabled={isCreating || !newName.trim() || !newNif.trim() || !paidAmount.trim()}
                         className="w-full sm:w-auto h-12 px-8 bg-[#F37021] hover:bg-orange-600 text-white font-black text-sm rounded-xl gap-2 shadow-lg shadow-orange-500/20"
                     >
                         {isCreating ? <Loader2 className="h-5 w-5 animate-spin" /> : <ShieldCheck className="h-5 w-5" />}
@@ -710,6 +890,32 @@ export default function GestaoEmpresasCloud() {
                         </p>
                     </div>
                 </div>
+
+                {(() => {
+                    const attention = tenants
+                        .map(tenant => ({ tenant, state: subscriptionState(tenant.expiresAt) }))
+                        .filter(({ state }) => state.kind === 'expiring' || state.kind === 'expired');
+                    if (!attention.length) return null;
+                    return (
+                        <div role="status" className="mb-4 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+                            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+                            <div>
+                                <p className="text-sm font-black">Subscrições a precisar de renovação ({attention.length})</p>
+                                <ul className="mt-1 space-y-0.5">
+                                    {attention.map(({ tenant, state }) => (
+                                        <li key={tenant.tenantId}>
+                                            <strong>{tenant.name}</strong> — {state.kind === 'expired'
+                                                ? `expirou há ${state.daysAgo} ${state.daysAgo === 1 ? 'dia' : 'dias'}`
+                                                : state.kind === 'expiring'
+                                                    ? `expira em ${state.daysLeft} ${state.daysLeft === 1 ? 'dia' : 'dias'}`
+                                                    : null}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        </div>
+                    );
+                })()}
 
                 {tenants.length === 0 ? (
                     <div className="rounded-2xl border-2 border-dashed border-slate-200 p-8 text-center dark:border-slate-800">
@@ -742,6 +948,20 @@ export default function GestaoEmpresasCloud() {
                                         >
                                             {tenant.status === 'active' ? 'Ativa' : 'Bloqueada'}
                                         </span>
+                                        {(() => {
+                                            const state = subscriptionState(tenant.expiresAt);
+                                            if (state.kind === 'expired') return (
+                                                <span className="rounded-full bg-red-100 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-red-800 dark:bg-red-950 dark:text-red-300">
+                                                    Expirada há {state.daysAgo} {state.daysAgo === 1 ? 'dia' : 'dias'}
+                                                </span>
+                                            );
+                                            if (state.kind === 'expiring') return (
+                                                <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+                                                    Expira em {state.daysLeft} {state.daysLeft === 1 ? 'dia' : 'dias'}
+                                                </span>
+                                            );
+                                            return null;
+                                        })()}
                                     </div>
                                     <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
                                         <span>
@@ -793,6 +1013,17 @@ export default function GestaoEmpresasCloud() {
                                         title="Baixar Ficha de Credenciais em PDF"
                                     >
                                         <FileDown className="h-3.5 w-3.5 text-[#F37021]" /> Ficha PDF
+                                    </Button>
+
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        disabled={busyTenant === tenant.tenantId}
+                                        onClick={() => handleRenew(tenant)}
+                                        className="h-9 gap-1.5 text-xs font-bold text-[#F37021] hover:bg-orange-50"
+                                        title="Renovar subscrição e registar pagamento"
+                                    >
+                                        <CalendarClock className="h-3.5 w-3.5" /> Renovar
                                     </Button>
 
                                     <Button
