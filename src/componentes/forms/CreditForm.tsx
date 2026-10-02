@@ -40,7 +40,7 @@ import {
 } from '@/componentes/ui/select';
 import { Credit, Client } from '@/tipos/credito';
 import { formatCurrency } from '@/bibliotecas/formatters';
-import { Info, Calculator, Calendar, AlertTriangle, FileText, Landmark, CheckCircle2, Sparkles } from 'lucide-react';
+import { Calculator, Calendar, AlertTriangle, FileText, Landmark, CheckCircle2, Sparkles, User, TrendingUp, ShieldCheck, Plus } from 'lucide-react';
 import { useToast } from '@/componentes/ui/use-toast';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
@@ -50,23 +50,41 @@ import { generateContractPDF, generatePermanentTransferLetterPDF } from '@/bibli
 import { ServicoCartasTransferencia } from '@/servicos/ServicoCartasTransferencia';
 import { cn } from '@/bibliotecas/utils';
 
-export interface StandardInterestTier {
-    id: string;
-    label: string;
-    months: number;
-    minMonths: number;
-    maxMonths: number;
-    rate: number;
+import { InterestTier, canManageInterestTiers, tierForMonths, tierMonths, tierPeriodLabel } from '@/bibliotecas/taxas-juro';
+import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
+
+const labelClass ='text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300';
+const inputClass = 'h-10 rounded-xl border-slate-200 bg-white text-sm dark:border-slate-700 dark:bg-slate-950';
+
+interface FormSectionProps {
+    step: number;
+    icon: React.ComponentType<{ className?: string }>;
+    title: string;
+    description?: string;
+    aside?: React.ReactNode;
+    children: React.ReactNode;
 }
 
-export const DEFAULT_STANDARD_INTEREST_TIERS: StandardInterestTier[] = [
-    { id: '1m', label: '1 Mês (35%)', months: 1, minMonths: 1, maxMonths: 1, rate: 35 },
-    { id: '2m', label: '2 Meses (50%)', months: 2, minMonths: 2, maxMonths: 2, rate: 50 },
-    { id: '3m', label: '3 Meses (60%)', months: 3, minMonths: 3, maxMonths: 3, rate: 60 },
-    { id: '4-5m', label: '4-5 Meses (70%)', months: 5, minMonths: 4, maxMonths: 5, rate: 70 },
-    { id: '6-8m', label: '6-8 Meses (80%)', months: 6, minMonths: 6, maxMonths: 8, rate: 80 },
-    { id: '9-10m', label: '9-10 M. (100%)', months: 10, minMonths: 9, maxMonths: 10, rate: 100 },
-];
+const FormSection = ({ step, icon: Icon, title, description, aside, children }: FormSectionProps) => (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xs dark:border-slate-800 dark:bg-slate-900">
+        <header className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-5 py-3.5 dark:border-slate-800 dark:bg-slate-900/60">
+            <div className="flex min-w-0 items-center gap-3">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-primary text-sm font-black text-primary-foreground shadow-xs">
+                    {step}
+                </div>
+                <div className="min-w-0">
+                    <h3 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-white">
+                        <Icon className="h-4 w-4 shrink-0 text-secondary" />
+                        {title}
+                    </h3>
+                    {description && <p className="text-xs text-slate-500 dark:text-slate-400">{description}</p>}
+                </div>
+            </div>
+            {aside}
+        </header>
+        <div className="space-y-4 p-5">{children}</div>
+    </section>
+);
 
 const calculateDueDate = (startDateStr: string, months: number): string => {
     if (!startDateStr) return '';
@@ -112,12 +130,14 @@ interface CreditFormProps {
 
 export function CreditForm({ onSubmit, initialData, prefillData, clients, credits, onCancel, submitLabel }: CreditFormProps) {
     const { toast } = useToast();
-    const { companySettings } = useData();
+    const { companySettings, interestTiers } = useData();
     const { user } = useAuth();
     const [showLimitWarning, setShowLimitWarning] = useState(false);
     const [showReflectionModal, setShowReflectionModal] = useState(false);
     const [tempFormData, setTempFormData] = useState<CreditFormValues | null>(null);
     const [selectedReflectionMonth, setSelectedReflectionMonth] = useState('');
+    const [isRatesDialogOpen, setIsRatesDialogOpen] = useState(false);
+    const canEditRates = canManageInterestTiers(user?.role);
 
     const getReflectionMonthOptions = () => {
         const options = [];
@@ -164,10 +184,8 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
 
     const initialInstallments = initialData?.installments || prefillData?.installments || 1;
 
-    // Obtém a taxa padrão inicial baseada no número de parcelas
-    const defaultTierForInstallments = DEFAULT_STANDARD_INTEREST_TIERS.find(
-        t => initialInstallments >= t.minMonths && initialInstallments <= t.maxMonths
-    ) || (initialInstallments >= 10 ? DEFAULT_STANDARD_INTEREST_TIERS[DEFAULT_STANDARD_INTEREST_TIERS.length - 1] : DEFAULT_STANDARD_INTEREST_TIERS[0]);
+    // Tabela de taxas definida na página de Créditos (ou a tabela padrão).
+    const defaultTierForInstallments = tierForMonths(interestTiers, initialInstallments) || interestTiers[0];
 
     const form = useForm<CreditFormValues>({
         resolver: zodResolver(creditSchema),
@@ -207,21 +225,20 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
     const currentStartDate = watchedValues.startDate || new Date().toISOString().split('T')[0];
 
     // Identifica o tier ativo atual
-    const activeTier = DEFAULT_STANDARD_INTEREST_TIERS.find(
-        t => (instalments >= t.minMonths && instalments <= t.maxMonths)
-    ) || (instalments >= 10 ? DEFAULT_STANDARD_INTEREST_TIERS[DEFAULT_STANDARD_INTEREST_TIERS.length - 1] : undefined);
+    const activeTier = tierForMonths(interestTiers, instalments);
 
-    // Manipulador ao clicar em um mês na Tabela Automática de Taxas
-    const handleSelectTier = (tier: StandardInterestTier) => {
-        form.setValue('installments', tier.months, { shouldValidate: true, shouldDirty: true });
+    // Manipulador ao clicar em um escalão da Tabela de Taxas
+    const handleSelectTier = (tier: InterestTier) => {
+        const months = tierMonths(tier);
+        form.setValue('installments', months, { shouldValidate: true, shouldDirty: true });
         form.setValue('interestRate', tier.rate, { shouldValidate: true, shouldDirty: true });
-        const newDueDate = calculateDueDate(currentStartDate, tier.months);
+        const newDueDate = calculateDueDate(currentStartDate, months);
         if (newDueDate) {
             form.setValue('dueDate', newDueDate, { shouldValidate: true, shouldDirty: true });
         }
         toast({
             title: `Taxa de ${tier.rate}% Aplicada`,
-            description: `Duração definida para ${tier.label.split(' ')[0]} ${tier.label.split(' ')[1] || ''}.`,
+            description: `Duração definida para ${months} ${months === 1 ? 'mês' : 'meses'}.`,
         });
     };
 
@@ -231,9 +248,8 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
         form.setValue('installments', months, { shouldValidate: true, shouldDirty: true });
         
         if (months > 0) {
-            const tier = DEFAULT_STANDARD_INTEREST_TIERS.find(t => months >= t.minMonths && months <= t.maxMonths)
-                || (months >= 10 ? DEFAULT_STANDARD_INTEREST_TIERS[DEFAULT_STANDARD_INTEREST_TIERS.length - 1] : undefined);
-            
+            const tier = tierForMonths(interestTiers, months);
+
             if (tier) {
                 form.setValue('interestRate', tier.rate, { shouldValidate: true });
             }
@@ -313,6 +329,12 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
     const effortRate = monthlyIncome > 0
         ? (totalProjectedCommitment / monthlyIncome) * 100
         : (selectedClient?.creditLimit && selectedClient.creditLimit > 0 ? (totalProjectedCommitment / selectedClient.creditLimit) * 100 : 30);
+
+    const effortVerdict = effortRate <= 35
+        ? { label: 'Operação recomendada — taxa de esforço dentro de limites conservadores.', className: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300' }
+        : effortRate <= 50
+            ? { label: 'Atenção — taxa de esforço elevada. Avalie garantias adicionais.', className: 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-300' }
+            : { label: 'Risco alto — a prestação compromete grande parte do rendimento.', className: 'bg-red-50 text-red-700 dark:bg-red-950/30 dark:text-red-300' };
 
     const handleError = (errors: any) => {
         console.error("Validation Errors:", errors);
@@ -449,331 +471,342 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
 
     return (
         <Form {...form}>
-            <form onSubmit={form.handleSubmit(handleSubmit, handleError)} className="space-y-4">
-                {/* 1. Cliente Solicitante */}
-                <FormField
-                    control={form.control}
-                    name="clientId"
-                    render={({ field }) => (
-                        <FormItem>
-                            <FormLabel className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-100">
-                                Cliente Solicitante *
-                                <span className="text-xs font-normal text-muted-foreground">(Selecione o beneficiário)</span>
-                            </FormLabel>
-                            <FormControl>
-                                <SearchableSelect
-                                    options={clients.map(c => {
-                                        const clientCredits = credits?.filter(cr => cr.clientId === c.id && cr.status !== 'cancelled' && cr.status !== 'rejected') || [];
-                                        const activeCredit = clientCredits.find(cr => limitConsumingCreditStatuses.has(cr.status) && (Number(cr.currentBalance) || 0) > 0.1);
-                                        const cycle = clientCredits.length + 1;
+            <form onSubmit={form.handleSubmit(handleSubmit, handleError)} className="flex min-h-0 flex-1 flex-col">
+                <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-slate-50/70 p-4 md:p-6 dark:bg-slate-950/40">
+                    {/* 1. Cliente */}
+                    <FormSection step={1} icon={User} title="Cliente Solicitante" description="Selecione o beneficiário do crédito.">
+                        <FormField
+                            control={form.control}
+                            name="clientId"
+                            render={({ field }) => (
+                                <FormItem>
+                                    <FormLabel className={labelClass}>Cliente *</FormLabel>
+                                    <FormControl>
+                                        <SearchableSelect
+                                            options={clients.map(c => {
+                                                const clientCredits = credits?.filter(cr => cr.clientId === c.id && cr.status !== 'cancelled' && cr.status !== 'rejected') || [];
+                                                const activeCredit = clientCredits.find(cr => limitConsumingCreditStatuses.has(cr.status) && (Number(cr.currentBalance) || 0) > 0.1);
+                                                const cycle = clientCredits.length + 1;
 
-                                        return {
-                                            value: c.id,
-                                            label: c.name,
-                                            disabled: c.availableCredit <= 0 && !initialData,
-                                            subLabel: activeCredit
-                                                ? `⚠️ Possui crédito ${activeCredit.status === 'overdue' ? 'VENCIDO' : 'ACTIVO'} - Disp: ${formatCurrency(c.availableCredit)}`
-                                                : `${cycle}º Crédito - Disponível: ${formatCurrency(c.availableCredit)}`
-                                        };
-                                    })}
-                                    value={field.value}
-                                    onValueChange={(val) => {
-                                        field.onChange(val);
-                                        const clientCredits = credits?.filter(cr => cr.clientId === val && cr.status !== 'cancelled' && cr.status !== 'rejected') || [];
-                                        form.setValue('creditNumber', clientCredits.length + 1);
-                                    }}
-                                    disabled={!!initialData}
-                                    placeholder="Pesquisar cliente por nome..."
-                                    searchPlaceholder="Digite o nome do cliente..."
-                                />
-                            </FormControl>
-                            <FormMessage />
-                            {selectedClientId && (
-                                <div className="mt-1 flex flex-col gap-1.5 animate-in fade-in slide-in-from-top-1 duration-200">
-                                    {clients.find(c => c.id === selectedClientId) && (() => {
-                                        const client = clients.find(c => c.id === selectedClientId)!;
-                                        const clientCredits = credits?.filter(cr => cr.clientId === selectedClientId && cr.status !== 'cancelled' && cr.status !== 'rejected') || [];
-                                        const cycle = initialData?.creditNumber || clientCredits.length + 1;
-                                        const ratio = client.creditLimit > 0 ? (client.availableCredit / client.creditLimit) : 0;
-                                        let variant: 'success' | 'warning' | 'destructive' = 'success';
-                                        if (ratio <= 0) variant = 'destructive';
-                                        else if (ratio <= 0.2) variant = 'warning';
-
-                                        return (
-                                            <div className="flex flex-wrap items-center gap-2 p-2 bg-muted/40 rounded-lg border w-full text-xs">
-                                                <Badge variant="secondary" className="px-2 py-0.5 text-[11px] font-bold bg-primary/10 text-primary border-primary/20">
-                                                    {cycle}º Ciclo de Crédito
-                                                </Badge>
-                                                <span className="text-[10px] text-muted-foreground">Limite:</span>
-                                                <Badge variant="outline" className="text-[10px] h-5">Total: {formatCurrency(client.creditLimit)}</Badge>
-                                                <Badge variant="outline" className="text-[10px] h-5">Usado: {formatCurrency(client.usedCredit)}</Badge>
-                                                <Badge variant={variant} className="text-[10px] h-5 font-bold">Disp: {formatCurrency(client.availableCredit)}</Badge>
-                                            </div>
-                                        );
-                                    })()}
-                                </div>
-                            )}
-                        </FormItem>
-                    )}
-                />
-
-                {/* 2. Montante do Capital e Taxa de Juros (Layout conforme imagem) */}
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <FormField
-                        control={form.control}
-                        name="principalAmount"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="font-bold text-slate-800 dark:text-slate-100">Montante do Capital (AOA) *</FormLabel>
-                                <FormControl>
-                                    <CurrencyInput
-                                        value={field.value}
-                                        onValueChange={field.onChange}
-                                        className="h-11 font-mono text-base font-bold"
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
-                    <FormField
-                        control={form.control}
-                        name="interestRate"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="font-bold text-slate-800 dark:text-slate-100">Taxa de Juros (%) *</FormLabel>
-                                <FormControl>
-                                    <div className="relative">
-                                        <Input
-                                            type="number"
-                                            step="0.1"
-                                            className="h-11 pr-10 font-mono text-base font-bold"
-                                            {...field}
+                                                return {
+                                                    value: c.id,
+                                                    label: c.name,
+                                                    disabled: c.availableCredit <= 0 && !initialData,
+                                                    subLabel: activeCredit
+                                                        ? `⚠️ Possui crédito ${activeCredit.status === 'overdue' ? 'VENCIDO' : 'ACTIVO'} - Disp: ${formatCurrency(c.availableCredit)}`
+                                                        : `${cycle}º Crédito - Disponível: ${formatCurrency(c.availableCredit)}`
+                                                };
+                                            })}
+                                            value={field.value}
+                                            onValueChange={(val) => {
+                                                field.onChange(val);
+                                                const clientCredits = credits?.filter(cr => cr.clientId === val && cr.status !== 'cancelled' && cr.status !== 'rejected') || [];
+                                                form.setValue('creditNumber', clientCredits.length + 1);
+                                            }}
+                                            disabled={!!initialData}
+                                            placeholder="Pesquisar cliente por nome..."
+                                            searchPlaceholder="Digite o nome do cliente..."
                                         />
-                                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground font-bold">%</span>
-                                    </div>
-                                </FormControl>
-                                <p className="text-[11px] text-muted-foreground mt-1">Calculada automaticamente pelo prazo.</p>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                </div>
+                                    </FormControl>
+                                    <FormMessage />
+                                </FormItem>
+                            )}
+                        />
 
-                {/* 3. TABELA AUTOMÁTICA DE TAXAS DE JUROS (Conforme imagem) */}
-                <div className="rounded-xl border border-emerald-500/20 bg-emerald-50/20 dark:bg-emerald-950/10 p-3 space-y-2">
-                    <div className="text-[11px] font-bold text-emerald-800 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1.5">
-                        <Sparkles className="h-3.5 w-3.5 text-primary" />
-                        TABELA AUTOMÁTICA DE TAXAS DE JUROS
-                    </div>
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                        {DEFAULT_STANDARD_INTEREST_TIERS.map(tier => {
-                            const isSelected = activeTier?.id === tier.id;
+                        {selectedClient && (() => {
+                            const clientCredits = credits?.filter(cr => cr.clientId === selectedClient.id && cr.status !== 'cancelled' && cr.status !== 'rejected') || [];
+                            const cycle = initialData?.creditNumber || clientCredits.length + 1;
+                            const ratio = selectedClient.creditLimit > 0 ? (selectedClient.availableCredit / selectedClient.creditLimit) : 0;
+                            const availableClass = ratio <= 0
+                                ? 'text-red-600 dark:text-red-400'
+                                : ratio <= 0.2 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400';
+
                             return (
-                                <button
-                                    key={tier.id}
-                                    type="button"
-                                    onClick={() => handleSelectTier(tier)}
-                                    className={cn(
-                                        "py-2 px-3 rounded-lg text-xs font-bold transition-all text-center border shadow-xs flex items-center justify-center cursor-pointer",
-                                        isSelected
-                                            ? "bg-[#f97316] text-white border-orange-600 ring-2 ring-orange-400/40 font-bold"
-                                            : "bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-200 hover:border-orange-400 hover:bg-orange-50/50 dark:hover:bg-orange-950/20"
-                                    )}
-                                >
-                                    {tier.label}
-                                </button>
+                                <div className="grid grid-cols-2 gap-3 animate-in fade-in slide-in-from-top-1 duration-200 sm:grid-cols-4">
+                                    {[
+                                        { label: 'Ciclo', value: `${cycle}º crédito`, className: 'text-secondary' },
+                                        { label: 'Limite total', value: formatCurrency(selectedClient.creditLimit), className: 'text-slate-900 dark:text-white' },
+                                        { label: 'Utilizado', value: formatCurrency(selectedClient.usedCredit), className: 'text-slate-900 dark:text-white' },
+                                        { label: 'Disponível', value: formatCurrency(selectedClient.availableCredit), className: availableClass },
+                                    ].map(item => (
+                                        <div key={item.label} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-800 dark:bg-slate-950">
+                                            <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p>
+                                            <p className={cn('truncate font-mono text-sm font-bold', item.className)}>{item.value}</p>
+                                        </div>
+                                    ))}
+                                </div>
                             );
-                        })}
-                    </div>
-                </div>
+                        })()}
+                    </FormSection>
 
-                {/* 4. Duração do Contrato e Data do Acordo (Conforme imagem) */}
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <FormField
-                        control={form.control}
-                        name="installments"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="font-bold text-slate-800 dark:text-slate-100">Duração do Contrato (Meses) *</FormLabel>
-                                <FormControl>
-                                    <Input
-                                        type="number"
-                                        min="1"
-                                        className="h-11 font-mono text-base font-bold"
-                                        value={field.value}
-                                        onChange={(e) => handleInstallmentsChange(e.target.value)}
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
+                    {/* 2. Condições do crédito */}
+                    <FormSection step={2} icon={Calculator} title="Condições do Crédito" description="Escolha um prazo da tabela ou ajuste os valores manualmente.">
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <FormField
+                                control={form.control}
+                                name="principalAmount"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel className={labelClass}>Montante do Capital (AOA) *</FormLabel>
+                                        <FormControl>
+                                            <CurrencyInput
+                                                value={field.value}
+                                                onValueChange={field.onChange}
+                                                className={cn(inputClass, 'font-mono text-base font-bold')}
+                                            />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="interestRate"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel className={labelClass}>Taxa de Juros *</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Input
+                                                    type="number"
+                                                    step="0.1"
+                                                    className={cn(inputClass, 'pr-10 font-mono text-base font-bold')}
+                                                    {...field}
+                                                />
+                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-muted-foreground">%</span>
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+
+                        {/* Tabela de taxas por prazo (definida na página de Créditos) */}
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <span className={cn(labelClass, 'flex items-center gap-1.5')}>
+                                    <Sparkles className="h-3.5 w-3.5 text-secondary" />
+                                    Tabela de Taxas por Prazo
+                                </span>
+                                {canEditRates ? (
+                                    <button
+                                        type="button"
+                                        onClick={() => setIsRatesDialogOpen(true)}
+                                        className="flex h-8 items-center gap-1.5 rounded-lg border border-primary/30 bg-white px-3 text-xs font-bold text-primary shadow-xs hover:bg-primary/5 dark:bg-slate-950 dark:text-secondary dark:hover:bg-primary/20"
+                                    >
+                                        <Plus className="h-3.5 w-3.5" />
+                                        Cadastrar Taxas
+                                    </button>
+                                ) : (
+                                    <span className="text-[11px] text-slate-500">Toque num prazo para aplicar a taxa</span>
+                                )}
+                            </div>
+                            <div className="grid grid-cols-[repeat(auto-fill,minmax(100px,1fr))] gap-2">
+                                {interestTiers.map(tier => {
+                                    const isSelected = activeTier?.id === tier.id;
+                                    return (
+                                        <button
+                                            key={tier.id}
+                                            type="button"
+                                            onClick={() => handleSelectTier(tier)}
+                                            aria-pressed={isSelected}
+                                            className={cn(
+                                                'flex flex-col items-center justify-center rounded-xl border px-2 py-2.5 text-center transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+                                                isSelected
+                                                    ? 'border-primary bg-primary text-primary-foreground shadow-md shadow-primary/20 ring-2 ring-secondary/60'
+                                                    : 'border-slate-200 bg-white text-slate-700 hover:border-primary/50 hover:bg-primary/5 dark:border-slate-700 dark:bg-slate-950 dark:text-slate-200 dark:hover:bg-primary/20'
+                                            )}
+                                        >
+                                            <span className={cn('text-[11px] font-semibold', isSelected ? 'text-primary-foreground/80' : 'text-slate-500 dark:text-slate-400')}>
+                                                {tierPeriodLabel(tier)}
+                                            </span>
+                                            <span className="font-mono text-base font-black">{tier.rate}%</span>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <FormField
+                                control={form.control}
+                                name="installments"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel className={labelClass}>Duração (Meses) *</FormLabel>
+                                        <FormControl>
+                                            <Input
+                                                type="number"
+                                                min="1"
+                                                className={cn(inputClass, 'font-mono font-bold')}
+                                                value={field.value}
+                                                onChange={(e) => handleInstallmentsChange(e.target.value)}
+                                            />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="lateInterestRate"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel className={labelClass}>Taxa de Mora Diária</FormLabel>
+                                        <FormControl>
+                                            <div className="relative">
+                                                <Input type="number" step="0.1" className={cn(inputClass, 'pr-10 font-mono font-bold')} {...field} />
+                                                <span className="absolute right-3 top-1/2 -translate-y-1/2 font-bold text-muted-foreground">%</span>
+                                            </div>
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="startDate"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel className={cn(labelClass, 'flex items-center gap-1.5')}>
+                                            <Calendar className="h-3.5 w-3.5 text-secondary" />
+                                            Data do Acordo *
+                                        </FormLabel>
+                                        <FormControl>
+                                            <Input
+                                                type="date"
+                                                className={cn(inputClass, 'font-mono')}
+                                                value={field.value}
+                                                onChange={(e) => handleStartDateChange(e.target.value)}
+                                            />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+
+                            <FormField
+                                control={form.control}
+                                name="dueDate"
+                                render={({ field }) => (
+                                    <FormItem>
+                                        <FormLabel className={cn(labelClass, 'flex items-center gap-1.5')}>
+                                            <Calendar className="h-3.5 w-3.5 text-secondary" />
+                                            Data de Vencimento *
+                                        </FormLabel>
+                                        <FormControl>
+                                            <Input type="date" className={cn(inputClass, 'font-mono')} {...field} />
+                                        </FormControl>
+                                        <FormMessage />
+                                    </FormItem>
+                                )}
+                            />
+                        </div>
+                    </FormSection>
+
+                    {/* 3. Resumo */}
+                    <FormSection step={3} icon={TrendingUp} title="Plano de Liquidação" description="Valores projectados com as condições acima.">
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Juros ({rate}%)</p>
+                                <p className="font-mono text-base font-bold text-slate-900 dark:text-white">+ {formatCurrency(totalInterest)}</p>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Total a Devolver</p>
+                                <p className="font-mono text-base font-bold text-slate-900 dark:text-white">{formatCurrency(totalToReturn)}</p>
+                            </div>
+                            <div className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 dark:bg-primary/20">
+                                <p className="text-[10px] font-bold uppercase tracking-wider text-primary dark:text-secondary">Mensalidade Estimada</p>
+                                <p className="font-mono text-base font-black text-primary dark:text-secondary">
+                                    {formatCurrency(valuePerInstallment)} <span className="text-xs font-normal text-slate-500">/ mês</span>
+                                </p>
+                            </div>
+                        </div>
+
+                        {selectedClient && (
+                            <div className="space-y-2 rounded-xl border border-slate-200 p-4 text-xs dark:border-slate-800">
+                                <div className="flex flex-wrap items-center justify-between gap-2">
+                                    <span className={cn(labelClass, 'flex items-center gap-1.5')}>
+                                        <ShieldCheck className="h-3.5 w-3.5 text-secondary" />
+                                        Avaliação de Risco e Capacidade
+                                    </span>
+                                    <span className="font-mono text-[11px] text-slate-500">NIF: {clientNif} · BI: {clientBi}</span>
+                                </div>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1 text-slate-600 dark:text-slate-300">
+                                    <span>Rendimento: <strong className="font-mono text-slate-900 dark:text-white">{monthlyIncome > 0 ? formatCurrency(monthlyIncome) : 'Não informado'}</strong></span>
+                                    <span>Amortizações activas: <strong className="font-mono text-slate-900 dark:text-white">{formatCurrency(currentMonthlyAmortizations)}</strong></span>
+                                    <span>Compromisso mensal projectado: <strong className="font-mono text-slate-900 dark:text-white">{formatCurrency(totalProjectedCommitment)}</strong></span>
+                                </div>
+                                <div className={cn('flex items-center justify-between gap-3 rounded-lg px-3 py-2 font-semibold', effortVerdict.className)}>
+                                    <span>{effortVerdict.label}</span>
+                                    <span className="font-mono text-sm font-black">{effortRate.toFixed(1)}%</span>
+                                </div>
+                            </div>
                         )}
-                    />
 
-                    <FormField
-                        control={form.control}
-                        name="startDate"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-100">
-                                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                                    Data do Acordo *
-                                </FormLabel>
-                                <FormControl>
-                                    <Input
-                                        type="date"
-                                        className="h-11 font-mono"
-                                        value={field.value}
-                                        onChange={(e) => handleStartDateChange(e.target.value)}
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
+                        {!initialData && (
+                            <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/20 dark:text-amber-200">
+                                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                                <p className="leading-relaxed">
+                                    O crédito será submetido como <strong>proposta pendente</strong>. A validação e o desembolso do capital dependem da aprovação do Administrador.
+                                </p>
+                            </div>
                         )}
-                    />
+                    </FormSection>
                 </div>
 
-                {/* Vencimento e Taxa de Mora */}
-                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                    <FormField
-                        control={form.control}
-                        name="dueDate"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="flex items-center gap-1.5 text-xs font-semibold text-slate-600 dark:text-slate-300">
-                                    <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                                    Data de Vencimento
-                                </FormLabel>
-                                <FormControl>
-                                    <Input type="date" className="h-9 font-mono text-xs" {...field} />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-
-                    <FormField
-                        control={form.control}
-                        name="lateInterestRate"
-                        render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="text-xs font-semibold text-slate-600 dark:text-slate-300">Taxa de Mora diária (%)</FormLabel>
-                                <FormControl>
-                                    <div className="relative">
-                                        <Input type="number" step="0.1" className="h-9 pr-8 font-mono text-xs" {...field} />
-                                        <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-medium">%</span>
-                                    </div>
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}
-                    />
-                </div>
-
-                {/* 5. AVALIAÇÃO DE RISCO E CAPACIDADE (Conforme imagem) */}
-                {selectedClient && (
-                    <div className="rounded-xl border border-emerald-500/30 bg-emerald-50/40 dark:bg-emerald-950/20 p-3.5 space-y-2 text-xs">
-                        <div className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5 uppercase tracking-wide text-[11px]">
-                            <span>📊</span> AVALIAÇÃO DE RISCO E CAPACIDADE | NIF: <span className="font-mono text-primary font-bold">{clientNif}</span> | BI: <span className="font-mono text-primary font-bold">{clientBi}</span>
-                        </div>
-                        <div className="text-slate-600 dark:text-slate-300 flex flex-wrap gap-x-3 gap-y-1 text-[11px] pt-1 border-t border-emerald-200/50 dark:border-emerald-800/40">
-                            <span>Rendimento: <strong className="font-mono text-slate-900 dark:text-white">{monthlyIncome > 0 ? formatCurrency(monthlyIncome) : '1 200 000 AOA'}</strong></span>
-                            <span>|</span>
-                            <span>Amortizações Activas: <strong className="font-mono text-slate-900 dark:text-white">{formatCurrency(currentMonthlyAmortizations)}</strong></span>
-                        </div>
-                        <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                            A nova prestação de <strong className="font-mono font-bold text-slate-900 dark:text-white">{formatCurrency(newInstallment)}</strong> elevará o compromisso mensal para <strong className="font-mono font-bold text-slate-900 dark:text-white">{formatCurrency(totalProjectedCommitment)}</strong>.
-                        </p>
-                        <div className="flex items-center justify-between pt-1 border-t border-emerald-200/50 dark:border-emerald-800/40">
-                            <span className="text-[11px] text-slate-600 dark:text-slate-400">Nova Taxa de Esforço Projectada:</span>
-                            <span className="font-bold font-mono text-sm text-slate-900 dark:text-white">{effortRate.toFixed(1)}%</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-                            <span>☑</span> Operação recomendada. Taxa dentro de limites conservadores (Margem Excelente).
-                        </div>
-                    </div>
-                )}
-
-                {/* 6. PLANO DE LIQUIDAÇÃO PROJECTADO (Conforme imagem) */}
-                <div className="rounded-xl border-2 border-orange-400/50 bg-orange-50/20 dark:bg-orange-950/10 p-4 space-y-2.5">
-                    <div className="text-xs font-black text-orange-600 dark:text-orange-400 uppercase tracking-wider">
-                        PLANO DE LIQUIDAÇÃO PROJECTADO:
-                    </div>
-                    <div className="space-y-1.5 text-xs">
-                        <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
-                            <span>Juros Prorratados ({rate}%):</span>
-                            <span className="font-bold font-mono text-slate-900 dark:text-white">+ {formatCurrency(totalInterest)}</span>
-                        </div>
-                        <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
-                            <span>Valor Total com Juros:</span>
-                            <span className="font-bold font-mono text-base text-slate-900 dark:text-white">{formatCurrency(totalToReturn)}</span>
-                        </div>
-                        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center pt-2 border-t border-orange-200/60 dark:border-orange-900/40 gap-1">
-                            <span className="font-bold text-slate-800 dark:text-slate-200 text-xs">Mensalidade Média Estimada:</span>
-                            <span className="font-black text-base md:text-lg text-orange-600 dark:text-orange-400 font-mono">
-                                {formatCurrency(valuePerInstallment)} <span className="text-xs font-normal text-slate-500">/ mês</span>
-                            </span>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 7. Aviso Operador Técnico (Conforme imagem) */}
-                <div className="rounded-xl border border-amber-300/60 bg-amber-50/60 dark:bg-amber-950/20 p-3 flex items-start gap-2.5 text-xs text-amber-900 dark:text-amber-200">
-                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                    <div>
-                        <div className="font-bold text-amber-800 dark:text-amber-300 mb-0.5 text-xs">Aviso Operador Técnico</div>
-                        <p className="text-[11px] leading-relaxed text-amber-700 dark:text-amber-300/80">
-                            Esta apólice será submetida como uma proposta pendente. A validação e o desembolso final de capital dependem da chancela oficial do Administrador.
-                        </p>
-                    </div>
-                </div>
-
-                {/* 8. Botões de Acção (Conforme imagem) */}
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t">
-                    <div className="flex flex-wrap items-center gap-2">
+                {/* Rodapé fixo com as acções */}
+                <div className="flex shrink-0 flex-col-reverse gap-3 border-t border-slate-200 bg-white px-4 py-4 shadow-lg sm:flex-row sm:items-center sm:justify-between md:px-6 dark:border-slate-800 dark:bg-slate-900">
+                    <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center">
                         <Button
                             type="button"
                             variant="outline"
                             onClick={handleGenerateDraft}
-                            className="h-10 text-xs gap-1.5 text-slate-700 dark:text-slate-200 border-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800"
+                            className="h-10 gap-1.5 rounded-xl border-slate-200 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200"
                             disabled={!selectedClientId}
                         >
-                            <FileText className="h-4 w-4 text-muted-foreground" />
-                            Gerar Minuta (Rascunho)
+                            <FileText className="h-4 w-4" />
+                            Gerar Minuta
                         </Button>
                         <Button
                             type="button"
                             variant="outline"
                             onClick={handleGenerateBankLetter}
-                            className="h-10 text-xs gap-1.5 text-blue-600 border-blue-200 hover:bg-blue-50 dark:hover:bg-blue-950/20 dark:border-blue-800"
+                            className="h-10 gap-1.5 rounded-xl border-slate-200 text-xs font-semibold text-slate-700 dark:border-slate-700 dark:text-slate-200"
                             disabled={!selectedClientId}
                         >
-                            <Landmark className="h-4 w-4 text-blue-600" />
-                            Carta de Transferência (Banco)
+                            <Landmark className="h-4 w-4" />
+                            Carta de Transferência
                         </Button>
                     </div>
 
-                    <div className="flex items-center gap-2 justify-end">
+                    <div className="flex w-full items-center gap-3 sm:w-auto sm:justify-end">
                         <Button
                             type="button"
-                            variant="ghost"
+                            variant="outline"
                             onClick={onCancel}
-                            className="h-10 px-5 text-sm"
+                            className="h-11 shrink-0 rounded-xl border-slate-200 px-4 font-semibold sm:px-6 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200"
                             disabled={form.formState.isSubmitting}
                         >
-                            Regressar
+                            Cancelar
                         </Button>
                         <Button
                             type="submit"
-                            className="h-10 px-6 min-w-[170px] bg-[#f97316] hover:bg-orange-600 text-white font-bold shadow-md text-sm"
+                            className="h-11 min-w-0 flex-1 gap-2 rounded-xl bg-primary px-4 font-bold text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90 sm:flex-none sm:px-6"
                             disabled={form.formState.isSubmitting}
                         >
-                            {form.formState.isSubmitting ? 'Processando...' : (initialData ? 'Atualizar' : (submitLabel || 'Solicitar Homologação'))}
+                            <CheckCircle2 className="h-4 w-4" />
+                            {form.formState.isSubmitting ? 'A processar...' : (initialData ? 'Actualizar' : (submitLabel || 'Solicitar Homologação'))}
                         </Button>
                     </div>
                 </div>
             </form>
+
+            {canEditRates && <TabelaTaxasDialog open={isRatesDialogOpen} onOpenChange={setIsRatesDialogOpen} />}
 
             <AlertDialog open={showLimitWarning} onOpenChange={setShowLimitWarning}>
                 <AlertDialogContent className="border-danger/20">

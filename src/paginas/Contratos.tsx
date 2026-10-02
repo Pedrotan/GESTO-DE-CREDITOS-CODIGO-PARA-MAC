@@ -38,6 +38,7 @@ import {
     DialogDescription,
 } from '@/componentes/ui/dialog';
 import { CreditForm } from '@/componentes/forms/CreditForm';
+import { CREDIT_DIALOG_CONTENT_CLASS, CREDIT_DIALOG_HEADER_CLASS } from '@/componentes/forms/credit-dialog-styles';
 import { PromessaDetailsModal } from '@/componentes/modals/PromessaDetailsModal';
 import { AlertModal } from '@/componentes/ui/AlertModal';
 import {
@@ -339,10 +340,10 @@ export default function Contracts() {
             </div>
 
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-                <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>Renovar Contrato</DialogTitle>
-                        <DialogDescription>
+                <DialogContent className={CREDIT_DIALOG_CONTENT_CLASS}>
+                    <DialogHeader className={CREDIT_DIALOG_HEADER_CLASS}>
+                        <DialogTitle className="text-xl font-bold tracking-tight text-white">Renovar Contrato</DialogTitle>
+                        <DialogDescription className="mt-1 text-sm text-white/75">
                             Ajuste as condições para renovar este contrato existente.
                         </DialogDescription>
                     </DialogHeader>

@@ -884,6 +884,14 @@ const createTables = async () => {
         );
         CREATE INDEX IF NOT EXISTS idx_calendar_tasks_date ON calendar_tasks(date);
         CREATE INDEX IF NOT EXISTS idx_calendar_tasks_usuario ON calendar_tasks(usuario_id);
+
+        -- Definições partilhadas entre dispositivos pela sincronização cloud (ex.: tabela de taxas de juro).
+        CREATE TABLE IF NOT EXISTS shared_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updatedAt TEXT NOT NULL,
+            updatedBy TEXT
+        );
     `);
 
     try {

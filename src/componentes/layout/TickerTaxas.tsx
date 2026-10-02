@@ -95,6 +95,8 @@ export function TickerTaxas() {
                 <div
                     className="flex w-max animate-ticker gap-10 whitespace-nowrap pl-10 group-hover:[animation-play-state:paused]"
                     style={{
+                        // Velocidade constante e legível (~40px/s), independentemente do número de taxas.
+                        animationDuration: `${Math.max(60, taxas.length * 7)}s`,
                         maskImage: 'linear-gradient(to right, transparent, black 3rem, black calc(100% - 3rem), transparent)',
                         WebkitMaskImage: 'linear-gradient(to right, transparent, black 3rem, black calc(100% - 3rem), transparent)',
                     }}

@@ -69,6 +69,7 @@ import {
 } from '@/componentes/ui/dropdown-menu';
 import { ClientForm } from '@/componentes/forms/ClientForm';
 import { CreditForm } from '@/componentes/forms/CreditForm';
+import { CREDIT_DIALOG_CONTENT_CLASS, CREDIT_DIALOG_HEADER_CLASS } from '@/componentes/forms/credit-dialog-styles';
 import { Client, Credit } from '@/tipos/credito';
 import { generateClientInfoSheetPDF, generateClientProfilePDF } from '@/bibliotecas/pdf';
 import { ServicoEmail } from '@/servicos/ServicoEmail';
@@ -1199,12 +1200,12 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     setCreditPrefillAmount(undefined);
                 }
             }}>
-                <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
-                        <DialogTitle>
+                <DialogContent className={CREDIT_DIALOG_CONTENT_CLASS}>
+                    <DialogHeader className={CREDIT_DIALOG_HEADER_CLASS}>
+                        <DialogTitle className="text-xl font-bold tracking-tight text-white">
                             {creditPrefillAmount !== undefined ? 'Conceder Restante do Valor' : 'Novo Ciclo de Crédito'}
                         </DialogTitle>
-                        <DialogDescription>
+                        <DialogDescription className="mt-1 text-sm text-white/75">
                             {creditPrefillAmount !== undefined
                                 ? `Concedendo o restante do valor disponível (${formatCurrency(creditPrefillAmount)}) para ${selectedClient?.name}.`
                                 : `Iniciando o ${credits.filter(c => c.clientId === selectedClient?.id).length + 1}º ciclo de crédito para ${selectedClient?.name}.`

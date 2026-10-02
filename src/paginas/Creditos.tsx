@@ -57,6 +57,7 @@ import {
   Trash2,
   Calculator,
   PlusCircle,
+  Percent,
   X,
   Download,
   Upload,
@@ -84,6 +85,9 @@ import {
 } from '@/componentes/ui/dropdown-menu';
 import { Progress } from '@/componentes/ui/progress';
 import { CreditForm } from '@/componentes/forms/CreditForm';
+import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
+import { canManageInterestTiers } from '@/bibliotecas/taxas-juro';
+import { CREDIT_DIALOG_CONTENT_CLASS, CREDIT_DIALOG_HEADER_CLASS } from '@/componentes/forms/credit-dialog-styles';
 import { PaymentForm } from '@/componentes/forms/PaymentForm';
 import { Credit } from '@/tipos/credito';
 import { useToast } from '@/componentes/ui/use-toast';
@@ -423,6 +427,7 @@ export default function Credits() {
 
   // Estados das Modais
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  const [isRatesDialogOpen, setIsRatesDialogOpen] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [isAdjustmentDialogOpen, setIsAdjustmentDialogOpen] = useState(false);
@@ -1200,6 +1205,12 @@ export default function Credits() {
             <Download className="h-4 w-4" />
             Modelo
           </Button>
+          {canManageInterestTiers(user?.role) && (
+            <Button variant="outline" className="gap-2 border-primary/30 text-primary hover:bg-primary/5" onClick={() => setIsRatesDialogOpen(true)}>
+              <Percent className="h-4 w-4" />
+              Cadastrar Taxas de Juro
+            </Button>
+          )}
           {isMonthClosed ? (
             <>
               <Badge variant="success" className="gap-1.5 px-3 py-2 text-xs bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm">
@@ -1699,12 +1710,15 @@ export default function Credits() {
 
       {/* Create Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-xl font-black text-slate-800 dark:text-white">
-              <PlusCircle className="h-6 w-6 text-primary" />
-              Emissão de Novo Contrato (Crédito)
+        <DialogContent className={CREDIT_DIALOG_CONTENT_CLASS}>
+          <DialogHeader className={CREDIT_DIALOG_HEADER_CLASS}>
+            <DialogTitle className="flex items-center gap-2 text-xl font-bold tracking-tight text-white">
+              <PlusCircle className="h-5 w-5 text-secondary" />
+              Emissão de Novo Contrato
             </DialogTitle>
+            <DialogDescription className="mt-1 text-sm text-white/75">
+              Defina o cliente, as condições e confirme o plano de liquidação.
+            </DialogDescription>
           </DialogHeader>
           <CreditForm
             onSubmit={handleCreateSubmit}
@@ -1715,6 +1729,8 @@ export default function Credits() {
           />
         </DialogContent>
       </Dialog>
+
+      <TabelaTaxasDialog open={isRatesDialogOpen} onOpenChange={setIsRatesDialogOpen} />
 
       {/* Supplier Selection Modal */}
       <Dialog open={isSupplierSelectOpen} onOpenChange={setIsSupplierSelectOpen}>

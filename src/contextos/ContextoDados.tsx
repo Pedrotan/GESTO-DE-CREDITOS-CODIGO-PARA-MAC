@@ -25,6 +25,7 @@ import { db, setDbAdapterMode as setGlobalDbMode } from '@/bibliotecas/bd';
 import { setRemoteSqlConfig } from '@/bibliotecas/adaptador-bd-remoto';
 import { appAdapter } from '@/bibliotecas/adaptador-aplicacao';
 import { getFileUrl } from '@/bibliotecas/utils';
+import { DEFAULT_INTEREST_TIERS, InterestTier } from '@/bibliotecas/taxas-juro';
 import { openWhatsApp } from '@/bibliotecas/whatsapp';
 import { generateClientProfilePDF, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary, resolveBrandDark } from '@/bibliotecas/pdf';
 import { resolveLicenseKey, setGlobalLicenseKey } from '@/bibliotecas/licenciamento';
@@ -42,6 +43,7 @@ import { ServicoGarantias } from '@/servicos/ServicoGarantias';
 import { ServicoSimulacao } from '@/servicos/ServicoSimulacao';
 import { ServicoFornecedor } from '@/servicos/ServicoFornecedor';
 import { ServicoTarefaCalendario } from '@/servicos/ServicoTarefaCalendario';
+import { ServicoTaxasJuro } from '@/servicos/ServicoTaxasJuro';
 import { isCloudSyncUrl, startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { LegalCase, Warranty } from '@/tipos/contencioso';
 import { getScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from '@/bibliotecas/contas';
@@ -109,6 +111,9 @@ interface ContextoDadosType {
         metadata?: any
     ) => Promise<void>;
     updateCompanySettings: (updates: Partial<ContextoDadosType['companySettings']>, user?: { id: string; name: string }) => Promise<void>;
+    /** Tabela de taxas de juro por prazo, partilhada entre dispositivos pela nuvem. */
+    interestTiers: InterestTier[];
+    saveInterestTiers: (tiers: InterestTier[]) => Promise<void>;
     sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp' | 'read'>) => Promise<void>;
     markMessageAsRead: (id: string) => Promise<void>;
     deleteMessage: (id: string) => Promise<void>;
@@ -334,6 +339,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const [legalCases, setLegalCases] = useState<LegalCase[]>([]);
     const [warranties, setWarranties] = useState<Warranty[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+    const [interestTiers, setInterestTiers] = useState<InterestTier[]>(DEFAULT_INTEREST_TIERS);
     const [calendarTasks, setCalendarTasks] = useState<CalendarTask[]>([]);
     const [closedMonths, setClosedMonths] = useState<any[]>([]);
     const [dbAdapterMode, setDbAdapterModeState] = useState<'local' | 'remote'>(() => {
@@ -673,7 +679,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 ServicoAuditoria.getLogs(100),
                 db.all<any>('SELECT * FROM closed_months'),
                 ServicoFornecedor.findAll(),
-                ServicoTarefaCalendario.getAll()
+                ServicoTarefaCalendario.getAll(),
+                ServicoTaxasJuro.load().catch(() => DEFAULT_INTEREST_TIERS)
             ]).then(([
                 gateways,
                 references,
@@ -695,7 +702,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 loadedLogs,
                 loadedClosedMonths,
                 loadedSuppliers,
-                loadedCalendarTasks
+                loadedCalendarTasks,
+                loadedInterestTiers
             ]) => {
                 const creditsByClient = (loadedCredits || []).reduce((acc: any, cr) => {
                     if (!acc[cr.clientId]) acc[cr.clientId] = [];
@@ -765,6 +773,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 setLogs(loadedLogs || []);
                 setClosedMonths(loadedClosedMonths || []);
                 setSuppliers(loadedSuppliers || []);
+                setInterestTiers(loadedInterestTiers);
                 setCalendarTasks(loadedCalendarTasks || []);
 
                 if (serverInfo?.isRunning && Definicoes) {
@@ -927,6 +936,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
         performAutoSync();
     };
+    const saveInterestTiers = async (tiers: InterestTier[]) => {
+        const saved = await ServicoTaxasJuro.save(tiers, authUser?.name);
+        setInterestTiers(saved);
+    };
+
     const updateCompanySettingsRef = useRef(updateCompanySettings);
     updateCompanySettingsRef.current = updateCompanySettings;
 
@@ -2550,6 +2564,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         clearNotifications,
         addLog,
         updateCompanySettings,
+        interestTiers,
+        saveInterestTiers,
         sendMessage,
         markMessageAsRead,
         deleteMessage,
