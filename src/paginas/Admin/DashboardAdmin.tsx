@@ -180,6 +180,19 @@ export default function DashboardAdmin() {
     const [showKeyGenerator, setShowKeyGenerator] = useState(false);
     const [tempKeys, setTempKeys] = useState<{ privateKey: string, publicKey: string } | null>(null);
 
+    // Perfil do proprietário (guardado no processo principal, junto da credencial mestra)
+    const [profile, setProfile] = useState({ name: 'Admin Master', email: '', phone: '' });
+    const [profileDraft, setProfileDraft] = useState(profile);
+    const [isSavingProfile, setIsSavingProfile] = useState(false);
+    const profileInitials = profile.name.split(/\s+/).filter(Boolean).slice(0, 2)
+        .map(part => part[0]?.toUpperCase()).join('') || 'AD';
+
+    useEffect(() => {
+        window.electronAPI?.masterProfileGet?.()
+            .then(loaded => { setProfile(loaded); setProfileDraft(loaded); })
+            .catch(error => console.warn('[Master] Perfil indisponível:', error));
+    }, []);
+
     // Stats
     const totalRevenue = financialRecords.reduce((acc, curr) => acc + (curr.value || 0), 0);
     const totalKeys = generatedKeys.length;
@@ -343,6 +356,25 @@ export default function DashboardAdmin() {
             setConfirmPassword('');
         } catch (error) {
             showModalNotification("Falha na atualização", error instanceof Error ? error.message : String(error), "error");
+        }
+    };
+
+    const handleSaveProfile = async (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!window.electronAPI?.masterProfileUpdate) {
+            showModalNotification("Indisponível", "A edição de perfil só está disponível na aplicação Tango Master.", "error");
+            return;
+        }
+        setIsSavingProfile(true);
+        try {
+            const saved = await window.electronAPI.masterProfileUpdate(profileDraft);
+            setProfile(saved);
+            setProfileDraft(saved);
+            showModalNotification("Perfil atualizado", "Os seus dados foram guardados.");
+        } catch (error) {
+            showModalNotification("Falha ao guardar perfil", error instanceof Error ? error.message : String(error), "error");
+        } finally {
+            setIsSavingProfile(false);
         }
     };
 
@@ -1074,7 +1106,7 @@ export default function DashboardAdmin() {
                         <SidebarItem id="licenciamento" icon={Key} label="Gerar Licenças" />
                         <SidebarItem id="empresas" icon={Cloud} label="Empresas Cloud" />
                         <SidebarItem id="precos" icon={FileText} label="Gestão de Preços" />
-                        <SidebarItem id="perfil" icon={Settings} label="Configurações & Logo" />
+                        <SidebarItem id="perfil" icon={Settings} label="Perfil & Configurações" />
                         <SidebarItem id="contabilidade" icon={CreditCard} label="Contabilidade" />
                         <SidebarItem id="guia" icon={BookOpen} label="Ajuda e Guia" />
                         <SidebarItem id="suporte" icon={LifeBuoy} label="Suporte & Tokens" />
@@ -1094,12 +1126,12 @@ export default function DashboardAdmin() {
 
                     <div className="bg-slate-100 dark:bg-slate-950/50 rounded-xl p-4 border border-slate-200 dark:border-slate-800 mb-4 transition-colors">
                         <div className="flex items-center gap-3 mb-2">
-                            <div className="h-8 w-8 rounded-full bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center font-bold text-xs text-white">
-                                AD
+                            <div className="h-8 w-8 shrink-0 rounded-full bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center font-bold text-xs text-white">
+                                {profileInitials}
                             </div>
-                            <div>
-                                <p className="text-sm font-bold text-slate-700 dark:text-slate-200">Admin Master</p>
-                                <p className="text-xs text-slate-500">Super User</p>
+                            <div className="min-w-0">
+                                <p className="truncate text-sm font-bold text-slate-700 dark:text-slate-200">{profile.name}</p>
+                                <p className="truncate text-xs text-slate-500">{profile.email || 'Super User'}</p>
                             </div>
                         </div>
                     </div>
@@ -1895,6 +1927,65 @@ export default function DashboardAdmin() {
                     {/* --- PERFIL & LOGOS --- */}
                     {activeTab === 'perfil' && (
                         <div className="w-full space-y-8 text-left">
+                            {/* Editar Perfil */}
+                            <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 transition-colors">
+                                <CardHeader>
+                                    <div className="flex items-center gap-4">
+                                        <div className="h-14 w-14 shrink-0 rounded-full bg-gradient-to-tr from-amber-500 to-orange-600 flex items-center justify-center font-bold text-lg text-white">
+                                            {profileInitials}
+                                        </div>
+                                        <div>
+                                            <CardTitle className="text-xl font-bold">Editar Perfil</CardTitle>
+                                            <CardDescription>Os seus dados de proprietário do Tango Master.</CardDescription>
+                                        </div>
+                                    </div>
+                                </CardHeader>
+                                <CardContent>
+                                    <form onSubmit={handleSaveProfile} className="grid gap-4 md:grid-cols-3">
+                                        <div className="space-y-2">
+                                            <Label htmlFor="master-profile-name">Nome</Label>
+                                            <Input
+                                                id="master-profile-name"
+                                                value={profileDraft.name}
+                                                onChange={(e) => setProfileDraft(prev => ({ ...prev, name: e.target.value }))}
+                                                maxLength={80}
+                                                autoComplete="name"
+                                                className="bg-slate-50 dark:bg-slate-950 border-slate-300 dark:border-slate-800"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="master-profile-email">Email</Label>
+                                            <Input
+                                                id="master-profile-email"
+                                                type="email"
+                                                value={profileDraft.email}
+                                                onChange={(e) => setProfileDraft(prev => ({ ...prev, email: e.target.value }))}
+                                                maxLength={120}
+                                                autoComplete="email"
+                                                className="bg-slate-50 dark:bg-slate-950 border-slate-300 dark:border-slate-800"
+                                            />
+                                        </div>
+                                        <div className="space-y-2">
+                                            <Label htmlFor="master-profile-phone">Telefone</Label>
+                                            <Input
+                                                id="master-profile-phone"
+                                                type="tel"
+                                                value={profileDraft.phone}
+                                                onChange={(e) => setProfileDraft(prev => ({ ...prev, phone: e.target.value }))}
+                                                maxLength={30}
+                                                autoComplete="tel"
+                                                className="bg-slate-50 dark:bg-slate-950 border-slate-300 dark:border-slate-800"
+                                            />
+                                        </div>
+                                        <div className="md:col-span-3 flex justify-end">
+                                            <Button type="submit" disabled={isSavingProfile} className="gap-2 font-bold">
+                                                <Save className="h-4 w-4" /> {isSavingProfile ? 'A guardar…' : 'Guardar Perfil'}
+                                            </Button>
+                                        </div>
+                                    </form>
+                                </CardContent>
+                            </Card>
+
                             <div>
                                 <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Personalização da Marca</h2>
                                 <p className="text-slate-500 dark:text-slate-400">Carregue os logótipos que serão usados nas faturas e no sistema.</p>

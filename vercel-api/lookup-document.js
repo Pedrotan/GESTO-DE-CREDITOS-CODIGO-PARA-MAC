@@ -242,7 +242,10 @@ export default async function handler(req, res) {
     console.error('[lookup][rate-limit]', error);
     return send(res, 503, { success: false, message: 'O controlo de acesso está indisponível.' });
   }
-  if (!requireSecret(req, process.env.TANGO_LOOKUP_API_KEY)) return send(res, 401, { success: false, message: 'Autenticação obrigatória.' });
+  // Aceita a chave dedicada de consulta ou a chave mestra usada pelo painel Tango Master.
+  const authorized = requireSecret(req, process.env.TANGO_LOOKUP_API_KEY) ||
+    requireSecret(req, process.env.TANGO_MASTER_SECRET, 'x-master-secret');
+  if (!authorized) return send(res, 401, { success: false, message: 'Autenticação obrigatória.' });
 
   const document = String(req.query?.document || '').trim().toUpperCase().replace(/\s+/g, '');
   const type = String(req.query?.type || 'SINGULAR').toUpperCase();

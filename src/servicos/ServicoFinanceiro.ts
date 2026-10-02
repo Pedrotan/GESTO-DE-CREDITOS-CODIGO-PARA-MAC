@@ -9,6 +9,16 @@ import { planearAjusteEncargos, type EncargoPrestacao } from '@/bibliotecas/ajus
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
 import { reconcileInstallments } from '@/bibliotecas/conciliacao-prestacoes';
 import { planConsecutiveInstallments, type InstallmentBalance } from '@/bibliotecas/liquidacao-prestacoes';
+import {
+    allocatePaymentMinor, applyPaymentToBalances, creditBalancesFromRow, revertPaymentFromBalances,
+    type AllocationMinor, type CreditBalancesAfter, type CreditBalancesMinor
+} from '@/bibliotecas/saldo-credito';
+
+/** Estado do crédito calculado pelo serviço a partir da base de dados após uma operação. */
+export type CreditStateAfter = Pick<Credit, 'currentBalance' | 'accruedInterest' | 'lateInterest' | 'totalDue'
+    | 'paidInstallments' | 'status' | 'version' | 'paidAt'>;
+
+export type PaymentOperationResult = AccountingEntry & { paidInstallments: number; creditState: CreditStateAfter };
 
 export class ServicoFinanceiro {
     private static async installmentReconciliationStatements(
@@ -142,6 +152,54 @@ export class ServicoFinanceiro {
         ];
     }
 
+    /** Lê os saldos persistidos do crédito; nunca usa os valores mantidos pela interface. */
+    private static async loadCreditBalances(creditId: string, expectedVersion?: number): Promise<CreditBalancesMinor> {
+        const row = await db.get<any>(`SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor,
+            accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version
+            FROM credits WHERE id = ? AND deletedAt IS NULL`, [creditId]);
+        if (!row) throw new Error('O crédito não foi encontrado.');
+        const balances = creditBalancesFromRow(row);
+        if (expectedVersion !== undefined && balances.version !== expectedVersion) {
+            throw new Error('O crédito foi alterado por outra operação. Atualize os dados e tente novamente.');
+        }
+        return balances;
+    }
+
+    private static async loadPaymentAllocation(paymentId: string): Promise<AllocationMinor> {
+        const row = await db.get<any>(`SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest,
+            allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor
+            FROM payments WHERE id = ?`, [paymentId]);
+        if (!row) throw new Error('O pagamento não foi encontrado.');
+        const minor = (value: unknown, legacy: unknown) => value !== null && value !== undefined
+            ? Number(value) : Math.round(Number(legacy || 0) * 100);
+        return {
+            principalMinor: minor(row.allocatedToPrincipalMinor, row.allocatedToPrincipal),
+            interestMinor: minor(row.allocatedToInterestMinor, row.allocatedToInterest),
+            lateInterestMinor: minor(row.allocatedToLateInterestMinor, row.allocatedToLateInterest)
+        };
+    }
+
+    private static creditBalanceStatement(creditId: string, after: CreditBalancesAfter, expectedVersion: number,
+        paidInstallments: number, paidAt: string | null) {
+        return {
+            sql: `UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?,
+                  lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?,
+                  paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?`,
+            params: [after.balanceMinor / 100, after.balanceMinor, after.interestMinor / 100, after.interestMinor,
+                after.lateInterestMinor / 100, after.lateInterestMinor, after.totalDueMinor / 100, after.totalDueMinor,
+                paidInstallments, after.status, paidAt, creditId, expectedVersion],
+            expectChanges: 1
+        };
+    }
+
+    private static creditStateResult(after: CreditBalancesAfter, paidInstallments: number, version: number, paidAt: string | null): CreditStateAfter {
+        return {
+            currentBalance: after.balanceMinor / 100, accruedInterest: after.interestMinor / 100,
+            lateInterest: after.lateInterestMinor / 100, totalDue: after.totalDueMinor / 100,
+            paidInstallments, status: after.status, version, paidAt: paidAt ? new Date(paidAt) : undefined
+        };
+    }
+
     private static async previousAccountingHash() {
         const lastEntry = await db.get<{ integrityHash?: string }>(
             'SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1'
@@ -271,11 +329,12 @@ export class ServicoFinanceiro {
         const reason = input.reason.trim();
         if (reason.length < 10 || reason.length > 1000) throw new Error('Informe uma justificação entre 10 e 1000 caracteres.');
         if (!/^[a-zA-Z0-9:_-]{8,128}$/u.test(input.idempotencyKey)) throw new Error('Chave idempotente inválida.');
-        const oldInterest = toMinorUnits(input.credit.accruedInterest || 0);
-        const oldLate = toMinorUnits(input.credit.lateInterest || 0);
+        const current = await this.loadCreditBalances(input.credit.id, input.credit.version ?? 0);
+        const oldInterest = current.interestMinor;
+        const oldLate = current.lateInterestMinor;
         const newInterest = toMinorUnits(input.accruedInterest);
         const newLate = toMinorUnits(input.lateInterest);
-        const principal = toMinorUnits(input.credit.currentBalance);
+        const principal = current.balanceMinor;
         const deltaInterest = newInterest - oldInterest;
         const deltaLate = newLate - oldLate;
         if (deltaInterest === 0 && deltaLate === 0) throw new Error('Os encargos não foram alterados.');
@@ -305,7 +364,7 @@ export class ServicoFinanceiro {
                       WHERE id = ? AND deletedAt IS NULL AND version = ?`,
                 params: [newInterest / 100, newInterest, newLate / 100, newLate,
                     (principal + newInterest + newLate) / 100, principal + newInterest + newLate,
-                    input.credit.id, input.credit.version ?? 0], expectChanges: 1
+                    input.credit.id, current.version], expectChanges: 1
             },
             ...changed.map(item => ({
                 sql: `UPDATE credit_installments SET interestMinor = ?, lateInterestMinor = ?,
@@ -348,7 +407,11 @@ export class ServicoFinanceiro {
         if (open.length === 0) throw new Error('O crédito não possui prestações abertas para receber o reforço.');
         const distribute = (total: number, index: number) => Math.floor(total / open.length) + (index < total % open.length ? 1 : 0);
         const auditId = crypto.randomUUID();
-        const principalAfter = input.credit.principalAmount + input.amount;
+        const current = await this.loadCreditBalances(input.credit.id, input.credit.version ?? 0);
+        const principalAfterMinor = current.principalMinor + amountMinor;
+        const balanceAfterMinor = current.balanceMinor + amountMinor;
+        const interestAfterMinor = current.interestMinor + interestMinor;
+        const totalDueAfterMinor = balanceAfterMinor + interestAfterMinor + current.lateInterestMinor;
         await db.transaction([
             {
                 sql: `INSERT INTO credit_reinforcements
@@ -360,13 +423,11 @@ export class ServicoFinanceiro {
             {
                 sql: `UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?,
                       currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?,
-                      totalDueMinor = ?, reinforcedAmount = ?, version = version + 1
+                      totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1
                       WHERE id = ? AND deletedAt IS NULL AND version = ?`,
-                params: [principalAfter, toMinorUnits(principalAfter), input.credit.currentBalance + input.amount,
-                    toMinorUnits(input.credit.currentBalance + input.amount), input.credit.accruedInterest + input.interestAmount,
-                    toMinorUnits(input.credit.accruedInterest + input.interestAmount), input.credit.totalDue + input.amount + input.interestAmount,
-                    toMinorUnits(input.credit.totalDue + input.amount + input.interestAmount),
-                    (input.credit.reinforcedAmount || 0) + input.amount, input.credit.id, input.credit.version ?? 0], expectChanges: 1
+                params: [principalAfterMinor / 100, principalAfterMinor, balanceAfterMinor / 100, balanceAfterMinor,
+                    interestAfterMinor / 100, interestAfterMinor, totalDueAfterMinor / 100, totalDueAfterMinor,
+                    amountMinor / 100, input.credit.id, current.version], expectChanges: 1
             },
             ...open.map((item, index) => ({
                 sql: `UPDATE credit_installments SET principalMinor = ?, interestMinor = ?, version = version + 1
@@ -491,36 +552,42 @@ export class ServicoFinanceiro {
         await RepositorioPagamento.insert(payment);
     }
 
+    /**
+     * Regista um pagamento confirmado. A alocação e os novos saldos são calculados aqui, a partir
+     * dos valores persistidos, e gravados na mesma transação com verificação de versão.
+     */
     static async addPaymentAndUpdateCredit(
-        payment: Payment,
-        creditUpdate: {
-            currentBalance: number;
-            accruedInterest: number;
-            lateInterest: number;
-            totalDue: number;
-            paidInstallments: number;
-            status: Credit['status'];
-            paidAt?: string | null;
-            expectedVersion: number;
-        },
+        input: Payment,
+        expectedVersion: number,
         clientId?: string
-    ): Promise<AccountingEntry & { paidInstallments: number }> {
-        if (payment.status !== 'confirmed') throw new Error('Só pagamentos confirmados podem liquidar prestações.');
-        if (payment.installmentCount != null) {
-            const plan = planConsecutiveInstallments(await this.getCreditInstallments(payment.creditId), payment.installmentCount);
-            if (toMinorUnits(payment.amount) !== plan.amountMinor ||
-                toMinorUnits(payment.allocatedToPrincipal) !== plan.principalMinor ||
-                toMinorUnits(payment.allocatedToInterest) !== plan.interestMinor ||
-                toMinorUnits(payment.allocatedToLateInterest) !== plan.lateInterestMinor) {
+    ): Promise<PaymentOperationResult & { payment: Payment }> {
+        if (input.status !== 'confirmed') throw new Error('Só pagamentos confirmados podem liquidar prestações.');
+        const current = await this.loadCreditBalances(input.creditId, expectedVersion);
+        const amountMinor = toMinorUnits(input.amount, 'Montante do pagamento');
+        let allocation: AllocationMinor;
+        let plan: ReturnType<typeof planConsecutiveInstallments> | null = null;
+        if (input.installmentCount != null) {
+            plan = planConsecutiveInstallments(await this.getCreditInstallments(input.creditId), input.installmentCount);
+            if (amountMinor !== plan.amountMinor) {
                 throw new Error('O cronograma mudou. Atualize as prestações e tente novamente.');
             }
-            if (payment.installmentCount === plan.open.length && creditUpdate.status !== 'paid') {
-                throw new Error('O saldo do crédito diverge do cronograma. A liquidação total foi recusada.');
-            }
-            if (payment.installmentCount < plan.open.length && creditUpdate.status === 'paid') {
-                throw new Error('O saldo do crédito diverge do cronograma. Reveja as prestações antes de continuar.');
-            }
+            allocation = { principalMinor: plan.principalMinor, interestMinor: plan.interestMinor, lateInterestMinor: plan.lateInterestMinor };
+        } else {
+            allocation = allocatePaymentMinor(current, amountMinor);
         }
+        const after = applyPaymentToBalances(current, allocation);
+        if (plan && input.installmentCount === plan.open.length && after.status !== 'paid') {
+            throw new Error('O saldo do crédito diverge do cronograma. A liquidação total foi recusada.');
+        }
+        if (plan && input.installmentCount! < plan.open.length && after.status === 'paid') {
+            throw new Error('O saldo do crédito diverge do cronograma. Reveja as prestações antes de continuar.');
+        }
+        const payment: Payment = {
+            ...input,
+            allocatedToPrincipal: allocation.principalMinor / 100,
+            allocatedToInterest: allocation.interestMinor / 100,
+            allocatedToLateInterest: allocation.lateInterestMinor / 100
+        };
         const paymentDate = payment.paymentDate && !isNaN(new Date(payment.paymentDate).getTime())
             ? new Date(payment.paymentDate).toISOString()
             : new Date().toISOString();
@@ -530,6 +597,7 @@ export class ServicoFinanceiro {
             processedBy: payment.processedBy || payment.usuario_id || 'system'
         }, await this.previousAccountingHash(), new Date());
         const reconciliation = await this.installmentReconciliationStatements(payment.creditId, { add: payment }, new Date(paymentDate));
+        const paidAt = after.status === 'paid' ? new Date().toISOString() : null;
         await db.transaction([
             {
                 sql: `INSERT INTO payments (id, creditId, clientName, amount, amountMinor, paymentDate, method, reference,
@@ -545,21 +613,8 @@ export class ServicoFinanceiro {
                     payment.processedBy, payment.status, payment.usuario_id
                 ]
             },
-            {
-                sql: `UPDATE credits
-                      SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?,
-                          lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?,
-                          paidInstallments = ?, status = ?, paidAt = ?, version = version + 1
-                      WHERE id = ? AND deletedAt IS NULL AND version = ?`,
-                params: [
-                    creditUpdate.currentBalance, toMinorUnits(creditUpdate.currentBalance),
-                    creditUpdate.accruedInterest, toMinorUnits(creditUpdate.accruedInterest),
-                    creditUpdate.lateInterest, toMinorUnits(creditUpdate.lateInterest),
-                    creditUpdate.totalDue, toMinorUnits(creditUpdate.totalDue), reconciliation.paidInstallments, creditUpdate.status,
-                    creditUpdate.paidAt || null, payment.creditId, creditUpdate.expectedVersion
-                ], expectChanges: 1
-            },
-            ...(creditUpdate.status === 'paid' ? [{
+            this.creditBalanceStatement(payment.creditId, after, current.version, reconciliation.paidInstallments, paidAt),
+            ...(after.status === 'paid' ? [{
                 sql: `UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'`,
                 params: [payment.creditId]
             }] : []),
@@ -583,7 +638,10 @@ export class ServicoFinanceiro {
                     accountingEntry.timestampIso]
             }
         ]);
-        return Object.assign(accountingEntry as AccountingEntry, { paidInstallments: reconciliation.paidInstallments });
+        return Object.assign(accountingEntry as AccountingEntry, {
+            paidInstallments: reconciliation.paidInstallments, payment,
+            creditState: this.creditStateResult(after, reconciliation.paidInstallments, current.version + 1, paidAt)
+        });
     }
 
     static async deletePayment(id: string, userId: string): Promise<void> {
@@ -596,11 +654,12 @@ export class ServicoFinanceiro {
     static async reversePaymentAndUpdateCredit(
         payment: Payment,
         credit: Credit,
-        creditUpdate: Pick<Credit, 'currentBalance' | 'accruedInterest' | 'lateInterest' | 'totalDue' | 'paidInstallments' | 'status'>,
         userId: string,
         justification?: string
-    ): Promise<AccountingEntry & { paidInstallments: number }> {
+    ): Promise<PaymentOperationResult> {
         const timestamp = new Date();
+        const current = await this.loadCreditBalances(credit.id, credit.version ?? 0);
+        const after = revertPaymentFromBalances(current, await this.loadPaymentAllocation(payment.id));
         const originalState = JSON.stringify(payment);
         const entry = await buildPaymentCorrectionEntry({ ...payment, clientId: credit.clientId, processedBy: userId },
             await this.previousAccountingHash(), 'reversal', timestamp);
@@ -609,14 +668,8 @@ export class ServicoFinanceiro {
         await db.transaction([
             { sql: `UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ?
                     WHERE id = ? AND deletedAt IS NULL`, params: [timestamp.toISOString(), userId, originalState, payment.id], expectChanges: 1 },
-            { sql: `UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?,
-                    lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?,
-                    paidAt = NULL, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?`,
-              params: [creditUpdate.currentBalance, toMinorUnits(creditUpdate.currentBalance),
-                  creditUpdate.accruedInterest, toMinorUnits(creditUpdate.accruedInterest), creditUpdate.lateInterest,
-                  toMinorUnits(creditUpdate.lateInterest), creditUpdate.totalDue, toMinorUnits(creditUpdate.totalDue),
-                  reconciliation.paidInstallments, creditUpdate.status, credit.id, credit.version ?? 0], expectChanges: 1 },
-            ...(credit.status === 'paid' && creditUpdate.status !== 'paid' ? [{
+            this.creditBalanceStatement(credit.id, after, current.version, reconciliation.paidInstallments, null),
+            ...(current.status === 'paid' && after.status !== 'paid' ? [{
                 sql: `UPDATE contracts SET status = 'active' WHERE id = ? AND status = 'paid'`, params: [credit.id]
             }] : []),
             ...reconciliation.statements,
@@ -630,31 +683,29 @@ export class ServicoFinanceiro {
                     JSON.stringify({ paymentId: payment.id, creditId: credit.id, justification: justification || 'Estorno de pagamento' })]
             }
         ]);
-        return Object.assign(entry as AccountingEntry, { paidInstallments: reconciliation.paidInstallments });
+        return Object.assign(entry as AccountingEntry, {
+            paidInstallments: reconciliation.paidInstallments,
+            creditState: this.creditStateResult(after, reconciliation.paidInstallments, current.version + 1, null)
+        });
     }
 
     static async restorePaymentAndUpdateCredit(
         payment: Payment,
         credit: Credit,
-        creditUpdate: Pick<Credit, 'currentBalance' | 'accruedInterest' | 'lateInterest' | 'totalDue' | 'paidInstallments' | 'status'>,
         userId: string
-    ): Promise<AccountingEntry & { paidInstallments: number }> {
+    ): Promise<PaymentOperationResult> {
         const timestamp = new Date();
+        const current = await this.loadCreditBalances(credit.id, credit.version ?? 0);
+        const after = applyPaymentToBalances(current, await this.loadPaymentAllocation(payment.id));
+        const paidAt = after.status === 'paid' ? timestamp.toISOString() : null;
         const entry = await buildPaymentCorrectionEntry({ ...payment, clientId: credit.clientId, processedBy: userId },
             await this.previousAccountingHash(), 'restore', timestamp);
         const reconciliation = await this.installmentReconciliationStatements(credit.id, { includePaymentId: payment.id }, timestamp);
         await db.transaction([
             { sql: `UPDATE payments SET deletedAt = NULL, deletedBy = NULL, restoredAt = ?
                     WHERE id = ? AND deletedAt IS NOT NULL`, params: [timestamp.toISOString(), payment.id], expectChanges: 1 },
-            { sql: `UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?,
-                    lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?,
-                    paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?`,
-              params: [creditUpdate.currentBalance, toMinorUnits(creditUpdate.currentBalance),
-                  creditUpdate.accruedInterest, toMinorUnits(creditUpdate.accruedInterest), creditUpdate.lateInterest,
-                  toMinorUnits(creditUpdate.lateInterest), creditUpdate.totalDue, toMinorUnits(creditUpdate.totalDue),
-                  reconciliation.paidInstallments, creditUpdate.status,
-                  creditUpdate.status === 'paid' ? timestamp.toISOString() : null, credit.id, credit.version ?? 0], expectChanges: 1 },
-            ...(creditUpdate.status === 'paid' ? [{
+            this.creditBalanceStatement(credit.id, after, current.version, reconciliation.paidInstallments, paidAt),
+            ...(after.status === 'paid' ? [{
                 sql: `UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'`, params: [credit.id]
             }] : []),
             ...reconciliation.statements,
@@ -668,7 +719,10 @@ export class ServicoFinanceiro {
                     JSON.stringify({ paymentId: payment.id, creditId: credit.id })]
             }
         ]);
-        return Object.assign(entry as AccountingEntry, { paidInstallments: reconciliation.paidInstallments });
+        return Object.assign(entry as AccountingEntry, {
+            paidInstallments: reconciliation.paidInstallments,
+            creditState: this.creditStateResult(after, reconciliation.paidInstallments, current.version + 1, paidAt)
+        });
     }
 
     static async restorePayment(id: string): Promise<void> {

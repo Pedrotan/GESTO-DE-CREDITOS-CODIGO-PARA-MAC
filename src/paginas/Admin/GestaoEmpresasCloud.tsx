@@ -44,7 +44,7 @@ const generateFriendlyCode = () => {
 
 export default function GestaoEmpresasCloud() {
     const [serverUrl, setServerUrl] = useState(() => localStorage.getItem(URL_KEY) || 'https://tango-gestao-creditos.vercel.app');
-    const [masterSecret, setMasterSecret] = useState(() => localStorage.getItem(SECRET_KEY) || 'TangoMaster#2026!LiveSecret');
+    const [masterSecret, setMasterSecret] = useState(() => localStorage.getItem(SECRET_KEY) || '');
     const [showSecret, setShowSecret] = useState(false);
 
     const [tenants, setTenants] = useState<CloudTenant[]>(() => {
@@ -131,7 +131,8 @@ export default function GestaoEmpresasCloud() {
         setIsSearchingNIF(true);
         setNifFoundSource(null);
         try {
-            const result = await ServicoAngolaAPI.fetchBIData(newNif, nifType);
+            const result = await ServicoAngolaAPI.fetchBIData(newNif, nifType,
+                serverUrl.trim().startsWith('http') ? { url: serverUrl, secret: masterSecret } : undefined);
             if (result && result.success && result.name) {
                 setNewName(result.name);
                 setNifFoundSource(result.source || 'Base de Dados Nacional');
@@ -527,7 +528,7 @@ export default function GestaoEmpresasCloud() {
                                 type={showSecret ? 'text' : 'password'}
                                 value={masterSecret}
                                 onChange={(e) => setMasterSecret(e.target.value)}
-                                placeholder="TangoMaster#2026!LiveSecret"
+                                placeholder="Chave mestra configurada na Vercel (TANGO_MASTER_SECRET)"
                                 className="h-11 pr-11 rounded-xl"
                             />
                             <button

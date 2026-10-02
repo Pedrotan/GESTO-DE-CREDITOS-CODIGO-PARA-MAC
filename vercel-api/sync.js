@@ -49,7 +49,8 @@ const authorizeTenant = async (sql, tenantId, providedKey) => {
   }
 
   const rows = await sql('SELECT key_hash, status, expires_at, access_code FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
-  const globalSecret = process.env.TANGO_SYNC_SECRET || process.env.DEFAULT_SYNC_PASSKEY || 'TangoSync#2026!Live';
+  // Chave global de administração: apenas a configurada no servidor, nunca um valor fixo no código.
+  const globalSecret = String(process.env.TANGO_SYNC_SECRET || '').trim();
   const isGlobalSecretValid = Boolean(globalSecret && safeEqual(providedKey, globalSecret));
 
   if (!rows.length) {

@@ -61,20 +61,6 @@ export default function LoginAdmin() {
         if (isLoading) return;
 
         const cleanPassword = password.trim();
-        const allowedClientSecrets = [
-            'TANGO_MASTER_2024',
-            'TangoMaster#2026!LiveSecret',
-            'Senha-Mestra-2026!',
-            'TangoSync#2026!Live'
-        ];
-
-        // Autenticação imediata para chaves mestras oficiais do ecossistema
-        if (allowedClientSecrets.includes(cleanPassword)) {
-            sessionStorage.setItem('tango_master_authenticated', 'true');
-            localStorage.setItem('tango_master_cloud_secret', cleanPassword === 'TANGO_MASTER_2024' ? 'TangoMaster#2026!LiveSecret' : cleanPassword);
-            navigate(dashboardPath, { replace: true });
-            return;
-        }
 
         // Modo Web ou Desktop sem API nativa de auth
         if (!window.electronAPI?.masterAuthStatus) {

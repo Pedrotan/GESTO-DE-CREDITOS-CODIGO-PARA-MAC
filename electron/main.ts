@@ -1199,6 +1199,14 @@ function registerMainHandlers() {
     assertMasterSession(event);
     return masterAuth!.changePassword(event.sender.id, currentPassword, newPassword);
   });
+  ipcMain.handle("master-profile-get", async (event) => {
+    assertMasterSession(event);
+    return masterAuth!.getProfile(event.sender.id);
+  });
+  ipcMain.handle("master-profile-update", async (event, profile) => {
+    assertMasterSession(event);
+    return masterAuth!.updateProfile(event.sender.id, profile);
+  });
   ipcMain.handle("master-auth-logout", async (event) => {
     assertTrustedIpcSender(event);
     return masterAuth?.logout(event.sender.id) ?? { configured: false, authenticated: false, expiresAt: null };
@@ -1649,7 +1657,7 @@ app.whenReady().then(async () => {
     reveal: (value) => value.startsWith("safe:v1:")
       ? safeStorage.decryptString(Buffer.from(value.slice("safe:v1:".length), "base64"))
       : value
-  });
+  }, { requireMfa: false }); // Instalação de uso pessoal do proprietário: só palavra-passe.
   const SAFE_MIME_TYPES: Record<string, string> = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -2826,7 +2834,15 @@ app.whenReady().then(async () => {
 
   ipcMain.handle("lookup-bi", async (event, bi, type) => {
     assertTrustedIpcSender(event);
-    const currentUser: any = assertUserPermission(event, "manage_clients");
+    // No Tango Master a sessão é do administrador master, não de um utilizador do ERP.
+    let currentUser: any;
+    if (isTangoMaster) {
+      if (!masterAuth) throw new Error("Sessao do Tango Master indisponivel.");
+      masterAuth.assertAuthenticated(event.sender.id);
+      currentUser = { id: "tango-master", name: "Tango Master" };
+    } else {
+      currentUser = assertUserPermission(event, "manage_clients");
+    }
     const cleanBI = (bi || "").trim().toUpperCase();
     if (!/^[A-Z0-9-]{9,32}$/u.test(cleanBI)) throw new Error("BI/NIF inválido.");
     await writeAuthAudit(currentUser, "document_lookup", "Consulta externa de documento iniciada.", { documentType: type === "COLECTIVO" ? "NIF" : "BI" });

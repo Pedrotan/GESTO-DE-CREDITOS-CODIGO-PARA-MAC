@@ -81,7 +81,7 @@ const sanitizeTransactionStatements = (statements: unknown): TransactionStatemen
         const type = item.type === 'exec' ? 'exec' : 'execute';
         const expectChanges = item.expectChanges;
         if (expectChanges !== undefined && (!Number.isSafeInteger(expectChanges) || expectChanges < 0 || expectChanges > 1_000_000)) {
-            throw new Error('Contagem esperada de alteraÃ§Ãµes invalida.');
+            throw new Error('Contagem esperada de alterações inválida.');
         }
         assertSqlKind(sql, type === 'exec' ? EXEC_SQL : WRITE_SQL, 'dbTransaction');
         if (type !== 'exec') assertSingleStatement(sql);
@@ -125,6 +125,12 @@ const api = Object.freeze({
         newPassword: ensureText(newPassword, 'Nova palavra-passe', 256)
     }),
     masterAuthLogout: () => ipcRenderer.invoke('master-auth-logout'),
+    masterProfileGet: () => ipcRenderer.invoke('master-profile-get'),
+    masterProfileUpdate: (profile: { name: string; email: string; phone: string }) => ipcRenderer.invoke('master-profile-update', {
+        name: ensureText(profile?.name ?? '', 'Nome', 80),
+        email: ensureText(profile?.email ?? '', 'Email', 120),
+        phone: ensureText(profile?.phone ?? '', 'Telefone', 30)
+    }),
     userAuthLogin: (login: string, password: string) => ipcRenderer.invoke('user-auth-login', {
         login: ensureText(login, 'Utilizador', 254), password: ensureText(password, 'Palavra-passe', 256)
     }),
@@ -136,10 +142,10 @@ const api = Object.freeze({
     userAuthLogout: () => ipcRenderer.invoke('user-auth-logout'),
     userAuthMfaBegin: () => ipcRenderer.invoke('user-auth-mfa-begin'),
     userAuthMfaEnable: (token: string) => ipcRenderer.invoke('user-auth-mfa-enable', {
-        token: ensureText(token, 'CÃ³digo MFA', 6)
+        token: ensureText(token, 'Código MFA', 6)
     }),
     userAuthMfaDisable: (token: string) => ipcRenderer.invoke('user-auth-mfa-disable', {
-        token: ensureText(token, 'CÃ³digo MFA', 6)
+        token: ensureText(token, 'Código MFA', 6)
     }),
     dbSchemaReady: () => ipcRenderer.invoke('db-schema-ready'),
     dbSchemaStatus: () => ipcRenderer.invoke('db-schema-status'),

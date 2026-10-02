@@ -233,6 +233,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT COUNT(*) as count FROM warranties WHERE status = ?",
   "SELECT SUM(debtAmount) as total FROM legal_cases WHERE stage != ?",
   "SELECT SUM(marketValue) as total FROM warranties WHERE status = ?",
+  "SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE id = ?",
   "SELECT c.id, c.startDate, c.installments, COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER)) AS principalMinor, MAX(0, COALESCE(c.totalDueMinor, CAST(ROUND(c.totalDue * 100) AS INTEGER)) - COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER))) AS interestMinor FROM credits c WHERE NOT EXISTS (SELECT 1 FROM credit_installments i WHERE i.creditId = c.id)",
   "SELECT id FROM users WHERE email = ?",
   "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?",
@@ -250,6 +251,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
   "SELECT last_insert_rowid() as id",
   "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+  "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT rescueKey FROM company_settings WHERE id = 1",
   "SELECT rowid AS ledgerSequence, * FROM accounting_entries ORDER BY rowid ASC",
   "SELECT sessionTimeout FROM company_settings WHERE id = 1",
@@ -278,10 +280,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE credit_installments SET principalMinor = ?, interestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
-  "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = NULL, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
-  "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
+  "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL",
   "UPDATE credits SET status = ?, approvedBy = ?, approvalNotes = ?, version = version + 1 WHERE id = ? AND status = 'pending_approval' AND version = ?",
   "UPDATE credits SET targetMonthId = ?, version = version + 1 WHERE id = ? AND version = ?",
@@ -1259,6 +1260,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT SUM(marketValue) as total FROM warranties WHERE status = ?"
   ],
   [
+    "2be9d11947fb8f64bca8ffc7b0df929a352ecc19aa825353b8f835cbe6d3dbce",
+    "SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE id = ?"
+  ],
+  [
     "b4f72dd297c35a038b6c282db24dab3febda6b37e57afcadc5c2434e59183236",
     "SELECT c.id, c.startDate, c.installments, COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER)) AS principalMinor, MAX(0, COALESCE(c.totalDueMinor, CAST(ROUND(c.totalDue * 100) AS INTEGER)) - COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER))) AS interestMinor FROM credits c WHERE NOT EXISTS (SELECT 1 FROM credit_installments i WHERE i.creditId = c.id)"
   ],
@@ -1325,6 +1330,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6a707e8fd2fbe3b8dd9ffc84cbf26503d5a00c4b788d58991c23e20252d00e10",
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  ],
+  [
+    "d97d7ae68294c41233c982840721ac90ca3447c1b22adcb80b583cdbceab48d0",
+    "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
     "9473539eeb7a03ef9d6914014c204b7932b9772dff258edebd8d8039222886ea",
@@ -1439,10 +1448,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
-    "e24875948939cd08903563ef3a5f6bd7acf48222af13dd5800821a9481a3a41a",
-    "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = NULL, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
-  ],
-  [
     "c827331c87cdac1ee00f953df2bc31ecde4281549bdb77b32cddf11c3b5effff",
     "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?"
   ],
@@ -1451,8 +1456,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
   ],
   [
-    "03864d3fff319d1d7eca3b7a962fd286ba64bb6b5c8aafd8dfcaf3fd38e989d5",
-    "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
+    "bc84effd45338cd5120c3b25b32c3c1da40976c0754c9feaa3d0162666fdaa8b",
+    "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
     "b86f7da2b2e29ca8fe7fc59f5ec8731615f21023afef2ca9fc342220e2fd8c30",

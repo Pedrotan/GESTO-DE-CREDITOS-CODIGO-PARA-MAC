@@ -18,6 +18,8 @@ export interface ElectronAPI {
     masterAuthMfaVerify: (token: string) => Promise<{ authenticated: boolean; recovered?: boolean; expiresAt?: string | null }>;
     masterAuthChangePassword: (currentPassword: string, newPassword: string) => Promise<{ configured: boolean; authenticated: boolean; expiresAt: string | null }>;
     masterAuthLogout: () => Promise<{ configured: boolean; authenticated: boolean; expiresAt: string | null }>;
+    masterProfileGet: () => Promise<{ name: string; email: string; phone: string }>;
+    masterProfileUpdate: (profile: { name: string; email: string; phone: string }) => Promise<{ name: string; email: string; phone: string }>;
     dbExecute: (sql: string, params?: any[]) => Promise<{ lastInsertRowid?: number | string; changes?: number }>;
     dbQuery: <T = any>(sql: string, params?: any[]) => Promise<T[]>;
     dbGet: <T = any>(sql: string, params?: any[]) => Promise<T | undefined>;

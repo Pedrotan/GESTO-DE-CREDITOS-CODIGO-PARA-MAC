@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { build } from 'esbuild';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { applyCors, enforceDistributedRateLimit, enforceRateLimit, requireSecret, safeEqual } from '../vercel-api/_security.js';
 
 const response = () => ({
@@ -50,3 +55,46 @@ test('limitador distribuído partilha a contagem e falha fechado', async () => {
     await assert.rejects(() => enforceDistributedRateLimit(async () => { throw new Error('database unavailable'); }, req, response(),
         { limit: 1, windowMs: 60_000, scope: 'test-distributed' }), /database unavailable/);
 });
+
+test('API de empresas só aceita a chave mestra configurada e falha fechada sem ela', async () => {
+    const tenants = await loadHandlerWithoutNeon('tenants.js');
+    const previous = { db: process.env.DATABASE_URL, master: process.env.TANGO_MASTER_SECRET };
+    process.env.DATABASE_URL = 'postgres://test';
+    const call = async secret => {
+        const res = response();
+        await tenants({ method: 'POST', headers: { authorization: `Bearer ${secret}` }, body: { action: 'list' } }, res);
+        return res;
+    };
+    try {
+        delete process.env.TANGO_MASTER_SECRET;
+        assert.equal((await call('TangoMaster#2026!LiveSecret')).statusCode, 503);
+        process.env.TANGO_MASTER_SECRET = 'segredo-configurado-no-servidor';
+        for (const legacy of ['TangoMaster#2026!LiveSecret', 'TANGO_MASTER_2024', 'Senha-Mestra-2026!', 'TangoSync#2026!Live']) {
+            assert.equal((await call(legacy)).statusCode, 401, legacy);
+        }
+    } finally {
+        for (const [key, value] of [['DATABASE_URL', previous.db], ['TANGO_MASTER_SECRET', previous.master]]) {
+            if (value === undefined) delete process.env[key]; else process.env[key] = value;
+        }
+    }
+});
+
+// Os handlers importam o cliente Neon, só instalado no deploy; nos testes a autenticação
+// tem de responder antes de qualquer acesso à base de dados.
+async function loadHandlerWithoutNeon(file) {
+    const outdir = mkdtempSync(path.join(tmpdir(), 'api-handler-'));
+    const outfile = path.join(outdir, 'handler.mjs');
+    await build({
+        entryPoints: [path.join(import.meta.dirname, '..', 'vercel-api', file)],
+        bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'silent',
+        plugins: [{ name: 'neon-stub', setup(builder) {
+            builder.onResolve({ filter: /^@neondatabase\/serverless$/ }, () => ({ path: 'neon', namespace: 'neon-stub' }));
+            builder.onLoad({ filter: /.*/, namespace: 'neon-stub' }, () => ({
+                contents: 'export const neon = () => { throw new Error("Base de dados não deve ser acedida."); };', loader: 'js'
+            }));
+        } }]
+    });
+    const module = await import(pathToFileURL(outfile).href);
+    rmSync(outdir, { recursive: true, force: true });
+    return module.default;
+}

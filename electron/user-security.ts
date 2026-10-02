@@ -109,7 +109,7 @@ export class UserSessionService {
     const session = this.sessions.get(senderId);
     if (!session || Math.min(session.idleExpiresAt, session.absoluteExpiresAt) <= Date.now()) {
       this.sessions.delete(senderId);
-      throw new Error('SessÃ£o inexistente ou expirada.');
+      throw new Error('Sessão inexistente ou expirada.');
     }
     const user: any = session.user;
     const secret = encodeBase32(crypto.randomBytes(20));
@@ -146,7 +146,7 @@ export class UserSessionService {
 
   updateMfaState(senderId: number, enabled: boolean) {
     const session = this.sessions.get(senderId);
-    if (!session) throw new Error('SessÃ£o inexistente ou expirada.');
+    if (!session) throw new Error('Sessão inexistente ou expirada.');
     session.user = { ...session.user, twoFactorEnabled: enabled };
     if (enabled) session.mfaEnrollmentRequired = false;
     return session.user;

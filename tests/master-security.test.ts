@@ -106,3 +106,42 @@ test('logout durante login não recria sessão e pedidos concorrentes são limit
         await assert.rejects(auth.setup(3, 'Outra-Senha-Mestra!'), /ja foi configurada/);
     } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
+
+test('instalação pessoal sem MFA abre sessão só com a palavra-passe correta', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tango-master-nomfa-'));
+    try {
+        const auth = new MasterAuthService(directory, undefined, { requireMfa: false });
+        const setup = await auth.setup(20, 'Senha-Mestra-2026!');
+        assert.equal(setup.authenticated, true);
+        assert.equal(setup.requiresMfa, false);
+        assert.equal(setup.requiresMfaEnrollment, false);
+        auth.logout(20);
+        await assert.rejects(auth.login(20, 'incorreta'), /Credenciais invalidas/);
+        assert.equal(auth.status(20).authenticated, false);
+        const result = await auth.login(20, 'Senha-Mestra-2026!');
+        assert.equal(result.authenticated, true);
+        assert.equal(result.requiresMfa, false);
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});
+
+test('perfil do Master exige sessão, valida os dados e fica guardado', async () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'tango-master-profile-'));
+    try {
+        const auth = new MasterAuthService(directory, undefined, { requireMfa: false });
+        await auth.setup(30, 'Senha-Mestra-2026!');
+        assert.deepEqual(auth.getProfile(30), { name: 'Admin Master', email: '', phone: '' });
+        assert.throws(() => auth.getProfile(31), /Sessao mestra/);
+        assert.throws(() => auth.updateProfile(31, { name: 'Intruso' }), /Sessao mestra/);
+        assert.throws(() => auth.updateProfile(30, { name: 'P', email: '', phone: '' }), /pelo menos 2/);
+        assert.throws(() => auth.updateProfile(30, { name: 'Pedro', email: 'sem-arroba', phone: '' }), /Email invalido/);
+        const saved = auth.updateProfile(30, { name: '  Pedro Morais ', email: 'pedro@example.com', phone: '+244 923 000 000' });
+        assert.deepEqual(saved, { name: 'Pedro Morais', email: 'pedro@example.com', phone: '+244 923 000 000' });
+        const reopened = new MasterAuthService(directory, undefined, { requireMfa: false });
+        await reopened.login(32, 'Senha-Mestra-2026!');
+        assert.deepEqual(reopened.getProfile(32), saved);
+    } finally {
+        fs.rmSync(directory, { recursive: true, force: true });
+    }
+});

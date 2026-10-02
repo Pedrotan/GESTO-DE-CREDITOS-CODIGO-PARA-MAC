@@ -122,8 +122,7 @@ export default async function handler(req, res) {
         safeEqual(tenant.access_code.trim().toUpperCase(), rawCode.trim().toUpperCase())
       )) ||
       safeEqual(sha256(normalizedCode), tenant.key_hash) ||
-      safeEqual(sha256(rawCode.trim()), tenant.key_hash) ||
-      (process.env.TANGO_SYNC_SECRET && safeEqual(rawCode, process.env.TANGO_SYNC_SECRET));
+      safeEqual(sha256(rawCode.trim()), tenant.key_hash);
 
     if (!codeMatches) {
       return send(res, 401, {

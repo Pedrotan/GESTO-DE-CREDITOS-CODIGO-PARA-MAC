@@ -71,7 +71,8 @@ function sanitizeResult(res: any, document?: string): BIDataResult {
 export class ServicoAngolaAPI {
     static async fetchBIData(
         biNumber: string,
-        type: 'SINGULAR' | 'COLECTIVO' = 'SINGULAR'
+        type: 'SINGULAR' | 'COLECTIVO' = 'SINGULAR',
+        server?: { url: string; secret: string }
     ): Promise<BIDataResult | null> {
         const document = (biNumber || '').trim().toUpperCase();
         if (document.length < 9) return null;
@@ -80,9 +81,14 @@ export class ServicoAngolaAPI {
             // 1. Em ambiente Electron, utiliza o handler IPC nativo com todos os endpoints
             const electronLookup = (window as any).electronAPI?.lookupBI;
             if (electronLookup) {
-                const electronRes = await electronLookup(document, type);
-                if (electronRes && electronRes.success) {
-                    return sanitizeResult(electronRes, document);
+                try {
+                    const electronRes = await electronLookup(document, type);
+                    if (electronRes && electronRes.success) {
+                        return sanitizeResult(electronRes, document);
+                    }
+                } catch (err) {
+                    // Uma falha no canal nativo não deve impedir as restantes fontes de consulta.
+                    console.warn('[ServicoAngolaAPI] Consulta nativa falhou:', err);
                 }
             }
 
@@ -136,20 +142,29 @@ export class ServicoAngolaAPI {
                 }
             }
 
-            // 3. Fallback para a rota interna / proxy server-side
-            const params = new URLSearchParams({ document, type });
-            const response = await fetch(`/api/lookup-document?${params.toString()}`, {
-                headers: { Accept: 'application/json' },
-                signal: AbortSignal.timeout(10_000)
-            });
-            const result = await response.json().catch(() => null);
-            if (response.ok && result?.success) {
-                return sanitizeResult(result, document);
+            // 3. Fallback para a rota server-side: no Master usa o servidor configurado e a chave mestra;
+            // fora de uma origem http (Electron em file://) não existe rota relativa.
+            const base = server?.url.trim().replace(/\/+$/, '')
+                || (window.location.protocol.startsWith('http') ? '' : null);
+            if (base !== null) {
+                const params = new URLSearchParams({ document, type });
+                const response = await fetch(`${base}/api/lookup-document?${params.toString()}`, {
+                    headers: {
+                        Accept: 'application/json',
+                        ...(server?.secret ? { Authorization: `Bearer ${server.secret.trim()}` } : {})
+                    },
+                    signal: AbortSignal.timeout(10_000)
+                });
+                const result = await response.json().catch(() => null);
+                if (response.ok && result?.success) {
+                    return sanitizeResult(result, document);
+                }
             }
-            if (result) {
-                return sanitizeResult(result, document);
-            }
-            return { success: false, name: '', message: `Documento não encontrado nos registos nacionais.` };
+            return {
+                success: false,
+                name: '',
+                message: 'Os serviços de consulta de documentos não responderam. Introduza o nome manualmente.'
+            };
         } catch (error: any) {
             console.error(`[ServicoAngolaAPI] Falha na consulta ${type}:`, error);
             return {

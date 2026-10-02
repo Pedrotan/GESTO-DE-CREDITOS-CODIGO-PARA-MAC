@@ -4,7 +4,7 @@ import { applyCors, enforceDistributedRateLimit } from './_security.js';
 
 // API de administração de empresas (tenants) e chaves de sincronização.
 // Uso exclusivo do Painel Master. Protegida por TANGO_MASTER_SECRET
-// (com fallback para TANGO_SYNC_SECRET ou segredo padrão do ecossistema).
+// Sem a variável configurada, o painel fica indisponível (não há chaves fixas no código).
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -87,28 +87,18 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
   
   const databaseUrl = process.env.DATABASE_URL;
-  const masterSecret = (process.env.TANGO_MASTER_SECRET || process.env.TANGO_SYNC_SECRET || 'TangoMaster#2026!LiveSecret').trim();
-  
-  if (!databaseUrl) {
-    return send(res, 503, { success: false, message: 'Painel Master ainda não configurado no servidor (DATABASE_URL ausente).' });
+  // Apenas a chave mestra configurada no servidor é aceite; sem ela o painel fica indisponível.
+  const masterSecret = String(process.env.TANGO_MASTER_SECRET || '').trim();
+
+  if (!databaseUrl || !masterSecret) {
+    return send(res, 503, { success: false, message: 'Painel Master ainda não configurado no servidor.' });
   }
 
   const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   const provided = (bearer || req.headers['x-master-secret'] || '').trim();
-  
-  // Lista de chaves mestras autorizadas do ecossistema Tango Master
-  const allowedSecrets = [
-    masterSecret,
-    'TangoMaster#2026!LiveSecret',
-    'TANGO_MASTER_2024',
-    'Senha-Mestra-2026!',
-    process.env.TANGO_SYNC_SECRET || '',
-    'TangoSync#2026!Live'
-  ].filter(Boolean);
 
-  const isAuthorized = allowedSecrets.some(sec => safeEqual(provided, sec));
-  if (!isAuthorized) {
-    return send(res, 401, { success: false, message: 'Chave mestra do Tango Master inválida.' });
+  if (!safeEqual(provided, masterSecret)) {
+    return send(res, 401, { success: false, message: 'Chave mestra inválida. Use o valor de TANGO_MASTER_SECRET configurado no projeto na Vercel.' });
   }
 
   const body = req.body || {};

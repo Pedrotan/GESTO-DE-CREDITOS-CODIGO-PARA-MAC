@@ -28,8 +28,6 @@ import { getFileUrl } from '@/bibliotecas/utils';
 import { openWhatsApp } from '@/bibliotecas/whatsapp';
 import { generateClientProfilePDF, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary, resolveBrandDark } from '@/bibliotecas/pdf';
 import { resolveLicenseKey, setGlobalLicenseKey } from '@/bibliotecas/licenciamento';
-import { calculateCreditAfterPayment, calculateCreditAfterPaymentRemoval } from '@/bibliotecas/calculos-financeiros';
-import { planConsecutiveInstallments } from '@/bibliotecas/liquidacao-prestacoes';
 import { useToast } from '@/ganchos/usar-toast';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { ServicoCliente } from '@/servicos/ServicoCliente';
@@ -272,28 +270,6 @@ const calculatePrincipalPaid = (creditId: string, allPayments: Payment[]) => {
     return allPayments
         .filter(p => p.creditId === creditId && p.status !== 'cancelled' && !p.deletedAt)
         .reduce((sum, payment) => sum + Math.max(0, Number(payment.allocatedToPrincipal || 0)), 0);
-};
-
-const allocatePaymentByOutstandingBuckets = (credit: Credit, amount: number, allPayments: Payment[]) => {
-    const previousPayments = allPayments.filter(p => p.creditId === credit.id && p.status !== 'cancelled' && !p.deletedAt);
-    const paidLateInterest = previousPayments.reduce((sum, p) => sum + Math.max(0, Number(p.allocatedToLateInterest || 0)), 0);
-    const paidInterest = previousPayments.reduce((sum, p) => sum + Math.max(0, Number(p.allocatedToInterest || 0)), 0);
-
-    let remainingAmount = Math.max(0, Number(amount || 0));
-    const lateInterestOpen = Math.max(0, Number(credit.lateInterest || 0) - paidLateInterest);
-    const interestOpen = Math.max(0, Number(credit.accruedInterest || 0) - paidInterest);
-
-    const allocatedToLateInterest = Math.min(remainingAmount, lateInterestOpen);
-    remainingAmount -= allocatedToLateInterest;
-
-    const allocatedToInterest = Math.min(remainingAmount, interestOpen);
-    remainingAmount -= allocatedToInterest;
-
-    return {
-        allocatedToLateInterest,
-        allocatedToInterest,
-        allocatedToPrincipal: Math.min(Math.max(0, remainingAmount), Math.max(0, Number(credit.currentBalance || 0))),
-    };
 };
 
 const calculateCreditPrincipalInUse = (credit: Credit, allPayments: Payment[]) => {
@@ -1537,61 +1513,31 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const targetUserId = activeContextUserId || user?.id || authUser?.id;
         const credit = credits.find(c => c.id === payment.creditId);
         if (!credit) throw new Error('O crédito associado ao pagamento não foi encontrado.');
-        const installmentPlan = payment.installmentCount == null ? null :
-            planConsecutiveInstallments(await ServicoFinanceiro.getCreditInstallments(payment.creditId), payment.installmentCount);
-        if (installmentPlan && Math.round(payment.amount * 100) !== installmentPlan.amountMinor) {
-            throw new Error('O valor não corresponde às prestações consecutivas selecionadas.');
-        }
-        const allocation = installmentPlan ? {
-            allocatedToPrincipal: installmentPlan.principalMinor / 100,
-            allocatedToInterest: installmentPlan.interestMinor / 100,
-            allocatedToLateInterest: installmentPlan.lateInterestMinor / 100
-        } : credit ? allocatePaymentByOutstandingBuckets(credit, payment.amount, payments) : {
-            allocatedToLateInterest: payment.allocatedToLateInterest || 0,
-            allocatedToInterest: payment.allocatedToInterest || 0,
-            allocatedToPrincipal: payment.allocatedToPrincipal || 0,
-        };
-        const paymentWithUser = { ...payment, ...allocation, usuario_id: targetUserId };
-        let updatedCredit: Credit | undefined;
-        if (credit) {
-            updatedCredit = calculateCreditAfterPayment(credit, allocation, payments);
-            const accountingEntry = await ServicoFinanceiro.addPaymentAndUpdateCredit(paymentWithUser, {
-                currentBalance: updatedCredit.currentBalance,
-                accruedInterest: updatedCredit.accruedInterest,
-                lateInterest: updatedCredit.lateInterest,
-                totalDue: updatedCredit.totalDue,
-                paidInstallments: updatedCredit.paidInstallments,
-                status: updatedCredit.status,
-                paidAt: updatedCredit.status === 'paid' ? new Date().toISOString() : null,
-                expectedVersion: credit.version ?? 0
-            }, credit.clientId);
-            updatedCredit = { ...updatedCredit, paidInstallments: accountingEntry.paidInstallments, version: (credit.version ?? 0) + 1 };
-            setAccountingEntries(previous => [...previous, accountingEntry]);
-            setCredits(previous => previous.map(item => item.id === credit.id ? updatedCredit! : item));
-            setNotifications(previous => [{
-                id: `notification:payment:${payment.id}`, userId: targetUserId || undefined,
-                title: 'Pagamento Recebido', message: `Recebido pagamento de ${payment.amount} AOA de ${payment.clientName}.`,
-                type: 'success', read: false, timestamp: new Date()
-            }, ...previous]);
-        } else {
-            await ServicoFinanceiro.addPayment(paymentWithUser);
-        }
+        // A alocação e os novos saldos são calculados pelo serviço a partir da base de dados.
+        const result = await ServicoFinanceiro.addPaymentAndUpdateCredit(
+            { ...payment, usuario_id: targetUserId }, credit.version ?? 0, credit.clientId);
+        const { creditState, payment: paymentWithUser, ...accountingEntry } = result;
+        const updatedCredit: Credit = { ...credit, ...creditState };
+        setAccountingEntries(previous => [...previous, accountingEntry as AccountingEntry]);
+        setCredits(previous => previous.map(item => item.id === credit.id ? updatedCredit : item));
+        setNotifications(previous => [{
+            id: `notification:payment:${payment.id}`, userId: targetUserId || undefined,
+            title: 'Pagamento Recebido', message: `Recebido pagamento de ${payment.amount} AOA de ${payment.clientName}.`,
+            type: 'success', read: false, timestamp: new Date()
+        }, ...previous]);
         const nextPayments = [paymentWithUser, ...payments];
         setPayments(prev => [paymentWithUser, ...prev]);
 
-        if (credit && updatedCredit) {
-            if (updatedCredit.status === 'paid') {
-                setContracts(previous => previous.map(contract => contract.id === credit.id
-                    ? { ...contract, status: 'paid' } : contract));
-            }
-
-            await refreshClientCreditLimit(
-                credit.clientId,
-                credits.map(c => c.id === credit.id ? updatedCredit! : c),
-                nextPayments,
-                user
-            );
+        if (updatedCredit.status === 'paid') {
+            setContracts(previous => previous.map(contract => contract.id === credit.id
+                ? { ...contract, status: 'paid' } : contract));
         }
+        await refreshClientCreditLimit(
+            credit.clientId,
+            credits.map(c => c.id === credit.id ? updatedCredit : c),
+            nextPayments,
+            user
+        );
 
         performAutoSync();
     };
@@ -1605,11 +1551,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 const remainingPayments = payments.filter(p => p.id !== id);
                 const credit = credits.find(c => c.id === payment.creditId);
                 if (!credit) throw new Error('O crédito associado ao pagamento não foi encontrado.');
-                const updatedCredit = { ...calculateCreditAfterPaymentRemoval(credit, payment, remainingPayments), version: (credit.version ?? 0) + 1 };
-                const reversalEntry = await ServicoFinanceiro.reversePaymentAndUpdateCredit(
-                    payment, credit, updatedCredit, user.id, justification
+                const { creditState, ...reversalEntry } = await ServicoFinanceiro.reversePaymentAndUpdateCredit(
+                    payment, credit, user.id, justification
                 );
-                updatedCredit.paidInstallments = reversalEntry.paidInstallments;
+                const updatedCredit: Credit = { ...credit, ...creditState };
                 const deletedPayment = { ...payment!, deletedAt: new Date(), deletedBy: user.id } as Payment;
                 setPayments(prev => prev.filter(p => p.id !== id));
                 setDeletedPayments(prev => [deletedPayment, ...prev]);
@@ -1656,11 +1601,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             const restored = { ...payment, deletedAt: undefined, restoredAt: new Date() };
             const credit = credits.find(c => c.id === restored.creditId);
             if (credit) {
-                const updatedCredit = { ...calculateCreditAfterPayment(credit, restored, payments), version: (credit.version ?? 0) + 1 };
-                const restorationEntry = await ServicoFinanceiro.restorePaymentAndUpdateCredit(
-                    restored, credit, updatedCredit, user?.id || authUser?.id || 'system'
+                const { creditState, ...restorationEntry } = await ServicoFinanceiro.restorePaymentAndUpdateCredit(
+                    restored, credit, user?.id || authUser?.id || 'system'
                 );
-                updatedCredit.paidInstallments = restorationEntry.paidInstallments;
+                const updatedCredit: Credit = { ...credit, ...creditState };
                 setDeletedPayments(prev => prev.filter(p => p.id !== id));
                 setPayments(prev => [restored, ...prev]);
                 setCredits(previous => previous.map(item => item.id === credit.id ? updatedCredit : item));

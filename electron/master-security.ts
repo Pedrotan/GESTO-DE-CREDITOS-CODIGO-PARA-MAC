@@ -10,6 +10,31 @@ type CredentialRecord = {
   createdAt: string;
   updatedAt: string;
   mfa?: { secret: string; recoveryCodeHashes: string[]; enabledAt: string };
+  profile?: MasterProfile;
+};
+
+export type MasterProfile = { name: string; email: string; phone: string };
+
+const DEFAULT_PROFILE: MasterProfile = { name: 'Admin Master', email: '', phone: '' };
+
+const cleanProfileText = (value: unknown, label: string, max: number) => {
+  if (value === undefined || value === null) return '';
+  if (typeof value !== 'string') throw new TypeError(`${label} invalido.`);
+  const clean = value.normalize('NFKC').replace(/[\u0000-\u001f\u007f]/gu, '').trim();
+  if (clean.length > max) throw new Error(`${label} demasiado longo.`);
+  return clean;
+};
+
+export const validateMasterProfile = (input: unknown): MasterProfile => {
+  if (!input || typeof input !== 'object') throw new TypeError('Perfil invalido.');
+  const data = input as Record<string, unknown>;
+  const name = cleanProfileText(data.name, 'Nome', 80);
+  const email = cleanProfileText(data.email, 'Email', 120);
+  const phone = cleanProfileText(data.phone, 'Telefone', 30);
+  if (name.length < 2) throw new Error('Indique um nome com pelo menos 2 caracteres.');
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)) throw new Error('Email invalido.');
+  if (phone && !/^[+\d\s()-]{6,30}$/u.test(phone)) throw new Error('Telefone invalido.');
+  return { name, email, phone };
 };
 
 type AttemptState = { failures: number; blockedUntil: number };
@@ -84,8 +109,15 @@ export class MasterAuthService {
   private lastTotpCounter = -1;
   private readonly protectSecret: (value: string) => string;
   private readonly revealSecret: (value: string) => string;
+  // Com requireMfa = false a palavra-passe basta para abrir sessão (instalação de uso pessoal).
+  private readonly requireMfa: boolean;
 
-  constructor(userDataPath: string, secretProtection?: { protect(value: string): string; reveal(value: string): string }) {
+  constructor(
+    userDataPath: string,
+    secretProtection?: { protect(value: string): string; reveal(value: string): string },
+    options: { requireMfa?: boolean } = {}
+  ) {
+    this.requireMfa = options.requireMfa ?? true;
     this.credentialsPath = path.join(userDataPath, 'master-credentials.json');
     this.attemptsPath = path.join(userDataPath, 'master-auth-attempts.json');
     this.protectSecret = secretProtection?.protect ?? ((value) => value);
@@ -115,7 +147,7 @@ export class MasterAuthService {
     };
     fs.mkdirSync(path.dirname(this.credentialsPath), { recursive: true });
     fs.writeFileSync(this.credentialsPath, JSON.stringify(record, null, 2), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
-    if ((this.senderVersions.get(senderId) ?? 0) === senderVersion) this.pendingPassword.set(senderId, { expiresAt: Date.now() + MFA_TTL_MS });
+    if ((this.senderVersions.get(senderId) ?? 0) === senderVersion) this.startSessionAfterPassword(senderId);
     return this.status(senderId);
     });
   }
@@ -125,10 +157,7 @@ export class MasterAuthService {
       const senderVersion = this.senderVersions.get(senderId) ?? 0;
       await this.verifyPassword(password);
       const record = this.readCredential();
-      if ((this.senderVersions.get(senderId) ?? 0) === senderVersion) this.pendingPassword.set(senderId, {
-        expiresAt: Date.now() + MFA_TTL_MS,
-        secret: record.mfa ? this.revealSecret(record.mfa.secret) : undefined
-      });
+      if ((this.senderVersions.get(senderId) ?? 0) === senderVersion) this.startSessionAfterPassword(senderId, record);
       return this.status(senderId);
     });
   }
@@ -182,6 +211,33 @@ export class MasterAuthService {
     this.createSession(senderId);
     return this.status(senderId);
     });
+  }
+
+  private startSessionAfterPassword(senderId: number, record?: CredentialRecord) {
+    if (!this.requireMfa) {
+      this.pendingPassword.delete(senderId);
+      this.createSession(senderId);
+      return;
+    }
+    this.pendingPassword.set(senderId, {
+      expiresAt: Date.now() + MFA_TTL_MS,
+      secret: record?.mfa ? this.revealSecret(record.mfa.secret) : undefined
+    });
+  }
+
+  getProfile(senderId: number): MasterProfile {
+    this.assertAuthenticated(senderId);
+    return { ...DEFAULT_PROFILE, ...this.readCredential().profile };
+  }
+
+  updateProfile(senderId: number, input: unknown): MasterProfile {
+    this.assertAuthenticated(senderId);
+    const profile = validateMasterProfile(input);
+    const record = this.readCredential();
+    record.profile = profile;
+    record.updatedAt = new Date().toISOString();
+    this.writeCredential(record);
+    return profile;
   }
 
   status(senderId: number) {

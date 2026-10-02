@@ -1049,6 +1049,11 @@ const createTables = async () => {
         await safeAddColumn('sync_conflicts', 'resolvedAt', 'TEXT');
     });
 
+    await applyMigration(2026100101, 'credit-reinforced-amount', async () => {
+        // O reforço de capital atualiza esta coluna; sem ela a operação falhava sempre.
+        await safeAddColumn('credits', 'reinforcedAmount', 'REAL DEFAULT 0');
+    });
+
     // safeAddColumns for migrations
     await safeAddColumn("users", "status", "TEXT DEFAULT 'active'");
     await safeAddColumn("users", "lastSeen", "TEXT");
@@ -1535,7 +1540,7 @@ export const sqlite = {
                         changes: database.getRowsModified()
                     });
                     if (statement.expectChanges !== undefined && database.getRowsModified() !== statement.expectChanges) {
-                        throw new Error(`Conflito de concorrÃªncia: esperadas ${statement.expectChanges} alteraÃ§Ãµes, obtidas ${database.getRowsModified()}.`);
+                        throw new Error(`Conflito de concorrência: esperadas ${statement.expectChanges} alterações, obtidas ${database.getRowsModified()}.`);
                     }
                 }
             }
