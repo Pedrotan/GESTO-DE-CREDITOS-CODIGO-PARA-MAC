@@ -3241,7 +3241,7 @@ export default function Settings() {
                                         type="password"
                                         value={formData.syncApiKey}
                                         onChange={handleInputChange}
-                                        placeholder="Use a mesma chave configurada em TANGO_SYNC_SECRET"
+                                        placeholder="Código de Acesso da empresa emitido pelo Tango Master"
                                         className="font-mono"
                                         disabled={!formData.syncEnabled || !isSuperAdmin}
                                     />
