@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
+import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
 
 // API de administração de empresas (tenants) e chaves de sincronização.
 // Uso exclusivo do Painel Master. Protegida por TANGO_MASTER_SECRET
@@ -152,6 +153,49 @@ export default async function handler(req, res) {
       return send(res, 200, { success: true, tenants: rows.map(toPublicTenant) });
     }
 
+    // Volume de negócio por empresa: resumo mensal enviado pelas empresas + actividade de sincronização
+    // (que o servidor conhece sem decifrar os dados).
+    if (action === 'usage') {
+      const period = PERIOD_PATTERN.test(String(body.period || '')) ? String(body.period) : currentPeriod();
+      const [year, month] = period.split('-').map(Number);
+      const previous = new Date(Date.UTC(year, month - 2, 1)).toISOString().slice(0, 7);
+      const start = new Date(Date.UTC(year, month - 1, 1)).toISOString();
+      const end = new Date(Date.UTC(year, month, 1)).toISOString();
+      await ensureUsageTable(sql);
+      const rows = await sql(`
+        SELECT t.tenant_id, t.name, t.status, t.expires_at, t.created_at, t.last_sync_at,
+          cur.metrics AS metrics, cur.reported_at AS reported_at, cur.app_version AS app_version,
+          prev.metrics AS previous_metrics,
+          (SELECT COUNT(*)::int FROM tango_sync_operations o
+             WHERE o.tenant_hash = t.tenant_hash AND o.created_at >= $2 AND o.created_at < $3) AS sync_operations,
+          (SELECT COUNT(DISTINCT o.device_id)::int FROM tango_sync_operations o
+             WHERE o.tenant_hash = t.tenant_hash AND o.created_at >= NOW() - INTERVAL '30 days') AS active_devices
+        FROM tango_tenants t
+        LEFT JOIN tango_usage_reports cur ON cur.tenant_id = t.tenant_id AND cur.period = $1
+        LEFT JOIN tango_usage_reports prev ON prev.tenant_id = t.tenant_id AND prev.period = $4
+        ORDER BY t.name ASC
+      `, [period, start, end, previous]);
+      return send(res, 200, {
+        success: true,
+        period,
+        previousPeriod: previous,
+        companies: rows.map(row => ({
+          tenantId: row.tenant_id,
+          name: row.name,
+          status: row.status,
+          expiresAt: row.expires_at,
+          createdAt: row.created_at,
+          lastSyncAt: row.last_sync_at,
+          reportedAt: row.reported_at,
+          appVersion: row.app_version,
+          metrics: row.metrics || null,
+          previousMetrics: row.previous_metrics || null,
+          syncOperations: Number(row.sync_operations || 0),
+          activeDevices: Number(row.active_devices || 0)
+        }))
+      });
+    }
+
     if (action === 'list-requests') {
       await ensureRegistrationRequestsTable(sql);
       const requests = await sql(`SELECT * FROM tango_registration_requests
@@ -240,6 +284,8 @@ export default async function handler(req, res) {
       await sql('DELETE FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       if (body.purgeData === true) {
         await sql('DELETE FROM tango_sync_operations WHERE tenant_hash = $1', [tenantHash]);
+        await ensureUsageTable(sql);
+        await sql('DELETE FROM tango_usage_reports WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       }
       return send(res, 200, { success: true });
     }

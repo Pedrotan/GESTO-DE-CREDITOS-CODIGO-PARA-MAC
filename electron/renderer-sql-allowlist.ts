@@ -229,6 +229,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM warranties WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE id = ?",
+  "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?",
+  "SELECT COUNT(*) AS n FROM users",
   "SELECT COUNT(*) as count FROM dictionary",
   "SELECT COUNT(*) as count FROM legal_cases WHERE priority = ?",
   "SELECT COUNT(*) as count FROM legal_cases WHERE stage = ?",
@@ -1247,6 +1249,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6ca511473799838785a65e73543057e380630ff9d88226c20a33a54de6ab9e08",
     "SELECT * FROM warranties WHERE id = ?"
+  ],
+  [
+    "e5a42ef884eebe05b3a6108a251c953eface73ad6c2e61447bfb114bbcdb355f",
+    "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?"
+  ],
+  [
+    "1bfab959c14d5d0ff7d8e535a99439ee09672d473c2773905e1394e8de92c32d",
+    "SELECT COUNT(*) AS n FROM users"
   ],
   [
     "f79650132f97dcf74034e11a22d56104bfc339f16b82608add7e6747abb811b4",

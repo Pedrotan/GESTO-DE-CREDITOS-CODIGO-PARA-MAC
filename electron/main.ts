@@ -50,6 +50,8 @@ const userAuth = new UserSessionService();
 const userLoginAttempts = new Map<string, { failures: number; blockedUntil: number }>();
 let financialSchemaBootstrapOpen = true;
 let firstUserCreationReserved = false;
+const HARDWARE_QUERY_TIMEOUT_MS = 10000;
+const DB_WORKER_START_TIMEOUT_MS = 45000;
 const isTangoMaster = process.argv.includes("--tango-master") || process.env.IS_TANGO_MASTER === "true";
 const showDebugConsole = process.argv.includes("--debug-console") || process.env.TANGO_DEBUG_CONSOLE === "true";
 const ERP_APP_NAME = "Tango Gestão de Creditos ERP";
@@ -1950,7 +1952,8 @@ app.whenReady().then(async () => {
         resolve(crypto.createHash("sha256").update(rawId + "TANGO_SECURE_SALT").digest("hex"));
         return;
       }
-      exec(command, (error, stdout) => {
+      // WMI pode ficar bloqueado (instalações, antivírus): nunca esperar mais do que HARDWARE_QUERY_TIMEOUT_MS.
+      exec(command, { timeout: HARDWARE_QUERY_TIMEOUT_MS, windowsHide: true }, (error, stdout) => {
         if (!error && stdout) rawId = stdout.trim();
         resolve(crypto.createHash("sha256").update(rawId + "TANGO_SECURE_SALT").digest("hex"));
       });
@@ -1966,21 +1969,43 @@ app.whenReady().then(async () => {
         return;
       }
       const { spawn } = require("child_process");
-      const child = spawn("powershell", ["-NoProfile", "-Command", script]);
-      child.on("error", (err) => {
-        console.error("[Spawn error caught]", err);
-      });
+      const child = spawn("powershell", ["-NoProfile", "-Command", script], { windowsHide: true });
+      let settled = false;
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(value);
+      };
+      const timer = setTimeout(() => {
+        console.warn("[Hardware] Consulta PowerShell excedeu o limite de tempo; a continuar sem este identificador.");
+        try { child.kill(); } catch { /* processo já terminou */ }
+        finish(null);
+      }, HARDWARE_QUERY_TIMEOUT_MS);
       let output = "";
       child.stdout.on("data", (data) => output += data.toString());
-      child.on("error", () => resolve(null));
+      child.on("error", (err) => {
+        console.error("[Spawn error caught]", err);
+        finish(null);
+      });
       child.on("close", () => {
         const value = output.trim();
-        resolve(value && value !== "ERROR" ? value : null);
+        finish(value && value !== "ERROR" ? value : null);
       });
     });
   }
-  async function getDbEncryptionKeyCandidates() {
-    const candidates = /* @__PURE__ */ new Set();
+  let dbKeyCandidatesPromise: Promise<string[]> | null = null;
+  function getDbEncryptionKeyCandidates() {
+    if (!dbKeyCandidatesPromise) {
+      dbKeyCandidatesPromise = computeDbEncryptionKeyCandidates().catch((error) => {
+        dbKeyCandidatesPromise = null;
+        throw error;
+      });
+    }
+    return dbKeyCandidatesPromise;
+  }
+  async function computeDbEncryptionKeyCandidates(): Promise<string[]> {
+    const candidates = /* @__PURE__ */ new Set<string>();
     const add = (value) => {
       const normalized = String(value || "").trim();
       if (normalized) candidates.add(normalized);
@@ -1989,12 +2014,10 @@ app.whenReady().then(async () => {
       const normalized = String(value || "").trim();
       if (normalized) candidates.add(hashDbKey(normalized));
     };
-    add(await getDbEncryptionKey());
-    addSalted(os.hostname());
-    addSalted(process.env.COMPUTERNAME);
-    const uuid = await runPowerShellScript("(Get-CimInstance Win32_ComputerSystemProduct).UUID");
-    addSalted(uuid);
-    const hardwareRaw = await runPowerShellScript(`try {
+    const [primaryKey, uuid, hardwareRaw] = await Promise.all([
+      getDbEncryptionKey(),
+      runPowerShellScript("(Get-CimInstance Win32_ComputerSystemProduct).UUID"),
+      runPowerShellScript(`try {
             $bios = Get-WmiObject Win32_ComputerSystemProduct | Select-Object -ExpandProperty UUID
             $baseboard = Get-WmiObject Win32_BaseBoard | Select-Object -ExpandProperty SerialNumber
             $cpu = Get-WmiObject Win32_Processor | Select-Object -ExpandProperty ProcessorId
@@ -2002,7 +2025,12 @@ app.whenReady().then(async () => {
             if ([string]::IsNullOrWhiteSpace($baseboard)) { $baseboard = "NO_BOARD" }
             if ([string]::IsNullOrWhiteSpace($cpu)) { $cpu = "NO_CPU" }
             Write-Output "$bios|$baseboard|$cpu"
-        } catch { Write-Output "ERROR" }`);
+        } catch { Write-Output "ERROR" }`)
+    ]);
+    add(primaryKey);
+    addSalted(os.hostname());
+    addSalted(process.env.COMPUTERNAME);
+    addSalted(uuid);
     if (typeof hardwareRaw === "string" && hardwareRaw) {
       const hardwareHash = crypto.createHash("sha256").update(hardwareRaw).digest("hex");
       add(hardwareHash);
@@ -2073,8 +2101,21 @@ app.whenReady().then(async () => {
     ];
     return candidates.find((candidate) => fs.existsSync(candidate)) || null;
   };
-  const startDbWorker = async () => {
+  // Escreve no mesmo ficheiro de diagnóstico do worker (útil quando o worker nem chega a arrancar).
+  const logStartup = (message) => {
+    try { fs.appendFileSync(accountLogPath, `[${new Date().toISOString()}] [Main] ${message}\n`); } catch { /* sem disco: ignorar */ }
+  };
+  let dbWorkerStarting: Promise<void> | null = null;
+  const startDbWorker = () => {
+    if (!dbWorkerStarting) {
+      dbWorkerStarting = startDbWorkerOnce().finally(() => { dbWorkerStarting = null; });
+    }
+    return dbWorkerStarting;
+  };
+  const startDbWorkerOnce = async () => {
     try {
+      const startedAt = Date.now();
+      logStartup("A preparar a base de dados (identificação do computador)...");
       const workerPath = resolveDbWorkerPath();
       if (!workerPath) {
         console.warn("[DB Worker] Arquivo db-worker.cjs nao encontrado em nenhum caminho conhecido.");
@@ -2084,6 +2125,7 @@ app.whenReady().then(async () => {
       ensureAccountDir(activeAccount.id);
       const encryptionKeys = await getDbEncryptionKeyCandidates();
       const encryptionKey = encryptionKeys[0] || "";
+      logStartup(`Identificação concluída em ${Date.now() - startedAt}ms; a iniciar o worker.`);
       const worker = new Worker(workerPath, {
         workerData: {
           dbPath,
@@ -2101,6 +2143,7 @@ app.whenReady().then(async () => {
       console.log("[DB Worker] Worker iniciado com sucesso:", workerPath);
     } catch (err) {
       console.error("[DB Worker] Falha ao instanciar worker:", err);
+      logStartup(`Falha ao iniciar o worker: ${err?.message || err}`);
       dbWorker = null;
     }
   };
@@ -2142,7 +2185,13 @@ app.whenReady().then(async () => {
   }
   const ensureWorkerRunning = async () => {
     if (!dbWorker) {
-      await startDbWorker();
+      let timer;
+      await Promise.race([
+        startDbWorker(),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("A base de dados está a demorar a arrancar. Feche e volte a abrir o programa.")), DB_WORKER_START_TIMEOUT_MS);
+        })
+      ]).finally(() => clearTimeout(timer));
     }
     if (!dbWorker) {
       throw new Error("Trabalhador da base de dados não está a correr ou crashou");

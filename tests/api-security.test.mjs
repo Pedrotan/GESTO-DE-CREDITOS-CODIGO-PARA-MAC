@@ -149,3 +149,25 @@ test('rotas públicas de estado e cadastro recusam dados inválidos sem tocar na
         if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous;
     }
 });
+
+test('relatório de utilização só aceita métricas agregadas válidas e exige código da empresa', async () => {
+    const { sanitizeUsageReport } = await import('../vercel-api/_uso-empresas.js');
+    assert.deepEqual(sanitizeUsageReport({ period: '2026-10', metrics: { creditsCount: 3.4, creditsVolumeMinor: 100, clientName: 'Ana' } }).metrics.creditsCount, 3);
+    assert.equal('clientName' in sanitizeUsageReport({ period: '2026-10', metrics: { clientName: 'Ana' } }).metrics, false);
+    assert.equal(sanitizeUsageReport({ period: '2026-13', metrics: {} }), null);
+    assert.equal(sanitizeUsageReport({ period: '2026-10', metrics: { paymentsCount: -1 } }), null);
+
+    const usage = await loadHandlerWithoutNeon('usage-report.js');
+    const previous = process.env.DATABASE_URL;
+    try {
+        process.env.DATABASE_URL = 'postgres://test';
+        const empty = response();
+        await usage({ method: 'POST', headers: {}, body: { tenantId: '5003207439', reports: [] } }, empty);
+        assert.equal(empty.statusCode, 400);
+        const invalid = response();
+        await usage({ method: 'POST', headers: {}, body: { tenantId: '5003207439', reports: [{ period: 'x', metrics: {} }] } }, invalid);
+        assert.equal(invalid.statusCode, 400);
+    } finally {
+        if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous;
+    }
+});

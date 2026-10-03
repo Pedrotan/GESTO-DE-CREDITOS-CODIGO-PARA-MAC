@@ -58,6 +58,7 @@ import {
   Calculator,
   PlusCircle,
   Percent,
+  ListOrdered,
   X,
   Download,
   Upload,
@@ -86,6 +87,7 @@ import {
 import { Progress } from '@/componentes/ui/progress';
 import { CreditForm } from '@/componentes/forms/CreditForm';
 import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
+import { PlanoPagamentoDialog } from '@/componentes/creditos/PlanoPagamentoDialog';
 import { canManageInterestTiers } from '@/bibliotecas/taxas-juro';
 import { CREDIT_DIALOG_CONTENT_CLASS, CREDIT_DIALOG_HEADER_CLASS } from '@/componentes/forms/credit-dialog-styles';
 import { PaymentForm } from '@/componentes/forms/PaymentForm';
@@ -428,6 +430,7 @@ export default function Credits() {
   // Estados das Modais
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isRatesDialogOpen, setIsRatesDialogOpen] = useState(false);
+  const [isPaymentPlanOpen, setIsPaymentPlanOpen] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [isDetailsDialogOpen, setIsDetailsDialogOpen] = useState(false);
   const [isAdjustmentDialogOpen, setIsAdjustmentDialogOpen] = useState(false);
@@ -1205,6 +1208,10 @@ export default function Credits() {
             <Download className="h-4 w-4" />
             Modelo
           </Button>
+          <Button variant="outline" className="gap-2 border-primary/30 text-primary hover:bg-primary/5" onClick={() => setIsPaymentPlanOpen(true)}>
+            <ListOrdered className="h-4 w-4" />
+            Plano de Pagamento
+          </Button>
           {canManageInterestTiers(user?.role) && (
             <Button variant="outline" className="gap-2 border-primary/30 text-primary hover:bg-primary/5" onClick={() => setIsRatesDialogOpen(true)}>
               <Percent className="h-4 w-4" />
@@ -1731,6 +1738,7 @@ export default function Credits() {
       </Dialog>
 
       <TabelaTaxasDialog open={isRatesDialogOpen} onOpenChange={setIsRatesDialogOpen} />
+      <PlanoPagamentoDialog open={isPaymentPlanOpen} onOpenChange={setIsPaymentPlanOpen} />
 
       {/* Supplier Selection Modal */}
       <Dialog open={isSupplierSelectOpen} onOpenChange={setIsSupplierSelectOpen}>

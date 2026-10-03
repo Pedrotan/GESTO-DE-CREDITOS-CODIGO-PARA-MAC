@@ -3679,4 +3679,92 @@ export const exportCompanyCredentialsPDF = (company: {
     }
 };
 
+/** Plano de pagamento entregue ao cliente: valor concedido, prazo, prestações e datas. */
+export const generatePaymentPlanPDF = (
+    data: {
+        clientName: string;
+        clientNif?: string;
+        creditReference?: string;
+        plan: {
+            principalMinor: number; ratePercent: number; months: number; interestMinor: number; totalMinor: number;
+            installmentMinor: number; firstDueDate: string; lastDueDate: string;
+            installments: Array<{ number: number; dueDate: string; principalMinor: number; interestMinor: number; totalMinor: number; balanceAfterMinor: number }>;
+        };
+        paidInstallments?: number;
+    },
+    settings?: any,
+    userName?: string
+) => {
+    const doc = new jsPDF();
+    const config = getCompanySettings(settings);
+    const primary = resolveBrandPrimary(config.primaryColor);
+    const black = BRAND_CHARCOAL;
+    const money = (minor: number) => formatCurrency(minor / 100, config.currency);
+    const { plan } = data;
 
+    applyBranding(doc, config, userName);
+
+    doc.setTextColor(0, 0, 0);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.text('PLANO DE PAGAMENTO', 105, 45, { align: 'center' });
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`Cliente: ${data.clientName}`, 20, 58);
+    doc.text(`NIF/BI: ${data.clientNif || 'Não informado'}`, 20, 63);
+    doc.text(`Referência: ${data.creditReference || 'Simulação'}`, 20, 68);
+    doc.text(`Data de Emissão: ${formatDateTime(new Date())}`, 20, 73);
+
+    const boxY = 80;
+    doc.setFillColor(245, 247, 250);
+    doc.roundedRect(20, boxY, 170, 22, 2, 2, 'F');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text('VALOR CONCEDIDO', 25, boxY + 7);
+    doc.text(`JUROS (${plan.ratePercent}%)`, 68, boxY + 7);
+    doc.text('TOTAL A PAGAR', 108, boxY + 7);
+    doc.text(`${plan.months} PRESTAÇÕES DE`, 148, boxY + 7);
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(black[0], black[1], black[2]);
+    doc.text(money(plan.principalMinor), 25, boxY + 16);
+    doc.text(money(plan.interestMinor), 68, boxY + 16);
+    doc.setTextColor(primary[0], primary[1], primary[2]);
+    doc.text(money(plan.totalMinor), 108, boxY + 16);
+    doc.setTextColor(black[0], black[1], black[2]);
+    doc.text(money(plan.installmentMinor), 148, boxY + 16);
+
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(80, 80, 80);
+    doc.text(`Prazo de ${plan.months} ${plan.months === 1 ? 'mês' : 'meses'}: primeira prestação a ${formatDate(plan.firstDueDate)} e última a ${formatDate(plan.lastDueDate)}.`, 20, boxY + 30);
+
+    const paid = data.paidInstallments || 0;
+    autoTable(doc, {
+        startY: boxY + 35,
+        head: [['Nº', 'Vencimento', 'Capital', 'Juros', 'Prestação', 'Saldo restante', 'Estado']],
+        body: plan.installments.map(item => [
+            String(item.number),
+            formatDate(item.dueDate),
+            money(item.principalMinor),
+            money(item.interestMinor),
+            money(item.totalMinor),
+            money(item.balanceAfterMinor),
+            item.number <= paid ? 'Paga' : 'Por pagar'
+        ]),
+        foot: [['', 'TOTAL', money(plan.principalMinor), money(plan.interestMinor), money(plan.totalMinor), '', '']],
+        headStyles: { fillColor: primary, textColor: [255, 255, 255], fontStyle: 'bold' },
+        footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
+        styles: { fontSize: 9 },
+        columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+        margin: { left: 20, right: 20 },
+    });
+
+    const finalY = (doc as any).lastAutoTable?.finalY || 200;
+    doc.setFontSize(8);
+    doc.setTextColor(120, 120, 120);
+    doc.text('Os pagamentos em atraso estão sujeitos à taxa de mora prevista no contrato.', 20, Math.min(finalY + 10, 280));
+
+    doc.save(`plano-pagamento-${data.clientName.replace(/[^\w]+/g, '-').toLowerCase()}.pdf`);
+};

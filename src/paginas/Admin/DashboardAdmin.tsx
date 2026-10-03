@@ -58,6 +58,7 @@ import {
     Cloud
 } from 'lucide-react';
 import GestaoEmpresasCloud, { type CloudTenant, type SubscriptionPayment } from './GestaoEmpresasCloud';
+import VolumeNegocioSaas from './VolumeNegocioSaas';
 import { subscriptionState } from '@/bibliotecas/subscricao';
 import { LicenseType, getLicenseTypeName } from '@/bibliotecas/licenciamento';
 import { formatDateSafe } from '@/bibliotecas/utils';
@@ -107,7 +108,7 @@ export default function DashboardAdmin() {
     const navigate = useNavigate();
 
     // Estado da Navegação (Sidebar)
-    const [activeTab, setActiveTab] = useState<'painel' | 'licenciamento' | 'precos' | 'perfil' | 'relatorios' | 'guia' | 'suporte' | 'contabilidade' | 'empresas'>('painel');
+    const [activeTab, setActiveTab] = useState<'painel' | 'licenciamento' | 'precos' | 'perfil' | 'relatorios' | 'guia' | 'suporte' | 'contabilidade' | 'empresas' | 'volume'>('painel');
 
     // Tema
     const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -1138,7 +1139,8 @@ export default function DashboardAdmin() {
 
                     <nav className="space-y-1">
                         <SidebarItem id="painel" icon={LayoutDashboard} label="Visão Geral" />
-                        <SidebarItem id="relatorios" icon={BarChart3} label="Relatórios" />
+                        <SidebarItem id="volume" icon={TrendingUp} label="Volume de Negócio" />
+                <SidebarItem id="relatorios" icon={BarChart3} label="Relatórios" />
                         <SidebarItem id="licenciamento" icon={Key} label="Gerar Licenças" />
                         <SidebarItem id="empresas" icon={Cloud} label="Empresas Cloud" badge={subscriptionAlerts.length} />
                         <SidebarItem id="precos" icon={FileText} label="Gestão de Preços" />
@@ -1832,6 +1834,8 @@ export default function DashboardAdmin() {
 
 
                     {/* --- RELATÓRIOS --- */}
+                    {activeTab === 'volume' && <VolumeNegocioSaas />}
+
                     {activeTab === 'relatorios' && (
                         <div className="space-y-6">
                             <div className="flex justify-between items-end">

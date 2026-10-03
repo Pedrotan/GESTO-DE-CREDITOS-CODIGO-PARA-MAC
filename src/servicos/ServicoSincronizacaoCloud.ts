@@ -14,6 +14,7 @@ import {
     type RemoteGroup,
     type SyncOperation,
 } from '@/bibliotecas/sync-operacoes';
+import { reportUsageIfDue } from '@/servicos/ServicoRelatorioUso';
 
 // Sincronização local-first entre todos os dispositivos da empresa (app de computador e navegadores).
 // Cada escrita local gera operações cifradas que vão para a nuvem; as operações dos outros dispositivos
@@ -370,6 +371,10 @@ export const syncCloudNow = async () => {
             }
 
             if ((totalPulled || totalConflicts) && config.onRemoteApplied) await config.onRemoteApplied();
+            void reportUsageIfDue({
+                url: normalizeBaseUrl(config.url), apiKey: config.apiKey, tenantId: config.tenantId,
+                deviceId: getDeviceId(), query: (sql, params) => sqlite.all(sql, params), appVersion: `${window.electronAPI ? 'PC' : 'Web'} 3.0.2`,
+            });
             const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts };
             emitStatus({ state: 'synced', ...result, at: new Date().toISOString() });
             return result;

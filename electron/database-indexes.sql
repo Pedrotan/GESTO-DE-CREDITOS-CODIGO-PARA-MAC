@@ -40,3 +40,7 @@ CREATE INDEX IF NOT EXISTS idx_simulations_amount ON simulations(amount);
 CREATE INDEX IF NOT EXISTS idx_credits_status_dueDate ON credits(status, dueDate);
 CREATE INDEX IF NOT EXISTS idx_payments_credit_date ON payments(creditId, paymentDate);
 CREATE INDEX IF NOT EXISTS idx_audit_user_timestamp ON audit_logs(userId, timestamp);
+
+-- Tabelas acrescentadas depois da instalação inicial: o arranque garante que existem em bases antigas
+-- (o esquema completo só é criado pelo renderer na primeira configuração).
+CREATE TABLE IF NOT EXISTS shared_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT);
