@@ -6,7 +6,7 @@ import { Textarea } from '@/componentes/ui/textarea';
 import { useData } from '@/contextos/ContextoDados';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import { scopedStorageKey } from '@/bibliotecas/contas';
-import { startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import {
     Building2, KeyRound, Loader2, ShieldCheck, Eye, EyeOff, ArrowLeft, ArrowRight, ShieldAlert,
     Shield, LogIn, ClipboardList, CheckCircle2, Cloud, BarChart3, Wallet, Users, Send
@@ -135,7 +135,7 @@ export const LigacaoEmpresaWeb = () => {
             localStorage.setItem('tango_active_tenant_id', verifiedTenantId);
             localStorage.setItem('tango_active_tenant_name', verifiedName);
             localStorage.setItem('tango_active_tenant_code', cleanCode);
-            localStorage.setItem(scopedStorageKey('cloud_sync_bootstrap_v1'), 'true');
+            localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
 
             await updateCompanySettings({
                 nif: verifiedTenantId,

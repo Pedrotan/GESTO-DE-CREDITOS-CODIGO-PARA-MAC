@@ -178,9 +178,11 @@ export default async function handler(req, res) {
     const page = rows.slice(0, PULL_LIMIT);
     const nextCursor = page.length ? Number(page[page.length - 1].seq) : cursor;
 
-    if (Math.random() < 0.01) {
-      const retentionDays = Math.max(30, Number(process.env.TANGO_SYNC_RETENTION_DAYS || 180));
-      await sql(`DELETE FROM tango_sync_operations WHERE created_at < NOW() - ($1 * INTERVAL '1 day')`, [retentionDays]);
+    // O histórico completo é o que permite a um dispositivo novo receber todos os dados da empresa.
+    // Só se apaga quando a retenção é configurada explicitamente na Vercel.
+    const retentionDays = Number(process.env.TANGO_SYNC_RETENTION_DAYS || 0);
+    if (retentionDays > 0 && Math.random() < 0.01) {
+      await sql(`DELETE FROM tango_sync_operations WHERE created_at < NOW() - ($1 * INTERVAL '1 day')`, [Math.max(365, retentionDays)]);
     }
 
     return send(res, 200, {

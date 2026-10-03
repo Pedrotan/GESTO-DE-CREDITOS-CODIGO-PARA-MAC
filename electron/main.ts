@@ -11,6 +11,8 @@ import * as url from 'url';
 import * as nodemailer from 'nodemailer';
 import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
+import { RENDERER_SQL_BY_ID } from './renderer-sql-allowlist';
+import { applyRemoteGroups, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
@@ -2483,6 +2485,29 @@ app.whenReady().then(async () => {
     } finally {
       if (reservedFirstUser) firstUserCreationReserved = false;
     }
+  });
+  // Operações recebidas da nuvem: já foram autorizadas no dispositivo de origem e chegam cifradas com a
+  // chave da empresa. O SQL é resolvido aqui (allowlist/esquema), nunca aceite em texto do renderer.
+  ipcMain.handle("sync-apply-remote", async (event, groups) => {
+    assertTrustedIpcSender(event);
+    userAuth.assertAuthenticated(event.sender.id);
+    if (financialSchemaBootstrapOpen) throw new Error("A base de dados ainda está a ser preparada.");
+    if (!Array.isArray(groups) || groups.length > 500) throw new TypeError("Lote de sincronização inválido.");
+    const columnsCache = new Map<string, Set<string>>();
+    const result = await applyRemoteGroups(groups as RemoteGroup[], {
+      sqlById: RENDERER_SQL_BY_ID,
+      tableColumns: async (table) => {
+        if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return new Set();
+        if (!columnsCache.has(table)) {
+          const rows: any = await runQuery("query", `PRAGMA table_info("${table}")`);
+          columnsCache.set(table, new Set((rows || []).map((row: any) => String(row.name))));
+        }
+        return columnsCache.get(table)!;
+      },
+      transaction: async (statements) => runTransaction(validateDbTransaction(statements))
+    });
+    if (result.applied || result.conflicts) broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    return result;
   });
   ipcMain.handle("db-import", async (event, payload) => {
     assertTrustedIpcSender(event);

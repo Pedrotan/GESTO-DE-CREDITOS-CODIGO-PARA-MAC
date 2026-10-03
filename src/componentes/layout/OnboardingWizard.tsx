@@ -17,7 +17,7 @@ import { appAdapter } from '@/bibliotecas/adaptador-aplicacao';
 import { ServicoAngolaAPI } from '@/servicos/ServicoAngolaAPI';
 import { getActiveAccountIdFromStorage, removeScopedLocalStorageItem, scopedStorageKey, deleteAppAccount, listAppAccounts, switchAppAccount } from '@/bibliotecas/contas';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
-import { startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } = {}) => {
     const activeAccountId = getActiveAccountIdFromStorage();
     const isSecondaryAccount = activeAccountId !== 'default';
@@ -193,7 +193,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
 
             const baseUrl = url.replace(/\/+$/, '');
             // Este dispositivo é um recetor puro no arranque: não enviar a base local vazia para a cloud.
-            localStorage.setItem(scopedStorageKey('cloud_sync_bootstrap_v1'), 'true');
+            localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
             startCloudSync({ url: baseUrl, apiKey: key, tenantId: tenant });
             const result = await syncCloudNow();
             stopCloudSync();

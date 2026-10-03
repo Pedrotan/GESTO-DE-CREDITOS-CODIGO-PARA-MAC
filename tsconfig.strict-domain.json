@@ -16,6 +16,7 @@
     "src/bibliotecas/resultado-backup.ts",
     "src/bibliotecas/saldo-credito.ts",
     "src/bibliotecas/subscricao.ts",
-    "src/bibliotecas/taxas-juro.ts"
+    "src/bibliotecas/taxas-juro.ts",
+    "src/bibliotecas/sync-operacoes.ts"
   ]
 }

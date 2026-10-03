@@ -176,6 +176,11 @@ const api = Object.freeze({
     dbTransaction: (statements: TransactionStatement[]) => {
         return ipcRenderer.invoke('db-transaction', sanitizeTransactionStatements(statements));
     },
+    // Operações da nuvem: o processo principal valida e resolve o SQL (ver sync-operacoes.ts).
+    syncApplyRemote: (groups: unknown[]) => {
+        if (!Array.isArray(groups)) throw new TypeError('Lote de sincronização inválido.');
+        return ipcRenderer.invoke('sync-apply-remote', JSON.parse(JSON.stringify(groups)));
+    },
 
     dbLoad: () => ipcRenderer.invoke('db-load'),
     dbSave: (data: Uint8Array) => ipcRenderer.invoke('db-save', data),

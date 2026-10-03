@@ -72,8 +72,8 @@ export function ConflictReview({ actorId, actorName, canManage }: {
 
     return <Card>
         <CardHeader>
-            <CardTitle>Conflitos financeiros de sincronização</CardTitle>
-            <CardDescription>Reveja a operação na origem e registe-a pelos fluxos normais antes de marcar um conflito como reconciliado. Nenhuma operação financeira remota é aplicada automaticamente.</CardDescription>
+            <CardTitle>Conflitos de sincronização</CardTitle>
+            <CardDescription>As operações dos outros dispositivos são aplicadas automaticamente. Aparecem aqui apenas as que não puderam ser aplicadas, por exemplo quando o mesmo crédito foi alterado nos dois lados ao mesmo tempo. Reveja a operação na origem e registe-a pelos fluxos normais antes de a marcar como reconciliada.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
             <Button type="button" variant="outline" onClick={() => void refresh()}>Atualizar lista</Button>

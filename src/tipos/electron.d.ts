@@ -25,6 +25,7 @@ export interface ElectronAPI {
     dbGet: <T = any>(sql: string, params?: any[]) => Promise<T | undefined>;
     dbExec: (sql: string) => Promise<{ success: boolean } | void>;
     dbTransaction: (statements: Array<{ sql: string; params?: any[]; type?: 'execute' | 'exec'; expectChanges?: number }>) => Promise<any[]>;
+    syncApplyRemote?: (groups: import('@/bibliotecas/sync-operacoes').RemoteGroup[]) => Promise<import('@/bibliotecas/sync-operacoes').ApplyResult>;
     dbLoad: () => Promise<Uint8Array | null>;
     dbSave: (data: Uint8Array) => Promise<boolean>;
     dbImport: (data: Uint8Array, confirmation: string) => Promise<{ success: boolean }>;

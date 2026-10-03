@@ -248,6 +248,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, name, email, username, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature, ip FROM users",
   "SELECT id, name, email, username, role, avatar, status, permissions FROM users",
   "SELECT id, name, role FROM users WHERE LOWER(email) = ?",
+  "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000",
   "SELECT id, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
@@ -307,6 +308,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE payments SET deletedAt = NULL, deletedBy = NULL, restoredAt = ? WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE payments SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
+  "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE sync_conflicts SET status = ?, resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE user_limits SET maxTransaction = ?, dailyLimit = ?, monthlyLimit = ?, restrictionsEnabled = ?, updatedAt = ? WHERE role = ?",
   "UPDATE users SET failedAttempts = 0, blockedAt = NULL WHERE id = ?",
@@ -1323,6 +1325,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, name, role FROM users WHERE LOWER(email) = ?"
   ],
   [
+    "013f69d21f2481982cae2f0924904102580bd89319865f28ad733692f0285d48",
+    "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000"
+  ],
+  [
     "ff79c9fe765a9c8223eb41a6e341f679d79f3751c335563a77eb214c64008bec",
     "SELECT id, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
   ],
@@ -1557,6 +1563,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "412a0e76763ac238db35ac2f06609d2e94d98cedf78f9e00df73d1332762ef83",
     "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?"
+  ],
+  [
+    "6ab67be9e4abff9f62321f06e31923459f9ad9eab5998d473946c8903d9ba820",
+    "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'"
   ],
   [
     "77c3ee44976298ee5f0c83f34ed50c79113628f6a4ae3b6eceaee044d5b7ee02",
