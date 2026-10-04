@@ -25,6 +25,9 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
     const { user, updateUser, users, hasUsers, addUser, syncUsersFromMaster } = useAuth();
     const [step, setStep] = useState(isSecondaryAccount ? 4 : (isPublicWebBuild ? 2 : 1));
     const [dismissed, setDismissed] = useState(false);
+    // Enquanto a configuração termina, o assistente fica visível (mesmo depois de criado o administrador)
+    // até a pessoa confirmar em "Entrar no Sistema".
+    const [isFinishing, setIsFinishing] = useState(false);
     const [tenantAuthorized, setTenantAuthorized] = useState(() => {
         return !isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true';
     });
@@ -405,7 +408,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
     const isTangoMaster = typeof window !== 'undefined' && window.location.hash.includes('tango-master');
     const isOnboardingRoute = typeof window !== 'undefined' && window.location.hash.includes('onboarding');
     const isWebTenantAuthorized = !isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true';
-    const showOnboarding = !dismissed && isWebTenantAuthorized && (forceShow || (!isFullySetup && !isTangoMaster) || (isOnboardingRoute && !localStorage.getItem(ONBOARDING_KEY)));
+    const showOnboarding = !dismissed && isWebTenantAuthorized && (isFinishing || forceShow || (!isFullySetup && !isTangoMaster) || (isOnboardingRoute && !localStorage.getItem(ONBOARDING_KEY)));
     const visibleSteps = isSecondaryAccount ? [4, 6, 7] : (isPublicWebBuild ? [2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5, 6, 7]);
 
     const handleNext = async () => {
@@ -464,6 +467,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
 
     const handleComplete = async () => {
         try {
+            setIsFinishing(true);
             setIsLoading(true);
 
             // Licenças, incluindo demonstrações, são sempre emitidas e assinadas pelo Tango Master.
@@ -569,6 +573,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
         } catch (error) {
             console.error("Erro ao finalizar configuração:", error);
             setIsLoading(false);
+            setIsFinishing(false);
             await Swal.fire({
                 title: "Ocorreu um Erro",
                 html: error instanceof Error ? error.message : String(error),

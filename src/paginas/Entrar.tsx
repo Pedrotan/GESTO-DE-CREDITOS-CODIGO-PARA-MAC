@@ -69,6 +69,19 @@ export default function Login() {
     const { login, logout, verify2FA, hasUsers, generate2FASecret, enable2FA } = useAuth();
     const { companySettings } = useData();
     const navigate = useNavigate();
+    // No computador as definições completas só se lêem depois do login; a identidade da empresa vem à parte.
+    const [publicInfo, setPublicInfo] = useState<{ name: string; logo: string | null; enableMultiTenant: boolean | null } | null>(null);
+    useEffect(() => {
+        let cancelled = false;
+        window.electronAPI?.companyPublicInfo?.().then(info => { if (!cancelled) setPublicInfo(info); }).catch(() => {});
+        return () => { cancelled = true; };
+    }, [companySettings.name, companySettings.enableMultiTenant]);
+    const isRealCompanyName = (name?: string | null) => Boolean(name && !['A Carregar...', 'Provisório', 'Empresa'].includes(name));
+    const loginCompanyName = isRealCompanyName(companySettings?.name) ? companySettings.name
+        : isRealCompanyName(publicInfo?.name) ? publicInfo!.name : 'Tango Gestão de Créditos';
+    const loginLogo = companySettings?.logo || publicInfo?.logo || null;
+    // A "Conta de trabalho" só aparece quando o modo multi-empresa foi activado nas definições.
+    const multiTenantEnabled = publicInfo?.enableMultiTenant ?? (isRealCompanyName(companySettings?.name) && companySettings?.enableMultiTenant === true);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [activeSlide, setActiveSlide] = useState(0);
@@ -320,7 +333,7 @@ export default function Login() {
                             <div className="grid h-14 w-14 place-items-center rounded-xl border-2 border-[#2563eb] overflow-hidden bg-white shadow-md shadow-blue-500/5 shrink-0">
                                 {!logoError ? (
                                     <img
-                                        src={companySettings?.logo ? (companySettings.logo.startsWith('data:') ? companySettings.logo : `${getFileUrl(companySettings.logo)}?t=${Date.now()}`) : 'logo-app.png'}
+                                        src={loginLogo ? (loginLogo.startsWith('data:') ? loginLogo : `${getFileUrl(loginLogo)}?t=${Date.now()}`) : 'logo-app.png'}
                                         alt="Logo"
                                         className="h-full w-full object-contain p-1"
                                         onError={() => setLogoError(true)}
@@ -330,7 +343,7 @@ export default function Login() {
                                 )}
                             </div>
                             <span className="min-w-0 break-words text-xl sm:text-2xl font-black tracking-[-0.04em] text-slate-800">
-                                {companySettings?.name && companySettings.name !== 'A Carregar...' && companySettings.name !== 'Provisório' && companySettings.name !== 'Empresa' ? companySettings.name : 'Tango Gestão de Créditos'}
+                                {loginCompanyName}
                             </span>
                         </div>
 
@@ -471,7 +484,7 @@ export default function Login() {
                     </div>
 
                     {/* Switcher below the modal */}
-                    {companySettings?.enableMultiTenant !== false && (
+                    {multiTenantEnabled && (
                         <div className="w-full bg-white/90 backdrop-blur-md rounded-[1.5rem] p-5 shadow-lg border border-slate-200/60 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
                             <p className="mb-2 text-[10px] font-black uppercase tracking-widest text-[#2563eb]">Conta de trabalho</p>
                             <AccountSwitcher showDelete={false} />

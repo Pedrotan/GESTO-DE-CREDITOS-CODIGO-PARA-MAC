@@ -1,8 +1,26 @@
+export const LINKS_OFICIAIS_DOCUMENTOS = {
+    PORTAL_CONTRIBUINTE: 'https://portaldocontribuinte.minfin.gov.ao/consultar-nif-do-contribuinte',
+    SEPE_CONSULTA_NIF: 'https://sepe.gov.ao/catalogo/eservicos/consulta-de-nif',
+} as const;
+
 /**
- * Consulta de NIF/BI em Electron ou na versão web.
- * No navegador, utiliza uma função server-side da Vercel para evitar CORS
- * e o bloqueio de conteúdo HTTP numa página HTTPS.
+ * Abre o portal oficial de consulta de documentos de Angola no navegador externo.
  */
+export function abrirPortalOficial(tipo: 'MINFIN' | 'SEPE'): void {
+    const url = tipo === 'MINFIN'
+        ? LINKS_OFICIAIS_DOCUMENTOS.PORTAL_CONTRIBUINTE
+        : LINKS_OFICIAIS_DOCUMENTOS.SEPE_CONSULTA_NIF;
+
+    if (typeof window !== 'undefined') {
+        const electronOpen = (window as any).electronAPI?.openExternal;
+        if (typeof electronOpen === 'function') {
+            electronOpen(url);
+        } else {
+            window.open(url, '_blank', 'noopener,noreferrer');
+        }
+    }
+}
+
 export interface BIDataResult {
     success: boolean;
     name: string;
@@ -15,13 +33,22 @@ export interface BIDataResult {
     maritalStatus?: string;
     fatherName?: string;
     motherName?: string;
+    taxRegime?: string;
+    taxPayerType?: string;
+    status?: string;
+    /** "Inadimplente" no Portal do Contribuinte (MINFIN). */
+    defaulter?: boolean;
     source?: string;
     message?: string;
     title?: string;
+    officialLinks?: {
+        minfin: string;
+        sepe: string;
+    };
 }
 
-import { detetarGeneroPorNome } from '@/bibliotecas/genero';
-import { calcularIdade, normalizarDataISO, inferirProvinciaDoBI } from '@/bibliotecas/formatadores';
+import { detetarGeneroPorNome } from '../bibliotecas/genero.ts';
+import { calcularIdade, normalizarDataISO, inferirProvinciaDoBI } from '../bibliotecas/formatadores.ts';
 
 function normalizeGender(raw: any): string {
     if (!raw) return "";
@@ -65,6 +92,14 @@ function sanitizeResult(res: any, document?: string): BIDataResult {
         issueDate: normalizarDataISO(res.issueDate || res.data_emissao) || undefined,
         expiryDate: normalizarDataISO(res.expiryDate || res.data_validade) || undefined,
         address,
+        taxRegime: res.taxRegime || undefined,
+        taxPayerType: res.taxPayerType || undefined,
+        status: res.status || undefined,
+        defaulter: typeof res.defaulter === 'boolean' ? res.defaulter : undefined,
+        officialLinks: res.officialLinks || {
+            minfin: LINKS_OFICIAIS_DOCUMENTOS.PORTAL_CONTRIBUINTE,
+            sepe: LINKS_OFICIAIS_DOCUMENTOS.SEPE_CONSULTA_NIF,
+        },
     };
 }
 
@@ -74,12 +109,33 @@ export class ServicoAngolaAPI {
         type: 'SINGULAR' | 'COLECTIVO' = 'SINGULAR',
         server?: { url: string; secret: string }
     ): Promise<BIDataResult | null> {
-        const document = (biNumber || '').trim().toUpperCase();
+        const document = (biNumber || '').trim().toUpperCase().replace(/\s+/g, '');
         if (document.length < 9) return null;
 
+        // O Master usa primeiro o servidor: as chaves dos fornecedores permanecem no backend.
+        const tenantId = typeof localStorage !== 'undefined' ? localStorage.getItem('tango_active_tenant_id') : null;
+        const tenantCode = typeof localStorage !== 'undefined' ? localStorage.getItem('tango_active_tenant_code') : null;
+        const lookupServer = server?.url || (typeof window !== 'undefined' && window.location.protocol.startsWith('http') ? window.location.origin : 'https://tango-gestao-creditos.vercel.app');
+        if ((server?.url && server.secret) || (tenantId && tenantCode)) {
+            try {
+                const params = new URLSearchParams({ document, type });
+                const response = await fetch(lookupServer.trim().replace(/\/+$/, '') + '/api/lookup-document?' + params, {
+                    headers: { Accept: 'application/json',
+                        ...(server?.secret ? { Authorization: 'Bearer ' + server.secret.trim() } :
+                            { 'x-tenant-id': tenantId!, 'x-sync-passkey': tenantCode! }) },
+                    signal: AbortSignal.timeout(12_000)
+                });
+                const result = await response.json().catch(() => null);
+                if (result?.success && response.ok) return sanitizeResult(result, document);
+                if (result?.message) return { ...result, success: false, name: '' };
+                return { success: false, name: '', message: 'O servidor de consulta devolveu uma resposta inválida. Verifique o endereço e a publicação da API.' };
+            } catch {
+                return { success: false, name: '', message: 'Não foi possível ligar ao servidor de consulta. Verifique a ligação e o endereço configurado.' };
+            }
+        }
         try {
             // 1. Em ambiente Electron, utiliza o handler IPC nativo com todos os endpoints
-            const electronLookup = (window as any).electronAPI?.lookupBI;
+            const electronLookup = typeof window !== 'undefined' ? (window as any).electronAPI?.lookupBI : undefined;
             if (electronLookup) {
                 try {
                     const electronRes = await electronLookup(document, type);
@@ -145,7 +201,7 @@ export class ServicoAngolaAPI {
             // 3. Fallback para a rota server-side: no Master usa o servidor configurado e a chave mestra;
             // fora de uma origem http (Electron em file://) não existe rota relativa.
             const base = server?.url.trim().replace(/\/+$/, '')
-                || (window.location.protocol.startsWith('http') ? '' : null);
+                || (typeof window !== 'undefined' && window.location?.protocol.startsWith('http') ? '' : null);
             if (base !== null) {
                 const params = new URLSearchParams({ document, type });
                 const response = await fetch(`${base}/api/lookup-document?${params.toString()}`, {
@@ -163,7 +219,11 @@ export class ServicoAngolaAPI {
             return {
                 success: false,
                 name: '',
-                message: 'Os serviços de consulta de documentos não responderam. Introduza o nome manualmente.'
+                message: 'Os serviços automáticos de consulta não responderam. Pode consultar diretamente no Portal do Contribuinte (MINFIN) ou no SEPE.',
+                officialLinks: {
+                    minfin: LINKS_OFICIAIS_DOCUMENTOS.PORTAL_CONTRIBUINTE,
+                    sepe: LINKS_OFICIAIS_DOCUMENTOS.SEPE_CONSULTA_NIF,
+                }
             };
         } catch (error: any) {
             console.error(`[ServicoAngolaAPI] Falha na consulta ${type}:`, error);
@@ -171,8 +231,12 @@ export class ServicoAngolaAPI {
                 success: false,
                 name: '',
                 message: error?.name === 'TimeoutError'
-                    ? 'O serviço de consulta demorou muito a responder.'
-                    : 'Não foi possível consultar o documento neste momento.'
+                    ? 'O serviço de consulta demorou muito a responder. Pode aceder aos portais oficiais abaixo.'
+                    : 'Não foi possível consultar o documento automaticamente neste momento.',
+                officialLinks: {
+                    minfin: LINKS_OFICIAIS_DOCUMENTOS.PORTAL_CONTRIBUINTE,
+                    sepe: LINKS_OFICIAIS_DOCUMENTOS.SEPE_CONSULTA_NIF,
+                }
             };
         }
     }

@@ -73,7 +73,7 @@ import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip,
     ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts';
-import jsPDF from 'jspdf';
+import jsPDF from '@/bibliotecas/pdf-documento';
 import autoTable from 'jspdf-autotable';
 
 interface FinanceRecord {

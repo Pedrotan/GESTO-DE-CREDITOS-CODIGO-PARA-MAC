@@ -108,3 +108,17 @@ export const validateAngolanIBAN = (iban: string): boolean => {
 
 
 
+
+// Logotipos oficiais (fonte: ABANC, https://abanc.ao/?page_id=385), guardados em public/bancos/<código>.
+const BANK_LOGO_FILES: Record<string, string> = {
+    '0040': 'webp', '0004': 'webp', '0005': 'webp', '0071': 'webp', '0045': 'webp', '0052': 'webp', '0051': 'webp',
+    '0043': 'webp', '0064': 'webp', '0059': 'webp', '0054': 'webp', '0006': 'webp', '0067': 'webp', '0053': 'webp',
+    '0048': 'webp', '0010': 'webp', '0055': 'webp', '0047': 'webp', '0062': 'webp', '0058': 'webp', '0044': 'webp',
+    '0060': 'jpg', '0056': 'webp', '0070': 'webp', '0066': 'webp', '0065': 'webp',
+};
+
+/** URL do logotipo do banco (ou null se não houver). */
+export const getBankLogoUrl = (bankCode?: string | null): string | null => {
+    const ext = bankCode ? BANK_LOGO_FILES[bankCode] : undefined;
+    return ext ? `${import.meta.env.BASE_URL}bancos/${bankCode}.${ext}` : null;
+};

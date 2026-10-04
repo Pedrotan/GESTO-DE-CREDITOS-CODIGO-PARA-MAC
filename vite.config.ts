@@ -48,8 +48,11 @@ export default defineConfig(({ mode }) => ({
         "**/release-admin/**",
         "**/dist/**",
         "**/dist-electron/**",
+        "**/scratch/**",
       ],
     },
+    // Testes de sincronização: encaminha /api para um servidor local que corre o código de vercel-api.
+    proxy: process.env.TANGO_DEV_API_PROXY ? { "/api": process.env.TANGO_DEV_API_PROXY } : undefined,
   },
   optimizeDeps: {
     entries: ["index.html"],

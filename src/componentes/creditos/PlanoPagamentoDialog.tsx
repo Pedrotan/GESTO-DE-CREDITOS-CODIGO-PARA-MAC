@@ -11,7 +11,11 @@ import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useToast } from '@/componentes/ui/use-toast';
 import { formatCurrency } from '@/bibliotecas/formatters';
 import { generatePaymentPlanPDF } from '@/bibliotecas/pdf';
-import { buildPaymentPlan, planOptionsFromTiers, type PaymentPlan } from '@/bibliotecas/plano-pagamento';
+import {
+    INSTALLMENT_STATUS_LABEL, buildPaymentPlan, paymentProgress, planFromStoredInstallments, planOptionsFromTiers, withPaidCount,
+    type InstallmentStatus, type PaymentPlan, type StoredInstallment,
+} from '@/bibliotecas/plano-pagamento';
+import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
 import { tierPeriodLabel } from '@/bibliotecas/taxas-juro';
 import { cn } from '@/bibliotecas/utils';
 import type { Credit } from '@/tipos/credito';
@@ -26,6 +30,12 @@ const money = (minor: number) => formatCurrency(minor / 100);
 const dateLabel = (iso: string) => new Date(iso).toLocaleDateString('pt-AO', { day: '2-digit', month: 'short', year: 'numeric' });
 const toMinor = (value: number) => Math.round((Number(value) || 0) * 100);
 const creditPrincipalMinor = (credit: Credit) => credit.principalAmountMinor ?? toMinor(credit.principalAmount);
+const STATUS_BADGE: Record<InstallmentStatus, string> = {
+    paid: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300',
+    partial: 'bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300',
+    overdue: 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300',
+    pending: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300',
+};
 const isoDate = (value: Date | string | undefined) => {
     const date = value ? new Date(value) : new Date();
     return Number.isNaN(date.getTime()) ? today() : date.toISOString().slice(0, 10);
@@ -37,7 +47,7 @@ interface PlanoPagamentoDialogProps {
 }
 
 export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialogProps) {
-    const { clients, credits, interestTiers, companySettings } = useData();
+    const { clients, credits, payments, interestTiers, companySettings } = useData();
     const { user } = useAuth();
     const { toast } = useToast();
     const [clientId, setClientId] = useState('');
@@ -45,6 +55,7 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
     const [amount, setAmount] = useState(0);
     const [startDate, setStartDate] = useState(today);
     const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
+    const [storedInstallments, setStoredInstallments] = useState<StoredInstallment[]>([]);
 
     useEffect(() => {
         if (!open) return;
@@ -71,19 +82,37 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
         setSelectedTierId(null);
     };
 
+    const selectedCreditId = selectedCredit?.id;
+    const selectedCreditVersion = selectedCredit?.version;
+    // Muda sempre que um pagamento deste crédito é registado, anulado ou reposto.
+    const creditPaymentsKey = useMemo(() => payments
+        .filter(payment => payment.creditId === selectedCreditId)
+        .map(payment => `${payment.id}:${payment.status}:${payment.deletedAt ? 1 : 0}`).join('|'), [payments, selectedCreditId]);
+
+    useEffect(() => {
+        let cancelled = false;
+        setStoredInstallments([]);
+        if (!selectedCreditId) return;
+        ServicoFinanceiro.getCreditInstallments(selectedCreditId)
+            .then(rows => { if (!cancelled) setStoredInstallments(rows as StoredInstallment[]); })
+            .catch(error => console.warn('[PlanoPagamento] Prestações indisponíveis:', error));
+        return () => { cancelled = true; };
+    }, [selectedCreditId, selectedCreditVersion, creditPaymentsKey]);
+
     const creditPlan = useMemo<PaymentPlan | null>(() => {
         if (!selectedCredit) return null;
         try {
-            return buildPaymentPlan({
+            if (storedInstallments.length) return planFromStoredInstallments(storedInstallments, Number(selectedCredit.interestRate) || 0);
+            return withPaidCount(buildPaymentPlan({
                 principalMinor: creditPrincipalMinor(selectedCredit),
                 ratePercent: Number(selectedCredit.interestRate) || 0,
                 months: Math.max(1, Number(selectedCredit.installments) || 1),
                 startDate: isoDate(selectedCredit.startDate),
-            });
+            }), Number(selectedCredit.paidInstallments) || 0);
         } catch {
             return null;
         }
-    }, [selectedCredit]);
+    }, [selectedCredit, storedInstallments]);
 
     const options = useMemo(() => {
         if (selectedCredit || toMinor(amount) <= 0) return [];
@@ -96,7 +125,7 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
 
     const chosenOption = options.find(option => option.tier.id === selectedTierId) || options[0];
     const plan = creditPlan || chosenOption?.plan || null;
-    const paidInstallments = selectedCredit ? Number(selectedCredit.paidInstallments) || 0 : 0;
+    const progress = creditPlan ? paymentProgress(creditPlan) : null;
 
     const exportPdf = () => {
         if (!plan || !client) return;
@@ -106,7 +135,7 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
                 clientNif: client.nif,
                 creditReference: selectedCredit ? `${selectedCredit.id} (${selectedCredit.creditNumber || 1}º crédito)` : undefined,
                 plan,
-                paidInstallments,
+                progress: progress || undefined,
             }, companySettings, user?.name);
         } catch (error) {
             console.error('[PlanoPagamento] Falha ao gerar PDF:', error);
@@ -231,19 +260,38 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
                     {plan && client && (
                         <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-xs dark:border-slate-800 dark:bg-slate-900">
                             <div className="rounded-xl bg-primary px-4 py-3 text-primary-foreground">
+                                {progress ? (
+                                    <p className="text-sm">
+                                        <strong>{client.name}</strong> já pagou <strong>{money(progress.paidMinor)}</strong> de{' '}
+                                        <strong>{money(plan.totalMinor)}</strong> ({progress.percent.toLocaleString('pt-AO')}%):{' '}
+                                        <strong>{progress.paidCount} de {plan.months}</strong> prestações pagas.
+                                        {progress.remainingMinor > 0
+                                            ? <> Faltam <strong>{money(progress.remainingMinor)}</strong>{progress.nextDue && <>; próxima: nº {progress.nextDue.number} a {dateLabel(progress.nextDue.dueDate)}</>}.</>
+                                            : <> <strong>Crédito liquidado.</strong></>}
+                                        {progress.overdueCount > 0 && <> <strong className="text-secondary">{progress.overdueCount} em atraso.</strong></>}
+                                    </p>
+                                ) : (
                                 <p className="text-sm">
                                     <strong>{client.name}</strong> vai pagar <strong>{money(plan.totalMinor)}</strong> em{' '}
                                     <strong>{plan.months} {plan.months === 1 ? 'prestação' : 'prestações'}</strong> mensais de{' '}
                                     <strong>{money(plan.installmentMinor)}</strong>, durante {plan.months} {plan.months === 1 ? 'mês' : 'meses'}
                                     {' '}(de {dateLabel(plan.firstDueDate)} a {dateLabel(plan.lastDueDate)}).
                                 </p>
+                                )}
+                                {progress && (
+                                    <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/20" aria-label={`${progress.percent}% pago`}>
+                                        <div className="h-full rounded-full bg-secondary transition-all" style={{ width: `${Math.min(100, progress.percent)}%` }} />
+                                    </div>
+                                )}
                             </div>
                             <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
                                 {[
                                     { label: 'Valor concedido', value: money(plan.principalMinor) },
                                     { label: `Juros (${plan.ratePercent}%)`, value: money(plan.interestMinor) },
                                     { label: 'Total a pagar', value: money(plan.totalMinor), highlight: true },
-                                    { label: selectedCredit ? 'Prestações pagas' : 'Prestação mensal', value: selectedCredit ? `${Math.min(paidInstallments, plan.months)} de ${plan.months}` : money(plan.installmentMinor) },
+                                    progress
+                                        ? { label: `Já pago · ${progress.paidCount} de ${plan.months}`, value: money(progress.paidMinor) }
+                                        : { label: 'Prestação mensal', value: money(plan.installmentMinor) },
                                 ].map(item => (
                                     <div key={item.label} className={cn('rounded-xl border px-4 py-3', item.highlight ? 'border-primary/30 bg-primary/5 dark:bg-primary/20' : 'border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950')}>
                                         <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{item.label}</p>
@@ -260,27 +308,29 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
                                             <th className="py-2 pr-3 text-right">Capital</th>
                                             <th className="py-2 pr-3 text-right">Juros</th>
                                             <th className="py-2 pr-3 text-right">Prestação</th>
+                                            {progress && <th className="py-2 pr-3 text-right">Pago</th>}
                                             <th className="py-2 pr-3 text-right">Saldo restante</th>
-                                            {selectedCredit && <th className="py-2 text-right">Estado</th>}
+                                            {progress && <th className="py-2 text-right">Estado</th>}
                                         </tr>
                                     </thead>
                                     <tbody>
                                         {plan.installments.map(item => {
-                                            const isPaid = item.number <= paidInstallments;
+                                            const status = item.status || 'pending';
                                             return (
-                                                <tr key={item.number} className="border-t border-slate-100 dark:border-slate-800">
+                                                <tr key={item.number} className={cn('border-t border-slate-100 dark:border-slate-800', status === 'paid' && 'bg-emerald-50/50 dark:bg-emerald-950/10', status === 'overdue' && 'bg-red-50/50 dark:bg-red-950/10')}>
                                                     <td className="py-2 pr-3 font-bold">{item.number}</td>
                                                     <td className="py-2 pr-3">{dateLabel(item.dueDate)}</td>
                                                     <td className="py-2 pr-3 text-right font-mono">{money(item.principalMinor)}</td>
                                                     <td className="py-2 pr-3 text-right font-mono">{money(item.interestMinor)}</td>
                                                     <td className="py-2 pr-3 text-right font-mono font-bold">{money(item.totalMinor)}</td>
+                                                    {progress && <td className="py-2 pr-3 text-right font-mono">{money(item.paidMinor || 0)}</td>}
                                                     <td className="py-2 pr-3 text-right font-mono text-slate-500">{money(item.balanceAfterMinor)}</td>
-                                                    {selectedCredit && (
+                                                    {progress && (
                                                         <td className="py-2 text-right">
-                                                            <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-bold',
-                                                                isPaid ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>
-                                                                {isPaid ? 'Paga' : 'Por pagar'}
+                                                            <span className={cn('rounded-full px-2 py-0.5 text-[11px] font-bold', STATUS_BADGE[status])}>
+                                                                {INSTALLMENT_STATUS_LABEL[status]}
                                                             </span>
+                                                            {status === 'paid' && item.paidAt && <div className="mt-0.5 text-[10px] text-slate-500">em {dateLabel(item.paidAt)}</div>}
                                                         </td>
                                                     )}
                                                 </tr>
@@ -300,7 +350,7 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
                     </Button>
                     <Button type="button" onClick={exportPdf} disabled={!plan || !client}
                         className="h-11 gap-2 rounded-xl bg-primary px-6 font-bold text-primary-foreground shadow-md shadow-primary/20 hover:bg-primary/90">
-                        <FileDown className="h-4 w-4" /> Gerar PDF para o cliente
+                        <FileDown className="h-4 w-4" /> {progress ? 'PDF da situação para o cliente' : 'Gerar PDF para o cliente'}
                     </Button>
                 </div>
             </DialogContent>

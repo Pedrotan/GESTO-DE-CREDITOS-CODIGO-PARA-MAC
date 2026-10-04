@@ -38,14 +38,15 @@
     "build:electron:admin": "vite build --config vite.config.electron.admin.ts",
     "stop-apps": "powershell -nop -c \"Get-Process electron, Tango*, Angola*, rcedit-x64 -EA 0 | Stop-Process -Force; $p = (Get-NetTCPConnection -LocalPort 8081 -ErrorAction SilentlyContinue).OwningProcess; if ($p) { Stop-Process -Id $p -Force -ErrorAction SilentlyContinue }; sleep 1\"",
     "clean": "powershell -nop -c \"'release','dist','dist-electron' | % { if (Test-Path $_) { rm $_ -Recurse -Force -EA 0 } }\"",
-    "build:erp": "npm run stop-apps && npm run build && npm run build:electron && electron-builder --win nsis",
+    "build:erp": "npm run stop-apps && npm run build && npm run build:electron && node scripts/package-win.mjs",
     "build:mac": "npm run build && npm run build:electron && electron-builder --mac --arm64",
     "build:mac:universal": "npm run build && npm run build:electron && electron-builder --mac --universal",
-    "build:master": "npm run stop-apps && vite build --config vite.config.admin.ts && npm run build:electron:admin && electron-builder --config electron-builder-admin.json --win nsis",
+    "build:master": "npm run stop-apps && vite build --config vite.config.admin.ts && npm run build:electron:admin && node scripts/package-win.mjs --config electron-builder-admin.json",
     "build:master:mac": "vite build --config vite.config.admin.ts && npm run build:electron:admin && electron-builder --config electron-builder-admin.json --mac --arm64",
     "build:all:mac": "npm run clean:mac && npm run rebuild && npm run build:mac && npm run build:master:mac",
     "build:all": "npm run clean:mac && npm run build:erp && npm run build:master",
-    "build:all:win": "npm run stop-apps && npm run clean:win && npm run build:erp && npm run build:master",
+    "build:all:win": "node scripts/build-instaladores.mjs",
+    "instaladores": "node scripts/build-instaladores.mjs",
     "clean:mac": "rm -rf release dist dist-electron release-admin dist-admin dist-electron-admin",
     "clean:win": "powershell -nop -c \"'dist','dist-electron','dist-admin','dist-electron-admin' | % { if (Test-Path $_) { rm $_ -Recurse -Force -EA 0 } }\"",
     "clean:artifacts": "powershell -noprofile -command \"$paths = @('release-admin', 'dist-admin', 'dist-electron-admin', 'release/win-unpacked'); foreach ($p in $paths) { if (Test-Path $p) { Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue } }\"",
@@ -54,6 +55,7 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@djosekispy/nifvalidation": "github:Djosekispy/nifvalidation",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
@@ -172,7 +174,7 @@
       "**/node_modules/bindings/**/*",
       "**/node_modules/file-uri-to-path/**/*",
       "**/*.node",
-      "dist-electron/db-worker.cjs"
+      "dist-electron/**/*"
     ],
     "mac": {
       "target": [

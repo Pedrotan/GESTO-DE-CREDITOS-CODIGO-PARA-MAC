@@ -48,13 +48,31 @@ let timer: ReturnType<typeof setInterval> | null = null;
 let onlineHandler: (() => void) | null = null;
 let writeHandler: (() => void) | null = null;
 let syncDebounce: ReturnType<typeof setTimeout> | null = null;
+let focusHandler: (() => void) | null = null;
 let applyingRemote = false;
+// Falhas seguidas: novas tentativas com intervalos crescentes, sem nunca bloquear o trabalho local.
+const RETRY_DELAYS_MS = [5_000, 15_000, 60_000, 300_000];
+let failureCount = 0;
+let retryNotBefore = 0;
+
+export type CloudSyncStatus = {
+    state: 'idle' | 'syncing' | 'synced' | 'pending' | 'error';
+    pending?: number;
+    message?: string;
+    at?: string;
+    pushed?: number;
+    pulled?: number;
+    conflicts?: number;
+};
+let lastStatus: CloudSyncStatus = { state: 'idle' };
+export const getLastCloudSyncStatus = () => lastStatus;
 
 export const isCloudSyncUrl = (url?: string | null) => {
     if (!url) return false;
     try {
         const parsed = new URL(url);
-        return parsed.protocol === 'https:';
+        // HTTPS em produção; HTTP só no próprio computador (servidor de testes local).
+        return parsed.protocol === 'https:' || (parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname));
     } catch {
         return false;
     }
@@ -166,6 +184,7 @@ export const enqueueSyncOperation = async (sql: string, params: unknown[] = []) 
     }
     await putOperations([{ id: crypto.randomUUID(), deviceId: getDeviceId(), ...command, createdAt: new Date().toISOString() }]);
     window.dispatchEvent(new CustomEvent('tango-local-db-write'));
+    void emitPending();
 };
 
 export const enqueueSyncTransaction = async (statements: SqlTransactionStatement[]) => {
@@ -189,6 +208,7 @@ export const enqueueSyncTransaction = async (statements: SqlTransactionStatement
         createdAt: new Date(now + index).toISOString(),
     })));
     window.dispatchEvent(new CustomEvent('tango-local-db-write'));
+    void emitPending();
 };
 
 const bytesToBase64 = (bytes: Uint8Array) => {
@@ -328,13 +348,28 @@ const reprocessRetainedOperations = async () => {
     return result.applied;
 };
 
-const emitStatus = (detail: Record<string, unknown>) => window.dispatchEvent(new CustomEvent('tango-cloud-sync-status', { detail }));
+const emitStatus = (detail: CloudSyncStatus) => {
+    lastStatus = detail;
+    window.dispatchEvent(new CustomEvent('tango-cloud-sync-status', { detail }));
+};
+
+/** Alterações locais ainda por enviar para a nuvem. */
+export const getPendingSyncCount = async () => (await readAll(STORE_NAME)).length;
+
+const emitPending = async () => {
+    if (lastStatus.state === 'syncing') return;
+    const pending = await getPendingSyncCount().catch(() => 0);
+    emitStatus({ ...lastStatus, state: lastStatus.state === 'error' ? 'error' : 'pending', pending });
+};
 
 export const syncCloudNow = async () => {
     if (syncPromise) return syncPromise;
     syncPromise = (async () => {
         const config = activeConfig;
-        if (!config || !navigator.onLine) return { success: false, message: 'Sem ligação à Internet.' };
+        if (!config || !navigator.onLine) {
+            if (config) emitStatus({ state: 'error', message: 'Sem ligação à Internet.', pending: await getPendingSyncCount().catch(() => 0) });
+            return { success: false, message: 'Sem ligação à Internet.' };
+        }
         if (!config.apiKey || config.apiKey.length < 8) return { success: false, message: 'Configure uma chave de sincronização com pelo menos 8 caracteres.' };
         emitStatus({ state: 'syncing' });
         try {
@@ -376,12 +411,20 @@ export const syncCloudNow = async () => {
                 deviceId: getDeviceId(), query: (sql, params) => sqlite.all(sql, params), appVersion: `${window.electronAPI ? 'PC' : 'Web'} 3.0.2`,
             });
             const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts };
-            emitStatus({ state: 'synced', ...result, at: new Date().toISOString() });
+            failureCount = 0;
+            retryNotBefore = 0;
+            const pending = await getPendingSyncCount().catch(() => 0);
+            emitStatus({ state: pending ? 'pending' : 'synced', pending, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, at: new Date().toISOString() });
             return result;
         } catch (error: any) {
             const message = error?.name === 'TimeoutError' ? 'O servidor demorou muito a responder.' : (error?.message || 'Falha na sincronização.');
             console.error('[CloudSync]', error);
-            emitStatus({ state: 'error', message });
+            const delay = RETRY_DELAYS_MS[Math.min(failureCount, RETRY_DELAYS_MS.length - 1)];
+            failureCount += 1;
+            retryNotBefore = Date.now() + delay;
+            const pending = await getPendingSyncCount().catch(() => 0);
+            emitStatus({ state: 'error', message, pending, at: new Date().toISOString() });
+            scheduleSync(delay);
             return { success: false, message };
         }
     })().finally(() => { syncPromise = null; });
@@ -396,11 +439,16 @@ const scheduleSync = (delay = 750) => {
 export const startCloudSync = (config: CloudSyncConfig) => {
     stopCloudSync();
     activeConfig = { ...config, url: normalizeBaseUrl(config.url) };
-    onlineHandler = () => scheduleSync(100);
+    failureCount = 0;
+    retryNotBefore = 0;
+    onlineHandler = () => { retryNotBefore = 0; scheduleSync(100); };
     writeHandler = () => scheduleSync();
+    // Ao voltar à janela recebe logo o que foi feito noutros dispositivos (ex.: na versão web).
+    focusHandler = () => { if (Date.now() >= retryNotBefore) scheduleSync(100); };
     window.addEventListener('online', onlineHandler);
+    window.addEventListener('focus', focusHandler);
     window.addEventListener('tango-local-db-write', writeHandler);
-    timer = setInterval(() => scheduleSync(0), SYNC_INTERVAL_MS);
+    timer = setInterval(() => { if (Date.now() >= retryNotBefore) scheduleSync(0); }, SYNC_INTERVAL_MS);
     scheduleSync(100);
     return stopCloudSync;
 };
@@ -410,9 +458,12 @@ export const stopCloudSync = () => {
     if (syncDebounce) clearTimeout(syncDebounce);
     if (onlineHandler) window.removeEventListener('online', onlineHandler);
     if (writeHandler) window.removeEventListener('tango-local-db-write', writeHandler);
+    if (focusHandler) window.removeEventListener('focus', focusHandler);
     timer = null;
+    focusHandler = null;
     syncDebounce = null;
     onlineHandler = null;
     writeHandler = null;
     activeConfig = null;
+    emitStatus({ state: 'idle' });
 };

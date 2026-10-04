@@ -21,3 +21,18 @@ export function canonicalizeLicensePayload(data: Record<string, unknown>) {
     validateSignedLicensePayload(data);
     return JSON.stringify(Object.fromEntries(Object.keys(data).sort().map(key => [key, data[key]])));
 }
+
+const cleanNif = (value: unknown) => String(value ?? '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+// NIF de consumidor final usado pelo Tango Master quando a licença não é emitida para uma empresa.
+const GENERIC_NIF = '999999999';
+
+/**
+ * Uma licença assinada vale neste dispositivo quando é global, quando foi emitida para esta máquina,
+ * ou quando foi emitida para o NIF desta empresa — neste caso vale em todos os dispositivos da empresa
+ * (computadores e versão web), para que basta activá-la num deles.
+ */
+export function licenseAppliesToDevice(data: { mid?: unknown; nif?: unknown }, currentMachineId: string, companyNif?: string | null) {
+    if (data.mid === 'GLOBAL' || data.mid === currentMachineId) return true;
+    const licenseNif = cleanNif(data.nif);
+    return licenseNif.length >= 9 && licenseNif !== GENERIC_NIF && licenseNif === cleanNif(companyNif);
+}

@@ -47,7 +47,7 @@ import {
     LineChart,
     Line
 } from 'recharts';
-import { jsPDF } from 'jspdf';
+import { jsPDF } from '@/bibliotecas/pdf-documento';
 import autoTable from 'jspdf-autotable';
 import { calculateClientScore, getRatingColor, ClientScore } from '@/bibliotecas/clientScoring';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';

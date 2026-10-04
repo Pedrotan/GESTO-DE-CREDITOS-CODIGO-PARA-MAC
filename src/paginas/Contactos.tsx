@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import jsPDF from 'jspdf';
+import jsPDF from '@/bibliotecas/pdf-documento';
 import autoTable from 'jspdf-autotable';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useData } from '@/contextos/ContextoDados';

@@ -1,6 +1,6 @@
 import { differenceInDays, parseISO, isValid, isBefore, format } from 'date-fns';
 import { verifySignature, importPublicKey } from './crypto_layer';
-import { validateSignedLicensePayload } from './payload-licenca';
+import { licenseAppliesToDevice, validateSignedLicensePayload } from './payload-licenca';
 
 // Chave Pública do Tango Master (Sincronizada com public_key.json)
 export const MASTER_PUBLIC_KEY = `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvd9xIaqvoTNpZXyx7zOT7Oqa8dIoTQL8pNA8+n+KbRNS6KcwhCjMa2Ve6iWLjE0D2wSKThWjbKR6MDKGls83QmN5EsYADjjyXcaV54+HrwY3n/hHUWnwv4rq3Whuxk+Emvm48EE8OJLgfAd1Gr6ACm62kAg9XFsYHTWPWoNts67KNjdPPnjHid0S97CEe6l3KahOKXLf52gwThec1iOxPIqK7+c9eu+rK/7NyHtlTZ8vR+p9YmitXy7HVhUw3YsfAt0WJ3hZYBm0R8JmC0QRelAaemXtNXgun1tbqLFdBgSSKw+samsdlbswGwyY+CshsO/DZzvU+gXWsRhrNpYhLQIDAQAB`;
@@ -32,6 +32,10 @@ export const getPublicLicenseKey = async (): Promise<string> => {
 };
 
 const GLOBAL_LICENSE_STORAGE_KEY = 'tango_global_license_key_v1';
+
+// NIF da empresa activa: uma licença emitida para este NIF vale em todos os dispositivos da empresa.
+let activeCompanyNif = '';
+export const setActiveLicenseCompanyNif = (nif?: string | null) => { activeCompanyNif = String(nif || ''); };
 
 export const getGlobalLicenseKey = (): string => {
     if (typeof localStorage === 'undefined') return '';
@@ -195,7 +199,7 @@ export const getMachineId = async (): Promise<string> => {
  * Validates a license key (Legacy or RSA).
  * Now Async!
  */
-export const validateLicense = async (key: string): Promise<LicenseInfo> => {
+export const validateLicense = async (key: string, companyNif: string = activeCompanyNif): Promise<LicenseInfo> => {
     let baseId = 'GLOBAL';
     if ((window as any).electronAPI) {
         try {
@@ -273,7 +277,7 @@ export const validateLicense = async (key: string): Promise<LicenseInfo> => {
             const { issuedAt } = validateSignedLicensePayload(data);
             const currentMID = await getMachineId();
 
-            if (data.mid !== 'GLOBAL' && data.mid !== currentMID) {
+            if (!licenseAppliesToDevice(data, currentMID, companyNif)) {
                 return {
                     isValid: false,
                     type: data.type,
@@ -281,7 +285,7 @@ export const validateLicense = async (key: string): Promise<LicenseInfo> => {
                     expirationDate: parseISO(data.exp),
                     status: 'invalid',
                     daysRemaining: 0,
-                    message: `Licença válida apenas para a máquina ${data.mid}. Detetada: ${currentMID}`
+                    message: `Licença válida apenas para a máquina ${data.mid} (ou para a empresa com o NIF ${data.nif || '-'}). Detetada: ${currentMID}`
                 };
             }
 

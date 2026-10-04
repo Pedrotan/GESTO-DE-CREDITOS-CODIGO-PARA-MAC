@@ -1,3 +1,5 @@
+import { BankLogo } from '@/componentes/BankLogo';
+import { ANGOLAN_BANKS } from '@/bibliotecas/ibanHelper';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useData } from '@/contextos/ContextoDados';
@@ -114,6 +116,13 @@ export function CartasTransferencia() {
     const [activeTab, setActiveTab] = useState<'editor' | 'history'>('editor');
     const initNewLetterRef = useRef<(client?: Client | null, credit?: Credit | null, templateId?: string) => void>(() => undefined);
 
+    // O conteúdo editável pertence ao estado e deve ser reposto quando o separador remonta.
+    useEffect(() => {
+        if (activeTab === 'editor' && editorRef.current) {
+            const html = sanitizeRichHtml(bodyHtml);
+            if (editorRef.current.innerHTML !== html) editorRef.current.innerHTML = html;
+        }
+    }, [activeTab, bodyHtml]);
     // Fechar dropdown Select2 ao clicar fora
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -462,7 +471,7 @@ export function CartasTransferencia() {
                             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                                 <span className="text-xs font-bold text-foreground flex items-center gap-1.5 uppercase tracking-wide">
                                     <UserCheck className="h-4 w-4 text-primary" />
-                                    Pesquisa Automática de Cliente (Select2):
+                                    Pesquisa Automática de Cliente:
                                 </span>
                                 {selectedClient && (
                                     <div className="flex items-center gap-2">
@@ -555,15 +564,15 @@ export function CartasTransferencia() {
 
                         {/* Parâmetros Rápidos de Referência Bancária */}
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-3 p-4 rounded-2xl bg-muted/20 border text-xs">
-                            <div className="space-y-1">
+<datalist id="bancos-carta">{ANGOLAN_BANKS.map(bank => <option key={bank.code} value={bank.name} />)}</datalist>                            <div className="space-y-1">
                                 <Label className="text-[11px] font-bold text-muted-foreground flex items-center gap-1">
                                     <Landmark className="h-3.5 w-3.5 text-primary" />
-                                    Banco de Domicílio
+                                    <BankLogo name={bankDestinationName} /> Banco de Domicílio
                                 </Label>
                                 <Input
                                     value={bankDestinationName}
                                     onChange={(e) => setBankDestinationName(e.target.value)}
-                                    placeholder="Ex: Banco BAI, BFA, BIC..."
+                                    list="bancos-carta" placeholder="Selecione ou escreva o banco"
                                     className="h-9 text-xs bg-background font-semibold rounded-xl"
                                 />
                             </div>
@@ -627,7 +636,7 @@ export function CartasTransferencia() {
                                             </div>
                                             <div>
                                                 <span className="font-bold text-sm tracking-tight block text-white">
-                                                    Editor de Texto (Estilo Microsoft Word)
+                                                    Editor de Texto
                                                 </span>
                                                 <span className="text-[10px] text-blue-200">
                                                     Edição direta de termos, cláusulas e formatação

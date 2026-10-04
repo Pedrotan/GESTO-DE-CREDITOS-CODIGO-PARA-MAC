@@ -28,7 +28,7 @@ import { getFileUrl } from '@/bibliotecas/utils';
 import { DEFAULT_INTEREST_TIERS, InterestTier } from '@/bibliotecas/taxas-juro';
 import { openWhatsApp } from '@/bibliotecas/whatsapp';
 import { generateClientProfilePDF, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary, resolveBrandDark } from '@/bibliotecas/pdf';
-import { resolveLicenseKey, setGlobalLicenseKey } from '@/bibliotecas/licenciamento';
+import { resolveLicenseKey, setActiveLicenseCompanyNif, setGlobalLicenseKey, validateLicense } from '@/bibliotecas/licenciamento';
 import { useToast } from '@/ganchos/usar-toast';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { ServicoCliente } from '@/servicos/ServicoCliente';
@@ -44,6 +44,7 @@ import { ServicoSimulacao } from '@/servicos/ServicoSimulacao';
 import { ServicoFornecedor } from '@/servicos/ServicoFornecedor';
 import { ServicoTarefaCalendario } from '@/servicos/ServicoTarefaCalendario';
 import { ServicoTaxasJuro } from '@/servicos/ServicoTaxasJuro';
+import { SHARED_SETTING_KEYS, ServicoDefinicoesPartilhadas } from '@/servicos/ServicoDefinicoesPartilhadas';
 import { isCloudSyncUrl, startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { LegalCase, Warranty } from '@/tipos/contencioso';
 import { getScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from '@/bibliotecas/contas';
@@ -340,6 +341,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const [warranties, setWarranties] = useState<Warranty[]>([]);
     const [suppliers, setSuppliers] = useState<Supplier[]>([]);
     const [interestTiers, setInterestTiers] = useState<InterestTier[]>(DEFAULT_INTEREST_TIERS);
+    // Incrementa a cada recarga de dados: volta a comparar a licença local com a partilhada pela nuvem.
+    const [sharedSettingsVersion, setSharedSettingsVersion] = useState(0);
     const [calendarTasks, setCalendarTasks] = useState<CalendarTask[]>([]);
     const [closedMonths, setClosedMonths] = useState<any[]>([]);
     const [dbAdapterMode, setDbAdapterModeState] = useState<'local' | 'remote'>(() => {
@@ -774,6 +777,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 setClosedMonths(loadedClosedMonths || []);
                 setSuppliers(loadedSuppliers || []);
                 setInterestTiers(loadedInterestTiers);
+                setSharedSettingsVersion(version => version + 1);
                 setCalendarTasks(loadedCalendarTasks || []);
 
                 if (serverInfo?.isRunning && Definicoes) {
@@ -902,6 +906,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         setScopedLocalStorageItem('cached_company_settings', JSON.stringify(effectiveSettings));
         await addLog('update', 'system', changes.length ? changes.join(', ') : 'Atualizou definições', user?.id, user?.name);
 
+        // A licença activada aqui vale para toda a empresa: publica-a para os outros dispositivos (web e PCs).
+        const newLicenseKey = String(updates.licenseKey || '').trim();
+        if (newLicenseKey && authUser?.id) {
+            try {
+                const shared = await ServicoDefinicoesPartilhadas.get(SHARED_SETTING_KEYS.licenseKey);
+                if (shared !== newLicenseKey) await ServicoDefinicoesPartilhadas.set(SHARED_SETTING_KEYS.licenseKey, newLicenseKey, authUser.name);
+            } catch (error) {
+                console.warn('[Licença] Não foi possível partilhar a licença com os outros dispositivos:', error);
+            }
+        }
+
         if (updates.syncEnabled !== undefined) setScopedLocalStorageItem('sync_enabled', updates.syncEnabled ? 'true' : 'false');
         if (updates.syncUrl !== undefined) setScopedLocalStorageItem('sync_url', updates.syncUrl || '');
         if (updates.syncPasskey !== undefined) setScopedLocalStorageItem('sync_passkey', updates.syncPasskey || '');
@@ -943,6 +958,32 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const updateCompanySettingsRef = useRef(updateCompanySettings);
     updateCompanySettingsRef.current = updateCompanySettings;
+
+    useEffect(() => {
+        setActiveLicenseCompanyNif(companySettings.nif);
+    }, [companySettings.nif]);
+
+    // Licença única para a empresa: adopta a licença activada noutro dispositivo quando é válida aqui e
+    // melhor do que a local; se a local for a melhor, publica-a para os outros dispositivos.
+    useEffect(() => {
+        if (!authUser?.id || !sharedSettingsVersion) return;
+        let cancelled = false;
+        (async () => {
+            const shared = (await ServicoDefinicoesPartilhadas.get(SHARED_SETTING_KEYS.licenseKey).catch(() => null) || '').trim();
+            const local = String(companySettings.licenseKey || '').trim();
+            if (cancelled || shared === local) return;
+            const sharedInfo = shared ? await validateLicense(shared, companySettings.nif) : null;
+            const localInfo = local ? await validateLicense(local, companySettings.nif) : null;
+            if (cancelled) return;
+            const sharedIsBetter = sharedInfo?.isValid && (!localInfo?.isValid || sharedInfo.expirationDate > localInfo.expirationDate);
+            if (sharedIsBetter) {
+                await updateCompanySettingsRef.current({ licenseKey: shared });
+            } else if (localInfo?.isValid) {
+                await ServicoDefinicoesPartilhadas.set(SHARED_SETTING_KEYS.licenseKey, local, authUser.name).catch(() => undefined);
+            }
+        })().catch(error => console.warn('[Licença] Sincronização da licença:', error));
+        return () => { cancelled = true; };
+    }, [authUser?.id, authUser?.name, companySettings.licenseKey, companySettings.nif, sharedSettingsVersion]);
 
     const loadMoreLogs = async (limit: number = 50) => {
         if (logs.length === 0) {

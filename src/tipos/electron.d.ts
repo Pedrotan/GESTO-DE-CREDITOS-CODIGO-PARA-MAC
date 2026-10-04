@@ -4,6 +4,7 @@ export interface ElectronAPI {
     userAuthStatus: () => Promise<{ authenticated: boolean; user?: any; expiresAt?: string }>;
     userAuthBootstrapStatus: () => Promise<{ hasUsers: boolean }>;
     userAuthLogout: () => Promise<{ authenticated: false }>;
+    companyPublicInfo?: () => Promise<{ name: string; logo: string | null; enableMultiTenant: boolean | null } | null>;
     userAuthMfaBegin: () => Promise<{ secret: string; qrCode: string }>;
     userAuthMfaEnable: (token: string) => Promise<{ enabled: boolean; reason?: 'session_expired' | 'qr_expired' | 'invalid_code'; user?: any; recoveryCodes?: string[] }>;
     userAuthMfaDisable: (token: string) => Promise<{ disabled: boolean; user?: any }>;

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import jsPDF from 'jspdf';
+import jsPDF from '@/bibliotecas/pdf-documento';
 import autoTable from 'jspdf-autotable';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { formatDateSafe } from '@/bibliotecas/utils';

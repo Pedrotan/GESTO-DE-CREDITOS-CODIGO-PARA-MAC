@@ -140,6 +140,7 @@ const api = Object.freeze({
     userAuthStatus: () => ipcRenderer.invoke('user-auth-status'),
     userAuthBootstrapStatus: () => ipcRenderer.invoke('user-auth-bootstrap-status'),
     userAuthLogout: () => ipcRenderer.invoke('user-auth-logout'),
+    companyPublicInfo: () => ipcRenderer.invoke('company-public-info'),
     userAuthMfaBegin: () => ipcRenderer.invoke('user-auth-mfa-begin'),
     userAuthMfaEnable: (token: string) => ipcRenderer.invoke('user-auth-mfa-enable', {
         token: ensureText(token, 'Código MFA', 6)

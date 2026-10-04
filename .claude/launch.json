@@ -4,7 +4,12 @@
     {
       "name": "web-dev",
       "runtimeExecutable": "npx",
-      "runtimeArgs": ["vite", "--port", "8081", "--strictPort"],
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "8081",
+        "--strictPort"
+      ],
       "port": 8081
     },
     {
@@ -34,6 +39,20 @@
         "--strictPort"
       ],
       "port": 4174
+    },
+    {
+      "name": "web-dev-synctest",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "8081",
+        "--strictPort"
+      ],
+      "port": 8081,
+      "env": {
+        "TANGO_DEV_API_PROXY": "http://localhost:3999"
+      }
     }
   ]
 }

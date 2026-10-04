@@ -89,6 +89,8 @@ import { CreditForm } from '@/componentes/forms/CreditForm';
 import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
 import { PlanoPagamentoDialog } from '@/componentes/creditos/PlanoPagamentoDialog';
 import { canManageInterestTiers } from '@/bibliotecas/taxas-juro';
+import { monthClosureState, monthIdOf, monthLabel, parseMonthId } from '@/bibliotecas/fecho-mes';
+import { getScopedLocalStorageItem } from '@/bibliotecas/contas';
 import { CREDIT_DIALOG_CONTENT_CLASS, CREDIT_DIALOG_HEADER_CLASS } from '@/componentes/forms/credit-dialog-styles';
 import { PaymentForm } from '@/componentes/forms/PaymentForm';
 import { Credit } from '@/tipos/credito';
@@ -129,7 +131,7 @@ export default function Credits() {
   const [reinforcementCredit, setReinforcementCredit] = useState<any>(null);
   const { user } = useAuth();
   const { credits, clients, addCredit, adjustCreditCharges, deleteCredit, addPayment, companySettings, payments, closedMonths, closeMonth, reopenMonth, suppliers, calendarTasks, addCalendarTask, deleteCalendarTask } = useData();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
   const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -652,7 +654,46 @@ export default function Credits() {
     e.target.value = '';
   };
 
+  // Fecho do mês obrigatório: com um mês anterior por fechar não se emitem novos créditos.
+  const pendingClosure = useMemo(() => {
+    const state = monthClosureState(new Date(), closedMonths.map(m => m.id),
+      getScopedLocalStorageItem('month_close_enforced_since') || monthIdOf(new Date()));
+    return state.kind === 'overdue' ? state : null;
+  }, [closedMonths]);
+
+  const openMonthClosing = (targetMonthId: string) => {
+    const parsed = parseMonthId(targetMonthId);
+    if (!parsed) return;
+    setPeriodType('monthly');
+    setSelectedYear(parsed.year);
+    setSelectedMonth(parsed.monthIndex);
+    setIsCloseModalOpen(true);
+  };
+
+  // Vindo do lembrete (#/creditos?fecharMes=AAAA-MM): abre logo o fecho desse mês.
+  useEffect(() => {
+    const target = searchParams.get('fecharMes');
+    if (!target) return;
+    if (user?.role === 'super_admin' || user?.role === 'admin') openMonthClosing(target);
+    const next = new URLSearchParams(searchParams);
+    next.delete('fecharMes');
+    setSearchParams(next, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
   const handleAddNew = () => {
+    if (pendingClosure) {
+      const canClose = user?.role === 'super_admin' || user?.role === 'admin';
+      toast({
+        title: "Fecho do mês pendente",
+        description: canClose
+          ? `Faça primeiro o fecho de ${monthLabel(pendingClosure.monthId)} para registar novos créditos.`
+          : `O fecho de ${monthLabel(pendingClosure.monthId)} ainda não foi feito. Peça ao administrador para o fazer.`,
+        variant: "destructive"
+      });
+      if (canClose) openMonthClosing(pendingClosure.monthId);
+      return;
+    }
     if (isMonthClosed) {
       toast({
         title: "Período Consolidado",

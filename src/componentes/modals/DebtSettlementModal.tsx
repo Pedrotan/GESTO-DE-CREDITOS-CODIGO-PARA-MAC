@@ -3,7 +3,7 @@ import { Button } from "@/componentes/ui/button";
 import { Download, PartyPopper, Share2 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/bibliotecas/formatters";
 import { CompanySettings } from "@/tipos/base-dados";
-import jsPDF from 'jspdf';
+import jsPDF from '@/bibliotecas/pdf-documento';
 
 interface DebtSettlementModalProps {
     isOpen: boolean;

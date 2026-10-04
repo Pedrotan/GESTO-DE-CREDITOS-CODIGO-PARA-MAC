@@ -1,4 +1,5 @@
-import jsPDF from 'jspdf';
+import { setPdfWatermark } from './pdf-documento';
+import jsPDF from '@/bibliotecas/pdf-documento';
 import autoTable from 'jspdf-autotable';
 import { CompanySettings } from '@/tipos/base-dados';
 import { Client, Credit } from '@/tipos/credito';
@@ -95,7 +96,7 @@ export const getCompanySettings = (providedSettings?: any): CompanySettings => {
         address: settings?.address || '',
         logo: settings?.logo || null,
         reportLogo: settings?.reportLogo || null,
-        watermarkLogo: null, // Keep canvas clean and crisp as in reference image
+        watermarkLogo: settings?.watermarkLogo || null,
         currency: settings?.currency || 'AOA',
         customClauses: settings?.customClauses || '',
         primaryColor: resolveBrandPrimary(settings?.primaryColor),
@@ -111,64 +112,6 @@ export const getCompanySettings = (providedSettings?: any): CompanySettings => {
         contractTemplates: settings?.contractTemplates || '[]',
         location: settings?.location || ''
     };
-};
-
-const addWatermark = (doc: jsPDF, logo: string | null) => {
-    if (!logo) return;
-    // Must be a data URI or sufficiently long base64 string
-    if (!logo.startsWith('data:') && logo.length < 100) return;
-    try {
-        const pageWidth = doc.internal.pageSize.width;
-        const pageHeight = doc.internal.pageSize.height;
-        
-        let imgWidth = 180;
-        let imgHeight = 180;
-        
-        try {
-            const properties = doc.getImageProperties(logo);
-            const originalWidth = properties.width;
-            const originalHeight = properties.height;
-            if (originalWidth && originalHeight) {
-                const aspectRatio = originalWidth / originalHeight;
-                // Limit watermark size to 75% of page dimensions or 180, whichever is smaller
-                const maxSize = Math.min(pageWidth * 0.75, pageHeight * 0.75, 180);
-                if (aspectRatio > 1) {
-                    imgWidth = maxSize;
-                    imgHeight = maxSize / aspectRatio;
-                } else {
-                    imgHeight = maxSize;
-                    imgWidth = maxSize * aspectRatio;
-                }
-            }
-        } catch (e) {
-            console.warn("Could not get watermark image properties, falling back to square:", e);
-        }
-
-        const x = (pageWidth - imgWidth) / 2;
-        const y = (pageHeight - imgHeight) / 2;
-
-        try {
-            // Check if GState exists (it might fail if jspdf plugins are not loaded correctly)
-            // @ts-ignore
-            const GState = doc.GState || (doc as any).constructor?.GState;
-
-            if (typeof GState === 'function') {
-                // @ts-ignore
-                doc.setGState(new GState({ opacity: 0.08 }));
-                doc.addImage(logo, 'PNG', x, y, imgWidth, imgHeight, undefined, 'NONE');
-                // @ts-ignore
-                doc.setGState(new GState({ opacity: 1.0 }));
-            } else {
-                // Fallback without transparency if GState is missing
-                console.warn("GState plugin not available, skipping watermark opacity");
-                doc.addImage(logo, 'PNG', x, y, imgWidth, imgHeight, undefined, 'NONE');
-            }
-        } catch (e) {
-            console.error("Error adding watermark:", e);
-        }
-    } catch (e) {
-        console.warn("Watermark skip:", e);
-    }
 };
 
 /** Detect image format from a data URI or return a safe default */
@@ -239,9 +182,7 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
     const dark = resolveBrandDark(config.secondaryColor);   // #2B2D2F
     const lightSilver = BRAND_SILVER;   // #E5E7EB
 
-    if (isValidLogoData(config.watermarkLogo)) {
-        addWatermark(doc, config.watermarkLogo);
-    }
+    setPdfWatermark(doc, config.watermarkLogo);
 
     // =========================================================================
     // =========================================================================
@@ -3679,7 +3620,8 @@ export const exportCompanyCredentialsPDF = (company: {
     }
 };
 
-/** Plano de pagamento entregue ao cliente: valor concedido, prazo, prestações e datas. */
+/** Plano de pagamento entregue ao cliente: valor concedido, prazo, prestações e, num crédito em curso,
+ *  a situação de cada prestação (paga, parcial, em atraso, por pagar) para notificar o cliente. */
 export const generatePaymentPlanPDF = (
     data: {
         clientName: string;
@@ -3688,9 +3630,13 @@ export const generatePaymentPlanPDF = (
         plan: {
             principalMinor: number; ratePercent: number; months: number; interestMinor: number; totalMinor: number;
             installmentMinor: number; firstDueDate: string; lastDueDate: string;
-            installments: Array<{ number: number; dueDate: string; principalMinor: number; interestMinor: number; totalMinor: number; balanceAfterMinor: number }>;
+            installments: Array<{
+                number: number; dueDate: string; principalMinor: number; interestMinor: number; totalMinor: number;
+                balanceAfterMinor: number; paidMinor?: number; status?: 'paid' | 'partial' | 'overdue' | 'pending'; paidAt?: string | null;
+            }>;
         };
-        paidInstallments?: number;
+        progress?: { paidCount: number; overdueCount: number; paidMinor: number; remainingMinor: number; percent: number;
+            nextDue: { number: number; dueDate: string } | null };
     },
     settings?: any,
     userName?: string
@@ -3700,64 +3646,91 @@ export const generatePaymentPlanPDF = (
     const primary = resolveBrandPrimary(config.primaryColor);
     const black = BRAND_CHARCOAL;
     const money = (minor: number) => formatCurrency(minor / 100, config.currency);
-    const { plan } = data;
+    const { plan, progress } = data;
+    const statusLabel: Record<string, string> = { paid: 'Paga', partial: 'Parcial', overdue: 'Em atraso', pending: 'Por pagar' };
 
     applyBranding(doc, config, userName);
 
     doc.setTextColor(0, 0, 0);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
-    doc.text('PLANO DE PAGAMENTO', 105, 45, { align: 'center' });
+    doc.text(progress ? 'PLANO DE PAGAMENTO - SITUAÇÃO' : 'PLANO DE PAGAMENTO', 105, 45, { align: 'center' });
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.text(`Cliente: ${data.clientName}`, 20, 58);
     doc.text(`NIF/BI: ${data.clientNif || 'Não informado'}`, 20, 63);
     doc.text(`Referência: ${data.creditReference || 'Simulação'}`, 20, 68);
-    doc.text(`Data de Emissão: ${formatDateTime(new Date())}`, 20, 73);
+    doc.text(`${progress ? 'Situação em' : 'Data de Emissão'}: ${formatDateTime(new Date())}`, 20, 73);
 
     const boxY = 80;
     doc.setFillColor(245, 247, 250);
     doc.roundedRect(20, boxY, 170, 22, 2, 2, 'F');
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
-    doc.text('VALOR CONCEDIDO', 25, boxY + 7);
-    doc.text(`JUROS (${plan.ratePercent}%)`, 68, boxY + 7);
-    doc.text('TOTAL A PAGAR', 108, boxY + 7);
-    doc.text(`${plan.months} PRESTAÇÕES DE`, 148, boxY + 7);
+    const labels = progress
+        ? ['VALOR CONCEDIDO', 'TOTAL A PAGAR', `JÁ PAGO (${progress.percent}%)`, 'EM FALTA']
+        : ['VALOR CONCEDIDO', `JUROS (${plan.ratePercent}%)`, 'TOTAL A PAGAR', `${plan.months} PRESTAÇÕES DE`];
+    const values = progress
+        ? [money(plan.principalMinor), money(plan.totalMinor), money(progress.paidMinor), money(progress.remainingMinor)]
+        : [money(plan.principalMinor), money(plan.interestMinor), money(plan.totalMinor), money(plan.installmentMinor)];
+    const columnsX = [25, 68, 108, 148];
+    labels.forEach((label, index) => doc.text(label, columnsX[index], boxY + 7));
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(black[0], black[1], black[2]);
-    doc.text(money(plan.principalMinor), 25, boxY + 16);
-    doc.text(money(plan.interestMinor), 68, boxY + 16);
-    doc.setTextColor(primary[0], primary[1], primary[2]);
-    doc.text(money(plan.totalMinor), 108, boxY + 16);
-    doc.setTextColor(black[0], black[1], black[2]);
-    doc.text(money(plan.installmentMinor), 148, boxY + 16);
+    values.forEach((value, index) => {
+        const highlight = index === 2;
+        const color = progress && index === 3 && progress.remainingMinor > 0 ? [220, 38, 38] : highlight ? primary : black;
+        doc.setTextColor(color[0], color[1], color[2]);
+        doc.text(value, columnsX[index], boxY + 16);
+    });
 
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(80, 80, 80);
-    doc.text(`Prazo de ${plan.months} ${plan.months === 1 ? 'mês' : 'meses'}: primeira prestação a ${formatDate(plan.firstDueDate)} e última a ${formatDate(plan.lastDueDate)}.`, 20, boxY + 30);
+    let noteY = boxY + 30;
+    if (progress) {
+        const status = progress.remainingMinor <= 0
+            ? 'Crédito liquidado. Obrigado pela pontualidade.'
+            : `Pagas ${progress.paidCount} de ${plan.months} prestações.${progress.nextDue ? ` Próxima prestação: nº ${progress.nextDue.number}, com vencimento a ${formatDate(progress.nextDue.dueDate)}.` : ''}`;
+        doc.text(status, 20, noteY);
+        if (progress.overdueCount > 0) {
+            noteY += 5;
+            doc.setTextColor(220, 38, 38);
+            doc.setFont("helvetica", "bold");
+            doc.text(`Atenção: ${progress.overdueCount} ${progress.overdueCount === 1 ? 'prestação em atraso' : 'prestações em atraso'}. Regularize o pagamento para evitar juros de mora.`, 20, noteY);
+            doc.setFont("helvetica", "normal");
+        }
+    } else {
+        doc.text(`Prazo de ${plan.months} ${plan.months === 1 ? 'mês' : 'meses'}: primeira prestação a ${formatDate(plan.firstDueDate)} e última a ${formatDate(plan.lastDueDate)}.`, 20, noteY);
+    }
 
-    const paid = data.paidInstallments || 0;
+    const head = progress
+        ? [['Nº', 'Vencimento', 'Prestação', 'Pago', 'Data do pagamento', 'Saldo restante', 'Estado']]
+        : [['Nº', 'Vencimento', 'Capital', 'Juros', 'Prestação', 'Saldo restante']];
+    const body = plan.installments.map(item => progress
+        ? [String(item.number), formatDate(item.dueDate), money(item.totalMinor), money(item.paidMinor || 0),
+            item.status === 'paid' && item.paidAt ? formatDate(item.paidAt) : '-', money(item.balanceAfterMinor), statusLabel[item.status || 'pending']]
+        : [String(item.number), formatDate(item.dueDate), money(item.principalMinor), money(item.interestMinor),
+            money(item.totalMinor), money(item.balanceAfterMinor)]);
     autoTable(doc, {
-        startY: boxY + 35,
-        head: [['Nº', 'Vencimento', 'Capital', 'Juros', 'Prestação', 'Saldo restante', 'Estado']],
-        body: plan.installments.map(item => [
-            String(item.number),
-            formatDate(item.dueDate),
-            money(item.principalMinor),
-            money(item.interestMinor),
-            money(item.totalMinor),
-            money(item.balanceAfterMinor),
-            item.number <= paid ? 'Paga' : 'Por pagar'
-        ]),
-        foot: [['', 'TOTAL', money(plan.principalMinor), money(plan.interestMinor), money(plan.totalMinor), '', '']],
+        startY: noteY + 5,
+        head,
+        body,
+        foot: progress
+            ? [['', 'TOTAL', money(plan.totalMinor), money(progress.paidMinor), '', '', '']]
+            : [['', 'TOTAL', money(plan.principalMinor), money(plan.interestMinor), money(plan.totalMinor), '']],
         headStyles: { fillColor: primary, textColor: [255, 255, 255], fontStyle: 'bold' },
         footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
         styles: { fontSize: 9 },
-        columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
+        columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: progress ? 'center' : 'right' }, 5: { halign: 'right' } },
+        didParseCell: (hook: any) => {
+            if (!progress || hook.section !== 'body' || hook.column.index !== 6) return;
+            const status = plan.installments[hook.row.index]?.status;
+            const colors: Record<string, [number, number, number]> = { paid: [22, 163, 74], partial: [217, 119, 6], overdue: [220, 38, 38], pending: [100, 116, 139] };
+            hook.cell.styles.textColor = colors[status || 'pending'];
+            hook.cell.styles.fontStyle = 'bold';
+        },
         margin: { left: 20, right: 20 },
     });
 
@@ -3766,5 +3739,5 @@ export const generatePaymentPlanPDF = (
     doc.setTextColor(120, 120, 120);
     doc.text('Os pagamentos em atraso estão sujeitos à taxa de mora prevista no contrato.', 20, Math.min(finalY + 10, 280));
 
-    doc.save(`plano-pagamento-${data.clientName.replace(/[^\w]+/g, '-').toLowerCase()}.pdf`);
+    doc.save(`${progress ? 'situacao' : 'plano'}-pagamento-${data.clientName.replace(/[^\w]+/g, '-').toLowerCase()}.pdf`);
 };

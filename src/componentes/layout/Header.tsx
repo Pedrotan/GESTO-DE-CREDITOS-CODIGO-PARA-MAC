@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Bell, Search, User, LogOut, MessageSquare, AlertCircle, X, Wifi, WifiOff, Sun, Moon, Cloud, CloudOff, Server, Menu, Download, UserCircle, BookOpen, Shield, History, Calendar, Mail, Globe, MapPin } from 'lucide-react';
+import { getLastCloudSyncStatus, isCloudSyncUrl, type CloudSyncStatus } from '@/servicos/ServicoSincronizacaoCloud';
+import { OPEN_CLOUD_LINK_EVENT } from '@/componentes/layout/LigacaoNuvemDesktop';
+import { Bell, Search, User, LogOut, MessageSquare, AlertCircle, X, Wifi, WifiOff, Sun, Moon, Cloud, CloudOff, RefreshCw, Server, Menu, Download, UserCircle, BookOpen, Shield, History, Calendar, Mail, Globe, MapPin } from 'lucide-react';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { useNavigate } from 'react-router-dom';
@@ -60,6 +62,28 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   }>({ clients: [], credits: [], payments: [] });
   const [showResults, setShowResults] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(getLastCloudSyncStatus);
+  useEffect(() => {
+    const handler = (event: Event) => setCloudStatus((event as CustomEvent<CloudSyncStatus>).detail);
+    window.addEventListener('tango-cloud-sync-status', handler);
+    return () => window.removeEventListener('tango-cloud-sync-status', handler);
+  }, []);
+  const cloudLinked = Boolean(companySettings?.syncEnabled && isCloudSyncUrl(companySettings?.syncUrl));
+  const pendingLabel = cloudStatus.pending ? `${cloudStatus.pending} pendente${cloudStatus.pending === 1 ? '' : 's'}` : '';
+  const cloudStatusLabel = cloudStatus.state === 'synced' ? 'Sincronizado'
+    : cloudStatus.state === 'error' ? (pendingLabel || 'Sem sincronizar')
+      : cloudStatus.state === 'syncing' ? 'A sincronizar'
+        : pendingLabel || 'Modo Cloud';
+  const lastSyncText = cloudStatus.at ? ` Última tentativa: ${new Date(cloudStatus.at).toLocaleTimeString('pt-AO')}.` : '';
+  const syncIndicatorTitle = serverInfo?.isRunning ? 'Servidor da rede local activo'
+    : dbAdapterMode === 'remote' ? 'Ligado a um servidor da rede local'
+      : cloudLinked
+        ? cloudStatus.state === 'error'
+          ? `Sincronização com a versão web falhou: ${cloudStatus.message || 'erro'}. Vai tentar de novo automaticamente.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
+          : cloudStatus.state === 'synced' ? `Sincronizado com a versão web.${lastSyncText}`
+            : `A sincronizar com a versão web.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}`
+        : window.electronAPI ? 'Modo Local: clique para ligar este computador à versão web' : 'Modo Local';
+  const canOpenCloudLink = Boolean(window.electronAPI) && !serverInfo?.isRunning && dbAdapterMode !== 'remote' && !cloudLinked;
   const [isDark, setIsDark] = useState(document.documentElement.classList.contains('dark'));
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
@@ -476,13 +500,26 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           </div>
 
           {/* Indicador de Sincronização */}
-          <div className={cn(
+          <div
+            role={canOpenCloudLink ? 'button' : undefined}
+            tabIndex={canOpenCloudLink ? 0 : undefined}
+            title={syncIndicatorTitle}
+            onClick={canOpenCloudLink ? () => window.dispatchEvent(new Event(OPEN_CLOUD_LINK_EVENT)) : undefined}
+            onKeyDown={canOpenCloudLink ? (event) => { if (event.key === 'Enter') window.dispatchEvent(new Event(OPEN_CLOUD_LINK_EVENT)); } : undefined}
+            className={cn(
             "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 2xl:px-3",
+            canOpenCloudLink && "cursor-pointer",
             serverInfo?.isRunning
               ? "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400"
-              : dbAdapterMode === 'remote' || companySettings?.syncEnabled
+              : dbAdapterMode === 'remote'
                 ? "bg-amber-50 border-amber-300 text-amber-700 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-400"
-                : "bg-slate-50 border-slate-200 text-slate-400 dark:bg-slate-900/30 dark:border-slate-800 dark:text-slate-600 grayscale opacity-60 hover:opacity-100 hover:grayscale-0"
+                : cloudLinked
+                  ? cloudStatus.state === 'error'
+                    ? "bg-red-50 border-red-300 text-red-700 dark:bg-red-950/30 dark:border-red-800 dark:text-red-400"
+                    : cloudStatus.state === 'synced'
+                      ? "bg-emerald-50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400"
+                      : "bg-amber-50 border-amber-300 text-amber-700 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-400"
+                  : "bg-slate-50 border-slate-200 text-slate-400 dark:bg-slate-900/30 dark:border-slate-800 dark:text-slate-600 grayscale opacity-60 hover:opacity-100 hover:grayscale-0"
           )}>
             {serverInfo?.isRunning ? (
               <>
@@ -491,11 +528,20 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                   Servidor ({connectedClients.length})
                 </span>
               </>
-            ) : (dbAdapterMode === 'remote' || companySettings?.syncEnabled) ? (
+            ) : dbAdapterMode === 'remote' ? (
               <>
                 <Cloud className="h-5 w-5 2xl:h-6 2xl:w-6" />
                 <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase 2xl:inline">
                   Modo Cliente
+                </span>
+              </>
+            ) : cloudLinked ? (
+              <>
+                {cloudStatus.state === 'error' ? <CloudOff className="h-5 w-5 2xl:h-6 2xl:w-6" />
+                  : cloudStatus.state === 'syncing' ? <RefreshCw className="h-5 w-5 animate-spin 2xl:h-6 2xl:w-6" />
+                    : <Cloud className="h-5 w-5 2xl:h-6 2xl:w-6" />}
+                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase 2xl:inline">
+                  {cloudStatusLabel}
                 </span>
               </>
             ) : (

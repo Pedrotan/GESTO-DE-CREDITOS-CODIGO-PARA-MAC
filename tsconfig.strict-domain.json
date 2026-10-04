@@ -19,6 +19,7 @@
     "src/bibliotecas/taxas-juro.ts",
     "src/bibliotecas/sync-operacoes.ts",
     "src/bibliotecas/volume-saas.ts",
-    "src/bibliotecas/plano-pagamento.ts"
+    "src/bibliotecas/plano-pagamento.ts",
+    "src/bibliotecas/fecho-mes.ts"
   ]
 }

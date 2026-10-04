@@ -1,3 +1,4 @@
+import { BankLogo } from '@/componentes/BankLogo';
 import { useEffect, useRef, useState } from 'react';
 import { 
     CreditCard, 
@@ -21,13 +22,14 @@ import {
     Briefcase,
     Users,
     Sparkles,
-    Fingerprint
+    Fingerprint,
+    ExternalLink
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useFormDraft } from '@/ganchos/usar-rascunho-formulario';
-import { ServicoAngolaAPI } from '@/servicos/ServicoAngolaAPI';
+import { ServicoAngolaAPI, abrirPortalOficial } from '@/servicos/ServicoAngolaAPI';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { AutocompleteInput } from '@/componentes/ui/AutocompleteInput';
@@ -59,7 +61,7 @@ import {
 import { Client, ClientDocument, BankCoordinate } from '@/tipos/credito';
 import { ScannerModal } from '@/componentes/modals/ScannerModal';
 import { AlertModal } from '@/componentes/ui/AlertModal';
-import { ANGOLAN_BANKS, formatAngolanIBAN, identifyBankFromIBAN, validateAngolanIBAN } from '@/bibliotecas/ibanHelper';
+import { ANGOLAN_BANKS, formatAngolanIBAN, identifyBankFromIBAN, getBankLogoUrl, validateAngolanIBAN } from '@/bibliotecas/ibanHelper';
 import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { cn } from '@/bibliotecas/utils';
@@ -458,17 +460,29 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                     ? " (Nota: o serviço de consulta não fornece as datas de emissão/validade — copie-as do próprio documento se necessário)."
                     : "";
 
+                const infoFonte = data.source ? ` (Fonte: ${data.source})` : '';
+                // Situação fiscal no Portal do Contribuinte: relevante antes de conceder crédito.
+                const inactivo = !!data.status && !/^activ|^ativ/i.test(data.status);
+                const situacaoFiscal = [
+                    data.status ? `Estado: ${data.status}` : '',
+                    data.defaulter !== undefined ? `Inadimplente: ${data.defaulter ? 'Sim' : 'Não'}` : '',
+                    data.taxRegime ? `Regime de IVA: ${data.taxRegime}` : '',
+                ].filter(Boolean).join(' · ');
+                const alertaFiscal = data.defaulter || inactivo
+                    ? ' ATENÇÃO: o contribuinte consta como inadimplente ou não está activo no Portal do Contribuinte. Avalie o risco antes de conceder crédito.'
+                    : '';
+
                 setGenericAlert({
                     isOpen: true,
-                    title: "Dados Encontrados com Sucesso",
-                    description: `O titular "${data.name}" e os dados de identificação foram preenchidos com sucesso.${avisoDatas}`,
-                    type: "success"
+                    title: alertaFiscal ? "Dados Encontrados - Atenção à Situação Fiscal" : "Dados Encontrados com Sucesso",
+                    description: `O titular "${data.name}" e os dados de identificação foram preenchidos com sucesso.${infoFonte}${situacaoFiscal ? ` ${situacaoFiscal}.` : ''}${alertaFiscal}${avisoDatas}`,
+                    type: alertaFiscal ? "warning" : "success"
                 });
             } else {
                 setGenericAlert({
                     isOpen: true,
-                    title: clientType === 'PARTICULAR' ? "BI não encontrado" : "NIF não encontrado",
-                    description: data?.message || "Não foi possível encontrar os dados para este documento. Verifique se está correto.",
+                    title: clientType === 'PARTICULAR' ? "BI não encontrado automaticamente" : "NIF não encontrado automaticamente",
+                    description: `${data?.message || 'Não foi possível encontrar os dados para este documento.'} Pode consultar diretamente através dos links oficiais (Portal do Contribuinte do MINFIN ou catálogo SEPE) disponíveis logo abaixo do campo.`,
                     type: "warning"
                 });
             }
@@ -477,7 +491,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
             setGenericAlert({
                 isOpen: true,
                 title: "Erro na Pesquisa",
-                description: "Ocorreu uma falha ao ligar aos serviços de validação de documentos.",
+                description: "Ocorreu uma falha ao ligar aos serviços automáticos de validação. Pode consultar diretamente no Portal do Contribuinte do MINFIN ou no SEPE através dos atalhos disponíveis.",
                 type: "error"
             });
         } finally {
@@ -949,6 +963,30 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                         </div>
                                                     </div>
                                                 </FormControl>
+                                                {!noNif && documentType !== 'PASSAPORTE' && (
+                                                    <div className="flex items-center gap-2 mt-1.5 text-[11px] text-slate-500">
+                                                        <span className="font-medium text-slate-400">Portais Oficiais:</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => abrirPortalOficial('MINFIN')}
+                                                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline font-semibold"
+                                                            title="Consultar NIF no Portal do Contribuinte (MINFIN)"
+                                                        >
+                                                            <span>MINFIN (NIF)</span>
+                                                            <ExternalLink className="h-3 w-3" />
+                                                        </button>
+                                                        <span className="text-slate-300">•</span>
+                                                        <button
+                                                            type="button"
+                                                            onClick={() => abrirPortalOficial('SEPE')}
+                                                            className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 hover:underline font-semibold"
+                                                            title="Consultar BI/NIF no catálogo SEPE"
+                                                        >
+                                                            <span>SEPE (BI / NIF)</span>
+                                                            <ExternalLink className="h-3 w-3" />
+                                                        </button>
+                                                    </div>
+                                                )}
                                                 {documentType === 'PASSAPORTE' && msgPassaporte && (
                                                     <p className={cn(
                                                         'text-xs font-medium mt-1',
@@ -1813,7 +1851,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                         <div key={iban.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-slate-50/70 text-xs shadow-2xs">
                                             <div className="flex items-center gap-2.5 min-w-0">
                                                 <div className="w-8 h-8 rounded-lg bg-white border border-slate-200 flex items-center justify-center text-slate-600 shrink-0 shadow-xs">
-                                                    <Landmark className="h-4 w-4 text-emerald-600 shrink-0" />
+                                                    <BankLogo iban={iban.iban} name={iban.bankName} className="h-7 w-7" />
                                                 </div>
                                                 <div className="flex flex-col min-w-0">
                                                     <span className="font-bold text-slate-800 truncate">{iban.bankName}</span>
@@ -2092,7 +2130,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                     {newIban.iban && (
                                         <div className="flex items-center gap-2 p-3 rounded-xl border bg-slate-50/50">
                                             <div className="h-10 w-10 rounded-lg bg-white border shadow-xs flex items-center justify-center overflow-hidden shrink-0">
-                                                {identifyBankFromIBAN(newIban.iban) ? (
+                                                {getBankLogoUrl(identifyBankFromIBAN(newIban.iban)?.code) ? (<img src={getBankLogoUrl(identifyBankFromIBAN(newIban.iban)?.code)!} alt={identifyBankFromIBAN(newIban.iban)?.shortName} className="h-full w-full object-contain p-0.5" />) : identifyBankFromIBAN(newIban.iban) ? (
                                                     <span className="font-black text-[10px] text-primary">
                                                         {identifyBankFromIBAN(newIban.iban)?.shortName}
                                                     </span>
@@ -2135,7 +2173,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                         <div key={iban.id} className="flex items-center justify-between p-3 rounded-lg border bg-muted/30">
                                             <div className="flex items-center gap-3">
                                                 <div className="bg-primary/10 p-2 rounded-full">
-                                                    <Landmark className="h-4 w-4 text-primary" />
+                                                    <BankLogo iban={iban.iban} name={iban.bankName} className="h-7 w-7" />
                                                 </div>
                                                 <div className="flex flex-col">
                                                     <span className="text-sm font-bold">{iban.bankName}</span>

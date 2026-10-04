@@ -87,7 +87,7 @@ export class ServicoContencioso {
             db.get<any>('SELECT * FROM company_settings WHERE id = 1')
         ]);
 
-        const { default: jsPDF } = await import('jspdf');
+        const { default: jsPDF } = await import('@/bibliotecas/pdf-documento');
         const doc = new jsPDF();
         const config = getCompanySettings(rawSettings);
         applyBranding(doc, config, undefined, false);

@@ -1,4 +1,4 @@
-import jsPDF from 'jspdf';
+import jsPDF from '@/bibliotecas/pdf-documento';
 import autoTable from 'jspdf-autotable';
 import { Client, Credit, Payment } from '@/tipos/credito';
 import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from './pdf';

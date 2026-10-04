@@ -60,6 +60,12 @@ const APP_DOWNLOAD_TITLE = ERP_APP_NAME;
 const APP_DOWNLOAD_DIR_NAME = "TANGO GESTAO DE CREDITOS";
 function configureAppIdentity() {
   if (isTangoMaster) return;
+  // Só em desenvolvimento: pasta de dados isolada para testar uma instalação limpa sem tocar nos dados reais.
+  if (!app.isPackaged && process.env.TANGO_USER_DATA_DIR) {
+    app.setName(ERP_APP_NAME);
+    app.setPath("userData", path.resolve(process.env.TANGO_USER_DATA_DIR));
+    return;
+  }
   const appDataDir = app.getPath("appData");
   const userDataCandidates = [
     ERP_APP_NAME,
@@ -874,11 +880,14 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   message_templates: "manage_settings",
   sync_conflicts: "manage_credits"
 };
-const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string }>) => {
+// Tabelas que o assistente de configuração inicial grava antes de existir o primeiro utilizador (sem sessão).
+const FIRST_SETUP_TABLES = new Set(["company_settings", "audit_logs"]);
+const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string }>, firstSetup = false) => {
   if (financialSchemaBootstrapOpen) return;
   for (const statement of statements) {
     const table = mutationTable(statement.sql);
     if (!table || ["credits", "payments", "accounting_entries", "ledger_transactions", "ledger_lines", "credit_installments", "users"].includes(table)) continue;
+    if (firstSetup && FIRST_SETUP_TABLES.has(table)) continue;
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
   }
 };
@@ -2364,8 +2373,9 @@ app.whenReady().then(async () => {
     delete foundUser.password;
     foundUser.lastLogin = now;
     foundUser.status = "active";
-    const requiresMfaEnrollment = foundUser.role === "super_admin" && !Boolean(foundUser.twoFactorEnabled);
-    const result = userAuth.begin(event.sender.id, foundUser, requiresMfaEnrollment);
+    // O 2FA é opcional para todas as contas (incluindo administradores): cada utilizador decide se o activa
+    // no seu perfil. Quem o activou continua a ter de introduzir o código no login.
+    const result = userAuth.begin(event.sender.id, foundUser, false);
     if (result.authenticated) {
       await writeAuthAudit(foundUser, "login", "Login efetuado com sucesso.", { method: "password" });
     }
@@ -2406,6 +2416,22 @@ app.whenReady().then(async () => {
     assertTrustedIpcSender(event);
     const row: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
     return { hasUsers: Number(row?.total || 0) > 0 };
+  });
+  // Identidade pública da empresa para o ecrã de login (antes de haver sessão): só nome, logotipo e se o
+  // modo multi-empresa está activo. Nunca devolve chaves, palavras-passe ou dados de clientes.
+  ipcMain.handle("company-public-info", async (event) => {
+    assertTrustedIpcSender(event);
+    try {
+      const row: any = await runQuery("get", "SELECT name, logo, enableMultiTenant FROM company_settings WHERE id = 1 LIMIT 1");
+      if (!row) return null;
+      return {
+        name: typeof row.name === "string" ? row.name : "",
+        logo: typeof row.logo === "string" ? row.logo : null,
+        enableMultiTenant: row.enableMultiTenant === null || row.enableMultiTenant === undefined ? null : Number(row.enableMultiTenant) !== 0
+      };
+    } catch {
+      return null;
+    }
   });
   ipcMain.handle("user-auth-logout", async (event) => {
     assertTrustedIpcSender(event);
@@ -2473,12 +2499,17 @@ app.whenReady().then(async () => {
     return { success: true };
   });
 
+  // Configuração inicial: ainda não há utilizadores, logo não pode haver sessão iniciada.
+  const isFirstSetup = async () => {
+    const row: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
+    return Number(row?.total || 0) === 0;
+  };
   ipcMain.handle("db-execute", async (event, sql, params) => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("execute", sql, params);
     assertRendererSqlAllowlisted([request], financialSchemaBootstrapOpen);
     assertFinancialSqlAuthorized(event, [request]);
-    assertGenericSqlAuthorized(event, [request]);
+    assertGenericSqlAuthorized(event, [request], !financialSchemaBootstrapOpen && await isFirstSetup());
     const reservedFirstUser = await assertUserSqlAuthorized(event, [request]);
     try {
       const r = await runQuery("execute", request.sql, request.params);
@@ -2525,7 +2556,7 @@ app.whenReady().then(async () => {
     const safeStatements = validateDbTransaction(statements);
     assertRendererSqlAllowlisted(safeStatements, financialSchemaBootstrapOpen);
     assertFinancialSqlAuthorized(event, safeStatements);
-    assertGenericSqlAuthorized(event, safeStatements);
+    assertGenericSqlAuthorized(event, safeStatements, !financialSchemaBootstrapOpen && await isFirstSetup());
     const reservedFirstUser = await assertUserSqlAuthorized(event, safeStatements);
     try {
       const r = await runTransaction(safeStatements);
@@ -2886,6 +2917,190 @@ app.whenReady().then(async () => {
     return provinces[code] ? `Província de ${provinces[code]}, Angola` : "";
   }
 
+  async function queryPortalContribuinteMinfin(cleanDoc: string): Promise<any | null> {
+    try {
+      const BASE = "https://portaldocontribuinte.minfin.gov.ao";
+      const initialUrl = `${BASE}/consultar-nif-do-contribuinte`;
+      const https = await import("node:https");
+      const agent = new https.Agent({ rejectUnauthorized: false });
+
+      const initialRes = await fetch(initialUrl, {
+        signal: AbortSignal.timeout(8_000),
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+        },
+        // @ts-ignore
+        agent
+      } as any);
+
+      if (!initialRes.ok) return null;
+      const initialHtml = await initialRes.text();
+      const cookies = (initialRes.headers.getSetCookie?.() || []).map((c: string) => c.split(";")[0]).join("; ");
+      const vsMatch = initialHtml.match(/name="javax\.faces\.ViewState"[^>]*value="([^"]+)"/);
+      const viewState = vsMatch ? vsMatch[1] : null;
+      if (!viewState) return null;
+
+      const actionMatch = initialHtml.match(/<form id="j_id_2x"[^>]*action="([^"]+)"/);
+      const action = actionMatch ? actionMatch[1] : "/consultar-headNifId-do-contribuinte";
+      const postUrl = action.startsWith("http") ? action : `${BASE}${action}`;
+
+      const body = new URLSearchParams({
+        "javax.faces.partial.ajax": "true",
+        "javax.faces.source": "j_id_2x:j_id_34",
+        "javax.faces.partial.execute": "j_id_2x",
+        "javax.faces.partial.render": "showpanelNIF",
+        "j_id_2x:j_id_34": "j_id_2x:j_id_34",
+        "j_id_2x:txtNIFNumber": cleanDoc,
+        "j_id_2x_SUBMIT": "1",
+        "javax.faces.ViewState": viewState
+      });
+
+      const postRes = await fetch(postUrl, {
+        method: "POST",
+        signal: AbortSignal.timeout(10_000),
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+          "Faces-Request": "partial/ajax",
+          "X-Requested-With": "XMLHttpRequest",
+          "Accept": "application/xml, text/xml, */*; q=0.01",
+          "Origin": BASE,
+          "Referer": initialUrl,
+          "Cookie": cookies
+        },
+        body,
+        // @ts-ignore
+        agent
+      } as any);
+
+      if (!postRes.ok) return null;
+      const xml = await postRes.text();
+      if (xml.includes("NIF não encontrado") || xml.includes('detail:"NIF não encontrado"')) {
+        return null;
+      }
+
+      const panelMatch = xml.match(/<update id="showpanelNIF"><!\[CDATA\[([\s\S]*?)\]\]><\/update>/);
+      const panelHtml = panelMatch ? panelMatch[1] : xml;
+      const formGroups = panelHtml.match(/<div class="form-group">([\s\S]*?)<\/div>/gi) || [];
+      const mapValores: Record<string, string> = {};
+      for (const fg of formGroups) {
+        const labels = [...fg.matchAll(/<label[^>]*>([\s\S]*?)<\/label>/gi)]
+          .map(m => m[1].replace(/<[^>]+>/g, "").trim())
+          .filter(Boolean);
+        if (labels.length >= 2) {
+          const k = labels[0].toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+          mapValores[k] = labels[1];
+        }
+      }
+
+      const name = mapValores["nome"] || mapValores["designacao"] || mapValores["denominacao"] || mapValores["razaosocial"] || mapValores["titular"];
+      const address = mapValores["residenciafiscal"] || mapValores["domiciliofiscal"] || mapValores["morada"] || mapValores["endereco"];
+      const taxRegime = mapValores["regimedeiva"] || mapValores["regime"];
+      const taxPayerType = mapValores["tipodecontribuinte"] || mapValores["tipo"];
+      const status = mapValores["estado"] || mapValores["situacao"];
+      const defaulter = mapValores["inadimplente"];
+
+      if (name && name.trim()) {
+        return {
+          name: name.trim().toUpperCase(),
+          address: address ? address.trim() : undefined,
+          taxRegime: taxRegime ? taxRegime.trim() : undefined,
+          taxPayerType: taxPayerType ? taxPayerType.trim() : undefined,
+          status: status ? status.trim() : undefined,
+          defaulter: defaulter ? /^sim/i.test(defaulter.trim()) : undefined,
+          source: "Portal do Contribuinte (MINFIN)"
+        };
+      }
+    } catch (err: any) {
+      console.warn("[lookup-bi][minfin-http]", err?.message || err);
+    }
+    return null;
+  }
+
+  async function queryViaNifValidationLibrary(cleanDoc: string): Promise<any | null> {
+    try {
+      // @ts-ignore
+      const nifMod = await import("@djosekispy/nifvalidation").catch(() => null);
+      if (!nifMod || typeof nifMod.getNifData !== "function") return null;
+
+      const fs = await import("node:fs");
+      const candidateBrowsers = [
+        "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+        "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+        "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+        "/usr/bin/google-chrome",
+        "/usr/bin/chromium-browser"
+      ];
+      let foundBrowser: string | undefined;
+      for (const bPath of candidateBrowsers) {
+        if (fs.existsSync(bPath)) {
+          foundBrowser = bPath;
+          break;
+        }
+      }
+
+      let browserAdapter: any = undefined;
+      if (foundBrowser) {
+        const puppeteer = await import("puppeteer").catch(() => null);
+        if (puppeteer) {
+          browserAdapter = {
+            async createPage() {
+              const browser = await puppeteer.default.launch({
+                executablePath: foundBrowser,
+                headless: true,
+                args: ["--disable-dev-shm-usage", "--no-sandbox", "--ignore-certificate-errors"]
+              });
+              const page = await browser.newPage();
+              await page.setRequestInterception(true);
+              page.on("request", (req: any) => {
+                const blocked = ["image", "stylesheet", "font"];
+                if (blocked.includes(req.resourceType())) {
+                  req.abort();
+                } else {
+                  req.continue();
+                }
+              });
+              return { browser, page };
+            }
+          };
+        }
+      }
+
+      const nifData = await nifMod.getNifData(cleanDoc, {
+        browserAdapter,
+        timeoutMs: 12_000,
+        resultTimeoutMs: 6_000,
+        retries: 1
+      });
+
+      if (nifData && nifData.name) {
+        // A biblioteca lê os campos do portal por posição e pode trocá-los (ex.: o regime de IVA aparece em
+        // residenciaFiscal e o "Inadimplente" em vatRegime). Classifica-se cada valor pelo conteúdo.
+        const extras = [nifData.residenciaFiscal, nifData.vatRegime]
+          .map((value: unknown) => (value === undefined || value === null ? "" : String(value).trim()))
+          .filter(Boolean);
+        const regime = extras.find(value => /regime|iva|exclus|simplificad/i.test(value));
+        const defaulterText = extras.find(value => /^(sim|n[aã]o)$/i.test(value));
+        const address = extras.find(value => value !== regime && value !== defaulterText);
+        return {
+          name: String(nifData.name).trim().toUpperCase(),
+          address,
+          taxRegime: regime,
+          defaulter: defaulterText ? /^sim/i.test(defaulterText) : undefined,
+          taxPayerType: nifData.type ? String(nifData.type).trim() : undefined,
+          status: nifData.state ? String(nifData.state).trim() : undefined,
+          source: "NIF Validation (Portal do Contribuinte)"
+        };
+      }
+    } catch (err: any) {
+      console.warn("[lookup-bi][nifvalidation-lib]", err?.message || err);
+    }
+    return null;
+  }
+
   function normalizeGender(raw: any): string {
     if (!raw) return "";
     const g = String(raw).trim().toUpperCase();
@@ -2914,6 +3129,9 @@ app.whenReady().then(async () => {
       if (!masterAuth) throw new Error("Sessao do Tango Master indisponivel.");
       masterAuth.assertAuthenticated(event.sender.id);
       currentUser = { id: "tango-master", name: "Tango Master" };
+    } else if (await isFirstSetup()) {
+      // Assistente de configuração inicial: consulta o NIF da empresa antes de existir o primeiro utilizador.
+      currentUser = { id: "first-setup", name: "Configuração inicial" };
     } else {
       currentUser = assertUserPermission(event, "manage_clients");
     }
@@ -2922,6 +3140,51 @@ app.whenReady().then(async () => {
     await writeAuthAudit(currentUser, "document_lookup", "Consulta externa de documento iniciada.", { documentType: type === "COLECTIVO" ? "NIF" : "BI" });
     const isColectivo = type === "COLECTIVO";
     const encoded = encodeURIComponent(cleanBI);
+
+    const mergedResult: any = {
+      name: "",
+      address: "",
+      birthDate: "",
+      age: undefined,
+      issueDate: "",
+      expiryDate: "",
+      gender: "",
+      maritalStatus: "",
+      fatherName: "",
+      motherName: "",
+      source: "",
+      officialLinks: {
+        minfin: "https://portaldocontribuinte.minfin.gov.ao/consultar-nif-do-contribuinte",
+        sepe: "https://sepe.gov.ao/catalogo/eservicos/consulta-de-nif"
+      }
+    };
+
+    // 1. Prioridade: Consulta directa ao Portal do Contribuinte oficial do MINFIN
+    const minfinData = await queryPortalContribuinteMinfin(cleanBI);
+    if (minfinData && minfinData.name) {
+      mergedResult.name = minfinData.name;
+      mergedResult.source = minfinData.source;
+      if (minfinData.address) mergedResult.address = minfinData.address;
+      if (minfinData.taxRegime) mergedResult.taxRegime = minfinData.taxRegime;
+      if (minfinData.taxPayerType) mergedResult.taxPayerType = minfinData.taxPayerType;
+      if (minfinData.status) mergedResult.status = minfinData.status;
+      if (minfinData.defaulter !== undefined) mergedResult.defaulter = minfinData.defaulter;
+    }
+
+    // 2. Fallback via biblioteca nifvalidation se ainda não tiver nome
+    if (!mergedResult.name) {
+      const nifLibData = await queryViaNifValidationLibrary(cleanBI);
+      if (nifLibData && nifLibData.name) {
+        mergedResult.name = nifLibData.name;
+        mergedResult.source = nifLibData.source;
+        if (nifLibData.address) mergedResult.address = nifLibData.address;
+        if (nifLibData.taxRegime) mergedResult.taxRegime = nifLibData.taxRegime;
+        if (nifLibData.taxPayerType) mergedResult.taxPayerType = nifLibData.taxPayerType;
+        if (nifLibData.status) mergedResult.status = nifLibData.status;
+        if (nifLibData.defaulter !== undefined) mergedResult.defaulter = nifLibData.defaulter;
+      }
+    }
+
     const endpoints = isColectivo ? [
       `https://joaotomas.elprimesolution.com/api/gateway/consulta-bi/consultar/${encoded}`,
       `https://consulta.edgarsingui.ao/consultar/${encoded}/nif`,
@@ -2935,20 +3198,6 @@ app.whenReady().then(async () => {
       `https://angolaapi.onrender.com/api/v1/validate/bi/${encoded}`,
       `https://angolaapi.herokuapp.com/api/v1/validate/bi/${encoded}`
     ];
-
-    const mergedResult: any = {
-      name: "",
-      address: "",
-      birthDate: "",
-      age: undefined,
-      issueDate: "",
-      expiryDate: "",
-      gender: "",
-      maritalStatus: "",
-      fatherName: "",
-      motherName: "",
-      source: ""
-    };
 
     for (const url2 of endpoints) {
       try {
@@ -3086,7 +3335,14 @@ app.whenReady().then(async () => {
       };
     }
 
-    return { success: false, message: "Dados não encontrados ou serviço indisponível" };
+    return {
+      success: false,
+      message: "Dados não encontrados nos serviços automáticos. Pode consultar diretamente no Portal do Contribuinte (MINFIN) ou no SEPE.",
+      officialLinks: {
+        minfin: "https://portaldocontribuinte.minfin.gov.ao/consultar-nif-do-contribuinte",
+        sepe: "https://sepe.gov.ao/catalogo/eservicos/consulta-de-nif"
+      }
+    };
   });
   ipcMain.handle("select-image", async (event) => {
     assertTrustedIpcSender(event);
