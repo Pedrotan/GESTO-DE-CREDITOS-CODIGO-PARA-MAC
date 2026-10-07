@@ -1,4 +1,5 @@
 import { getScopedLocalStorageItem, scopedStorageKey } from '@/bibliotecas/contas';
+import { setFinancialConnectionProbe } from '@/bibliotecas/ligacao-financeira';
 import { sqlite, type SqlTransactionStatement } from '@/bibliotecas/adaptador-sqlite';
 import { RENDERER_SQL_BY_ID, RENDERER_SQL_ID_BY_STATEMENT } from '../../electron/renderer-sql-allowlist.ts';
 import {
@@ -34,7 +35,9 @@ const INCOMING_STORE = 'incoming';
 const DEVICE_KEY = 'tango_cloud_device_id';
 const CURSOR_KEY = 'cloud_sync_cursor_v1';
 // v2: reenvia uma fotografia completa (inclui dados financeiros, antes retidos) para os outros dispositivos.
-export const CLOUD_SYNC_BOOTSTRAP_KEY = 'cloud_sync_bootstrap_v2';
+// v3: reenvia de novo, cifrada com a chave actual da empresa: o histórico antigo pode ter sido cifrado com
+// chaves anteriores que os dispositivos novos não conseguem ler.
+export const CLOUD_SYNC_BOOTSTRAP_KEY = 'cloud_sync_bootstrap_v3';
 const REPROCESS_KEY = 'cloud_sync_reprocess_v2';
 const MAX_PUSH_OPERATIONS = 100;
 const MAX_PULL_ROUNDS = 10;
@@ -63,6 +66,8 @@ export type CloudSyncStatus = {
     pushed?: number;
     pulled?: number;
     conflicts?: number;
+    /** Operações da nuvem cifradas com uma chave antiga, ignoradas por não poderem ser lidas. */
+    skipped?: number;
 };
 let lastStatus: CloudSyncStatus = { state: 'idle' };
 export const getLastCloudSyncStatus = () => lastStatus;
@@ -379,6 +384,7 @@ export const syncCloudNow = async () => {
             let totalPushed = 0;
             let totalPulled = await reprocessRetainedOperations();
             let totalConflicts = 0;
+            let totalSkipped = 0;
 
             for (let round = 0; round < MAX_PULL_ROUNDS; round++) {
                 const queued = await getQueuedOperations();
@@ -396,7 +402,14 @@ export const syncCloudNow = async () => {
                 totalPushed += supported.length;
 
                 const incoming: SyncOperation[] = [];
-                for (const item of body.operations || []) incoming.push(await decryptOperation(item.payload, key));
+                for (const item of body.operations || []) {
+                    // Uma operação cifrada com uma chave antiga não pode bloquear a sincronização de tudo o resto.
+                    try {
+                        incoming.push(await decryptOperation(item.payload, key));
+                    } catch {
+                        totalSkipped += 1;
+                    }
+                }
                 const result = await applyOperations(incoming);
                 totalPulled += result.applied;
                 totalConflicts += result.conflicts;
@@ -410,14 +423,17 @@ export const syncCloudNow = async () => {
                 url: normalizeBaseUrl(config.url), apiKey: config.apiKey, tenantId: config.tenantId,
                 deviceId: getDeviceId(), query: (sql, params) => sqlite.all(sql, params), appVersion: `${window.electronAPI ? 'PC' : 'Web'} 3.0.2`,
             });
-            const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts };
+            if (totalSkipped) console.warn(`[CloudSync] ${totalSkipped} operações antigas cifradas com outra chave foram ignoradas.`);
+            const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped };
             failureCount = 0;
             retryNotBefore = 0;
             const pending = await getPendingSyncCount().catch(() => 0);
-            emitStatus({ state: pending ? 'pending' : 'synced', pending, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, at: new Date().toISOString() });
+            emitStatus({ state: pending ? 'pending' : 'synced', pending, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped, at: new Date().toISOString() });
             return result;
         } catch (error: any) {
-            const message = error?.name === 'TimeoutError' ? 'O servidor demorou muito a responder.' : (error?.message || 'Falha na sincronização.');
+            const message = error?.name === 'TimeoutError' ? 'O servidor demorou muito a responder.'
+                : error?.message === 'Failed to fetch' ? 'Não foi possível contactar o servidor da nuvem.'
+                    : (error?.message || (error?.name ? `Falha na sincronização (${error.name}).` : 'Falha na sincronização.'));
             console.error('[CloudSync]', error);
             const delay = RETRY_DELAYS_MS[Math.min(failureCount, RETRY_DELAYS_MS.length - 1)];
             failureCount += 1;
@@ -450,10 +466,18 @@ export const startCloudSync = (config: CloudSyncConfig) => {
     window.addEventListener('tango-local-db-write', writeHandler);
     timer = setInterval(() => { if (Date.now() >= retryNotBefore) scheduleSync(0); }, SYNC_INTERVAL_MS);
     scheduleSync(100);
+    // Versão web (cópia da nuvem): as operações financeiras só avançam com o servidor contactável; a sonda
+    // sincroniza antes (envia o que falta e recebe o mais recente) e, sem ligação, a operação é recusada.
+    if (!window.electronAPI) setFinancialConnectionProbe(async () => {
+        if (!navigator.onLine) return { ok: false, message: 'sem Internet' };
+        const result: any = await syncCloudNow();
+        return result?.success ? { ok: true } : { ok: false, message: result?.message };
+    });
     return stopCloudSync;
 };
 
 export const stopCloudSync = () => {
+    setFinancialConnectionProbe(null);
     if (timer) clearInterval(timer);
     if (syncDebounce) clearTimeout(syncDebounce);
     if (onlineHandler) window.removeEventListener('online', onlineHandler);

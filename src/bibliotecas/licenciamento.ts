@@ -1,9 +1,10 @@
 import { differenceInDays, parseISO, isValid, isBefore, format } from 'date-fns';
 import { verifySignature, importPublicKey } from './crypto_layer';
-import { licenseAppliesToDevice, validateSignedLicensePayload } from './payload-licenca';
+import { decodeLicensePayload, licenseAppliesToDevice, normalizeLicenseKey, validateSignedLicensePayload } from './payload-licenca';
 
-// Chave Pública do Tango Master (Sincronizada com public_key.json)
-export const MASTER_PUBLIC_KEY = `MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvd9xIaqvoTNpZXyx7zOT7Oqa8dIoTQL8pNA8+n+KbRNS6KcwhCjMa2Ve6iWLjE0D2wSKThWjbKR6MDKGls83QmN5EsYADjjyXcaV54+HrwY3n/hHUWnwv4rq3Whuxk+Emvm48EE8OJLgfAd1Gr6ACm62kAg9XFsYHTWPWoNts67KNjdPPnjHid0S97CEe6l3KahOKXLf52gwThec1iOxPIqK7+c9eu+rK/7NyHtlTZ8vR+p9YmitXy7HVhUw3YsfAt0WJ3hZYBm0R8JmC0QRelAaemXtNXgun1tbqLFdBgSSKw+samsdlbswGwyY+CshsO/DZzvU+gXWsRhrNpYhLQIDAQAB`;
+// Chave Pública do Tango Master: definida em chave-publica-licencas.ts (usada também pelo processo principal).
+import { MASTER_PUBLIC_KEY } from './chave-publica-licencas';
+export { MASTER_PUBLIC_KEY };
 
 /**
  * Obtém a chave pública para validação de licença.
@@ -209,7 +210,7 @@ export const validateLicense = async (key: string, companyNif: string = activeCo
 
     const currentMID = await getMachineId();
 
-    const effectiveKey = String(key || '').trim() || getGlobalLicenseKey();
+    const effectiveKey = normalizeLicenseKey(key) || normalizeLicenseKey(getGlobalLicenseKey());
 
     if (!effectiveKey) {
         return {
@@ -266,14 +267,7 @@ export const validateLicense = async (key: string, companyNif: string = activeCo
                 };
             }
 
-            const decodedPayload = atob(payload);
-            let data: LicensePayload;
-            try {
-                data = JSON.parse(decodedPayload);
-            } catch (e) {
-                // Se falhar, pode ser que o payload já fosse JSON puro (dependendo de como foi btoa-ado)
-                data = JSON.parse(atob(payload));
-            }
+            const data: LicensePayload = JSON.parse(decodeLicensePayload(payload));
             const { issuedAt } = validateSignedLicensePayload(data);
             const currentMID = await getMachineId();
 

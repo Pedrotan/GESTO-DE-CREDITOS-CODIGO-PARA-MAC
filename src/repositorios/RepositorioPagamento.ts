@@ -4,7 +4,13 @@ import { toMinorUnits } from '@/bibliotecas/ledger-financeiro';
 
 export class RepositorioPagamento extends RepositorioBase {
     static async findAll(): Promise<any[]> {
-        return await this.query('SELECT * FROM payments WHERE deletedAt IS NULL');
+        // Só dinheiro efectivamente recebido: pendentes de validação e anulados ficam fora dos saldos e indicadores.
+        return await this.query("SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed'");
+    }
+
+    /** Todos os pagamentos para a gestão (confirmados, pendentes de validação e anulados). */
+    static async findForManagement(): Promise<any[]> {
+        return await this.query('SELECT * FROM payments WHERE deletedAt IS NULL ORDER BY paymentDate DESC');
     }
 
     static async findDeleted(): Promise<any[]> {

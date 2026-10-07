@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
+import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -20,7 +21,10 @@ const sha256 = (value) => crypto.createHash('sha256').update(String(value)).dige
 const normalizeCode = (val) => String(val || '').trim().replace(/[-\s]/g, '').toUpperCase();
 
 export default async function handler(req, res) {
-  if (!applyCors(req, res)) return send(res, 403, { success: false, message: 'Origem não autorizada.' });
+  if (!applyCors(req, res)) {
+    await recordRejectedOrigin(req);
+    return send(res, 403, { success: false, message: 'Origem não autorizada.' });
+  }
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
   if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
 
@@ -62,6 +66,13 @@ export default async function handler(req, res) {
   try {
     // Limite de segurança: 20 tentativas por minuto por IP para prevenir força bruta
     if (!await enforceDistributedRateLimit(sql, req, res, { limit: 20, windowMs: 60_000, scope: 'verify_company' })) return;
+    const remaining = await lockoutRemaining(sql, req, { scope: 'company_code', subject: tenantId });
+    if (remaining > 0) {
+      res.setHeader('Retry-After', String(remaining));
+      return send(res, 429, { success: false, code: 'LOCKED', message: `Demasiadas tentativas falhadas. Tente novamente em ${Math.ceil(remaining / 60)} minuto(s).` });
+    }
+    const failure = (details) => registerAuthFailure(sql, req, { scope: 'company_code', subject: tenantId, type: 'company_code_failed',
+      title: 'Código de acesso de empresa errado', details });
 
     // Garantir que a tabela existe e suporta o campo access_code
     await sql(`
@@ -88,6 +99,7 @@ export default async function handler(req, res) {
     const rows = await sql('SELECT * FROM tango_tenants WHERE UPPER(tenant_id) = $1', [tenantId]);
 
     if (!rows || rows.length === 0) {
+      await failure(`Tentativa de activação com o NIF ${tenantId}, que não está registado.`);
       return send(res, 404, {
         success: false,
         code: 'NOT_REGISTERED',
@@ -125,6 +137,7 @@ export default async function handler(req, res) {
       safeEqual(sha256(rawCode.trim()), tenant.key_hash);
 
     if (!codeMatches) {
+      await failure(`Código de acesso errado para o NIF ${tenantId}.`);
       return send(res, 401, {
         success: false,
         code: 'WRONG_CODE',
@@ -132,6 +145,7 @@ export default async function handler(req, res) {
       });
     }
 
+    await clearAuthFailures(sql, { scope: 'company_code', subject: tenantId });
     // Empresa aprovada com sucesso!
     return send(res, 200, {
       success: true,

@@ -1,6 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
+import { clientCreditStanding, newCreditBlockReason } from '@/bibliotecas/regras-credito';
+import { JurosMoraDialog } from '@/componentes/creditos/JurosMoraDialog';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
+import { InvestigacaoAuditoria } from '@/componentes/auditoria/InvestigacaoAuditoria';
+import type { InvestigationTarget } from '@/componentes/auditoria/DetalheAuditoria';
+import { FileClock } from 'lucide-react';
 import { ReinforcementModal } from '@/componentes/modals/ReinforcementModal';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
@@ -74,7 +79,8 @@ import {
   ArrowDownUp,
   Users,
   Lock,
-  Unlock
+  Unlock,
+  AlarmClock,
 } from 'lucide-react';
 import { generateExcelTemplate, parseExcelFile } from '@/bibliotecas/ExcelHelper';
 import {
@@ -400,7 +406,9 @@ export default function Credits() {
       return;
     }
     try {
-      await reopenMonth(monthId);
+      const reason = window.prompt('Justifique a reabertura deste período (pelo menos 10 caracteres):');
+      if (!reason) return;
+      await reopenMonth(monthId, reason);
       toast({
         title: "Mês Reaberto",
         description: `A folha de ${MONTH_FULL_NAMES[selectedMonth]} de ${selectedYear} foi reaberta.`,
@@ -431,6 +439,9 @@ export default function Credits() {
 
   // Estados das Modais
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
+  // "Solicitar novo crédito" depois de o cliente liquidar o anterior: valor mínimo = crédito anterior.
+  const [renewalRequest, setRenewalRequest] = useState<{ clientId: string; clientName: string; minAmount: number } | null>(null);
+  const [moraCredit, setMoraCredit] = useState<Credit | null>(null);
   const [isRatesDialogOpen, setIsRatesDialogOpen] = useState(false);
   const [isPaymentPlanOpen, setIsPaymentPlanOpen] = useState(false);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
@@ -452,6 +463,8 @@ export default function Credits() {
   });
 
   const [selectedCredit, setSelectedCredit] = useState<Credit | undefined>(undefined);
+  // Histórico de auditoria do crédito (todas as alterações desde a criação).
+  const [auditTarget, setAuditTarget] = useState<InvestigationTarget | null>(null);
   const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null);
   const { toast } = useToast();
 
@@ -837,7 +850,17 @@ export default function Credits() {
       const clientCredits = credits.filter(c => c.clientId === client.id && c.status !== 'rejected' && c.status !== 'cancelled');
       const hasUnpaidCredits = clientCredits.some(c => c.status !== 'paid' && (Number(c.currentBalance) || 0) > 0.1);
 
-      if (clientCredits.length > 0 && !hasUnpaidCredits) {
+      if (renewalRequest?.clientId === client.id && data.principalAmount < renewalRequest.minAmount) {
+        setAlertConfig({
+          isOpen: true,
+          title: "Valor abaixo do mínimo",
+          description: `O novo crédito tem de ser igual ou superior ao anterior (${formatCurrency(renewalRequest.minAmount)}).`,
+          type: "warning"
+        });
+        return;
+      }
+
+      if (clientCredits.length > 0 && !hasUnpaidCredits && renewalRequest?.clientId !== client.id) {
         setAlertConfig({
           isOpen: true,
           title: "Novo ciclo requer decisão de limite",
@@ -895,7 +918,7 @@ export default function Credits() {
         client.riskLevel === 'high';
       const finalStatus = requiresApproval ? 'pending_approval' : 'active';
 
-      await addCredit({
+      const saved = await addCredit({
         ...data,
         startDate: new Date(data.startDate),
         dueDate: new Date(data.dueDate),
@@ -915,12 +938,31 @@ export default function Credits() {
       }, user ? { id: user.id, name: user.name } : undefined);
 
       setIsCreateDialogOpen(false);
+      setRenewalRequest(null);
+      // O crédito aparece na folha do seu mês de competência: abre essa folha para o ver de imediato na lista.
+      const competence = /^\d{4}-\d{2}$/.test(String(data.targetMonthId || ''))
+        ? String(data.targetMonthId)
+        : new Date(data.startDate).toISOString().slice(0, 7);
+      const [competenceYear, competenceMonth] = competence.split('-').map(Number);
+      if (periodType !== 'monthly' || competenceYear !== selectedYear || competenceMonth - 1 !== selectedMonth) {
+        setPeriodType('monthly');
+        setSelectedYear(competenceYear);
+        setSelectedMonth(competenceMonth - 1);
+        toast({
+          title: 'Crédito registado',
+          description: `Está na folha de ${new Date(competenceYear, competenceMonth - 1, 1).toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' })} (mês de competência escolhido).`,
+        });
+      }
+      setStatusFilter('all');
 
-      if (requiresApproval) {
+      // O estado final vem das alçadas: um crédito pedido como activo pode subir na cadeia de aprovação.
+      if (saved.status === 'pending_approval') {
         setAlertConfig({
           isOpen: true,
           title: "Crédito enviado para aprovação",
-          description: "A solicitação ficou pendente por regra de limite, risco ou permissão.",
+          description: saved.escalationReason
+            ? `${saved.escalationReason}. O pedido ficou na fila de Aprovações e os aprovadores desse nível foram notificados.`
+            : "A solicitação ficou pendente por regra de limite, risco ou permissão.",
           type: "warning"
         });
         return;
@@ -1638,8 +1680,13 @@ export default function Credits() {
                 <TableCell>
                   <div className="w-32">
                     {(() => {
-                      const paidAmount = credit.totalDue - credit.currentBalance;
-                      const progress = Math.min(Math.round((paidAmount / credit.totalDue) * 100), 100);
+                      // Pago = pagamentos confirmados; o total é o que já foi pago mais o que ainda está em dívida.
+                      const paidAmount = payments
+                        .filter(payment => payment.creditId === credit.id && payment.status === 'confirmed' && !payment.deletedAt)
+                        .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
+                      const outstanding = Math.max(0, Number(credit.totalDue) || 0);
+                      const progress = credit.status === 'paid' ? 100
+                        : paidAmount + outstanding > 0 ? Math.min(100, Math.round((paidAmount / (paidAmount + outstanding)) * 100)) : 0;
                       return (
                         <>
                           <div className="mb-1 flex justify-between text-[10px] font-bold">
@@ -1677,14 +1724,49 @@ export default function Credits() {
                         <Eye className="h-4 w-4" />
                         Ver Detalhes
                       </DropdownMenuItem>
+                      <DropdownMenuItem className="gap-2" onClick={() => setAuditTarget({ mode: 'entity', key: credit.id, label: `Crédito de ${credit.clientName}` })}>
+                        <FileClock className="h-4 w-4" />
+                        Histórico de auditoria
+                      </DropdownMenuItem>
                       <DropdownMenuItem
                         className="gap-2"
                         onClick={() => handleRegisterPayment(credit)}
-                        disabled={credit.status === 'paid' || credit.currentBalance <= 0}
+                        disabled={!['active', 'overdue', 'defaulted', 'renegotiated'].includes(credit.status) || credit.currentBalance <= 0}
                       >
                         <Receipt className="h-4 w-4" />
                         Registar Pagamento
                       </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="gap-2"
+                        onClick={() => setMoraCredit(credit)}
+                        disabled={['pending_approval', 'rejected', 'cancelled'].includes(credit.status)}
+                      >
+                        <AlarmClock className="h-4 w-4 text-destructive" />
+                        Juros de Mora
+                      </DropdownMenuItem>
+                      {credit.status === 'paid' && (() => {
+                        const standing = clientCreditStanding(credit.clientId, credits);
+                        const blocked = newCreditBlockReason(standing, (value) => formatCurrency(value));
+                        return (
+                          <DropdownMenuItem
+                            className="flex-col items-start gap-0.5"
+                            disabled={!!blocked}
+                            title={blocked || undefined}
+                            onClick={() => {
+                              setRenewalRequest({
+                                clientId: credit.clientId, clientName: credit.clientName,
+                                minAmount: standing.lastPaidPrincipal || Number(credit.principalAmount) || 0,
+                              });
+                              handleAddNew();
+                            }}
+                          >
+                            <span className="flex items-center gap-2 font-semibold text-emerald-700 dark:text-emerald-400">
+                              <PlusCircle className="h-4 w-4" /> Solicitar Novo Crédito
+                            </span>
+                            {blocked && <span className="max-w-[230px] pl-6 text-[11px] leading-snug text-muted-foreground">{blocked}</span>}
+                          </DropdownMenuItem>
+                        );
+                      })()}
                       <DropdownMenuItem className="gap-2" onClick={() => handleViewHistory(credit.id)}>
                         <History className="h-4 w-4" />
                         Ver Histórico
@@ -1757,18 +1839,23 @@ export default function Credits() {
       </div>
 
       {/* Create Dialog */}
-      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+      <Dialog open={isCreateDialogOpen} onOpenChange={(open) => { setIsCreateDialogOpen(open); if (!open) setRenewalRequest(null); }}>
         <DialogContent className={CREDIT_DIALOG_CONTENT_CLASS}>
           <DialogHeader className={CREDIT_DIALOG_HEADER_CLASS}>
             <DialogTitle className="flex items-center gap-2 text-xl font-bold tracking-tight text-white">
               <PlusCircle className="h-5 w-5 text-secondary" />
-              Emissão de Novo Contrato
+              {renewalRequest ? 'Solicitar Novo Crédito' : 'Emissão de Novo Contrato'}
             </DialogTitle>
             <DialogDescription className="mt-1 text-sm text-white/75">
-              Defina o cliente, as condições e confirme o plano de liquidação.
+              {renewalRequest
+                ? `${renewalRequest.clientName} liquidou o crédito anterior. Valor mínimo: ${formatCurrency(renewalRequest.minAmount)}; o pedido segue o fluxo normal de aprovação.`
+                : 'Defina o cliente, as condições e confirme o plano de liquidação.'}
             </DialogDescription>
           </DialogHeader>
           <CreditForm
+            key={renewalRequest?.clientId || 'novo'}
+            prefillData={renewalRequest ? { clientId: renewalRequest.clientId, principalAmount: renewalRequest.minAmount } : undefined}
+            minPrincipalAmount={renewalRequest?.minAmount}
             onSubmit={handleCreateSubmit}
             clients={clients}
             credits={credits}
@@ -1779,6 +1866,7 @@ export default function Credits() {
       </Dialog>
 
       <TabelaTaxasDialog open={isRatesDialogOpen} onOpenChange={setIsRatesDialogOpen} />
+      <JurosMoraDialog credit={moraCredit} open={!!moraCredit} onOpenChange={(open) => { if (!open) setMoraCredit(null); }} />
       <PlanoPagamentoDialog open={isPaymentPlanOpen} onOpenChange={setIsPaymentPlanOpen} />
 
       {/* Supplier Selection Modal */}
@@ -2273,6 +2361,7 @@ export default function Credits() {
         onOpenChange={setIsDailyCashFlowOpen}
         initialDate={todayCalendarDate}
       />
+      <InvestigacaoAuditoria target={auditTarget} events={[]} onClose={() => setAuditTarget(null)} />
     </MainLayout >
   );
 }

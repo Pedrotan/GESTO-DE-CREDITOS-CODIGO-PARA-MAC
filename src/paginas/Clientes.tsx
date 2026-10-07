@@ -1,4 +1,8 @@
+import { InvestigacaoAuditoria } from '@/componentes/auditoria/InvestigacaoAuditoria';
+import type { InvestigationTarget } from '@/componentes/auditoria/DetalheAuditoria';
+import { FileClock } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
+import { clientCreditStanding, newCreditBlockReason, requiresCreditApproval } from '@/bibliotecas/regras-credito';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
@@ -115,6 +119,8 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
+    // Histórico de auditoria do cliente (todas as alterações desde a criação).
+    const [auditTarget, setAuditTarget] = useState<InvestigationTarget | null>(null);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [isDetailsOpen, setIsDetailsOpen] = useState(false);
     const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
@@ -132,7 +138,8 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
     const [includeInterest, setIncludeInterest] = useState(true);
     const [clientForDownload, setClientForDownload] = useState<Client | undefined>(undefined);
 
-    const [creditPrefillAmount, setCreditPrefillAmount] = useState<number | undefined>(undefined);
+    // Novo crédito após liquidação: valor mínimo = crédito anterior (undefined no primeiro crédito do cliente).
+    const [renewalMinAmount, setRenewalMinAmount] = useState<number | undefined>(undefined);
     const [isDecisionModalOpen, setIsDecisionModalOpen] = useState(false);
     const [newLimitInput, setNewLimitInput] = useState<string>('');
     const [decisionType, setDecisionType] = useState<'A' | 'B' | null>(null);
@@ -433,17 +440,13 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
     };
 
     const handleNewCredit = (client: Client) => {
+        const standing = clientCreditStanding(client.id, credits);
+        if (newCreditBlockReason(standing, formatCurrency)) return;
         setSelectedClient(client);
-        setCreditPrefillAmount(undefined);
+        setRenewalMinAmount(standing.hasCredits && standing.lastPaidPrincipal > 0 ? standing.lastPaidPrincipal : undefined);
         setDecisionType(null);
         setNewLimitInput(String(client.creditLimit));
         setIsDecisionModalOpen(true);
-    };
-
-    const handleGrantRemaining = (client: Client) => {
-        setSelectedClient(client);
-        setCreditPrefillAmount(client.availableCredit);
-        setIsNewCreditDialogOpen(true);
     };
 
     const handleDecisionConfirm = async () => {
@@ -579,8 +582,19 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
             const totalInterest = (data.principalAmount * data.interestRate) / 100;
             const totalToReturn = data.principalAmount + totalInterest;
             const generatedId = `CR-${crypto.randomUUID()}`;
+            if (renewalMinAmount && data.principalAmount < renewalMinAmount) {
+                throw new Error(`O novo crédito tem de ser igual ou superior ao anterior (${formatCurrency(renewalMinAmount)}).`);
+            }
+            const freshClient = clients.find(c => c.id === selectedClient.id) || selectedClient;
+            const requiresApproval = requiresCreditApproval({
+                canApprove: user?.role === 'super_admin' || Boolean(user?.permissions?.includes('approve_loans')),
+                principalAmount: data.principalAmount,
+                availableCredit: Number(freshClient.availableCredit || 0),
+                clientStatus: freshClient.status,
+                riskLevel: freshClient.riskLevel,
+            });
 
-            await addCredit({
+            const saved = await addCredit({
                 ...data,
                 id: generatedId,
                 clientName: selectedClient.name,
@@ -591,16 +605,20 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                 lateInterest: 0,
                 totalDue: totalToReturn,
                 createdAt: new Date(),
-                status: 'active',
+                status: requiresApproval ? 'pending_approval' : 'active',
                 requestedBy: user?.name || 'Sistema',
+                requestedAt: new Date(),
                 creditNumber: nextCycle
             }, user ? { id: user.id, name: user.name } : undefined);
 
+            const pendingApproval = saved.status === 'pending_approval';
             setAlertConfig({
                 isOpen: true,
-                title: "Crédito Registado!",
-                description: `O ${nextCycle}º ciclo de crédito para ${selectedClient.name} foi iniciado com sucesso.`,
-                type: "success"
+                title: pendingApproval ? "Pedido enviado para aprovação" : "Crédito Registado!",
+                description: pendingApproval
+                    ? `O ${nextCycle}º crédito de ${selectedClient.name} ficou pendente na página Aprovações (${saved.escalationReason || 'regra de limite, risco ou permissão'}).`
+                    : `O ${nextCycle}º ciclo de crédito para ${selectedClient.name} foi iniciado com sucesso.`,
+                type: pendingApproval ? "warning" : "success"
             });
             setIsNewCreditDialogOpen(false);
             setSelectedClient(undefined);
@@ -1063,22 +1081,25 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                                         </DropdownMenuTrigger>
                                         <DropdownMenuContent align="end">
                                             <DropdownMenuItem className="gap-2" onClick={() => handleDetails(client)}><Eye className="h-4 w-4" />Ver Detalhes</DropdownMenuItem>
-                                            <DropdownMenuItem
-                                                className="gap-2"
-                                                onClick={() => handleNewCredit(client)}
-                                                disabled={!isFullyPaid(client.id)}
-                                            >
-                                                <Plus className="h-4 w-4" />Novo Crédito
-                                            </DropdownMenuItem>
-                                            {client.availableCredit > 0 && (
-                                                <DropdownMenuItem
-                                                    className="gap-2 text-success focus:text-success"
-                                                    onClick={() => handleGrantRemaining(client)}
-                                                >
-                                                    <CreditCard className="h-4 w-4" />Conceder Restante
-                                                </DropdownMenuItem>
-                                            )}
+                                            {(() => {
+                                                const standing = clientCreditStanding(client.id, credits);
+                                                const blocked = newCreditBlockReason(standing, formatCurrency);
+                                                return (
+                                                    <DropdownMenuItem
+                                                        className="flex-col items-start gap-0.5"
+                                                        onClick={() => handleNewCredit(client)}
+                                                        disabled={!!blocked}
+                                                        title={blocked || undefined}
+                                                    >
+                                                        <span className="flex items-center gap-2">
+                                                            <Plus className="h-4 w-4" />{standing.hasCredits ? 'Solicitar Novo Crédito' : 'Novo Crédito'}
+                                                        </span>
+                                                        {blocked && <span className="max-w-[230px] pl-6 text-[11px] leading-snug text-muted-foreground">{blocked}</span>}
+                                                    </DropdownMenuItem>
+                                                );
+                                            })()}
                                             <DropdownMenuItem className="gap-2" onClick={() => handleViewHistory(client.name)}><History className="h-4 w-4" />Ver Histórico</DropdownMenuItem>
+                                            <DropdownMenuItem className="gap-2" onClick={() => setAuditTarget({ mode: 'entity', key: client.id, label: `Cliente ${client.name}` })}><FileClock className="h-4 w-4" />Histórico de auditoria</DropdownMenuItem>
                                             <DropdownMenuItem className="gap-2 text-emerald-600 focus:text-emerald-600 font-semibold" onClick={() => handleDetails(client)}><Receipt className="h-4 w-4" />Ficha & Extrato de Pagamentos</DropdownMenuItem>
                                             <DropdownMenuItem className="gap-2" onClick={() => handleEdit(client)}><Edit className="h-4 w-4" />Editar</DropdownMenuItem>
                                             <DropdownMenuItem className="gap-2" onClick={() => handleDownloadClick(client)}><Download className="h-4 w-4" />Baixar Ficha (PDF)</DropdownMenuItem>
@@ -1153,7 +1174,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     setIsDetailsOpen(open); 
                     if (!open) setSelectedClient(undefined); 
                 }} 
-                onGrantRemaining={handleGrantRemaining} 
+
             />
 
             <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
@@ -1197,17 +1218,17 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                 setIsNewCreditDialogOpen(open);
                 if (!open) {
                     setSelectedClient(undefined);
-                    setCreditPrefillAmount(undefined);
+                    setRenewalMinAmount(undefined);
                 }
             }}>
                 <DialogContent className={CREDIT_DIALOG_CONTENT_CLASS}>
                     <DialogHeader className={CREDIT_DIALOG_HEADER_CLASS}>
                         <DialogTitle className="text-xl font-bold tracking-tight text-white">
-                            {creditPrefillAmount !== undefined ? 'Conceder Restante do Valor' : 'Novo Ciclo de Crédito'}
+                            {renewalMinAmount !== undefined ? 'Solicitar Novo Crédito' : 'Novo Ciclo de Crédito'}
                         </DialogTitle>
                         <DialogDescription className="mt-1 text-sm text-white/75">
-                            {creditPrefillAmount !== undefined
-                                ? `Concedendo o restante do valor disponível (${formatCurrency(creditPrefillAmount)}) para ${selectedClient?.name}.`
+                            {renewalMinAmount !== undefined
+                                ? `${selectedClient?.name} liquidou o crédito anterior. Valor mínimo do novo pedido: ${formatCurrency(renewalMinAmount)}; segue o fluxo normal de aprovação.`
                                 : `Iniciando o ${credits.filter(c => c.clientId === selectedClient?.id).length + 1}º ciclo de crédito para ${selectedClient?.name}.`
                             }
                         </DialogDescription>
@@ -1219,8 +1240,9 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                             credits={credits}
                             prefillData={{
                                 clientId: selectedClient.id,
-                                principalAmount: creditPrefillAmount
+                                principalAmount: renewalMinAmount
                             }}
+                            minPrincipalAmount={renewalMinAmount}
                             onCancel={() => setIsNewCreditDialogOpen(false)}
                         />
                     )}
@@ -1300,7 +1322,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                                     Opção B: Manter Limite Anterior
                                 </p>
                                 <p className="text-xs text-muted-foreground mt-1">
-                                    Mantém o limite atual de {selectedClient ? formatCurrency(selectedClient.creditLimit) : '0,00 AOA'} e redefine o saldo utilizado para 0.
+                                    Mantém o limite atual de {selectedClient ? formatCurrency(selectedClient.creditLimit) : formatCurrency(0)} e redefine o saldo utilizado para 0.
                                 </p>
                              </div>
                         </div>
@@ -1316,6 +1338,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+            <InvestigacaoAuditoria target={auditTarget} events={[]} onClose={() => setAuditTarget(null)} extraTerms={auditTarget ? [auditTarget.label.replace(/^Cliente /, '')] : []} />
         </MainLayout>
     );
 }

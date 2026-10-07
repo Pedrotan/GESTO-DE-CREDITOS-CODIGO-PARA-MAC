@@ -108,3 +108,47 @@ export function revertPaymentFromBalances(current: CreditBalancesMinor, allocati
         status: current.status === 'paid' && totalDueMinor > 0 ? 'active' : current.status
     };
 }
+
+type InstallmentForAllocation = {
+    dueDate: string;
+    installmentNumber?: number;
+    status?: string;
+    principalMinor: number; interestMinor: number; lateInterestMinor: number;
+    paidPrincipalMinor: number; paidInterestMinor: number; paidLateInterestMinor: number;
+};
+
+/**
+ * Prática bancária: o pagamento liquida as prestações por ordem de vencimento e, em cada uma, primeiro a mora,
+ * depois o juro e por fim o capital. Assim uma prestação paga por inteiro fica paga (e deixa de gerar mora), em
+ * vez de o pagamento ir primeiro aos juros de todas as prestações. O que sobrar vai para encargos fora do plano.
+ */
+export function allocatePaymentByInstallments(
+    schedule: InstallmentForAllocation[], current: CreditBalancesMinor, amountMinor: number
+): AllocationMinor {
+    let remaining = nonNegative(amountMinor, 'Montante do pagamento');
+    if (remaining === 0) throw new Error('O valor do pagamento tem de ser maior que zero.');
+    const allocation = { principalMinor: 0, interestMinor: 0, lateInterestMinor: 0 };
+    const take = (component: keyof AllocationMinor, due: number, creditLimit: number) => {
+        const value = Math.max(0, Math.min(remaining, due, creditLimit - allocation[component]));
+        allocation[component] += value;
+        remaining -= value;
+    };
+    const ordered = [...schedule]
+        .filter(item => item.status !== 'cancelled')
+        .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime() || (a.installmentNumber ?? 0) - (b.installmentNumber ?? 0));
+    for (const item of ordered) {
+        if (remaining <= 0) break;
+        take('lateInterestMinor', item.lateInterestMinor - item.paidLateInterestMinor, current.lateInterestMinor);
+        take('interestMinor', item.interestMinor - item.paidInterestMinor, current.interestMinor);
+        take('principalMinor', item.principalMinor - item.paidPrincipalMinor, current.balanceMinor);
+    }
+    // Encargos do crédito que não estão no plano (por exemplo, ajustes manuais): mesma ordem.
+    take('lateInterestMinor', current.lateInterestMinor, current.lateInterestMinor);
+    take('interestMinor', current.interestMinor, current.interestMinor);
+    take('principalMinor', current.balanceMinor, current.balanceMinor);
+    if (remaining > 0) {
+        const totalDue = (current.balanceMinor + current.interestMinor + current.lateInterestMinor) / 100;
+        throw new Error(`O pagamento excede o total em dívida (${totalDue.toFixed(2)}).`);
+    }
+    return allocation;
+}

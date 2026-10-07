@@ -1,5 +1,6 @@
+import { formatCurrency, formatDecimal } from '@/bibliotecas/formatters';
 import jsPDF from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 import { Client, Credit, Payment } from '@/tipos/credito';
 import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from './pdf';
 
@@ -134,11 +135,11 @@ export const generateEconomicReport = (data: EconomicReportData) => {
         doc.text(value, x + 4, y + 14);
     };
 
-    drawCard(16, yPos, 'Capital Concedido (Total)', `${totalCreditsIssued.toLocaleString('pt-AO', { maximumFractionDigits: 0 })} AOA`, dark);
-    drawCard(106, yPos, 'Total Arrecadado (Caixa)', `${totalPaid.toLocaleString('pt-AO', { maximumFractionDigits: 0 })} AOA`, [22, 101, 52]);
+    drawCard(16, yPos, 'Capital Concedido (Total)', formatCurrency(totalCreditsIssued), dark);
+    drawCard(106, yPos, 'Total Arrecadado (Caixa)', formatCurrency(totalPaid), [22, 101, 52]);
     yPos += 22;
-    drawCard(16, yPos, 'Expectativa de Retorno Global', `${totalExpected.toLocaleString('pt-AO', { maximumFractionDigits: 0 })} AOA`, dark);
-    drawCard(106, yPos, 'Saldo Pendente em Carteira', `${totalOutstanding.toLocaleString('pt-AO', { maximumFractionDigits: 0 })} AOA`, [220, 38, 38]);
+    drawCard(16, yPos, 'Expectativa de Retorno Global', formatCurrency(totalExpected), dark);
+    drawCard(106, yPos, 'Saldo Pendente em Carteira', formatCurrency(totalOutstanding), [220, 38, 38]);
     yPos += 26;
 
     // ========== 2. ANÁLISE DE CARTEIRA ==========
@@ -197,7 +198,7 @@ export const generateEconomicReport = (data: EconomicReportData) => {
         doc.rect(85, yPos - 3, barWidth, 4, 'F');
 
         doc.setFont('helvetica', 'bold');
-        doc.text(`${(client.volume / 1000).toFixed(1)}k AOA`, 190, yPos, { align: 'right' });
+        doc.text(`${formatDecimal(client.volume / 1000, 1)} mil Kz`, 190, yPos, { align: 'right' });
         yPos += 7.5;
     });
 
@@ -216,7 +217,7 @@ export const generateEconomicReport = (data: EconomicReportData) => {
         ['Total de Clientes Cadastrados', clients.length.toString()],
         ['Total de Contratos de Crédito', credits.length.toString()],
         ['Total de Pagamentos Registados', payments.length.toString()],
-        ['Ticket Médio de Empréstimo', `${(credits.length > 0 ? totalCreditsIssued / credits.length : 0).toLocaleString('pt-AO', { maximumFractionDigits: 0 })} AOA`]
+        ['Ticket Médio de Empréstimo', formatCurrency(credits.length > 0 ? totalCreditsIssued / credits.length : 0)]
     ];
 
     autoTable(doc, {

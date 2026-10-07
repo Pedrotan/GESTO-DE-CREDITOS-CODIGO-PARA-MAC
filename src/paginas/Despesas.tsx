@@ -1,3 +1,4 @@
+import { ComprovativoDespesa } from '@/componentes/ComprovativoDespesa';
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useData } from '@/contextos/ContextoDados';
@@ -50,6 +51,7 @@ const CATEGORIES_STORAGE_KEY = 'tango_custom_expense_categories';
 export default function Despesas() {
     const { accountingEntries, addAccountingEntry } = useData();
     const { user } = useAuth();
+    const [receiptFile,setReceiptFile]=useState<File|null>(null);
     const { toast } = useToast();
 
     const hoje = new Date();
@@ -195,10 +197,17 @@ export default function Despesas() {
 
         setAGravar(true);
         try {
+            let receipt;
+            if(receiptFile){
+                if(receiptFile.size>512000 || !['application/pdf','image/png','image/jpeg'].includes(receiptFile.type))throw new Error('Use PDF, PNG ou JPEG até 512 KB.');
+                const data=await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(String(reader.result).split(',')[1]);reader.onerror=()=>reject(new Error('Falha ao ler comprovativo.'));reader.readAsDataURL(receiptFile);});
+                receipt={name:receiptFile.name,mime:receiptFile.type,data};
+            }
             const expenseDate = dataDespesa ? new Date(dataDespesa + 'T12:00:00') : new Date();
 
             await addAccountingEntry({
                 type: 'adjustment',
+                receipt, category:categoria,
                 description: `${categoria} — ${descricao.trim()}`,
                 debit: 'expenses',
                 credit: formaPagamento,
@@ -224,6 +233,7 @@ export default function Despesas() {
             setModalAberta(false);
             setDescricao('');
             setValor(0);
+            setReceiptFile(null);
             setDataDespesa(new Date().toISOString().split('T')[0]);
         } catch {
             toast({ title: 'Erro', description: 'Não foi possível registar a despesa.' });
@@ -355,7 +365,7 @@ export default function Despesas() {
                                                     </span>
                                                 </TableCell>
                                                 <TableCell className="font-medium text-foreground py-3">
-                                                    {detalhe}
+                                                    {detalhe}<ComprovativoDespesa entryId={e.id} />
                                                 </TableCell>
                                                 <TableCell className="text-center py-3">
                                                     <span className={cn(
@@ -546,6 +556,7 @@ export default function Despesas() {
                             />
                         </div>
 
+                        <div className="space-y-1.5"><Label>Comprovativo (PDF, PNG ou JPEG até 512 KB)</Label><Input type="file" accept="application/pdf,image/png,image/jpeg" onChange={e=>setReceiptFile(e.target.files?.[0] || null)} />{receiptFile && <p className="text-xs text-muted-foreground">{receiptFile.name}</p>}</div>
                         {/* Descrição */}
                         <div className="space-y-1.5">
                             <Label htmlFor="desc-despesa" className="text-xs font-bold">Descrição / Detalhe *</Label>

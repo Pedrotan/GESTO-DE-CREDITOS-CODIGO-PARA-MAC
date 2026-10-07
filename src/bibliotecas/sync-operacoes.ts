@@ -37,7 +37,13 @@ export type ApplyResult = { applied: number; conflicts: number };
 /** Tabelas que nunca saem nem entram pela nuvem (credenciais, chaves e estado local). */
 export const SYNC_EXCLUDED_TABLES = new Set([
     'dictionary', 'sqlite_sequence', 'users', 'company_settings', 'payment_gateways',
-    'password_reset_requests', 'sync_conflicts', 'schema_migrations',
+    'password_reset_requests', 'sync_conflicts', 'schema_migrations', 'audit_log_chain', 'accounting_entry_seals',
+    // Ficheiros de relatórios gerados e agendamentos de envio ficam no computador que os criou.
+    'report_history', 'report_schedules',
+    // Selos HMAC e fechos diários da auditoria: cada computador verifica e sela a sua cópia.
+    'audit_entry_seals', 'audit_daily_closes',
+    // Linhas de bloqueio dos limites: só servem de guarda na transacção local (o consumo sincroniza em limit_ledger).
+    'limit_locks',
 ]);
 
 export const normalizeSqlText = (sql: string) =>

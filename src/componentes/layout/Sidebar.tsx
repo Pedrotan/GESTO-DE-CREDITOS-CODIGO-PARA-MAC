@@ -4,7 +4,9 @@ import { cn, getFileUrl } from '@/bibliotecas/utils';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
 import { Role } from '@/tipos/autenticacao';
+import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { validateLicense } from '@/bibliotecas/licenciamento';
+import { CaixaEletronicoIcon } from '@/componentes/ui/CaixaEletronicoIcon';
 import {
   LayoutDashboard,
   Users,
@@ -51,6 +53,8 @@ import {
   PenTool,
   Info,
   RefreshCw,
+  Gavel,
+  ShieldAlert,
 } from 'lucide-react';
 import {
   Tooltip,
@@ -96,7 +100,7 @@ const menuItems: MenuItem[] = [
   { icon: LineChart, label: 'Mercado', path: '/mercado' },
   { icon: Calculator, label: 'Simulador', path: '/simulador' },
   { icon: CreditCard, label: 'Créditos', path: '/creditos', permission: 'view_credits' },
-  { icon: Receipt, label: 'Pagamentos', path: '/pagamentos', permission: 'manage_payments' },
+  { icon: CaixaEletronicoIcon, label: 'Pagamentos', path: '/pagamentos', permission: 'manage_payments' },
   { icon: CalendarDays, label: 'Plano Mensal', path: '/plano-mensal', permission: 'view_credits' },
   { icon: Contact, label: 'Contactos', path: '/contactos', permission: 'manage_clients' },
   { icon: ReceiptText, label: 'Despesas', path: '/despesas', permission: 'manage_fiscal' },
@@ -107,17 +111,19 @@ const menuItems: MenuItem[] = [
   { icon: MessageSquare, label: 'Chat Interno', path: '/chat' },
   { icon: FileText, label: 'Relatórios', path: '/relatorios', permission: 'view_reports' },
   { icon: Calculator, label: 'Contabilidade', path: '/contabilidade', permission: 'manage_fiscal' },
-  { icon: Receipt, label: 'Relatórios Fiscais', path: '/relatorios-fiscais', permission: 'manage_fiscal' },
+  { icon: ReceiptText, label: 'Relatórios Fiscais', path: '/relatorios-fiscais', permission: 'manage_fiscal' },
   { icon: CheckCircle, label: 'Aprovações', path: '/aprovacoes', permission: 'approve_loans' },
   {
     icon: UserCog,
-    label: 'Usuários',
+    label: 'Utilizadores',
     path: '/utilizadores',
     children: [
-      { icon: UserCog, label: 'Usuários', path: '/utilizadores', permission: 'manage_users' },
-      { icon: BarChart, label: 'Relatórios Usuários', path: '/relatorios-atividade', roles: ['super_admin'], moduleKey: 'enableProfileActivity' },
-      { icon: Lock, label: 'Auditoria', path: '/logs-auditoria', permission: 'view_audit_logs' },
-      { icon: MonitorSmartphone, label: 'Sessões Activas', path: '/sessoes', permission: 'manage_users' },
+      { icon: UserCog, label: 'Utilizadores', path: '/utilizadores', permission: 'manage_users' },
+      { icon: ShieldCheck, label: 'Perfis de Acesso', path: '/perfis', permission: 'manage_users' },
+      { icon: BarChart, label: 'Relatórios Utilizadores', path: '/relatorios-atividade', roles: ['super_admin'], moduleKey: 'enableProfileActivity' },
+      { icon: Lock, label: 'Auditoria', path: '/logs-auditoria' },
+      { icon: ShieldAlert, label: 'Centro de Segurança', path: '/seguranca', permission: 'view_audit_logs' },
+      { icon: MonitorSmartphone, label: 'Sessões Ativas', path: '/sessoes', permission: 'manage_users' },
       { icon: ShieldCheck, label: 'Limites', path: '/limites-utilizador', permission: 'manage_limits' },
     ],
   },
@@ -138,6 +144,7 @@ const menuItems: MenuItem[] = [
       { icon: Smartphone, label: 'WhatsApp', path: '/definicoes?tab=whatsapp' },
       { icon: Landmark, label: 'Contas', path: '/definicoes?tab=banking' },
       { icon: ScrollText, label: 'Contratos', path: '/definicoes?tab=contracts' },
+      { icon: Calculator, label: 'Simulador e Produtos', path: '/definicoes?tab=simulador' },
       { icon: Megaphone, label: 'Marketing', path: '/definicoes?tab=marketing' },
       { icon: Mail, label: 'Email (SMTP)', path: '/definicoes?tab=email' },
       { icon: Cloud, label: 'Cloud', path: '/definicoes?tab=cloud', hideWhenSingular: true },
@@ -148,6 +155,7 @@ const menuItems: MenuItem[] = [
       { icon: Info, label: 'Sobre', path: '/definicoes?tab=about' },
     ],
   },
+  { icon: Gavel, label: 'Termos e Políticas', path: '/termos-e-politicas' },
   { icon: BookOpen, label: 'Guia do Sistema', path: '/guia' },
 ];
 
@@ -193,7 +201,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
 
     if (user?.role === 'super_admin') return true;
     if (item.roles && !item.roles.includes(user?.role as Role)) return false;
-    if (item.permission) return !!user?.permissions?.includes(item.permission);
+    if (item.permission) return ServicoControloAcesso.temPermissao(user, item.permission);
 
     const serverRelatedPaths = ['/definicoes?tab=network', '/chat'];
     if (isSingular && (serverRelatedPaths.some(p => item.path.startsWith(p)) || item.label.includes('Chat'))) {

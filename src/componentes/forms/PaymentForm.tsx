@@ -221,7 +221,7 @@ export function PaymentForm({ onSubmit, credits, onCancel, initialCreditId }: Pa
                                                 Saldo Devedor Atual: <span className="font-bold text-foreground">
                                                     {(() => {
                                                         const c = credits.find(cr => cr.id === form.getValues('creditId'));
-                                                        return c ? formatCurrency(c.currentBalance) : '0,00 AOA';
+                                                        return c ? formatCurrency(c.currentBalance) : formatCurrency(0);
                                                     })()}
                                                 </span>
                                             </p>

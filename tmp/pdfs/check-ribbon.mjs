@@ -1,0 +1,11 @@
+import { build } from 'esbuild';
+import { readFileSync,writeFileSync } from 'node:fs';
+const logo='data:image/png;base64,'+readFileSync('public/favicon.png').toString('base64');
+globalThis.localStorage={getItem:key=>key==='tango_master_watermark'?logo:null};
+await build({stdin:{contents:`export {newSoftwareContract} from '../../src/bibliotecas/contrato-software.ts';export {softwareContractPdf} from '../../src/bibliotecas/contrato-software-pdf.ts';`,resolveDir:import.meta.dirname},bundle:true,platform:'node',format:'esm',outfile:'tmp/pdfs/ribbon-bundle.mjs',logLevel:'silent'});
+const {newSoftwareContract,softwareContractPdf}=await import('./ribbon-bundle.mjs');
+const doc=softwareContractPdf({...newSoftwareContract(),number:'TG-2026-001',client:'Empresa Demonstração, Lda',nif:'5000000000'},logo);
+const output=doc.output();
+if((output.match(/\/I\d+ Do/g)||[]).length!==doc.getNumberOfPages()*2)throw new Error('Logótipo ou marca ausente em alguma página');
+writeFileSync('tmp/pdfs/ribbon-watermark.pdf',Buffer.from(doc.output('arraybuffer')));
+console.log('Logótipo e marca de água em todas as',doc.getNumberOfPages(),'páginas');

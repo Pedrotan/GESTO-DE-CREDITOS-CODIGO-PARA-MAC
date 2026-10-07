@@ -140,6 +140,10 @@ const api = Object.freeze({
     userAuthStatus: () => ipcRenderer.invoke('user-auth-status'),
     userAuthBootstrapStatus: () => ipcRenderer.invoke('user-auth-bootstrap-status'),
     userAuthLogout: () => ipcRenderer.invoke('user-auth-logout'),
+    userAuthConfirmPassword: (password: string) => ipcRenderer.invoke('user-auth-confirm-password', ensureText(password, 'Palavra-passe', 256)),
+    accountingSealVerify: () => ipcRenderer.invoke('accounting-seal-verify'),
+    auditSealVerify: () => ipcRenderer.invoke('audit-seal-verify'),
+    accountingSealPending: () => ipcRenderer.invoke('accounting-seal-pending'),
     companyPublicInfo: () => ipcRenderer.invoke('company-public-info'),
     userAuthMfaBegin: () => ipcRenderer.invoke('user-auth-mfa-begin'),
     userAuthMfaEnable: (token: string) => ipcRenderer.invoke('user-auth-mfa-enable', {
@@ -248,6 +252,12 @@ const api = Object.freeze({
 
     onMasterDiscovered: (callback: (data: any) => void) => subscribe('master-discovered', callback),
     onDbUpdate: (callback: () => void) => subscribe('db-update', callback),
+
+    // Centro de Segurança: alertas de intrusão em tempo real, histórico e estado das protecções.
+    onSecurityAlert: (callback: (event: any) => void) => subscribe('security-alert', callback),
+    securityEventsList: () => ipcRenderer.invoke('security-events-list'),
+    securityEventsAck: () => ipcRenderer.invoke('security-events-ack'),
+    securityStatus: () => ipcRenderer.invoke('security-status'),
 
     promoteToMaster: (passkey?: string) => ipcRenderer.invoke('promote-to-master', passkey ? ensureText(passkey, 'Chave', 256) : undefined),
     getMeshPriority: () => ipcRenderer.invoke('get-mesh-priority'),

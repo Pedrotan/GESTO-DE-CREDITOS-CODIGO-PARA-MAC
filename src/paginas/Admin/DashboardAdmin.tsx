@@ -59,10 +59,16 @@ import {
 } from 'lucide-react';
 import GestaoEmpresasCloud, { type CloudTenant, type SubscriptionPayment } from './GestaoEmpresasCloud';
 import VolumeNegocioSaas from './VolumeNegocioSaas';
+import ContratosSoftware from './ContratosSoftware';
+import MarcaAguaMaster from './MarcaAguaMaster';
+import { validateSoftwareContract } from '@/bibliotecas/contrato-software';
+import SegurancaServidor from './SegurancaServidor';
 import { subscriptionState } from '@/bibliotecas/subscricao';
 import { LicenseType, getLicenseTypeName } from '@/bibliotecas/licenciamento';
+import { decodeLicensePayload, encodeLicensePayload } from '@/bibliotecas/payload-licenca';
+import { drawContactFooter, generateLicenseCertificatePDF, getCompanySettings } from '@/bibliotecas/pdf';
 import { formatDateSafe } from '@/bibliotecas/utils';
-import { formatAngolanPhone } from '@/bibliotecas/formatters';
+import { formatAngolanPhone, formatCurrency } from '@/bibliotecas/formatters';
 import { addMonths, addYears, format, addDays, isBefore } from 'date-fns';
 import { pt } from 'date-fns/locale';
 import { toast } from '@/ganchos/usar-toast';
@@ -74,7 +80,7 @@ import {
     ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import jsPDF from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 
 interface FinanceRecord {
     id: string;
@@ -108,7 +114,7 @@ export default function DashboardAdmin() {
     const navigate = useNavigate();
 
     // Estado da Navegação (Sidebar)
-    const [activeTab, setActiveTab] = useState<'painel' | 'licenciamento' | 'precos' | 'perfil' | 'relatorios' | 'guia' | 'suporte' | 'contabilidade' | 'empresas' | 'volume'>('painel');
+    const [activeTab, setActiveTab] = useState<'painel' | 'licenciamento' | 'precos' | 'perfil' | 'relatorios' | 'guia' | 'suporte' | 'contabilidade' | 'empresas' | 'volume' | 'seguranca' | 'contratos' | 'marcaagua'>('painel');
 
     // Tema
     const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -418,7 +424,12 @@ export default function DashboardAdmin() {
                 prices,
                 branding,
                 keys: generatedKeys,
-                finance: financialRecords
+                finance: financialRecords,
+                masterWatermark: localStorage.getItem('tango_master_watermark') || '',
+                softwareContracts: {
+                    history: JSON.parse(localStorage.getItem('tango_master_contracts_v1') || '[]'),
+                    draft: JSON.parse(localStorage.getItem('tango_master_contract_draft_v1') || 'null')
+                }
             }
         };
 
@@ -448,8 +459,15 @@ export default function DashboardAdmin() {
                 }
 
                 const { config } = data;
+                if(config.masterWatermark!==undefined && (typeof config.masterWatermark!=='string' || (config.masterWatermark!=='' && !/^data:image\/(png|jpeg);base64,[A-Za-z0-9+/=]+$/.test(config.masterWatermark))))throw new Error('Marca de água no backup inválida.');
+                if (config.softwareContracts) {
+                    const contracts = config.softwareContracts;
+                    if (!Array.isArray(contracts.history) || !contracts.history.every(validateSoftwareContract) ||
+                        (contracts.draft != null && !validateSoftwareContract(contracts.draft))) throw new Error('Contratos no backup inválidos.');
+                }
 
                 // Restaurar localStorage
+                if(config.masterWatermark!==undefined){if(config.masterWatermark)localStorage.setItem('tango_master_watermark',config.masterWatermark);else localStorage.removeItem('tango_master_watermark');}
                 localStorage.setItem('tango_master_prices', JSON.stringify(config.prices));
                 localStorage.setItem('tango_master_logo_system', config.branding.systemLogo);
                 localStorage.setItem('tango_master_logo_invoice', config.branding.invoiceLogo);
@@ -461,6 +479,12 @@ export default function DashboardAdmin() {
                 if (config.finance) {
                     setFinancialRecords(config.finance);
                     localStorage.setItem('tango_master_finance', JSON.stringify(config.finance));
+                }
+                if (config.softwareContracts) {
+                    const contracts = config.softwareContracts;
+                    localStorage.setItem('tango_master_contracts_v1', JSON.stringify(contracts.history));
+                    if (contracts.draft) localStorage.setItem('tango_master_contract_draft_v1', JSON.stringify(contracts.draft));
+                    else localStorage.removeItem('tango_master_contract_draft_v1');
                 }
 
                 showModalNotification("Restauro Concluído", "Configurações, chaves e histórico restaurados com sucesso.");
@@ -516,7 +540,7 @@ export default function DashboardAdmin() {
             };
 
             // 3. Converter para Base64 antes de assinar (conforme licenciamento.ts)
-            const payloadBase64 = btoa(JSON.stringify(licensePayload));
+            const payloadBase64 = encodeLicensePayload(JSON.stringify(licensePayload));
 
             // A chave privada nunca sai do cofre do processo principal.
             const signed = await window.electronAPI.signLicensePayload(payloadBase64);
@@ -605,7 +629,7 @@ export default function DashboardAdmin() {
             };
 
             // 2. Converter para Base64 antes de assinar
-            const payloadBase64 = btoa(JSON.stringify(licensePayload));
+            const payloadBase64 = encodeLicensePayload(JSON.stringify(licensePayload));
 
             // 3. Assinar
             const signed = await window.electronAPI.signLicensePayload(payloadBase64);
@@ -761,222 +785,49 @@ export default function DashboardAdmin() {
         });
 
         // Rodapé
+        for (let page = 1; page <= doc.getNumberOfPages(); page++) { doc.setPage(page); drawContactFooter(doc, getCompanySettings()); }
         doc.setFontSize(7); doc.setTextColor(...colors.gray);
         doc.text("TangoMasterGestao - Relatório Oficial de Licenciamento", pageWidth / 2, pageHeight - 10, { align: 'center' });
 
         doc.save('TangoMasterGestao_Licencas.pdf');
     };
 
-    // --- EXPORTAR RECIBO INDIVIDUAL (REDESIGN PREMIUM) ---
+    // --- CERTIFICADO DE LICENÇA (mesmo modelo gráfico dos documentos do ERP) ---
     const generateLicenseReceiptPDF = (record: GeneratedKeyRecord, isPreview: boolean = false) => {
-        const doc = new jsPDF();
-        const pageWidth = doc.internal.pageSize.getWidth();
-        const pageHeight = doc.internal.pageSize.getHeight();
-
-        const colors = {
-            red: [220, 30, 30] as [number, number, number],
-            dark: [30, 30, 30] as [number, number, number],
-            gray: [100, 100, 100] as [number, number, number],
-            lightGray: [240, 240, 240] as [number, number, number]
+        // Os dados assinados (NIF, dispositivos, identificador) vêm da própria chave.
+        let signed: { nif?: string; devices?: number; jti?: string; iat?: string; tier?: string } = {};
+        try {
+            const wrapper = JSON.parse(atob(record.key.replace(/\s+/g, '')));
+            signed = JSON.parse(decodeLicensePayload(wrapper.payload));
+        } catch { /* chave antiga ou ilegível: usa os dados do registo */ }
+        const planNames: Record<string, string> = {
+            monthly: 'Mensal', quarterly: 'Trimestral', biannual: 'Semestral', annual: 'Anual', lifetime: 'Vitalícia', trial: 'Demonstração (3 dias)'
         };
-
-        const drawCircles = (x: number, y: number, color: [number, number, number], opacity: number = 1) => {
-            doc.setDrawColor(...color);
-            doc.setLineWidth(3);
-            for (let i = 0; i < 4; i++) {
-                doc.setDrawColor(color[0], color[1], color[2]);
-                doc.circle(x, y, 10 + (i * 12), 'S');
-            }
-        };
-
-        // Geometria
-        doc.setLineWidth(8); doc.setDrawColor(...colors.red);
-        doc.circle(pageWidth + 5, -5, 45, 'S');
-        doc.circle(-5, pageHeight + 5, 45, 'S');
-
-        // Logo e Título
-        const logo = branding.invoiceLogo || branding.systemLogo;
-        if (logo) {
-            try {
-                let imgWidth = 30;
-                let imgHeight = 15;
-                try {
-                    const properties = doc.getImageProperties(logo);
-                    const originalWidth = properties.width;
-                    const originalHeight = properties.height;
-                    if (originalWidth && originalHeight) {
-                        const aspectRatio = originalWidth / originalHeight;
-                        if (aspectRatio > 2) {
-                            imgWidth = 30;
-                            imgHeight = 30 / aspectRatio;
-                        } else {
-                            imgHeight = 15;
-                            imgWidth = 15 * aspectRatio;
-                        }
-                    }
-                } catch (err) {
-                    console.warn("Could not get logo properties:", err);
-                }
-                const yOffset = 15 + (15 - imgHeight) / 2;
-                doc.addImage(logo, 'PNG', 20, yOffset, imgWidth, imgHeight, undefined, 'NONE');
-            } catch (e) { }
-        }
-
-        doc.setFontSize(18); doc.setFont("helvetica", "bold"); doc.setTextColor(...colors.dark);
-        doc.text("TangoMasterGestao", 55, 23);
-        doc.setFontSize(8); doc.setFont("helvetica", "normal"); doc.setTextColor(...colors.gray);
-        doc.text("SISTEMA DE GESTÃO INTELIGENTE & LICENCIAMENTO DIGITAL", 55, 28);
-
-        // Destinatário
-        const startY = 45;
-        doc.setFontSize(10); doc.setTextColor(...colors.gray); doc.text("To,", 20, startY);
-        doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(...colors.red);
-        doc.text((record.clientName || "CLIENTE").toUpperCase(), 20, startY + 8);
-
-        doc.setFontSize(9); doc.setTextColor(...colors.dark); doc.setFont("helvetica", "normal");
-        doc.text(`NIF: ${record.clientNif || "---"}`, 20, startY + 16);
-        doc.text(`TEL: ${record.clientPhone || "---"}`, 20, startY + 22);
-
-        doc.setFontSize(10); doc.setFont("helvetica", "bold"); doc.setTextColor(...colors.red);
-        doc.text("DATA DE EMISSÃO:", pageWidth - 80, startY + 8);
-        doc.setFont("helvetica", "normal"); doc.setTextColor(...colors.dark);
-        doc.text(format(new Date(record.createdAt), "dd/MM/yyyy"), pageWidth - 45, startY + 8);
-
-        // Certificado
-        const bodyY = 85;
-        doc.setFontSize(11); doc.setFont("helvetica", "bold");
-        doc.text("CERTIFICADO DE LICENCIAMENTO DIGITAL", 20, bodyY);
-        doc.setFontSize(9); doc.setFont("helvetica", "normal");
-        const mainText = `Certificamos que o terminal ${record.machineId} foi licenciado para uso do software Tango ERP, garantindo conformidade e suporte total durante o período contratado.`;
-        doc.text(doc.splitTextToSize(mainText, pageWidth - 40), 20, bodyY + 8);
-
-        // Tabela de Dados
-        const tableY = 110;
-        doc.setFillColor(...colors.lightGray); doc.rect(20, tableY, pageWidth - 40, 50, 'F');
-        doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.text("DETALHES DA SUBSCSCRIÇÃO", 25, tableY + 8);
-
-        doc.setFont("helvetica", "normal");
-        doc.text("PLANO:", 25, tableY + 18); doc.text(getLicenseTypeName(record.type).toUpperCase(), 65, tableY + 18);
-        doc.text("ID MÁQUINA:", 25, tableY + 26); doc.text(record.machineId, 65, tableY + 26);
-        doc.text("VALIDADE:", 25, tableY + 34); doc.setTextColor(...colors.red); doc.text(format(new Date(record.expirationDate), "dd/MM/yyyy"), 65, tableY + 34);
-
-        doc.setTextColor(...colors.dark);
-        doc.text("SERIAL:", 25, tableY + 45);
-        doc.setFont("helvetica", "italic"); doc.setFontSize(8);
-        doc.text("(Ver Anexo na Página 2)", 65, tableY + 45);
-        /* 
-        // SERIAL PAGE 1 REMOVED
-        doc.setLineWidth(0.5);
-        doc.roundedRect(60, tableY + 38, pageWidth - 80, 15, 2, 2, 'S'); // Box
-
-        doc.setFont("courier", "bold"); doc.setFontSize(8); // Increased size
-        doc.setTextColor(...colors.dark);
-
-        // Calculate centered position for Y or improved wrapping
-        const wrappedKey = doc.splitTextToSize(record.key, pageWidth - 90);
-        */
-
-        // Guia de Ativação
-        const guideY = 175;
-        doc.setFillColor(245, 245, 245); doc.rect(20, guideY, pageWidth - 40, 35, 'F');
-        doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(...colors.red);
-        doc.text("GUIA DE ATIVAÇÃO RÁPIDA", 25, guideY + 8);
-        doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...colors.dark);
-        const steps = [
-            "1. No sistema, vá a Definições > Licença.",
-            "2. Copie o ID da Máquina (MID).",
-            "3. Insira o Código Serial acima e valide."
-        ];
-        steps.forEach((s, i) => doc.text(s, 25, guideY + 16 + (i * 5)));
-
-        // Assinatura
-        const footerY = 230;
-        doc.setFontSize(10); doc.setTextColor(...colors.gray); doc.text("From,", 20, footerY);
-        doc.setFontSize(14); doc.setFont("helvetica", "bold"); doc.setTextColor(...colors.red);
-        doc.text("ADMINISTRAÇÃO TANGO", 20, footerY + 8);
-        doc.setDrawColor(...colors.gray); doc.line(20, footerY + 15, 80, footerY + 15);
-
-        // Rodapé de segurança
-
-        // Rodapé de segurança Pag 1 (Vazio conforme pedido)
-
-        // --- PÁGINA 2: SERIAL KEY ---
-        doc.addPage();
-
-        // Header Pagina 2
-        doc.setLineWidth(8); doc.setDrawColor(...colors.red);
-        doc.circle(pageWidth + 5, -5, 45, 'S');
-        doc.circle(-5, pageHeight + 5, 45, 'S');
-
-        // Logo Pagina 2
-        if (branding.systemLogo) {
-            try {
-                let imgWidth = 20;
-                let imgHeight = 20;
-                try {
-                    const properties = doc.getImageProperties(branding.systemLogo);
-                    const originalWidth = properties.width;
-                    const originalHeight = properties.height;
-                    if (originalWidth && originalHeight) {
-                        const aspectRatio = originalWidth / originalHeight;
-                        if (aspectRatio > 1) {
-                            imgWidth = 20;
-                            imgHeight = 20 / aspectRatio;
-                        } else {
-                            imgHeight = 20;
-                            imgWidth = 20 * aspectRatio;
-                        }
-                    }
-                } catch (err) {
-                    console.warn("Could not get system logo properties:", err);
-                }
-                const xOffset = pageWidth - 40 + (20 - imgWidth) / 2;
-                const yOffset = 15 + (20 - imgHeight) / 2;
-                doc.addImage(branding.systemLogo, 'PNG', xOffset, yOffset, imgWidth, imgHeight, undefined, 'NONE');
-            } catch (e) { }
-        }
-
-        doc.setFontSize(16); doc.setFont("helvetica", "bold"); doc.setTextColor(...colors.dark);
-        doc.text("ANEXO: SERIAL DE ATIVAÇÃO", 20, 40);
-        doc.setFontSize(10); doc.setFont("helvetica", "normal"); doc.setTextColor(...colors.gray);
-        doc.text("Utilize o código abaixo para ativar a sua licença.", 20, 46);
-
-        // --- Círculo Vermelho de Segurança ---
-        const centerX = pageWidth / 2;
-        const centerY = 120;
-        const radius = 65;
-
-        doc.setDrawColor(...colors.red);
-        doc.setLineWidth(2);
-        doc.circle(centerX, centerY, radius, 'S');
-
-        // Texto do Serial dentro do círculo
-        doc.setFont("courier", "bold");
-        doc.setFontSize(9);
-        doc.setTextColor(...colors.dark);
-
-        const serialText = record.key;
-        const chunkSize = 40; // Menor para caber no círculo
-        const chunks = serialText.match(new RegExp('.{1,' + chunkSize + '}', 'g')) || [serialText];
-
-        // Centralizar verticalmente os chunks
-        const totalHeight = chunks.length * 5;
-        const serialStartY = centerY - (totalHeight / 2) + 2;
-
-        chunks.forEach((chunk, index) => {
-            doc.text(chunk, centerX, serialStartY + (index * 5), { align: 'center' });
-        });
-
-        // Rodapé de finalização
-        doc.setFontSize(6); doc.setTextColor(...colors.gray);
-        doc.text("PÁGINA 2/2", pageWidth / 2, pageHeight - 15, { align: 'center' });
-
-        if (isPreview) {
-            const dataUri = doc.output('datauristring');
-            setPdfPreviewUrl(dataUri);
-        } else {
-            doc.save(`Certificado_${record.clientName || 'Licenca'}.pdf`);
-        }
+        const tier = signed.tier || record.tier;
+        const licenseNif = String(signed.nif || record.clientNif || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase();
+        const verificationSource = (signed.jti || record.id || '').replace(/[^0-9a-f]/gi, '').toUpperCase().padEnd(12, '0');
+        const result = generateLicenseCertificatePDF({
+            clientName: record.clientName || 'Cliente',
+            clientNif: record.clientNif,
+            clientPhone: record.clientPhone,
+            clientEmail: record.clientEmail,
+            machineId: record.machineId,
+            planLabel: planNames[record.type] || getLicenseTypeName(record.type),
+            tierLabel: tier === 'empresarial' ? 'Licença Empresarial' : 'Licença Pessoal',
+            devices: signed.devices || record.deviceCount,
+            issuedAt: signed.iat || record.createdAt,
+            expiresAt: record.expirationDate,
+            key: record.key,
+            verificationCode: verificationSource.slice(0, 12).match(/.{4}/g)!.join('-'),
+            companyNif: licenseNif.length >= 9 && licenseNif !== '999999999' ? licenseNif : null,
+        }, {
+            name: 'DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA',
+            logo: branding.invoiceLogo || branding.systemLogo || null,
+            phone: profile.phone || '+244 941 537 486',
+            email: profile.email || 'suporte@tangogestao.ao',
+            signerName: profile.name && profile.name !== 'Admin Master' ? profile.name : 'Administração Tango',
+        }, isPreview ? 'datauri' : 'save');
+        if (isPreview && result) setPdfPreviewUrl(result);
     };
 
     // --- ELIMINAR REGISTO FINANCEIRO ---
@@ -1057,7 +908,7 @@ export default function DashboardAdmin() {
         doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(...colors.dark);
         doc.text("2. Chave Pública (Verificação)", 20, 95);
         doc.setFontSize(9); doc.setFont("helvetica", "normal"); doc.setTextColor(...colors.gray);
-        const text2 = "A Chave Pública é usada no código-fonte do software do Cliente (Tango ERP) para validar as assinaturas geradas. Substitua a constante MASTER_PUBLIC_KEY em 'src/bibliotecas/licenciamento.ts'.";
+        const text2 = "A Chave Pública é usada no código-fonte do software do Cliente (Tango ERP) para validar as assinaturas geradas. Substitua a constante MASTER_PUBLIC_KEY em 'src/bibliotecas/chave-publica-licencas.ts'.";
         doc.text(doc.splitTextToSize(text2, pageWidth - 40), 20, 102);
 
         doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(...colors.dark);
@@ -1067,6 +918,7 @@ export default function DashboardAdmin() {
         doc.text(doc.splitTextToSize(text3, pageWidth - 40), 20, 132);
 
         // Rodapé
+        for (let page = 1; page <= doc.getNumberOfPages(); page++) { doc.setPage(page); drawContactFooter(doc, getCompanySettings()); }
         doc.setFontSize(7); doc.setTextColor(...colors.gray);
         doc.text("TangoMasterGestao - Documentação Técnica de Segurança", pageWidth / 2, pageHeight - 10, { align: 'center' });
 
@@ -1140,8 +992,11 @@ export default function DashboardAdmin() {
                     <nav className="space-y-1">
                         <SidebarItem id="painel" icon={LayoutDashboard} label="Visão Geral" />
                         <SidebarItem id="volume" icon={TrendingUp} label="Volume de Negócio" />
+                        <SidebarItem id="seguranca" icon={ShieldAlert} label="Segurança" />
                 <SidebarItem id="relatorios" icon={BarChart3} label="Relatórios" />
                         <SidebarItem id="licenciamento" icon={Key} label="Gerar Licenças" />
+                        <SidebarItem id="contratos" icon={FileText} label="Contratos de Venda" />
+                        <SidebarItem id="marcaagua" icon={FileText} label="Marca de Água" />
                         <SidebarItem id="empresas" icon={Cloud} label="Empresas Cloud" badge={subscriptionAlerts.length} />
                         <SidebarItem id="precos" icon={FileText} label="Gestão de Preços" />
                         <SidebarItem id="perfil" icon={Settings} label="Perfil & Configurações" />
@@ -1188,6 +1043,8 @@ export default function DashboardAdmin() {
 
                     {/* --- EMPRESAS CLOUD (Tenants & Chaves de Sincronização) --- */}
                     {activeTab === 'empresas' && <GestaoEmpresasCloud onSubscriptionPayment={handleSubscriptionPayment} />}
+                    {activeTab === 'contratos' && <ContratosSoftware logo={branding.invoiceLogo || branding.systemLogo} />}
+                    {activeTab === 'marcaagua' && <MarcaAguaMaster />}
 
                     {/* --- PAINEL --- */}
                     {activeTab === 'painel' && (
@@ -1264,7 +1121,7 @@ export default function DashboardAdmin() {
                                             <div>
                                                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Ticket Médio</p>
                                                 <div className="text-2xl font-bold text-amber-600 dark:text-amber-400 mt-2">
-                                                    {averageTicket.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' }).replace('KZ', '').trim()} AOA
+                                                    {formatCurrency(averageTicket)}
                                                 </div>
                                             </div>
                                             <div className="bg-amber-500/10 p-2 rounded-lg"><BarChartIcon className="h-5 w-5 text-amber-600 dark:text-amber-500" /></div>
@@ -1835,6 +1692,7 @@ export default function DashboardAdmin() {
 
                     {/* --- RELATÓRIOS --- */}
                     {activeTab === 'volume' && <VolumeNegocioSaas />}
+                    {activeTab === 'seguranca' && <SegurancaServidor />}
 
                     {activeTab === 'relatorios' && (
                         <div className="space-y-6">

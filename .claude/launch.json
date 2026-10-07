@@ -53,6 +53,17 @@
       "env": {
         "TANGO_DEV_API_PROXY": "http://localhost:3999"
       }
+    },
+    {
+      "name": "web-dev-8082",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "8082",
+        "--strictPort"
+      ],
+      "port": 8082
     }
   ]
 }

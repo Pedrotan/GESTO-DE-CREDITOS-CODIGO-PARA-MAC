@@ -48,12 +48,12 @@ import {
     Line
 } from 'recharts';
 import { jsPDF } from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 import { calculateClientScore, getRatingColor, ClientScore } from '@/bibliotecas/clientScoring';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { format } from 'date-fns';
 import { formatCurrency } from '@/bibliotecas/formatters';
-import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from '@/bibliotecas/pdf';
+import { applyBranding, fitPdfText, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from '@/bibliotecas/pdf';
 
 const RATING_COLORS = {
     'Excelente': '#22c55e',
@@ -367,9 +367,8 @@ export default function Scoring() {
         doc.roundedRect(16, titleY, 3.5, 11, 0.8, 0.8, 'F');
 
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(13);
         doc.setTextColor(dark[0], dark[1], dark[2]);
-        doc.text(`Relatório de Análise de Risco - ${client.name}`, 22, titleY + 5);
+        doc.text(fitPdfText(doc, `Relatório de Análise de Risco - ${client.name}`, doc.internal.pageSize.getWidth() - 22 - 16, 13, 9), 22, titleY + 5);
 
         doc.setFont('helvetica', 'normal');
         doc.setFontSize(7.5);
@@ -868,7 +867,7 @@ export default function Scoring() {
                                             </div>
                                             <div>
                                                 <div className="text-sm text-slate-600">Total Emprestado</div>
-                                                <div className="text-xl font-bold">{selectedClient.score.metrics.totalBorrowed.toLocaleString()} AOA</div>
+                                                <div className="text-xl font-bold">{formatCurrency(selectedClient.score.metrics.totalBorrowed)}</div>
                                             </div>
                                             <div>
                                                 <div className="text-sm text-slate-600">Meses como Cliente</div>

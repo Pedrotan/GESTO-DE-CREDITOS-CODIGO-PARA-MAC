@@ -76,7 +76,6 @@ import {
     WifiOff,
     Users,
     CreditCard,
-    DollarSign,
     FileCheck,
     BarChart,
     CheckSquare,
@@ -110,10 +109,12 @@ import { formatAngolanIBAN, identifyBankFromIBAN, validateAngolanIBAN, ANGOLAN_B
 import { v4 as uuidv4 } from 'uuid';
 import { appAdapter } from '@/bibliotecas/adaptador-aplicacao';
 import { validateLicense, getLicenseTypeName, getMachineId } from '@/bibliotecas/licenciamento';
+import { normalizeLicenseKey } from '@/bibliotecas/payload-licenca';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ServicoAutoBackup, AutoBackupConfig, AutoBackupLog } from '@/servicos/ServicoAutoBackup';
 import { ConflictReview } from '@/componentes/sync/ConflictReview';
+import { ConfiguracaoSimulador } from '@/componentes/simulador/ConfiguracaoSimulador';
 
 const SUPPORT_PHONE = "+244 941537486";
 const SYSTEM_NAME = "Tango Gestão de Créditos";
@@ -824,18 +825,27 @@ export default function Settings() {
     const handleSaveGeneral = async () => {
         try {
             // Verificar se a chave de licença foi alterada
-            const isNewKey = formData.licenseKey.trim() !== (companySettings?.licenseKey || '').trim();
+            const isNewKey = normalizeLicenseKey(formData.licenseKey) !== (companySettings?.licenseKey || '').trim();
 
-            if (isNewKey && formData.licenseKey.trim() !== '') {
+            if (isNewKey && normalizeLicenseKey(formData.licenseKey) !== '') {
                 // 1. Validar estrutura e assinatura
-                const licenseResult = await validateLicense(formData.licenseKey.trim());
+                const licenseResult = await validateLicense(normalizeLicenseKey(formData.licenseKey));
 
+                if (!licenseResult.isValid) {
+                    setAlertConfig({
+                        isOpen: true,
+                        title: "Licença não activada",
+                        description: licenseResult.message || "A chave de licença não é válida para este computador ou empresa.",
+                        type: "error"
+                    });
+                    return;
+                }
                 if (licenseResult.isValid) {
                     // 2. Validar uso único se houver rede Master
                     if (formData.syncUrl) {
                         const activation = await appAdapter.activateLicense(
                             formData.syncUrl,
-                            formData.licenseKey.trim(),
+                            normalizeLicenseKey(formData.licenseKey),
                             machineId
                         );
 
@@ -891,7 +901,7 @@ export default function Settings() {
                 enableSuppliersModule: formData.enableSuppliersModule,
                 enableSuppliersModuleAdminOnly: formData.enableSuppliersModuleAdminOnly,
                 enableMultiTenant: formData.enableMultiTenant,
-                licenseKey: formData.licenseKey.trim(),
+                licenseKey: normalizeLicenseKey(formData.licenseKey),
                 defaultSimulationInterestRate: Number(formData.defaultSimulationInterestRate),
                 defaultSimulationAdminFee: Number(formData.defaultSimulationAdminFee),
                 defaultSimulationIof: Number(formData.defaultSimulationIof),
@@ -1114,7 +1124,7 @@ export default function Settings() {
         setAlertConfig({
             isOpen: true,
             title: "FORMATAR BASE DE DADOS?",
-            description: "ATENÇÃO: Esta ação é IRREVERSÍVEL. Todos os clientes, créditos, pagamentos, contratos e registos de auditoria serão ELIMINADOS permanentemente. É altamente recomendado fazer um backup antes de prosseguir.",
+            description: "ATENÇÃO: Esta ação é IRREVERSÍVEL. Todos os clientes, créditos, pagamentos, e contratos serão ELIMINADOS permanentemente (os registos de auditoria são imutáveis e mantêm-se). É altamente recomendado fazer um backup antes de prosseguir.",
             type: "error",
             showCancel: true,
             actionLabel: "Sim, Formatar Tudo",
@@ -1129,13 +1139,12 @@ export default function Settings() {
                     await sqlite.exec('DELETE FROM payments');
                     await sqlite.exec('DELETE FROM contracts');
                     await sqlite.exec('DELETE FROM notifications');
-                    await sqlite.exec('DELETE FROM audit_logs');
                     await sqlite.exec('DELETE FROM chat_messages');
                     await sqlite.exec('DELETE FROM payment_gateways');
                     await sqlite.exec('DELETE FROM payment_references');
 
                     // Resetar sequências se necessário (SQLite autoincrement)
-                    await sqlite.exec("DELETE FROM sqlite_sequence WHERE name IN ('clients', 'credits', 'payments', 'contracts', 'notifications', 'audit_logs', 'chat_messages', 'payment_gateways', 'payment_references')");
+                    await sqlite.exec("DELETE FROM sqlite_sequence WHERE name IN ('clients', 'credits', 'payments', 'contracts', 'notifications', 'chat_messages', 'payment_gateways', 'payment_references')");
 
                     toastNotify({
                         title: "Base de Dados Formatada",
@@ -3381,6 +3390,11 @@ export default function Settings() {
                             )}
                         </CardFooter>
                     </Card>
+                </TabsContent>
+
+                {/* Simulador e Produtos */}
+                <TabsContent value="simulador" className="mt-6 space-y-6">
+                    <ConfiguracaoSimulador />
                 </TabsContent>
 
                 {/* Sobre */}

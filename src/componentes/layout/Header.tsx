@@ -10,7 +10,7 @@ import { Input } from '@/componentes/ui/input';
 import { Badge } from '@/componentes/ui/badge';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
-import { formatDateTime } from '@/bibliotecas/formatters';
+import { formatCurrency, formatDateTime } from '@/bibliotecas/formatters';
 import { cn, getFileUrl } from '@/bibliotecas/utils';
 import { ROLES } from '@/tipos/autenticacao';
 import { AccountSwitcher } from '@/componentes/contas/AccountSwitcher';
@@ -79,7 +79,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
     : dbAdapterMode === 'remote' ? 'Ligado a um servidor da rede local'
       : cloudLinked
         ? cloudStatus.state === 'error'
-          ? `Sincronização com a versão web falhou: ${cloudStatus.message || 'erro'}. Vai tentar de novo automaticamente.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
+          ? `Sincronização com a versão web falhou: ${(cloudStatus.message || 'erro').replace(/.+$/, '')}. Vai tentar de novo automaticamente.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
           : cloudStatus.state === 'synced' ? `Sincronizado com a versão web.${lastSyncText}`
             : `A sincronizar com a versão web.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}`
         : window.electronAPI ? 'Modo Local: clique para ligar este computador à versão web' : 'Modo Local';
@@ -375,7 +375,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                     >
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-medium">{cr.id}</span>
-                        <span className="text-[10px] font-bold">{cr.principalAmount} AOA</span>
+                        <span className="text-[10px] font-bold">{formatCurrency(cr.principalAmount)}</span>
                       </div>
                       <span className="text-[10px] text-muted-foreground">{cr.clientName}</span>
                     </button>
@@ -393,7 +393,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                     >
                       <div className="flex justify-between items-center">
                         <span className="text-sm font-medium">{p.reference || p.id}</span>
-                        <span className="text-[10px] font-bold">{p.amount} AOA</span>
+                        <span className="text-[10px] font-bold">{formatCurrency(p.amount)}</span>
                       </div>
                       <span className="text-[10px] text-muted-foreground">{p.clientName}</span>
                     </button>

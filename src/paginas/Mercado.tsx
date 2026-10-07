@@ -342,7 +342,7 @@ export default function Mercado() {
                                                 tickFormatter={(v: number) => fmt(v)}
                                             />
                                             <Tooltip
-                                                formatter={(v: number) => [`${fmt(v)} AOA`, selecionada.toUpperCase()]}
+                                                formatter={(v: number) => [`${fmt(v)} Kz`, selecionada.toUpperCase()]}
                                                 contentStyle={{ borderRadius: 12, fontSize: 12 }}
                                             />
                                             <Area
@@ -423,7 +423,7 @@ export default function Mercado() {
                                                             tickFormatter={(v: number) => v.toFixed(0)}
                                                         />
                                                         <Tooltip
-                                                            formatter={(v: number) => [`${fmt(v)} AOA`, codigo.toUpperCase()]}
+                                                            formatter={(v: number) => [`${fmt(v)} Kz`, codigo.toUpperCase()]}
                                                             contentStyle={{ borderRadius: 12, fontSize: 12 }}
                                                         />
                                                         <Line

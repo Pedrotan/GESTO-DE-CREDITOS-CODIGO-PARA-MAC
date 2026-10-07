@@ -20,6 +20,8 @@
     "src/bibliotecas/sync-operacoes.ts",
     "src/bibliotecas/volume-saas.ts",
     "src/bibliotecas/plano-pagamento.ts",
-    "src/bibliotecas/fecho-mes.ts"
+    "src/bibliotecas/fecho-mes.ts",
+    "src/bibliotecas/horario-acesso.ts",
+    "src/bibliotecas/alertas-auditoria.ts"
   ]
 }

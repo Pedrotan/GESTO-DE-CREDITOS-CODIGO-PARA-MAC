@@ -103,6 +103,9 @@ function sanitizeResult(res: any, document?: string): BIDataResult {
     };
 }
 
+const NOT_FOUND_MESSAGE = 'O documento não foi encontrado nos serviços de consulta. Confirme o número ou preencha os dados manualmente a partir do documento.';
+const UNAVAILABLE_MESSAGE = 'Não foi possível obter os dados automaticamente neste momento. Preencha os dados manualmente a partir do documento do cliente; pode confirmá-los nos portais oficiais (MINFIN ou SEPE) indicados abaixo do campo.';
+
 export class ServicoAngolaAPI {
     static async fetchBIData(
         biNumber: string,
@@ -127,10 +130,11 @@ export class ServicoAngolaAPI {
                 });
                 const result = await response.json().catch(() => null);
                 if (result?.success && response.ok) return sanitizeResult(result, document);
-                if (result?.message) return { ...result, success: false, name: '' };
-                return { success: false, name: '', message: 'O servidor de consulta devolveu uma resposta inválida. Verifique o endereço e a publicação da API.' };
+                // Documento inexistente é uma resposta definitiva; fornecedor por configurar ou indisponível
+                // não é: segue para as restantes fontes (consulta nativa do desktop e serviços públicos).
+                if (result?.code === 'DOCUMENT_NOT_FOUND') return { ...result, success: false, name: '', message: NOT_FOUND_MESSAGE };
             } catch {
-                return { success: false, name: '', message: 'Não foi possível ligar ao servidor de consulta. Verifique a ligação e o endereço configurado.' };
+                // Servidor inacessível: tenta as restantes fontes.
             }
         }
         try {
@@ -219,7 +223,7 @@ export class ServicoAngolaAPI {
             return {
                 success: false,
                 name: '',
-                message: 'Os serviços automáticos de consulta não responderam. Pode consultar diretamente no Portal do Contribuinte (MINFIN) ou no SEPE.',
+                message: UNAVAILABLE_MESSAGE,
                 officialLinks: {
                     minfin: LINKS_OFICIAIS_DOCUMENTOS.PORTAL_CONTRIBUINTE,
                     sepe: LINKS_OFICIAIS_DOCUMENTOS.SEPE_CONSULTA_NIF,
@@ -231,8 +235,8 @@ export class ServicoAngolaAPI {
                 success: false,
                 name: '',
                 message: error?.name === 'TimeoutError'
-                    ? 'O serviço de consulta demorou muito a responder. Pode aceder aos portais oficiais abaixo.'
-                    : 'Não foi possível consultar o documento automaticamente neste momento.',
+                    ? 'O serviço de consulta demorou muito a responder. ' + UNAVAILABLE_MESSAGE
+                    : UNAVAILABLE_MESSAGE,
                 officialLinks: {
                     minfin: LINKS_OFICIAIS_DOCUMENTOS.PORTAL_CONTRIBUINTE,
                     sepe: LINKS_OFICIAIS_DOCUMENTOS.SEPE_CONSULTA_NIF,

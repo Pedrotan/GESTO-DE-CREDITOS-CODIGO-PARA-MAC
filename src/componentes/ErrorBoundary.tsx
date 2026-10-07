@@ -1,4 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
+import { isChunkLoadError, reloadForNewVersion } from '@/bibliotecas/carregamento-modulos';
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
     constructor(props: { children: ReactNode }) {
@@ -12,6 +13,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
 
     componentDidCatch(error: Error, errorInfo: ErrorInfo) {
         console.error("Uncaught error:", error, errorInfo);
+        // Página de uma versão anterior (depois de um deploy): recarrega para obter a versão nova.
+        if (isChunkLoadError(error)) reloadForNewVersion();
     }
 
     render() {

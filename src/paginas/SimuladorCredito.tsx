@@ -1,1513 +1,908 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+    AlertTriangle, Calculator, CheckCircle2, FileDown, GitCompareArrows, History, Info, Loader2, Mail, MessageCircle,
+    RotateCcw, Save, Send, ShieldAlert, Sparkles, Undo2, UserRound, X,
+} from 'lucide-react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/componentes/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/componentes/ui/card';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
 import { Button } from '@/componentes/ui/button';
 import { Slider } from '@/componentes/ui/slider';
+import { Switch } from '@/componentes/ui/switch';
 import { Badge } from '@/componentes/ui/badge';
+import { Textarea } from '@/componentes/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/componentes/ui/tabs';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/componentes/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/componentes/ui/table';
-import { Calculator, TrendingUp, AlertTriangle, Download, DollarSign, Calendar, Percent, History, Brain, Trash2, CheckCircle2, XCircle, Info, Save, Search, FileSpreadsheet, Filter } from 'lucide-react';
+import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
+import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
+import { DecimalInput } from '@/componentes/ui/DecimalInput';
 import { AlertModal } from '@/componentes/ui/AlertModal';
-import { formatCurrency } from '@/bibliotecas/formatters';
+import { useToast } from '@/ganchos/usar-toast';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
-import { generateSimulationPDF } from '@/bibliotecas/pdf';
+import { useConfigSimulador } from '@/ganchos/usar-config-simulador';
 import { cn } from '@/bibliotecas/utils';
-import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
-import { useToast } from '@/ganchos/usar-toast';
+import { formatCurrency, formatDate, formatDecimal, formatPercent } from '@/bibliotecas/formatters';
 import {
-    LineChart,
-    Line,
-    XAxis,
-    YAxis,
-    CartesianGrid,
-    Tooltip,
-    Legend,
-    ResponsiveContainer,
-    AreaChart,
-    Area
-} from 'recharts';
+    AMORTIZATION_LABELS, GRACE_LABELS, effortRate, maxPrincipalForPayment, minMonthsForPayment, simulateCredit, stampDutyUseRate,
+    type SimulationResult,
+} from '@/bibliotecas/simulador-credito';
+import { productLimitErrors, type RiskLevel, type SimulatorConfig } from '@/bibliotecas/config-simulador';
+import { RISK_LABELS, assessRisk } from '@/bibliotecas/risco-simulacao';
+import { clientCreditStanding, newCreditBlockReason } from '@/bibliotecas/regras-credito';
+import { SIMULATION_NOTICE, legalContextFrom } from '@/bibliotecas/termos-legais';
+import type { Simulation } from '@/tipos/credito';
+import { CartoesResultado } from '@/componentes/simulador/CartoesResultado';
+import { TabelaCronograma } from '@/componentes/simulador/TabelaCronograma';
+import { GraficosSimulacao } from '@/componentes/simulador/GraficosSimulacao';
+import { HistoricoSimulacoes } from '@/componentes/simulador/HistoricoSimulacoes';
+import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
+import { ComparadorCenarios, MAX_SCENARIOS, type Scenario } from '@/componentes/simulador/ComparadorCenarios';
+import {
+    QUICK_TERMS, activeProducts, baseAnnualRate, buildInput, clientHistory, defaultForm, formFromSimulation, newSimulationNumber,
+    newVerificationCode, parseDetails, productFields, simulationStatus, type SimulatorForm, type StoredDetails,
+} from '@/componentes/simulador/modelo';
 
-interface AmortizationRow {
-    month: number;
-    payment: number;
-    interest: number;
-    amortization: number;
-    balance: number;
+type SavedRef = { id: string; number: string; code: string; issuedAt: Date; expiresAt: Date; signature: string; status: 'simulated' | 'converted'; convertedCreditId?: string | null };
+
+const stable = (value: unknown): string => JSON.stringify(value, (_key, item) => (item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.keys(item).sort().reduce((acc, key) => ({ ...acc, [key]: (item as Record<string, unknown>)[key] }), {})
+    : item));
+const signatureOf = (form: SimulatorForm, annualRate: number) => stable({ form, annualRate: Math.round(annualRate * 1e6) / 1e6 });
+const yearsLabel = (months: number) => {
+    if (!months) return '';
+    const years = months / 12;
+    return Number.isInteger(years) ? `${years} ${years === 1 ? 'ano' : 'anos'}` : `${formatDecimal(years, 1)} anos`;
+};
+const addDays = (date: Date, days: number) => new Date(date.getTime() + days * 86_400_000);
+
+const Section = ({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) => (
+    <div className={cn('space-y-3', className)}>
+        <Label className="text-xs font-bold uppercase text-muted-foreground">{title}</Label>
+        {children}
+    </div>
+);
+
+type Computed = {
+    ready: boolean;
+    baseRate: number;
+    riskAdjustment: number;
+    annualRate: number;
+    result: SimulationResult | null;
+    effort: number | null;
+    risk: ReturnType<typeof assessRisk>;
+    riskLevel: RiskLevel;
+};
+
+/** Cálculo completo: risco a partir da prestação sem ajuste, depois TAN ajustada ao risco e simulação final. */
+function compute(form: SimulatorForm, config: SimulatorConfig, history: ReturnType<typeof clientHistory>): Computed {
+    const ready = form.principal > 0 && form.months > 0;
+    const baseRate = baseAnnualRate(form);
+    const baseResult = ready ? simulateCredit(buildInput(form, config, baseRate)) : null;
+    const baseEffort = baseResult?.valid ? effortRate(baseResult.maxInstallment, form.otherDebts, form.income) : null;
+    const risk = assessRisk({
+        effortRate: baseEffort, effortLimit: config.effortLimit,
+        latePayments: history?.latePayments || 0, maxDaysOverdue: history?.maxDaysOverdue || 0, paidCredits: history?.paidCredits || 0,
+        activeCredits: history?.activeCredits || 0, defaultedCredits: history?.defaultedCredits || 0, guaranteeCoverage: history?.guaranteeCoverage || 0,
+    });
+    const riskLevel = form.riskOverride ?? risk.level;
+    const riskAdjustment = form.applyRiskAdjustment ? config.riskSpread[riskLevel] : 0;
+    const annualRate = Math.max(0, baseRate + riskAdjustment);
+    const result = ready ? simulateCredit(buildInput(form, config, annualRate)) : null;
+    const effort = result?.valid ? effortRate(result.maxInstallment, form.otherDebts, form.income) : null;
+    return { ready, baseRate, riskAdjustment, annualRate, result, effort, risk, riskLevel };
 }
 
 export function SimuladorCredito() {
-    const { companySettings, clients, simulations, addSimulation, deleteSimulation } = useData();
+    const { companySettings, clients, credits, payments, warranties, simulations, addSimulation, deleteSimulation, updateSimulationStatus, addCredit, addLog } = useData();
     const { user } = useAuth();
     const { toast } = useToast();
+    const navigate = useNavigate();
+    const { config, loading: configLoading } = useConfigSimulador();
 
-    // --- State ---
-    const [amount, setAmount] = useState<number>(0);
-    const [term, setTerm] = useState<number>(0);
-    const [clientName, setClientName] = useState<string>('');
-    const [clientIncome, setClientIncome] = useState<number>(0);
-    // Use defaults from settings or fallback
-    const [interestRate, setInterestRate] = useState<number>(companySettings?.defaultSimulationInterestRate || 3.5);
-    const [method, setMethod] = useState<'price' | 'sac'>('price');
-    const [riskProfile, setRiskProfile] = useState<'low' | 'medium' | 'high'>('medium');
+    const [tab, setTab] = useState('simulador');
+    const [form, setForm] = useState<SimulatorForm>(() => defaultForm(config));
+    const touched = useRef(false);
+    const [saved, setSaved] = useState<SavedRef | null>(null);
+    const [busy, setBusy] = useState<string | null>(null);
+    const [scenarios, setScenarios] = useState<Scenario[]>([]);
+    const [riskDialog, setRiskDialog] = useState<{ open: boolean; level: RiskLevel; justification: string }>({ open: false, level: 'medium', justification: '' });
+    const [riskError, setRiskError] = useState('');
+    const [convertOpen, setConvertOpen] = useState(false);
+    const [inverseOpen, setInverseOpen] = useState(false);
+    const [inverseTarget, setInverseTarget] = useState(0);
+    const [deleteTarget, setDeleteTarget] = useState<Simulation | null>(null);
 
-    // Additional Costs
-    const [adminFee, setAdminFee] = useState<number>(companySettings?.defaultSimulationAdminFee || 2.0);
-    const [iofRate, setIofRate] = useState<number>(companySettings?.defaultSimulationIof || 0.38);
+    // Quando a configuração partilhada chega, os valores do produto por omissão passam a ser os da empresa.
+    useEffect(() => { if (!configLoading && !touched.current) setForm(defaultForm(config)); }, [config, configLoading]);
 
-    // --- History State ---
-    const history = useMemo(() => simulations || [], [simulations]);
-    const [historySearch, setHistorySearch] = useState('');
-    const [minAmount, setMinAmount] = useState<number>(0);
-    const [maxAmount, setMaxAmount] = useState<number>(0);
-    const [selectedClientFilter, setSelectedClientFilter] = useState<string>('');
+    const products = useMemo(() => activeProducts(config), [config]);
+    const product = useMemo(() => config.products.find(item => item.id === form.productId) || products[0], [config.products, form.productId, products]);
+    const client = useMemo(() => clients.find(item => item.id === form.clientId), [clients, form.clientId]);
+    const history = useMemo(() => clientHistory(client, credits, payments, warranties as any, form.principal), [client, credits, payments, warranties, form.principal]);
+    const calc = useMemo(() => compute(form, config, history), [form, config, history]);
+    const { ready, result, effort, risk, riskLevel, annualRate } = calc;
+    const signature = useMemo(() => signatureOf(form, annualRate), [form, annualRate]);
+    const isSaved = !!saved && saved.signature === signature;
 
-    const filteredHistory = useMemo(() => {
-        let filtered = history;
+    const set = useCallback((changes: Partial<SimulatorForm>) => { touched.current = true; setForm(prev => ({ ...prev, ...changes })); }, []);
 
-        // Text search
-        if (historySearch) {
-            const search = historySearch.toLowerCase();
-            filtered = filtered.filter(h =>
-                (h.clientName && h.clientName.toLowerCase().includes(search)) ||
-                (h.reference && h.reference.toLowerCase().includes(search))
-            );
+    // ── Validação ────────────────────────────────────────────────────────────────────
+    const errors = useMemo(() => {
+        if (!ready) return [] as string[];
+        const list = productLimitErrors(product, form.principal, form.months, value => formatCurrency(value));
+        if (form.graceMonths >= form.months) list.push('A carência tem de ser inferior ao prazo do crédito.');
+        if (form.dueDay < 1 || form.dueDay > 28) list.push('O dia de vencimento tem de estar entre 1 e 28.');
+        if (Number.isNaN(new Date(`${form.startDate}T12:00:00`).getTime())) list.push('Indique uma data de início válida.');
+        return list;
+    }, [ready, product, form.principal, form.months, form.graceMonths, form.dueDay, form.startDate]);
+
+    const overLimit = effort !== null && effort > config.effortLimit;
+    const recommendation = useMemo(() => {
+        if (!overLimit || !result?.valid) return null;
+        const maxPayment = (config.effortLimit / 100) * form.income - form.otherDebts;
+        if (maxPayment <= 0) return { maxPayment: 0, maxAmount: 0, minMonths: null as number | null };
+        const { principal: _ignored, ...rest } = buildInput(form, config, annualRate);
+        const maxAmount = Math.min(product.maxAmount, maxPrincipalForPayment(maxPayment, rest, Math.max(product.maxAmount, form.principal) * 1.5));
+        const minMonths = minMonthsForPayment(maxPayment, buildInput(form, config, annualRate), product.maxMonths);
+        return { maxPayment, maxAmount, minMonths };
+    }, [overLimit, result, config, form, annualRate, product]);
+
+    const missingReason = useMemo(() => {
+        const name = !form.clientName.trim();
+        if (name && !form.principal) return 'Indique o nome do cliente e o montante.';
+        if (name) return 'Indique o nome do cliente.';
+        if (!form.principal) return 'Indique o montante.';
+        if (!form.months) return 'Indique o prazo.';
+        if (errors.length) return errors[0];
+        if (form.riskOverride && form.riskJustification.trim().length < 10) return 'Justifique a alteração do nível de risco.';
+        return null;
+    }, [form.clientName, form.principal, form.months, form.riskOverride, form.riskJustification, errors]);
+
+    const standing = useMemo(() => (client ? clientCreditStanding(client.id, credits) : null), [client, credits]);
+    const convertReason = useMemo(() => {
+        if (missingReason) return missingReason;
+        if (!client) return 'Só é possível converter simulações de clientes registados. Seleccione o cliente na pesquisa.';
+        // Clientes inactivos podem pedir: o pedido segue sempre para aprovação. Só os bloqueados não podem.
+        if (client.status === 'blocked' || client.blocked) return `O cliente está bloqueado${client.blockReason ? `: ${client.blockReason}` : ''}.`;
+        const blocked = standing ? newCreditBlockReason(standing, value => formatCurrency(value)) : null;
+        if (blocked) return `O cliente tem créditos por liquidar. ${blocked}`;
+        if (form.graceMonths > 0) return 'Os pedidos de crédito não suportam carência: retire a carência para converter.';
+        if (isSaved && saved?.status === 'converted') return 'Esta simulação já foi convertida em pedido de crédito.';
+        return null;
+    }, [missingReason, client, standing, form.graceMonths, isSaved, saved]);
+
+    // ── Cliente e produto ────────────────────────────────────────────────────────────
+    const clientOptions = useMemo(() => clients.filter(item => !item.deletedAt).map(item => ({
+        value: item.id, label: item.name, subLabel: [item.nif && `NIF ${item.nif}`, item.phone].filter(Boolean).join(' · '), keywords: `${item.nif || ''} ${item.phone || ''} ${item.email || ''}`,
+    })), [clients]);
+
+    const selectClient = (id: string) => {
+        const selected = clients.find(item => item.id === id);
+        if (!selected) return;
+        const info = clientHistory(selected, credits, payments, warranties as any, form.principal);
+        set({
+            clientId: selected.id, clientName: selected.name, clientNif: selected.nif || '', clientPhone: selected.phone || '', clientEmail: selected.email || '',
+            clientAddress: selected.address || '', income: Number(selected.monthlyIncome) || 0, otherDebts: info?.monthlyDebts || 0,
+            riskOverride: null, riskJustification: '',
+        });
+    };
+    const clearClient = () => set({ clientId: null, clientName: '', clientNif: '', clientPhone: '', clientEmail: '', clientAddress: '', income: 0, otherDebts: 0, riskOverride: null, riskJustification: '' });
+
+    const selectProduct = (id: string) => {
+        const next = config.products.find(item => item.id === id);
+        if (!next) return;
+        const clamp = (value: number, min: number, max: number) => (value ? Math.min(max, Math.max(min, value)) : value);
+        set({ ...productFields(next, config), principal: clamp(form.principal, next.minAmount, next.maxAmount), months: clamp(form.months, next.minMonths, next.maxMonths) });
+    };
+
+    // ── Guardar, PDF, partilha e conversão ───────────────────────────────────────────
+    const buildDetails = (): StoredDetails => ({
+        version: 2, form, productName: product.name, baseRate: calc.baseRate, riskAdjustment: calc.riskAdjustment, annualRate,
+        risk: { calculated: risk.level, level: riskLevel, score: risk.score, overridden: !!form.riskOverride, justification: form.riskOverride ? form.riskJustification : undefined },
+        effortRate: effort,
+        summary: {
+            taeg: result?.taeg ?? null, mtic: result?.mtic || 0, netReceived: result?.netReceived || 0, installmentBase: result?.installmentBase || 0,
+            totalInterest: result?.totalInterest || 0, totalTaxes: result?.totalTaxes || 0, totalCommissions: result?.totalCommissions || 0, totalInsurance: result?.totalInsurance || 0,
+        },
+        settings: { stampDuty: config.stampDuty, extraHolidays: config.extraHolidays, effortLimit: config.effortLimit, lateSurcharge: config.lateSurcharge, validityDays: config.validityDays, indexName: config.indexName },
+    });
+
+    const save = async (): Promise<SavedRef | null> => {
+        if (missingReason || !result?.valid) {
+            toast({ title: 'Simulação incompleta', description: missingReason || 'Indique o montante e o prazo.', variant: 'destructive' });
+            return null;
         }
-
-        // Amount range filter
-        if (minAmount > 0) {
-            filtered = filtered.filter(h => h.amount >= minAmount);
-        }
-        if (maxAmount > 0) {
-            filtered = filtered.filter(h => h.amount <= maxAmount);
-        }
-
-        // Client filter
-        if (selectedClientFilter) {
-            filtered = filtered.filter(h => h.clientName === selectedClientFilter);
-        }
-
-        return filtered;
-    }, [history, historySearch, minAmount, maxAmount, selectedClientFilter]);
-
-    // --- Modal States ---
-    const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
-    const [loadConfirmOpen, setLoadConfirmOpen] = useState(false);
-    const [detailsModalOpen, setDetailsModalOpen] = useState(false);
-    const [selectedHistoryEntry, setSelectedHistoryEntry] = useState<any>(null);
-    const [saveSuccessOpen, setSaveSuccessOpen] = useState(false);
-
-    useEffect(() => {
-        // Histórico agora vem do useData() via refreshData() inicial
-    }, []);
-
-    const saveToHistory = async () => {
-        // Generate a unique reference: SIM-YYYY-XXXX (last 4 of timestamp)
-        const year = new Date().getFullYear();
-        const random = Math.floor(Math.random() * 9000) + 1000;
-        const reference = `SIM-${year}-${random}`;
-
-        const newEntry = {
-            id: crypto.randomUUID(),
-            reference,
-            date: new Date().toISOString(),
-            clientName: clientName.trim() || 'Simulação Sem Nome',
-            clientIncome,
-            amount,
-            term,
-            interestRate,
-            method,
-            riskProfile,
-            totalPayment: simulation.totalPayment,
-            monthlyPayment: simulation.rows[0]?.payment || 0,
-            aiAnalysis: JSON.stringify(aiResult),
-            createdAt: new Date().toISOString()
+        if (isSaved && saved) return saved;
+        const used = new Set(simulations.map(item => item.reference));
+        let number = newSimulationNumber();
+        while (used.has(number)) number = newSimulationNumber();
+        const issuedAt = new Date();
+        const expiresAt = addDays(issuedAt, config.validityDays);
+        const record: Simulation = {
+            id: crypto.randomUUID(), reference: number, date: issuedAt, clientName: form.clientName.trim(), clientIncome: form.income,
+            amount: form.principal, term: form.months, interestRate: Math.round(annualRate * 10000) / 10000, method: form.system, riskProfile: riskLevel,
+            totalPayment: result.totalPayments, monthlyPayment: result.installment, createdAt: issuedAt, status: 'simulated',
+            clientId: form.clientId, productId: product.id, verificationCode: newVerificationCode(), expiresAt, details: JSON.stringify(buildDetails()), updatedAt: issuedAt,
         };
-
-        await addSimulation(newEntry as any);
-
-        // Show success modal and close after 2s
-        setSaveSuccessOpen(true);
-        setTimeout(() => setSaveSuccessOpen(false), 2000);
+        await addSimulation(record);
+        const ref: SavedRef = { id: record.id, number, code: record.verificationCode!, issuedAt, expiresAt, signature, status: 'simulated' };
+        setSaved(ref);
+        return ref;
     };
 
-    const deleteFromHistory = async (id: string) => {
-        await deleteSimulation(id);
+    const handleSave = async () => {
+        setBusy('save');
+        try {
+            const ref = await save();
+            if (ref) toast({ title: 'Guardada no histórico', description: `Simulação ${ref.number} · código ${ref.code} · válida até ${formatDate(ref.expiresAt)}.` });
+        } catch (error: any) {
+            toast({ title: 'Não foi possível guardar', description: error?.message, variant: 'destructive' });
+        } finally { setBusy(null); }
     };
 
-    const loadFromHistory = (entry: any) => {
-        setClientName(entry.clientName === 'Simulação Sem Nome' ? '' : entry.clientName);
-        setClientIncome(entry.clientIncome);
-        setAmount(entry.amount);
-        setTerm(entry.term);
-        setInterestRate(entry.interestRate);
-        setMethod(entry.method);
-        setRiskProfile(entry.riskProfile);
-        // If it was loaded, entry already has aiAnalysis as object or string
+    const legal = useMemo(() => legalContextFrom(companySettings, config), [companySettings, config]);
+
+    const sheetFor = (input: { form: SimulatorForm; result: SimulationResult; annualRate: number; baseRate: number; riskAdjustment: number; productName: string; effort: number | null; riskLevel: RiskLevel; overridden: boolean; justification?: string; number: string; code: string; issuedAt: Date; expiresAt: Date; settings: Pick<SimulatorConfig, 'effortLimit' | 'lateSurcharge' | 'validityDays' | 'indexName'> }) => ({
+        number: input.number, verificationCode: input.code, issuedAt: input.issuedAt, expiresAt: input.expiresAt,
+        client: { name: input.form.clientName, nif: input.form.clientNif, phone: input.form.clientPhone, email: input.form.clientEmail, address: input.form.clientAddress, income: input.form.income, otherDebts: input.form.otherDebts, registered: !!input.form.clientId },
+        productName: input.productName,
+        params: {
+            principal: input.form.principal, months: input.form.months, system: input.form.system, startDate: input.form.startDate, dueDay: input.form.dueDay,
+            graceMonths: input.form.graceMonths, graceType: input.form.graceType, rateType: input.form.rateType, indexName: input.settings.indexName,
+            indexValue: input.form.indexValue, spread: input.form.spread, baseRate: input.baseRate, riskAdjustment: input.riskAdjustment, annualRate: input.annualRate,
+            feePayment: input.form.feePayment, openingFee: input.form.openingFee, processingFee: input.form.processingFee, insuranceRate: input.form.insuranceEnabled ? input.form.insuranceRate : 0,
+        },
+        result: input.result, effortRate: input.effort, effortLimit: input.settings.effortLimit,
+        risk: { level: input.riskLevel, overridden: input.overridden, justification: input.justification },
+        lateSurcharge: input.settings.lateSurcharge, validityDays: input.settings.validityDays,
+    });
+
+    const handlePdf = async () => {
+        setBusy('pdf');
+        try {
+            const ref = await save();
+            if (!ref || !result) return;
+            const { generateSimulationSheetPdf } = await import('@/bibliotecas/ficha-simulacao-pdf');
+            await generateSimulationSheetPdf(sheetFor({
+                form, result, annualRate, baseRate: calc.baseRate, riskAdjustment: calc.riskAdjustment, productName: product.name, effort, riskLevel,
+                overridden: !!form.riskOverride, justification: form.riskJustification, number: ref.number, code: ref.code, issuedAt: ref.issuedAt, expiresAt: ref.expiresAt, settings: config,
+            }), companySettings, user?.name, legal);
+        } catch (error: any) {
+            toast({ title: 'Não foi possível gerar a ficha', description: error?.message, variant: 'destructive' });
+        } finally { setBusy(null); }
     };
 
-    // --- Confirmation Handlers ---
-    const handleLoadFromHistory = (entry: any) => {
-        setSelectedHistoryEntry(entry);
-        setLoadConfirmOpen(true);
-    };
-
-    const confirmLoadFromHistory = () => {
-        if (selectedHistoryEntry) {
-            loadFromHistory(selectedHistoryEntry);
-            setLoadConfirmOpen(false);
-            // Open details modal after loading
-            setDetailsModalOpen(true);
-            // Keep selectedHistoryEntry for details modal
+    const historyPdf = async (simulation: Simulation) => {
+        try {
+            const details = parseDetails(simulation);
+            const savedForm = formFromSimulation(simulation, config);
+            const settings = { ...config, ...(details?.settings || {}) };
+            const rate = details?.annualRate ?? (Number(simulation.interestRate) || 0) * (details ? 1 : 12);
+            const replay = simulateCredit(buildInput(savedForm, settings, rate));
+            if (!replay.valid) throw new Error('A simulação guardada não tem montante ou prazo válidos.');
+            const issuedAt = new Date(simulation.date);
+            const { generateSimulationSheetPdf } = await import('@/bibliotecas/ficha-simulacao-pdf');
+            await generateSimulationSheetPdf(sheetFor({
+                form: savedForm, result: replay, annualRate: rate, baseRate: details?.baseRate ?? rate, riskAdjustment: details?.riskAdjustment ?? 0,
+                productName: details?.productName || 'Crédito', effort: details?.effortRate ?? effortRate(replay.maxInstallment, savedForm.otherDebts, savedForm.income),
+                riskLevel: (details?.risk.level || simulation.riskProfile) as RiskLevel, overridden: !!details?.risk.overridden, justification: details?.risk.justification,
+                number: simulation.reference, code: simulation.verificationCode || '—', issuedAt,
+                expiresAt: simulation.expiresAt ? new Date(simulation.expiresAt) : addDays(issuedAt, settings.validityDays), settings,
+            }), companySettings, user?.name, legalContextFrom(companySettings, settings));
+        } catch (error: any) {
+            toast({ title: 'Não foi possível gerar a ficha', description: error?.message, variant: 'destructive' });
         }
     };
 
-    const handleDeleteFromHistory = (entry: any) => {
-        setSelectedHistoryEntry(entry);
-        setDeleteConfirmOpen(true);
+    const shareText = () => {
+        if (!result?.valid) return '';
+        return [
+            `*Simulação de crédito — ${companySettings?.name || 'Tango'}*`,
+            isSaved && saved ? `N.º ${saved.number} (válida até ${formatDate(saved.expiresAt)})` : null,
+            form.clientName ? `Cliente: ${form.clientName}` : null,
+            `Produto: ${product.name}`,
+            `Montante: ${formatCurrency(form.principal)} · Prazo: ${form.months} meses`,
+            `${form.system === 'price' ? 'Prestação mensal' : '1.ª prestação'}: ${formatCurrency(result.installment)}`,
+            `TAN: ${formatPercent(annualRate)} · TAEG: ${result.taeg === null ? '—' : formatPercent(result.taeg)}`,
+            `Montante a receber: ${formatCurrency(result.netReceived)}`,
+            `MTIC: ${formatCurrency(result.mtic)}`,
+            '',
+            SIMULATION_NOTICE,
+        ].filter(line => line !== null).join('\n');
     };
 
-    const confirmDeleteFromHistory = () => {
-        if (selectedHistoryEntry) {
-            deleteFromHistory(selectedHistoryEntry.id);
-            setDeleteConfirmOpen(false);
-            setSelectedHistoryEntry(null);
-        }
-    };
-
-    // --- Risk Adjustment Effect ---
-    useEffect(() => {
-        // Only override if user hasn't started manually typing custom rates (simplified logic: check if it matches default/profile)
-        // For now, let's keep it responsive to buttons for better UX
-        const baseRate = companySettings?.defaultSimulationInterestRate || 3.5;
-
-        switch (riskProfile) {
-            case 'low':
-                setInterestRate(baseRate - 1.0 > 0 ? baseRate - 1.0 : 1.0); // Simple heuristic
-                break;
-            case 'medium':
-                setInterestRate(baseRate);
-                break;
-            case 'high':
-                setInterestRate(baseRate + 1.5);
-                break;
-        }
-    }, [riskProfile, companySettings?.defaultSimulationInterestRate]);
-
-    // --- Calculations ---
-    const simulation = useMemo(() => {
-        const rows: AmortizationRow[] = [];
-        let balance = amount;
-        let totalInterest = 0;
-        let totalPayment = 0;
-
-        const i = interestRate / 100;
-        const n = term;
-
-        // Calculate upfront costs
-        const adminFeeValue = amount * (adminFee / 100);
-        const iofValue = amount * (iofRate / 100);
-        const totalUpfrontCosts = adminFeeValue + iofValue;
-
-        if (n <= 0 || amount <= 0) {
-            return {
-                rows: [],
-                totalInterest: 0,
-                totalPayment: 0,
-                totalUpfrontCosts: 0,
-                totalCost: 0,
-                cetTotal: 0
-            };
-        }
-
-        let monthlyPayment = 0;
-
-        if (method === 'price') {
-            // formula: PMT = PV * (i * (1+i)^n) / ((1+i)^n - 1)
-            monthlyPayment = amount * (i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);
-        }
-
-        // Amortization Schedule
-        for (let m = 1; m <= n; m++) {
-            let interest = balance * i;
-            let amortization = 0;
-            let payment = 0;
-
-            if (method === 'price') {
-                payment = monthlyPayment;
-                amortization = payment - interest;
-            } else {
-                // SAC: Constant Amortization
-                amortization = amount / n;
-                payment = amortization + interest;
-            }
-
-            balance -= amortization;
-            if (balance < 0.01) balance = 0; // Floating point fix
-
-            totalInterest += interest;
-            totalPayment += payment;
-
-            rows.push({
-                month: m,
-                payment,
-                interest,
-                amortization,
-                balance
-            });
-        }
-
-        const totalCost = totalPayment + totalUpfrontCosts;
-        const cetTotal = ((totalCost / amount) - 1) * 100;
-
-        return {
-            rows,
-            totalInterest,
-            totalPayment,
-            totalUpfrontCosts,
-            totalCost,
-            cetTotal
-        };
-    }, [amount, term, interestRate, method, adminFee, iofRate]);
-
-    // --- AI Risk Analysis (Tango Expert v3) ---
-    const aiResult = useMemo(() => {
-        if (!clientIncome || clientIncome <= 0) return null;
-
-        const firstPayment = simulation.rows[0]?.payment || 0;
-        if (firstPayment <= 0) return null;
-
-        const dti = (firstPayment / clientIncome) * 100; // Debt-to-Income ratio
-        const totalInterestRatio = (simulation.totalInterest / amount) * 100;
-
-        let status: 'safe' | 'warning' | 'danger' = 'safe';
-        let message = '';
-        let detailedAdvice = '';
-        let suggestion = null;
-
-        if (dti <= 30) {
-            status = 'safe';
-            message = `Análise Positiva: O rácio de endividamento (DTI) é de ${dti.toFixed(1)}%. Este valor está abaixo do limite prudencial de 30%, o que indica uma capacidade de pagamento confortável.`;
-            detailedAdvice = "Com base neste perfil, o crédito é considerado de baixo risco. Sugerimos manter uma reserva de emergência equivalente a 6 meses de despesas para maior segurança contra imprevistos económicos.";
-        } else if (dti <= 45) {
-            status = 'warning';
-            message = `Atenção Necessária: O seu DTI de ${dti.toFixed(1)}% entra na zona de alerta. Acima de 30%, a sua liquidez mensal para alimentação e saúde pode ser afectada por oscilações na economia ou inflação.`;
-            detailedAdvice = "Recomendamos que verifique se possui outras dívidas ativas. Para maior saúde financeira, idealmente o montante da prestação não deveria exceder 30% da sua renda líquida.";
-            const targetPayment = clientIncome * 0.30;
-            const suggestedAmount = (amount * targetPayment) / firstPayment;
-            suggestion = Math.floor(suggestedAmount / 1000) * 1000;
+    const share = async (channel: 'whatsapp' | 'email') => {
+        const ref = await save();
+        if (!ref) return;
+        const text = shareText();
+        if (channel === 'whatsapp') {
+            const phone = form.clientPhone.replace(/\D/g, '');
+            const number = phone ? (phone.startsWith('244') ? phone : phone.startsWith('9') ? `244${phone}` : phone) : '';
+            window.open(`https://wa.me/${number}?text=${encodeURIComponent(text)}`, '_blank');
         } else {
-            status = 'danger';
-            message = `Risco Financeiro Elevado: A prestação compromete ${dti.toFixed(1)}% do seu rendimento líquido. Segundo os padrões bancários e de saúde financeira, isto coloca o cliente em alto risco de incumprimento.`;
-            detailedAdvice = `O custo total dos juros representa ${totalInterestRatio.toFixed(1)}% do capital solicitado. Com este nível de endividamento, qualquer imprevisto pode levar ao default. Recomendamos vivamente a redução do montante ou o aumento do prazo (se possível).`;
-            const targetPayment = clientIncome * 0.30;
-            const suggestedAmount = (amount * targetPayment) / firstPayment;
-            suggestion = Math.floor(suggestedAmount / 1000) * 1000;
+            const subject = `Simulação de crédito ${ref.number} — ${companySettings?.name || ''}`.trim();
+            window.location.href = `mailto:${encodeURIComponent(form.clientEmail || '')}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(text.replace(/\*/g, ''))}`;
         }
-
-        return { dti, status, message, detailedAdvice, suggestion };
-    }, [clientIncome, simulation.rows, amount, simulation.totalInterest]);
-
-    const handleApplySuggestion = () => {
-        if (aiResult?.suggestion) {
-            setAmount(aiResult.suggestion);
-        }
+        void addLog('update', 'system', `Simulação ${ref.number} partilhada por ${channel === 'whatsapp' ? 'WhatsApp' : 'email'} (${form.clientName}).`, user?.id, user?.name);
     };
 
-    const handleExportPDF = () => {
-        generateSimulationPDF(
-            simulation,
-            {
-                name: clientName,
-                income: clientIncome,
-                requestedAmount: amount,
-                term: term,
-                interestRate: interestRate,
-                method: method,
-                reference: 'PROPOSTA-INDIVIDUAL'
-            },
-            companySettings,
-            user?.name || 'Consultor',
-            aiResult
-        );
+    const convert = async () => {
+        if (convertReason || !client || !result?.valid) return;
+        setBusy('convert');
+        try {
+            const ref = await save();
+            if (!ref) return;
+            const creditId = `CR-${crypto.randomUUID()}`;
+            const ownCredits = credits.filter(item => item.clientId === client.id && !['rejected', 'cancelled'].includes(item.status));
+            const start = new Date(`${form.startDate}T12:00:00`);
+            const due = result.lastDueDate ? new Date(`${result.lastDueDate}T12:00:00`) : addDays(start, form.months * 30);
+            await addCredit({
+                id: creditId, clientId: client.id, clientName: client.name, principalAmount: form.principal, currentBalance: form.principal,
+                interestRate: Math.round(annualRate * 10000) / 10000, lateInterestRate: client.lateInterestRate || 1, installments: form.months, paidInstallments: 0,
+                startDate: start, dueDate: due, status: 'pending_approval', requestedBy: user?.name || 'Sistema', requestedAt: new Date(),
+                daysOverdue: 0, accruedInterest: result.totalInterest, lateInterest: 0, totalDue: form.principal + result.totalInterest,
+                amortizationMethod: form.system === 'sac' ? 'SAC' : 'PRICE', creditNumber: ownCredits.length + 1, createdAt: new Date(),
+                targetMonthId: form.startDate.slice(0, 7),
+            } as any, user ? { id: user.id, name: user.name } : undefined, { productId: product.id, effortRate: effort });
+            await updateSimulationStatus(ref.id, 'converted', creditId);
+            setSaved({ ...ref, status: 'converted', convertedCreditId: creditId });
+            await addLog('create', 'credit', `Pedido de crédito ${creditId} criado a partir da simulação ${ref.number} (${product.name}, ${formatCurrency(form.principal)}, ${form.months} meses, TAN ${formatPercent(annualRate)}, TAEG ${result.taeg === null ? 'n.d.' : formatPercent(result.taeg)}, MTIC ${formatCurrency(result.mtic)}).`, user?.id, user?.name, null, { simulation: ref.number, creditId });
+            setConvertOpen(false);
+            toast({ title: 'Pedido de crédito enviado para aprovação', description: `A simulação ${ref.number} foi convertida no pedido ${creditId.slice(0, 13)}…` });
+        } catch (error: any) {
+            toast({ title: 'Não foi possível converter', description: error?.message, variant: 'destructive' });
+        } finally { setBusy(null); }
     };
 
-    const handleDownloadHistoryPDF = (entry: any) => {
-        // Reconstruct simulation data from history entry
-        const reconstructedSimulation = {
-            rows: [],
-            totalInterest: 0,
-            totalPayment: entry.totalPayment || 0,
-            totalUpfrontCosts: 0,
-            totalCost: entry.totalPayment || 0,
-            cetTotal: 0
-        };
-
-        // Reconstruct amortization schedule
-        let balance = entry.amount;
-        const i = entry.interestRate / 100;
-        const n = entry.term;
-        let totalInterest = 0;
-
-        if (entry.method === 'price') {
-            const monthlyPayment = entry.amount * (i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);
-            for (let m = 1; m <= n; m++) {
-                const interest = balance * i;
-                const amortization = monthlyPayment - interest;
-                balance -= amortization;
-                totalInterest += interest;
-                reconstructedSimulation.rows.push({
-                    month: m,
-                    payment: monthlyPayment,
-                    interest,
-                    amortization,
-                    balance: Math.max(0, balance)
-                });
-            }
-        } else {
-            const amortization = entry.amount / n;
-            for (let m = 1; m <= n; m++) {
-                const interest = balance * i;
-                const payment = amortization + interest;
-                balance -= amortization;
-                totalInterest += interest;
-                reconstructedSimulation.rows.push({
-                    month: m,
-                    payment,
-                    interest,
-                    amortization,
-                    balance: Math.max(0, balance)
-                });
-            }
-        }
-
-        reconstructedSimulation.totalInterest = totalInterest;
-
-        // Parse AI analysis if stored as string
-        let aiAnalysis = entry.aiAnalysis;
-        if (typeof aiAnalysis === 'string') {
-            try {
-                aiAnalysis = JSON.parse(aiAnalysis);
-            } catch (e) {
-                aiAnalysis = null;
-            }
-        }
-
-        generateSimulationPDF(
-            reconstructedSimulation,
-            {
-                name: entry.clientName,
-                income: entry.clientIncome,
-                requestedAmount: entry.amount,
-                term: entry.term,
-                interestRate: entry.interestRate,
-                method: entry.method,
-                reference: entry.reference || 'HISTÓRICO'
-            },
-            companySettings,
-            user?.name || 'Consultor',
-            aiAnalysis
-        );
+    // ── Risco ────────────────────────────────────────────────────────────────────────
+    const applyRiskOverride = async () => {
+        const justification = riskDialog.justification.trim().replace(/\s+/g, ' ');
+        // Justificação válida: 20+ caracteres, 3+ palavras, sem caracteres repetidos e diferente das anteriores.
+        const invalid = await ServicoAuditoriaAvancada.checkJustification(justification, user?.id);
+        if (invalid) { setRiskError(invalid); return; }
+        setRiskError('');
+        set({ riskOverride: riskDialog.level, riskJustification: justification });
+        setRiskDialog(prev => ({ ...prev, open: false }));
+        await addLog('update', 'system', `Simulador: nível de risco de ${form.clientName || 'cliente não identificado'} alterado de ${RISK_LABELS[risk.level]} para ${RISK_LABELS[riskDialog.level]}. Justificação: ${justification}`,
+            user?.id, user?.name, { level: RISK_LABELS[risk.level], score: risk.score }, { level: RISK_LABELS[riskDialog.level] },
+            { justification, override: true, clientId: form.clientId || undefined, clientName: form.clientName || undefined, from: risk.level, to: riskDialog.level });
+    };
+    const resetRisk = async () => {
+        const previous = form.riskOverride;
+        set({ riskOverride: null, riskJustification: '' });
+        if (previous) await addLog('update', 'system', `Simulador: alteração manual do risco (${RISK_LABELS[previous]}) removida; volta ao cálculo automático (${RISK_LABELS[risk.level]}).`, user?.id, user?.name);
     };
 
-    const handleExportClientHistory = async () => {
-        if (!selectedClientFilter) return;
-
-        const clientSimulations = history.filter(h => h.clientName === selectedClientFilter);
-
-        if (clientSimulations.length === 0) {
-            toast({
-                title: 'Nenhuma simulação encontrada',
-                description: `Não há simulações para ${selectedClientFilter}`,
-                variant: 'destructive'
+    // ── Histórico ────────────────────────────────────────────────────────────────────
+    const reopen = (simulation: Simulation, asNew: boolean) => {
+        touched.current = true;
+        const next = formFromSimulation(simulation, config);
+        const details = parseDetails(simulation);
+        setForm(next);
+        if (!asNew && details) {
+            setSaved({
+                id: simulation.id, number: simulation.reference, code: simulation.verificationCode || '—', issuedAt: new Date(simulation.date),
+                expiresAt: simulation.expiresAt ? new Date(simulation.expiresAt) : addDays(new Date(simulation.date), config.validityDays),
+                signature: signatureOf(details.form, details.annualRate), status: simulation.status === 'converted' ? 'converted' : 'simulated', convertedCreditId: simulation.convertedCreditId,
             });
-            return;
-        }
-
-        // Generate Excel report
-        const data = clientSimulations.map(s => {
-            let aiStatus = 'N/A';
-            if (s.aiAnalysis) {
-                if (typeof s.aiAnalysis === 'string') {
-                    try {
-                        const parsed = JSON.parse(s.aiAnalysis) as any;
-                        aiStatus = parsed.status || 'N/A';
-                    } catch (e) {
-                        aiStatus = 'N/A';
-                    }
-                } else {
-                    aiStatus = (s.aiAnalysis as any).status || 'N/A';
-                }
-            }
-
-            return {
-                'Referência': s.reference || 'N/A',
-                'Data': new Date(s.date).toLocaleString(),
-                'Cliente': s.clientName,
-                'Montante': s.amount,
-                'Prazo (meses)': s.term,
-                'Taxa (%)': s.interestRate,
-                'Método': s.method.toUpperCase(),
-                'Mensalidade': s.monthlyPayment,
-                'Total a Pagar': s.totalPayment,
-                'Risco': aiStatus
-            };
-        });
-
-        const { exportToExcel } = await import('@/bibliotecas/ExcelHelper');
-        exportToExcel(
-            data,
-            `Histórico_Simulações_${selectedClientFilter.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}`
-        );
+        } else setSaved(null);
+        setTab('simulador');
+        toast(asNew
+            ? { title: 'Simulação duplicada', description: 'Ajuste os valores e guarde para gerar um novo número.' }
+            : { title: `Simulação ${simulation.reference} reaberta`, description: simulationStatus(simulation) === 'expired' ? 'Está expirada: ao guardar novamente é emitida uma nova ficha.' : 'Pode gerar a ficha, partilhar ou converter em pedido.' });
     };
 
-    const handleExportAllHistory = async () => {
-        if (filteredHistory.length === 0) {
-            toast({
-                title: 'Nenhuma simulação para exportar',
-                description: 'O histórico está vazio ou os filtros não retornaram resultados.',
-                variant: 'destructive'
-            });
-            return;
-        }
-
-        const data = filteredHistory.map(s => {
-            let aiStatus = 'N/A';
-            let dtiValue = 'N/A';
-
-            if (s.aiAnalysis) {
-                if (typeof s.aiAnalysis === 'string') {
-                    try {
-                        const parsed = JSON.parse(s.aiAnalysis);
-                        aiStatus = parsed.status || 'N/A';
-                        dtiValue = parsed.dti ? parsed.dti.toFixed(1) : 'N/A';
-                    } catch (e) {
-                        aiStatus = 'N/A';
-                        dtiValue = 'N/A';
-                    }
-                } else {
-                    aiStatus = (s.aiAnalysis as any).status || 'N/A';
-                    dtiValue = (s.aiAnalysis as any).dti ? (s.aiAnalysis as any).dti.toFixed(1) : 'N/A';
-                }
-            }
-
-            return {
-                'Referência': s.reference || 'N/A',
-                'Data': new Date(s.date).toLocaleString(),
-                'Cliente': s.clientName,
-                'Rendimento': s.clientIncome || 0,
-                'Montante': s.amount,
-                'Prazo (meses)': s.term,
-                'Taxa (%)': s.interestRate,
-                'Método': s.method.toUpperCase(),
-                'Mensalidade': s.monthlyPayment,
-                'Total a Pagar': s.totalPayment,
-                'Risco IA': aiStatus,
-                'DTI (%)': dtiValue
-            };
-        });
-
-        const { exportToExcel } = await import('@/bibliotecas/ExcelHelper');
-        exportToExcel(
-            data,
-            `Relatório_Completo_Simulações_${new Date().toISOString().split('T')[0]}`
-        );
-
-        toast({
-            title: 'Relatório exportado',
-            description: `${filteredHistory.length} simulações exportadas com sucesso.`,
-            className: 'bg-emerald-50 border-emerald-200 text-emerald-800'
-        });
+    const confirmDelete = async () => {
+        if (!deleteTarget) return;
+        try {
+            await deleteSimulation(deleteTarget.id);
+            await addLog('delete', 'system', `Eliminou a simulação ${deleteTarget.reference} (${deleteTarget.clientName}).`, user?.id, user?.name);
+            if (saved?.id === deleteTarget.id) setSaved(null);
+            toast({ title: 'Simulação eliminada' });
+        } catch (error: any) {
+            toast({ title: 'Não foi possível eliminar', description: error?.message, variant: 'destructive' });
+        } finally { setDeleteTarget(null); }
     };
+
+    // ── Simulação inversa ────────────────────────────────────────────────────────────
+    const inverse = useMemo(() => {
+        if (!inverseOpen || !(inverseTarget > 0) || !form.months) return null;
+        const { principal: _ignored, ...rest } = buildInput(form, config, annualRate);
+        const maxAmount = maxPrincipalForPayment(inverseTarget, rest, Math.max(product.maxAmount, form.principal) * 2);
+        const minMonths = form.principal > 0 ? minMonthsForPayment(inverseTarget, buildInput(form, config, annualRate), product.maxMonths) : null;
+        return { maxAmount, minMonths, withinProduct: Math.min(maxAmount, product.maxAmount) };
+    }, [inverseOpen, inverseTarget, form, config, annualRate, product]);
+
+    const openInverse = () => {
+        const byEffort = form.income > 0 ? Math.max(0, (config.effortLimit / 100) * form.income - form.otherDebts) : 0;
+        setInverseTarget(Math.floor(byEffort || result?.installment || 0));
+        if (!form.months) set({ months: Math.min(product.maxMonths, Math.max(product.minMonths, 12)) });
+        setInverseOpen(true);
+    };
+
+    const addScenario = () => {
+        if (!ready) { toast({ title: 'Simulação incompleta', description: 'Indique o montante e o prazo antes de comparar.' }); return; }
+        if (scenarios.length >= MAX_SCENARIOS) return;
+        setScenarios(prev => [...prev, { id: crypto.randomUUID(), name: `Cenário ${prev.length + 1}`, form: { ...form }, annualRate }]);
+        setTab('comparar');
+    };
+
+    // ── Interface ────────────────────────────────────────────────────────────────────
+    const amountStep = product.maxAmount > 10_000_000 ? 50_000 : product.maxAmount > 1_000_000 ? 10_000 : 1_000;
+    const useRate = stampDutyUseRate(form.months || product.minMonths, config.stampDuty);
+    const riskTone = (level: RiskLevel) => level === 'low' ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : level === 'medium' ? 'border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300' : 'border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300';
 
     return (
-        <MainLayout title="Simulador de Crédito" subtitle="Ferramenta de Análise e Cálculo Financeiro">
-            <Tabs defaultValue="simulator" className="w-full space-y-6">
-                <div className="flex justify-between items-center">
-                    <TabsList className="grid w-[480px] grid-cols-3">
-                        <TabsTrigger value="simulator" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white">
-                            <Calculator className="h-4 w-4 mr-2" />
-                            Simulador
-                        </TabsTrigger>
-                        <TabsTrigger value="history">
-                            <History className="h-4 w-4 mr-2" />
-                            Histórico
-                        </TabsTrigger>
-                        <TabsTrigger value="guide">
-                            <Info className="h-4 w-4 mr-2" />
-                            Guia
-                        </TabsTrigger>
-                    </TabsList>
-                </div>
+        <MainLayout title="Simulador de Crédito" subtitle="Simulação ao padrão dos bancos angolanos: TAN, TAEG, MTIC, Imposto do Selo e taxa de esforço">
+            <Tabs value={tab} onValueChange={setTab} className="w-full space-y-6">
+                <TabsList className="grid w-full max-w-[640px] grid-cols-4">
+                    <TabsTrigger value="simulador" className="data-[state=active]:bg-indigo-600 data-[state=active]:text-white"><Calculator className="mr-2 h-4 w-4" /> Simulador</TabsTrigger>
+                    <TabsTrigger value="comparar"><GitCompareArrows className="mr-2 h-4 w-4" /> Comparar{scenarios.length ? ` (${scenarios.length})` : ''}</TabsTrigger>
+                    <TabsTrigger value="historico"><History className="mr-2 h-4 w-4" /> Histórico</TabsTrigger>
+                    <TabsTrigger value="guia"><Info className="mr-2 h-4 w-4" /> Guia</TabsTrigger>
+                </TabsList>
 
-                <TabsContent value="simulator">
-                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-                        {/* --- CONTROLS --- */}
-                        <div className="lg:col-span-1 space-y-6">
-                            <Card className="card-elevated border-none shadow-lg bg-card">
-                                <CardHeader className="bg-muted/50 border-b border-border rounded-t-xl pb-4">
-                                    <CardTitle className="flex items-center gap-2 text-indigo-600 dark:text-indigo-400">
-                                        <Calculator className="h-5 w-5" /> Parâmetros da Simulação
+                <TabsContent value="simulador">
+                    <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+                        {/* ── PARÂMETROS ── */}
+                        <div className="space-y-6 lg:col-span-1">
+                            <Card className="card-elevated border-none bg-card shadow-lg">
+                                <CardHeader className="rounded-t-xl border-b border-border bg-muted/50 pb-4">
+                                    <CardTitle className="flex items-center justify-between gap-2 text-indigo-600 dark:text-indigo-400">
+                                        <span className="flex items-center gap-2"><Calculator className="h-5 w-5" /> Parâmetros da Simulação</span>
+                                        <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-muted-foreground" onClick={() => { touched.current = true; setForm(defaultForm(config)); setSaved(null); }}>
+                                            <RotateCcw className="h-3.5 w-3.5" /> Limpar
+                                        </Button>
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="space-y-6 pt-6">
-
-                                    {/* Client Data (Optional) */}
-                                    <div className="space-y-3 p-4 bg-muted/30 rounded-lg border border-border">
+                                    {/* Cliente */}
+                                    <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-4">
                                         <Label className="text-xs font-bold uppercase text-muted-foreground">Dados do Cliente</Label>
-
                                         <div className="space-y-2">
-                                            <Label className="text-xs">Pesquisar Cliente Cadastrado</Label>
-                                            <Select onValueChange={(val) => {
-                                                const selected = clients.find(c => c.id === val);
-                                                if (selected) {
-                                                    setClientName(selected.name);
-                                                    if (selected.monthlyIncome) {
-                                                        setClientIncome(selected.monthlyIncome);
-                                                    }
-                                                }
-                                            }}>
-                                                <SelectTrigger className="h-9 bg-background">
-                                                    <SelectValue placeholder="Selecione um cliente..." />
-                                                </SelectTrigger>
-                                                <SelectContent>
-                                                    <div className="p-2 border-b">
-                                                        <Input
-                                                            placeholder="Filtrar..."
-                                                            className="h-8 text-xs"
-                                                            onChange={(e) => {
-                                                                // Simple internal filter via CSS or local state if list is huge
-                                                            }}
-                                                        />
-                                                    </div>
-                                                    {clients.slice(0, 100).map(c => (
-                                                        <SelectItem key={c.id} value={c.id}>
-                                                            {c.name} - {c.nif}
-                                                        </SelectItem>
-                                                    ))}
-                                                </SelectContent>
-                                            </Select>
+                                            <Label className="text-xs">Pesquisar cliente registado</Label>
+                                            <div className="flex gap-2">
+                                                <div className="min-w-0 flex-1">
+                                                    <SearchableSelect options={clientOptions} value={form.clientId || ''} onValueChange={selectClient}
+                                                        placeholder="Nome, NIF ou telefone…" searchPlaceholder="Pesquisar cliente…" emptyMessage="Nenhum cliente encontrado." />
+                                                </div>
+                                                {form.clientId && <Button variant="outline" size="icon" className="shrink-0" title="Retirar cliente" onClick={clearClient}><X className="h-4 w-4" /></Button>}
+                                            </div>
                                         </div>
-
+                                        {client && history && (
+                                            <div className="flex flex-wrap gap-1.5 text-[11px]">
+                                                <Badge variant="outline" className="gap-1"><UserRound className="h-3 w-3" /> {client.status === 'active' ? 'Activo' : 'Inactivo'}</Badge>
+                                                <Badge variant="outline">{history.activeCredits} crédito(s) activo(s)</Badge>
+                                                <Badge variant="outline">{history.paidCredits} liquidado(s)</Badge>
+                                                {history.latePayments > 0 && <Badge variant="outline" className="border-red-300 text-red-600">{history.latePayments} atraso(s)</Badge>}
+                                                {history.guaranteesValue > 0 && <Badge variant="outline">Garantias {formatCurrency(history.guaranteesValue)}</Badge>}
+                                            </div>
+                                        )}
                                         <div className="space-y-2">
-                                            <Label className="text-xs font-bold">Nome Completo <span className="text-red-500">*</span></Label>
-                                            <Input
-                                                placeholder="Ex: João da Silva"
-                                                value={clientName}
-                                                onChange={e => setClientName(e.target.value)}
-                                            />
+                                            <Label className="text-xs font-bold">Nome completo <span className="text-red-500">*</span></Label>
+                                            <Input placeholder="Ex.: João Manuel da Silva" value={form.clientName} disabled={!!form.clientId} onChange={event => set({ clientName: event.target.value })} />
                                         </div>
-                                        <div className="space-y-2">
-                                            <Label className="text-xs">Rendimento Mensal</Label>
-                                            <CurrencyInput
-                                                value={clientIncome}
-                                                onValueChange={(val) => setClientIncome(val)}
-                                                placeholder="0,00 AOA"
-                                            />
-                                        </div>
-                                    </div>
-
-                                    {/* Amount */}
-                                    <div className="space-y-3">
-                                        <div className="flex justify-between">
-                                            <Label>Valor Solicitado</Label>
-                                            <span className="font-bold text-indigo-600">{formatCurrency(amount, companySettings?.currency)}</span>
-                                        </div>
-                                        <Slider
-                                            value={[amount]}
-                                            min={0}
-                                            max={1000000}
-                                            step={1000}
-                                            onValueChange={([val]) => setAmount(val)}
-                                            className="py-2"
-                                        />
-                                        <CurrencyInput
-                                            value={amount}
-                                            onValueChange={(val) => setAmount(val)}
-                                            className="font-mono font-bold text-right"
-                                        />
-                                    </div>
-
-                                    {/* Term */}
-                                    <div className="space-y-3">
-                                        <div className="flex justify-between">
-                                            <Label>Prazo (Meses)</Label>
-                                            <span className="font-bold text-indigo-600">{term} meses</span>
-                                        </div>
-                                        <Slider
-                                            value={[term]}
-                                            min={0}
-                                            max={60}
-                                            step={1}
-                                            onValueChange={([val]) => setTerm(val)}
-                                            className="py-2"
-                                        />
-
-                                        <div className="grid grid-cols-2 gap-4">
+                                        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
                                             <div className="space-y-2">
-                                                <Label className="text-xs">Meses</Label>
-                                                <Input
-                                                    type="number"
-                                                    value={term}
-                                                    onChange={(e) => setTerm(Number(e.target.value))}
-                                                    className="h-9"
-                                                    min={0}
-                                                />
+                                                <Label className="text-xs">Rendimento Mensal Líquido</Label>
+                                                <CurrencyInput value={form.income} onValueChange={income => set({ income })} />
                                             </div>
                                             <div className="space-y-2">
-                                                <Label className="text-xs">Anos</Label>
-                                                <Input
-                                                    type="number"
-                                                    value={(term / 12).toFixed(1)}
-                                                    onChange={(e) => setTerm(Math.round(Number(e.target.value) * 12))}
-                                                    className="h-9"
-                                                    min={0}
-                                                    step={0.5}
-                                                />
+                                                <Label className="text-xs">Outros encargos mensais com créditos</Label>
+                                                <CurrencyInput value={form.otherDebts} onValueChange={otherDebts => set({ otherDebts })} />
                                             </div>
                                         </div>
+                                        {history && history.activeCredits > 0 && (
+                                            <p className="text-[11px] leading-tight text-muted-foreground">Encargos preenchidos com as prestações estimadas dos {history.activeCredits} crédito(s) em curso no sistema ({formatCurrency(history.monthlyDebts)}/mês). Acrescente créditos noutras instituições.</p>
+                                        )}
                                     </div>
 
-                                    {/* Risk / Rate */}
-                                    <div className="space-y-3 bg-muted/30 p-4 rounded-lg border border-border">
-                                        <Label className="text-xs font-bold uppercase text-muted-foreground">Análise de Risco (Score)</Label>
-                                        <div className="flex gap-2">
-                                            {(['low', 'medium', 'high'] as const).map(r => (
-                                                <button
-                                                    key={r}
-                                                    onClick={() => setRiskProfile(r)}
-                                                    className={`flex-1 py-1.5 px-2 rounded text-xs font-bold transition-all border ${riskProfile === r
-                                                        ? r === 'low' ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/50 ring-2 ring-emerald-500/20'
-                                                            : r === 'medium' ? 'bg-amber-500/10 text-amber-600 border-amber-500/50 ring-2 ring-amber-500/20'
-                                                                : 'bg-red-500/10 text-red-600 border-red-500/50 ring-2 ring-red-500/20'
-                                                        : 'bg-background text-muted-foreground border-border hover:bg-muted'
-                                                        }`}
-                                                >
-                                                    {r === 'low' ? 'Risco Baixo' : r === 'medium' ? 'Risco Médio' : 'Risco Alto'}
-                                                </button>
-                                            ))}
-                                        </div>
-
-                                        <div className="grid grid-cols-2 gap-3 pt-2">
-                                            <div className="space-y-1">
-                                                <Label className="text-[10px] h-3.5 flex items-center">Taxa Mensal (%)</Label>
-                                                <div className="relative">
-                                                    <Input
-                                                        type="number"
-                                                        value={interestRate}
-                                                        onChange={(e) => setInterestRate(Number(e.target.value))}
-                                                        className="h-8 text-right pr-6 bg-background"
-                                                        step={0.1}
-                                                    />
-                                                    <Percent className="absolute right-2 top-2 h-3 w-3 text-muted-foreground" />
-                                                </div>
-                                            </div>
-                                            <div className="space-y-1">
-                                                <div className="flex items-center gap-1 h-3.5">
-                                                    <Label className="text-[10px]">Taxa Admin / IOF (%)</Label>
-                                                    <Info className="h-2.5 w-2.5 text-muted-foreground cursor-help" />
-                                                </div>
-                                                <div className="relative">
-                                                    <Input
-                                                        type="number"
-                                                        value={adminFee + iofRate}
-                                                        onChange={(e) => {
-                                                            const total = Number(e.target.value);
-                                                            // Split back into fees (simple 80/20 split or just adjust admin)
-                                                            setAdminFee(total - iofRate);
-                                                        }}
-                                                        className="h-8 text-right pr-6 bg-emerald-500/5 border-emerald-500/20 text-emerald-600 font-bold opacity-100"
-                                                        step={0.01}
-                                                    />
-                                                    <Percent className="absolute right-2 top-2 h-3 w-3 text-emerald-600/70" />
-                                                </div>
-                                            </div>
-                                        </div>
-                                        <p className="text-[9px] text-muted-foreground italic leading-tight mt-1">
-                                            * Taxas fixas configuradas em: <span className="font-bold text-indigo-600">Definições &gt; Dados da Empresa</span>.
+                                    {/* Produto */}
+                                    <Section title="Produto">
+                                        <Select value={product.id} onValueChange={selectProduct}>
+                                            <SelectTrigger className="bg-background"><SelectValue /></SelectTrigger>
+                                            <SelectContent>{products.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
+                                        </Select>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            {formatCurrency(product.minAmount)} a {formatCurrency(product.maxAmount)} · {product.minMonths} a {product.maxMonths} meses · {product.rateType === 'variable' ? `${config.indexName} + ${formatDecimal(product.spread, 2)} p.p.` : `TAN ${formatPercent(product.annualRate)}`}
                                         </p>
+                                    </Section>
+
+                                    {/* Montante */}
+                                    <div className="space-y-3">
+                                        <div className="flex items-baseline justify-between gap-2">
+                                            <Label>Montante do Crédito</Label>
+                                            <span className="truncate font-bold text-indigo-600">{form.principal ? formatCurrency(form.principal) : '—'}</span>
+                                        </div>
+                                        <Slider value={[Math.max(product.minAmount, Math.min(product.maxAmount, form.principal || product.minAmount))]} min={product.minAmount} max={product.maxAmount} step={amountStep}
+                                            onValueChange={([value]) => set({ principal: value })} className="py-2" />
+                                        <CurrencyInput value={form.principal} onValueChange={principal => set({ principal })} className="text-right font-mono font-bold" placeholder="Ex.: 1 000 000,00" />
                                     </div>
 
-                                    {/* Method */}
-                                    <div className="space-y-2">
-                                        <Label>Sistema de Amortização</Label>
-                                        <Tabs value={method} onValueChange={(v) => setMethod(v as 'price' | 'sac')} className="w-full">
-                                            <TabsList className="w-full grid grid-cols-2">
-                                                <TabsTrigger value="price">PRICE (Fixas)</TabsTrigger>
-                                                <TabsTrigger value="sac">SAC (Decresc.)</TabsTrigger>
+                                    {/* Prazo */}
+                                    <div className="space-y-3">
+                                        <div className="flex items-baseline justify-between gap-2">
+                                            <Label>Prazo</Label>
+                                            <span className="font-bold text-indigo-600">{form.months ? `${form.months} meses · ${yearsLabel(form.months)}` : 'Escolha o prazo'}</span>
+                                        </div>
+                                        <Slider value={[Math.max(product.minMonths, Math.min(product.maxMonths, form.months || product.minMonths))]} min={product.minMonths} max={product.maxMonths} step={1}
+                                            onValueChange={([value]) => set({ months: value })} className="py-2" />
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {QUICK_TERMS.map(months => {
+                                                const allowed = months >= product.minMonths && months <= product.maxMonths;
+                                                return (
+                                                    <button key={months} type="button" disabled={!allowed} onClick={() => set({ months })}
+                                                        className={cn('rounded-md border px-2.5 py-1 text-xs font-bold transition-all',
+                                                            form.months === months ? 'border-indigo-500 bg-indigo-600 text-white' : 'bg-background hover:bg-muted', !allowed && 'cursor-not-allowed opacity-40')}>
+                                                        {months}
+                                                    </button>
+                                                );
+                                            })}
+                                            <span className="self-center text-[11px] text-muted-foreground">meses</span>
+                                        </div>
+                                    </div>
+
+                                    {/* Datas */}
+                                    <Section title="Datas e carência" className="rounded-lg border border-border bg-muted/30 p-4">
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1"><Label className="text-[11px]">Data de início (desembolso)</Label><Input type="date" value={form.startDate} onChange={event => set({ startDate: event.target.value })} className="h-9 bg-background" /></div>
+                                            <div className="space-y-1"><Label className="text-[11px]">Dia de vencimento</Label><DecimalInput digits={0} min={1} max={28} value={form.dueDay} onValueChange={dueDay => set({ dueDay })} className="h-9 bg-background" /></div>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1">
+                                                <Label className="text-[11px]">Carência (opcional)</Label>
+                                                <Select value={String(form.graceMonths)} onValueChange={value => set({ graceMonths: Number(value) })}>
+                                                    <SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger>
+                                                    <SelectContent>{[0, 1, 2, 3, 4, 5, 6].map(value => <SelectItem key={value} value={String(value)}>{value === 0 ? 'Sem carência' : `${value} ${value === 1 ? 'mês' : 'meses'}`}</SelectItem>)}</SelectContent>
+                                                </Select>
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label className="text-[11px]">Tipo de carência</Label>
+                                                <Select value={form.graceType} disabled={!form.graceMonths} onValueChange={value => set({ graceType: value as SimulatorForm['graceType'] })}>
+                                                    <SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger>
+                                                    <SelectContent><SelectItem value="capital">Só capital</SelectItem><SelectItem value="total">Capital e juros</SelectItem></SelectContent>
+                                                </Select>
+                                            </div>
+                                        </div>
+                                        {form.graceMonths > 0 && <p className="text-[11px] text-muted-foreground">{GRACE_LABELS[form.graceType]}.</p>}
+                                    </Section>
+
+                                    {/* Taxa */}
+                                    <Section title="Taxa de juro" className="rounded-lg border border-border bg-muted/30 p-4">
+                                        <Tabs value={form.rateType} onValueChange={value => set({ rateType: value as SimulatorForm['rateType'] })}>
+                                            <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="fixed">Taxa Fixa</TabsTrigger><TabsTrigger value="variable">Taxa Variável</TabsTrigger></TabsList>
+                                        </Tabs>
+                                        {form.rateType === 'fixed' ? (
+                                            <div className="space-y-1"><Label className="text-[11px]">TAN — Taxa Anual Nominal</Label><DecimalInput suffix="%" min={0} max={500} value={form.baseRate} onValueChange={baseRate => set({ baseRate })} className="bg-background text-right font-bold" /></div>
+                                        ) : (
+                                            <div className="grid grid-cols-2 gap-3">
+                                                <div className="space-y-1"><Label className="text-[11px]">Indexante ({config.indexName})</Label><DecimalInput suffix="%" digits={3} min={0} max={500} value={form.indexValue} onValueChange={indexValue => set({ indexValue })} className="bg-background text-right" /></div>
+                                                <div className="space-y-1"><Label className="text-[11px]">Spread</Label><DecimalInput suffix="p.p." min={-100} max={500} value={form.spread} onValueChange={spread => set({ spread })} className="bg-background text-right" /></div>
+                                            </div>
+                                        )}
+                                        <div className="flex items-center justify-between gap-2 rounded-md bg-background px-3 py-2">
+                                            <div className="text-xs">
+                                                <p>Ajustar ao risco <span className="font-bold">({RISK_LABELS[riskLevel]}: {calc.riskAdjustment >= 0 ? '+' : ''}{formatDecimal(form.applyRiskAdjustment ? config.riskSpread[riskLevel] : 0, 2)} p.p.)</span></p>
+                                            </div>
+                                            <Switch checked={form.applyRiskAdjustment} onCheckedChange={applyRiskAdjustment => set({ applyRiskAdjustment })} />
+                                        </div>
+                                        <div className="rounded-md border border-indigo-500/20 bg-indigo-500/5 px-3 py-2">
+                                            <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{formatPercent(annualRate)} <span className="text-xs font-bold text-muted-foreground">TAN</span></p>
+                                            <p className="text-xs text-muted-foreground">Taxa mensal (TAN ÷ 12): {formatPercent(annualRate / 12, 4)} · {form.rateType === 'fixed' ? 'fixa' : 'variável'}</p>
+                                        </div>
+                                    </Section>
+
+                                    {/* Sistema */}
+                                    <Section title="Sistema de amortização">
+                                        <Tabs value={form.system} onValueChange={value => set({ system: value as SimulatorForm['system'] })} className="w-full">
+                                            <TabsList className="grid w-full grid-cols-2">
+                                                <TabsTrigger value="price" className="text-xs">{AMORTIZATION_LABELS.price}</TabsTrigger>
+                                                <TabsTrigger value="sac" className="text-xs">{AMORTIZATION_LABELS.sac}</TabsTrigger>
                                             </TabsList>
                                         </Tabs>
+                                    </Section>
+
+                                    {/* Encargos */}
+                                    <Section title="Encargos" className="rounded-lg border border-border bg-muted/30 p-4">
+                                        <div className="space-y-1">
+                                            <Label className="text-[11px]">Comissão de abertura</Label>
+                                            <div className="flex gap-2">
+                                                <Select value={form.openingFee.mode} onValueChange={mode => set({ openingFee: { ...form.openingFee, mode: mode as 'percent' | 'fixed' } })}>
+                                                    <SelectTrigger className="h-9 w-20 bg-background"><SelectValue /></SelectTrigger>
+                                                    <SelectContent><SelectItem value="percent">%</SelectItem><SelectItem value="fixed">Kz</SelectItem></SelectContent>
+                                                </Select>
+                                                <div className="flex-1">
+                                                    {form.openingFee.mode === 'percent'
+                                                        ? <DecimalInput suffix="%" min={0} max={100} value={form.openingFee.value} onValueChange={value => set({ openingFee: { ...form.openingFee, value } })} className="h-9 bg-background" />
+                                                        : <CurrencyInput value={form.openingFee.value} onValueChange={value => set({ openingFee: { ...form.openingFee, value } })} className="h-9 bg-background" />}
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-1"><Label className="text-[11px]">Comissão de processamento (por prestação)</Label><CurrencyInput value={form.processingFee} onValueChange={processingFee => set({ processingFee })} className="h-9 bg-background" /></div>
+                                        <div className="flex items-center justify-between gap-3">
+                                            <div className="min-w-0 flex-1 space-y-1">
+                                                <Label className="text-[11px]">Seguro (% mensal sobre o capital em dívida)</Label>
+                                                <DecimalInput suffix="% / mês" digits={3} min={0} max={100} disabled={!form.insuranceEnabled} value={form.insuranceRate} onValueChange={insuranceRate => set({ insuranceRate })} className="h-9 bg-background" />
+                                            </div>
+                                            <Switch className="mt-5" checked={form.insuranceEnabled} onCheckedChange={insuranceEnabled => set({ insuranceEnabled })} />
+                                        </div>
+                                        <div className="space-y-1">
+                                            <Label className="text-[11px]">Comissão de abertura e Imposto do Selo de utilização</Label>
+                                            <Select value={form.feePayment} onValueChange={feePayment => set({ feePayment: feePayment as SimulatorForm['feePayment'] })}>
+                                                <SelectTrigger className="h-9 bg-background"><SelectValue /></SelectTrigger>
+                                                <SelectContent><SelectItem value="deducted">Descontados no desembolso</SelectItem><SelectItem value="financed">Financiados (somados ao capital)</SelectItem></SelectContent>
+                                            </Select>
+                                        </div>
+                                        <p className="text-[11px] leading-tight text-muted-foreground">
+                                            Imposto do Selo: {formatPercent(useRate)} sobre a utilização ({(form.months || product.minMonths) >= 60 ? '5 anos ou mais' : (form.months || product.minMonths) > 12 ? 'mais de 1 ano' : 'até 1 ano'}) e {formatPercent(config.stampDuty.interest)} sobre os juros de cada prestação. Taxas em Configurações › Simulador e Produtos.
+                                        </p>
+                                    </Section>
+
+                                    {/* Acções */}
+                                    <div className="space-y-2">
+                                        <Button className="w-full bg-indigo-600 hover:bg-indigo-700" disabled={!!missingReason || !!busy || isSaved} onClick={() => void handleSave()}>
+                                            {busy === 'save' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : isSaved ? <CheckCircle2 className="mr-2 h-4 w-4" /> : <Save className="mr-2 h-4 w-4" />}
+                                            {isSaved ? 'Guardada no Histórico' : 'Guardar no Histórico'}
+                                        </Button>
+                                        {missingReason && <p className="flex items-start gap-1.5 text-xs text-amber-600"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {missingReason}</p>}
+                                        <div className="grid grid-cols-2 gap-2">
+                                            <Button variant="outline" className="gap-2" disabled={!!missingReason || !!busy} onClick={() => void handlePdf()}>
+                                                {busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />} Ficha (PDF)
+                                            </Button>
+                                            <Button variant="outline" className="gap-2" disabled={!form.months} onClick={openInverse}><Sparkles className="h-4 w-4" /> Simulação inversa</Button>
+                                            <Button variant="outline" className="gap-2 text-emerald-700" disabled={!!missingReason || !!busy} onClick={() => void share('whatsapp')}><MessageCircle className="h-4 w-4" /> WhatsApp</Button>
+                                            <Button variant="outline" className="gap-2" disabled={!!missingReason || !!busy} onClick={() => void share('email')}><Mail className="h-4 w-4" /> Email</Button>
+                                        </div>
+                                        <Button variant="outline" className="w-full gap-2" disabled={!ready || scenarios.length >= MAX_SCENARIOS} onClick={addScenario}><GitCompareArrows className="h-4 w-4" /> Adicionar ao comparador ({scenarios.length}/{MAX_SCENARIOS})</Button>
+                                        <Button className="w-full gap-2 bg-emerald-600 hover:bg-emerald-700" disabled={!!convertReason || !!busy} onClick={() => setConvertOpen(true)}><Send className="h-4 w-4" /> Converter em pedido de crédito</Button>
+                                        {convertReason && !missingReason && <p className="flex items-start gap-1.5 text-xs text-muted-foreground"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0" /> {convertReason}</p>}
                                     </div>
-
-                                    <Button
-                                        className="w-full bg-indigo-600 hover:bg-indigo-700"
-                                        onClick={saveToHistory}
-                                        disabled={!clientName.trim()}
-                                    >
-                                        <Save className="h-4 w-4 mr-2" />
-                                        Guardar no Histórico
-                                    </Button>
-
                                 </CardContent>
                             </Card>
                         </div>
 
-                        {/* --- RESULTS --- */}
-                        <div className="lg:col-span-2 space-y-6">
+                        {/* ── RESULTADOS ── */}
+                        <div className="space-y-6 lg:col-span-2">
+                            {errors.length > 0 && (
+                                <div className="space-y-1 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300">
+                                    <p className="flex items-center gap-2 font-bold"><AlertTriangle className="h-4 w-4" /> Fora dos limites do produto</p>
+                                    {errors.map(error => <p key={error}>{error}</p>)}
+                                </div>
+                            )}
 
-                            {/* Summary Cards */}
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                <div className="card-kpi-sky">
-                                    <div className="flex items-center gap-2.5 min-w-0">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0">
-                                            <DollarSign className="h-5 w-5" />
+                            {!ready || !result?.valid ? (
+                                <Card className="border-dashed">
+                                    <CardContent className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+                                        <div className="flex h-16 w-16 items-center justify-center rounded-full bg-indigo-500/10"><Calculator className="h-8 w-8 text-indigo-600" /></div>
+                                        <p className="text-lg font-bold">Indique o montante e o prazo para ver a simulação</p>
+                                        <p className="max-w-md text-sm text-muted-foreground">Escolha o produto, o montante e o prazo. A prestação, a TAN, a TAEG, o MTIC, o Imposto do Selo e a taxa de esforço são calculados em tempo real.</p>
+                                    </CardContent>
+                                </Card>
+                            ) : (
+                                <>
+                                    {isSaved && saved && (
+                                        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-500/30 bg-indigo-500/5 px-4 py-2.5 text-sm">
+                                            <CheckCircle2 className="h-4 w-4 text-indigo-600" />
+                                            <span className="font-mono font-bold">{saved.number}</span>
+                                            <span className="text-muted-foreground">· código {saved.code} · válida até {formatDate(saved.expiresAt)}</span>
+                                            {saved.status === 'converted' && <Badge variant="success" className="ml-auto">Convertida em pedido</Badge>}
                                         </div>
-                                        <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">
-                                            Primeira Parcela
-                                        </p>
-                                    </div>
-                                    <div className="my-2">
-                                        <p className="font-display text-2xl sm:text-3xl font-black tracking-tight text-slate-950 dark:text-white truncate">
-                                            {formatCurrency(simulation.rows[0]?.payment || 0, companySettings?.currency)}
-                                        </p>
-                                    </div>
-                                    <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-                                        {method === 'price' ? 'Parcelas Fixas' : 'Parcelas Decrescentes'}
-                                    </p>
-                                </div>
-                                <div className="card-kpi-amber">
-                                    <div className="flex items-center gap-2.5 min-w-0">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0">
-                                            <AlertTriangle className="h-5 w-5" />
-                                        </div>
-                                        <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">
-                                            Total a Pagar
-                                        </p>
-                                    </div>
-                                    <div className="my-2">
-                                        <p className="font-display text-2xl sm:text-3xl font-black tracking-tight text-slate-950 dark:text-white truncate">
-                                            {formatCurrency(simulation.totalPayment, companySettings?.currency)}
-                                        </p>
-                                    </div>
-                                    <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-                                        {formatCurrency(simulation.totalInterest, companySettings?.currency)} de Juros
-                                    </p>
-                                </div>
-                                <div className={cn(
-                                    !aiResult ? "card-kpi-purple" :
-                                        aiResult.status === 'safe' ? "card-kpi-mint" :
-                                            aiResult.status === 'warning' ? "card-kpi-amber" : "card-kpi-coral"
-                                )}>
-                                    <div className="flex items-center gap-2.5 min-w-0">
-                                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0">
-                                            <Percent className="h-5 w-5" />
-                                        </div>
-                                        <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">
-                                            Comprometimento de Renda
-                                        </p>
-                                    </div>
-                                    <div className="my-2">
-                                        <p className="font-display text-2xl sm:text-3xl font-black tracking-tight text-slate-950 dark:text-white truncate">
-                                            {aiResult ? `${aiResult.dti.toFixed(1)}%` : "---"}
-                                        </p>
-                                    </div>
-                                    <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-                                        {aiResult ? "Percentual do rendimento" : "Insira o rendimento para analisar"}
-                                    </p>
-                                </div>
-                            </div>
+                                    )}
 
-                            {/* Tango AI Analysis Section */}
-                            {aiResult && (
-                                <Card className={cn(
-                                    "border shadow-md",
-                                    aiResult.status === 'safe' ? "bg-emerald-500/10 border-emerald-500/20 dark:bg-emerald-950/30 dark:border-emerald-800/40" :
-                                        aiResult.status === 'warning' ? "bg-amber-500/10 border-amber-500/20 dark:bg-amber-950/30 dark:border-amber-800/40" : "bg-red-500/10 border-red-500/20 dark:bg-red-950/30 dark:border-red-800/40"
-                                )}>
-                                    <CardContent className="p-4 flex items-start gap-4">
-                                        <div className={cn(
-                                            "p-3 rounded-xl",
-                                            aiResult.status === 'safe' ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300" :
-                                                aiResult.status === 'warning' ? "bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300" : "bg-red-100 text-red-700 dark:bg-red-950/60 dark:text-red-300"
-                                        )}>
-                                            <Brain className="h-6 w-6" />
-                                        </div>
-                                        <div className="flex-1 space-y-1">
-                                            <div className="flex items-center justify-between">
-                                                <h4 className="font-bold text-foreground flex items-center gap-2">
-                                                    Análise Inteligente Tango
-                                                    {aiResult.status === 'safe' ? <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" /> :
-                                                        aiResult.status === 'warning' ? <AlertTriangle className="h-4 w-4 text-amber-600 dark:text-amber-400" /> :
-                                                            <XCircle className="h-4 w-4 text-red-600 dark:text-red-400" />}
-                                                </h4>
-                                                <Badge variant="outline" className={cn(
-                                                    "capitalize",
-                                                    aiResult.status === 'safe' ? "border-emerald-200 text-emerald-700 bg-emerald-100/50 dark:border-emerald-800 dark:text-emerald-300 dark:bg-emerald-950/50" :
-                                                        aiResult.status === 'warning' ? "border-amber-200 text-amber-700 bg-amber-100/50 dark:border-amber-800 dark:text-amber-300 dark:bg-amber-950/50" :
-                                                            "border-red-200 text-red-700 bg-red-100/50 dark:border-red-800 dark:text-red-300 dark:bg-red-950/50"
-                                                )}>
-                                                    {aiResult.status === 'safe' ? 'Recomendado' : aiResult.status === 'warning' ? 'Atenção' : 'Alto Risco'}
-                                                </Badge>
-                                            </div>
-                                            <p className="text-sm text-muted-foreground leading-relaxed font-medium">
-                                                {aiResult.message}
-                                            </p>
-                                            <p className="text-xs text-muted-foreground italic mt-2 opacity-80 border-l-2 border-current pl-2">
-                                                {aiResult.detailedAdvice}
-                                            </p>
-                                            {aiResult.suggestion && (
-                                                <div className="mt-3 p-3 bg-background/50 rounded-lg border border-border flex items-center justify-between gap-4">
-                                                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                                                        <TrendingUp className="h-4 w-4 text-indigo-500" />
-                                                        <span>Sugestão IA: Reduzir montante para <strong>{formatCurrency(aiResult.suggestion, companySettings?.currency)}</strong> para segurança financeira.</span>
+                                    <CartoesResultado result={result} system={form.system} rateType={form.rateType} effort={effort} effortLimit={config.effortLimit} feePayment={form.feePayment} />
+
+                                    {/* Risco e taxa de esforço */}
+                                    <Card className={cn('border shadow-md', riskTone(riskLevel))}>
+                                        <CardContent className="space-y-3 p-4">
+                                            <div className="flex flex-wrap items-center justify-between gap-3">
+                                                <div className="flex items-center gap-3">
+                                                    <div className="rounded-xl bg-background/60 p-3"><ShieldAlert className="h-6 w-6" /></div>
+                                                    <div>
+                                                        <p className="font-bold text-foreground">Risco {RISK_LABELS[riskLevel]} {form.riskOverride && <Badge variant="outline" className="ml-1 align-middle">alterado manualmente</Badge>}</p>
+                                                        <p className="text-xs text-muted-foreground">Pontuação calculada: {risk.score}/100 ({RISK_LABELS[risk.level]}) · ajuste da TAN: {calc.riskAdjustment >= 0 ? '+' : ''}{formatDecimal(calc.riskAdjustment, 2)} p.p.</p>
                                                     </div>
-                                                    <Button size="sm" variant="outline" className="h-7 text-[10px] bg-card hover:bg-indigo-500/10 border-indigo-500/30 text-indigo-600 dark:text-indigo-400" onClick={handleApplySuggestion}>
-                                                        Aplicar Sugestão
-                                                    </Button>
+                                                </div>
+                                                <div className="flex gap-2">
+                                                    {form.riskOverride
+                                                        ? <Button size="sm" variant="outline" className="gap-1 bg-background" onClick={() => void resetRisk()}><Undo2 className="h-4 w-4" /> Repor cálculo</Button>
+                                                        : <Button size="sm" variant="outline" className="bg-background" onClick={() => setRiskDialog({ open: true, level: risk.level === 'high' ? 'medium' : risk.level, justification: '' })}>Alterar nível de risco</Button>}
+                                                </div>
+                                            </div>
+                                            <ul className="grid gap-1 text-xs text-foreground/80 md:grid-cols-2">
+                                                {risk.reasons.map(reason => (
+                                                    <li key={reason.text} className="flex items-start gap-1.5">
+                                                        <span className={cn('mt-1 h-1.5 w-1.5 shrink-0 rounded-full', reason.impact >= 0 ? 'bg-emerald-500' : 'bg-red-500')} />{reason.text}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                            {form.riskOverride && <p className="text-xs italic text-muted-foreground">Justificação: {form.riskJustification}</p>}
+                                        </CardContent>
+                                    </Card>
+
+                                    {overLimit && recommendation && (
+                                        <div className="space-y-3 rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm">
+                                            <p className="flex items-center gap-2 font-bold text-red-700 dark:text-red-300"><AlertTriangle className="h-4 w-4" /> Taxa de esforço de {formatPercent(effort ?? 0, 1)} acima do limite de {formatPercent(config.effortLimit, 0)}</p>
+                                            {recommendation.maxPayment <= 0 ? (
+                                                <p className="text-red-700 dark:text-red-300">Os outros encargos já esgotam o limite: não há margem para uma nova prestação.</p>
+                                            ) : (
+                                                <div className="grid gap-3 md:grid-cols-3">
+                                                    <div className="rounded-lg bg-background/70 p-3"><p className="text-xs text-muted-foreground">Prestação máxima</p><p className="font-bold">{formatCurrency(recommendation.maxPayment)}</p></div>
+                                                    <div className="flex items-center justify-between gap-2 rounded-lg bg-background/70 p-3">
+                                                        <div><p className="text-xs text-muted-foreground">Montante máximo recomendado ({form.months} meses)</p><p className="font-bold">{formatCurrency(recommendation.maxAmount)}</p></div>
+                                                        <Button size="sm" variant="outline" disabled={recommendation.maxAmount < product.minAmount} onClick={() => set({ principal: recommendation.maxAmount })}>Aplicar</Button>
+                                                    </div>
+                                                    <div className="flex items-center justify-between gap-2 rounded-lg bg-background/70 p-3">
+                                                        <div><p className="text-xs text-muted-foreground">Prazo mínimo ({formatCurrency(form.principal)})</p><p className="font-bold">{recommendation.minMonths ? `${recommendation.minMonths} meses` : `Acima de ${product.maxMonths} meses`}</p></div>
+                                                        <Button size="sm" variant="outline" disabled={!recommendation.minMonths} onClick={() => recommendation.minMonths && set({ months: recommendation.minMonths })}>Aplicar</Button>
+                                                    </div>
                                                 </div>
                                             )}
                                         </div>
-                                    </CardContent>
-                                </Card>
+                                    )}
+
+                                    <GraficosSimulacao result={result} />
+                                    <TabelaCronograma result={result} title={`Cronograma ${isSaved && saved ? saved.number : 'da simulação'}`}
+                                        subtitle={`${form.clientName || 'Cliente'} · ${product.name} · ${formatCurrency(form.principal)} · ${form.months} meses · TAN ${formatPercent(annualRate)} · ${AMORTIZATION_LABELS[form.system]}`} />
+                                </>
                             )}
-
-                            {/* Chart */}
-                            <Card>
-                                <CardHeader>
-                                    <CardTitle className="text-base">Projeção da Dívida e Amortização</CardTitle>
-                                </CardHeader>
-                                <CardContent className="h-[300px]">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <AreaChart data={simulation.rows} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-                                            <defs>
-                                                <linearGradient id="colorBalance" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#ef4444" stopOpacity={0.1} />
-                                                    <stop offset="95%" stopColor="#ef4444" stopOpacity={0} />
-                                                </linearGradient>
-                                                <linearGradient id="colorAmort" x1="0" y1="0" x2="0" y2="1">
-                                                    <stop offset="5%" stopColor="#10b981" stopOpacity={0.1} />
-                                                    <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
-                                                </linearGradient>
-                                            </defs>
-                                            <XAxis dataKey="month" stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} />
-                                            <YAxis stroke="#94a3b8" fontSize={12} tickLine={false} axisLine={false} tickFormatter={(val) => `${val / 1000}k`} />
-                                            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-                                            <Tooltip
-                                                contentStyle={{ backgroundColor: 'hsl(var(--card))', borderRadius: '8px', border: '1px solid hsl(var(--border))', boxShadow: '0 4px 12px rgba(0,0,0,0.1)' }}
-                                                itemStyle={{ color: 'hsl(var(--foreground))' }}
-                                                formatter={(value: number) => formatCurrency(value, companySettings?.currency)}
-                                            />
-                                            <Legend />
-                                            <Area type="monotone" dataKey="balance" name="Saldo Devedor" stroke="#ef4444" fillOpacity={1} fill="url(#colorBalance)" />
-                                            <Area type="monotone" dataKey="payment" name="Parcela" stroke="#6366f1" fillOpacity={0} fill="#6366f1" />
-                                        </AreaChart>
-                                    </ResponsiveContainer>
-                                </CardContent>
-                            </Card>
-
-                            {/* Table */}
-                            <Card>
-                                <CardHeader className="pb-2">
-                                    <div className="flex items-center justify-between">
-                                        <CardTitle className="text-base">Cronograma de Pagamentos</CardTitle>
-                                        <Button variant="outline" size="sm" className="h-8 gap-2 bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 hover:bg-indigo-500/20 border-indigo-500/20" onClick={handleExportPDF}>
-                                            <Download className="h-4 w-4" /> Baixar Ficha de Simulação (PDF)
-                                        </Button>
-                                    </div>
-                                </CardHeader>
-                                <CardContent>
-                                    <div className="relative overflow-auto max-h-[400px]">
-                                        <Table>
-                                            <TableHeader className="sticky top-0 bg-card z-10 shadow-sm">
-                                                <TableRow>
-                                                    <TableHead className="w-[80px]">Mês</TableHead>
-                                                    <TableHead className="text-right">Prestação</TableHead>
-                                                    <TableHead className="text-right">Juros</TableHead>
-                                                    <TableHead className="text-right">Amortização</TableHead>
-                                                    <TableHead className="text-right">Saldo Devedor</TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {simulation.rows.map((row) => (
-                                                    <TableRow key={row.month} className="hover:bg-muted/50 border-border">
-                                                        <TableCell className="font-mono text-xs">{row.month}º</TableCell>
-                                                        <TableCell className="text-right font-bold text-foreground">
-                                                            {formatCurrency(row.payment, companySettings?.currency)}
-                                                        </TableCell>
-                                                        <TableCell className="text-right text-red-500 text-xs">
-                                                            {formatCurrency(row.interest, companySettings?.currency)}
-                                                        </TableCell>
-                                                        <TableCell className="text-right text-emerald-500 text-xs">
-                                                            {formatCurrency(row.amortization, companySettings?.currency)}
-                                                        </TableCell>
-                                                        <TableCell className="text-right text-muted-foreground text-xs font-medium">
-                                                            {formatCurrency(row.balance, companySettings?.currency)}
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </div>
-                                </CardContent>
-                            </Card>
-
                         </div>
                     </div>
                 </TabsContent>
 
-                <TabsContent value="history">
-                    <Card>
-                        <CardHeader className="space-y-4">
-                            <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
-                                <div>
-                                    <CardTitle className="flex items-center gap-2">
-                                        <History className="h-5 w-5 text-indigo-600" />
-                                        Histórico de Simulações
-                                    </CardTitle>
-                                    <CardDescription>Consulte todas as simulações guardadas. Total: {history.length}</CardDescription>
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        className="gap-2 h-9"
-                                        onClick={handleExportAllHistory}
-                                        disabled={filteredHistory.length === 0}
-                                    >
-                                        <FileSpreadsheet className="h-4 w-4" />
-                                        Exportar Relatório ({filteredHistory.length})
-                                    </Button>
-                                    {selectedClientFilter && (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="gap-2 h-9 bg-indigo-50 text-indigo-600 border-indigo-200"
-                                            onClick={handleExportClientHistory}
-                                        >
-                                            <Download className="h-4 w-4" />
-                                            Exportar Cliente
-                                        </Button>
-                                    )}
-                                </div>
-                            </div>
-
-                            {/* Filters Row */}
-                            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 p-4 bg-muted/30 rounded-lg border">
-                                <div className="relative">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                                    <Input
-                                        placeholder="Procurar..."
-                                        value={historySearch}
-                                        onChange={(e) => setHistorySearch(e.target.value)}
-                                        className="pl-10 h-9 bg-background"
-                                    />
-                                </div>
-                                <div>
-                                    <Select value={selectedClientFilter} onValueChange={setSelectedClientFilter}>
-                                        <SelectTrigger className="h-9 bg-background">
-                                            <SelectValue placeholder="Filtrar por cliente..." />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="__all__">Todos os Clientes</SelectItem>
-                                            {Array.from(new Set(history.map(h => h.clientName))).sort().map(name => (
-                                                <SelectItem key={name} value={name}>{name}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div>
-                                    <CurrencyInput
-                                        value={minAmount}
-                                        onValueChange={setMinAmount}
-                                        placeholder="Valor mínimo"
-                                        className="h-9 bg-background"
-                                    />
-                                </div>
-                                <div>
-                                    <CurrencyInput
-                                        value={maxAmount}
-                                        onValueChange={setMaxAmount}
-                                        placeholder="Valor máximo"
-                                        className="h-9 bg-background"
-                                    />
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent>
-                            {history.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-                                    <History className="h-12 w-12 mb-4 opacity-20" />
-                                    <p>Nenhuma simulação guardada no histórico.</p>
-                                </div>
-                            ) : filteredHistory.length === 0 ? (
-                                <div className="flex flex-col items-center justify-center py-12 text-slate-400">
-                                    <Search className="h-12 w-12 mb-4 opacity-20" />
-                                    <p>Nenhuma simulação encontrada para "{historySearch}".</p>
-                                </div>
-                            ) : (
-                                <div className="rounded-xl border border-border">
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow className="bg-muted/50">
-                                                <TableHead>Referência / Data</TableHead>
-                                                <TableHead>Cliente</TableHead>
-                                                <TableHead className="text-right">Montante / Prazo</TableHead>
-                                                <TableHead className="text-right">Mensalidade</TableHead>
-                                                <TableHead className="text-center">Risco IA</TableHead>
-                                                <TableHead className="text-right pr-4">Ações</TableHead>
-                                            </TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {filteredHistory.map((entry) => (
-                                                <TableRow key={entry.id} className="hover:bg-muted/30 transition-colors">
-                                                    <TableCell>
-                                                        <div className="flex flex-col">
-                                                            <span className="font-bold text-indigo-600 dark:text-indigo-400 font-mono text-xs">
-                                                                {entry.reference || 'N/A'}
-                                                            </span>
-                                                            <span className="text-[10px] text-muted-foreground">
-                                                                {new Date(entry.date).toLocaleString()}
-                                                            </span>
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell>
-                                                        <span className="font-semibold text-foreground">{entry.clientName}</span>
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <div className="flex flex-col">
-                                                            <span className="font-bold text-foreground">
-                                                                {formatCurrency(entry.amount, companySettings?.currency)}
-                                                            </span>
-                                                            <span className="text-[10px] text-muted-foreground">
-                                                                {entry.term} m @ {entry.interestRate}%
-                                                            </span>
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell className="text-right">
-                                                        <div className="flex flex-col">
-                                                            <span className="font-bold text-emerald-500">
-                                                                {formatCurrency(entry.monthlyPayment, companySettings?.currency)}
-                                                            </span>
-                                                            <span className="text-[10px] text-muted-foreground uppercase">
-                                                                {entry.method}
-                                                            </span>
-                                                        </div>
-                                                    </TableCell>
-                                                    <TableCell className="text-center">
-                                                        <Badge className={cn(
-                                                            "text-[10px] h-5",
-                                                            (() => {
-                                                                let status = 'unknown';
-                                                                if (entry.aiAnalysis) {
-                                                                    if (typeof entry.aiAnalysis === 'string') {
-                                                                        try {
-                                                                            const parsed = JSON.parse(entry.aiAnalysis);
-                                                                            status = parsed.status || 'unknown';
-                                                                        } catch (e) {
-                                                                            status = 'unknown';
-                                                                        }
-                                                                    } else {
-                                                                        status = (entry.aiAnalysis as any).status || 'unknown';
-                                                                    }
-                                                                }
-                                                                return status === 'safe' ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200" :
-                                                                    status === 'warning' ? "bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200" :
-                                                                        "bg-red-100 text-red-700 hover:bg-red-100 border-red-200";
-                                                            })()
-                                                        )}>
-                                                            {(() => {
-                                                                if (!entry.aiAnalysis) return 'N/A';
-                                                                let status = 'unknown';
-                                                                if (typeof entry.aiAnalysis === 'string') {
-                                                                    try {
-                                                                        const parsed = JSON.parse(entry.aiAnalysis);
-                                                                        status = parsed.status || 'unknown';
-                                                                    } catch (e) {
-                                                                        status = 'unknown';
-                                                                    }
-                                                                } else {
-                                                                    status = (entry.aiAnalysis as any).status || 'unknown';
-                                                                }
-                                                                return status === 'safe' ? 'BAIXO' : status === 'warning' ? 'MÉDIO' : 'ALTO';
-                                                            })()}
-                                                        </Badge>
-                                                    </TableCell>
-                                                    <TableCell className="text-right pr-2">
-                                                        <div className="flex justify-end gap-1">
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-8 w-8 text-emerald-500 hover:text-emerald-600 hover:bg-emerald-500/10"
-                                                                onClick={() => handleDownloadHistoryPDF(entry)}
-                                                                title="Baixar PDF"
-                                                            >
-                                                                <Download className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-8 w-8 text-indigo-500 hover:text-indigo-600 hover:bg-indigo-500/10"
-                                                                onClick={() => handleLoadFromHistory(entry)}
-                                                                title="Visualizar e Carregar"
-                                                            >
-                                                                <Calculator className="h-4 w-4" />
-                                                            </Button>
-                                                            <Button
-                                                                variant="ghost"
-                                                                size="icon"
-                                                                className="h-8 w-8 text-destructive hover:bg-red-500/10 hover:text-destructive"
-                                                                onClick={() => handleDeleteFromHistory(entry)}
-                                                                title="Remover"
-                                                            >
-                                                                <Trash2 className="h-4 w-4" />
-                                                            </Button>
-                                                        </div>
-                                                    </TableCell>
-                                                </TableRow>
-                                            ))}
-                                        </TableBody>
-                                    </Table>
-                                </div>
-                            )}
-                        </CardContent>
-                    </Card>
+                <TabsContent value="comparar">
+                    <ComparadorCenarios scenarios={scenarios} config={config} onChange={setScenarios} onAddCurrent={addScenario}
+                        onApply={scenario => {
+                            touched.current = true;
+                            setForm({ ...scenario.form, rateType: 'fixed', baseRate: scenario.annualRate, applyRiskAdjustment: false, riskOverride: null, riskJustification: '' });
+                            setSaved(null);
+                            setTab('simulador');
+                        }} />
                 </TabsContent>
 
-                <TabsContent value="guide">
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Guia do Simulador de Crédito</CardTitle>
-                            <CardDescription>Entenda como projetar cenários e analisar custos para o seu cliente.</CardDescription>
-                        </CardHeader>
-                        <CardContent className="prose prose-slate max-w-none dark:prose-invert">
-                            <h3 className="text-indigo-800 dark:text-indigo-400 font-bold">1. Parâmetros da Simulação</h3>
-                            <p>No painel esquerdo, você pode ajustar as condições do crédito:</p>
-                            <ul>
-                                <li><strong>Dados do Cliente:</strong> Preencha para personalizar a Ficha de Simulação (PDF).</li>
-                                <li><strong>Valor Solicitado:</strong> Use o controle deslizante ou digite o valor exato.</li>
-                                <li><strong>Prazo:</strong> Defina o número limite de parcelas.</li>
-                                <li><strong>Score de Risco:</strong> Ajusta automaticamente a taxa de juros (Baixo, Médio, Alto).</li>
-                                <li><strong>Sistema de Amortização:</strong>
-                                    <ul>
-                                        <li><strong>PRICE:</strong> Parcelas fixas do início ao fim.</li>
-                                        <li><strong>SAC:</strong> Parcelas que começam mais altas e diminuem (amortização constante).</li>
-                                    </ul>
-                                </li>
-                            </ul>
+                <TabsContent value="historico">
+                    <HistoricoSimulacoes simulations={simulations} onReopen={simulation => reopen(simulation, false)} onDuplicate={simulation => reopen(simulation, true)}
+                        onPdf={simulation => void historyPdf(simulation)} onDelete={setDeleteTarget} />
+                </TabsContent>
 
-                            <h3 className="text-indigo-800 dark:text-indigo-400 font-bold">2. Resultados e Métricas</h3>
-                            <ul>
-                                <li><strong>Primeira Parcela:</strong> O valor inicial que o cliente pagará.</li>
-                                <li><strong>CET (Custo Efetivo Total):</strong> A taxa real anual incluindo custos extras. Item obrigatório para comparação justa.</li>
-                            </ul>
-
-                            <h3 className="text-indigo-800 dark:text-indigo-400 font-bold">3. Passos para Emissão de Proposta</h3>
-                            <ol>
-                                <li>Preencha o <strong>Nome do Cliente</strong> e o <strong>Rendimento</strong> (opcional).</li>
-                                <li>Ajuste o valor e prazo conforme a necessidade.</li>
-                                <li>Selecione o perfil de risco adequado (consulte o Score do cliente se disponível).</li>
-                                <li>Verifique se a parcela cabe no orçamento (regra dos 30%).</li>
-                                <li>Clique em <strong>"Baixar Ficha de Simulação"</strong> para gerar o documento PDF oficial para assinatura ou envio.</li>
-                            </ol>
-                        </CardContent>
-                    </Card>
+                <TabsContent value="guia">
+                    <GuiaSimulador config={config} onTerms={() => navigate('/termos-e-politicas')} />
                 </TabsContent>
             </Tabs>
 
-            {/* Confirmation Modals */}
-            <AlertModal
-                isOpen={loadConfirmOpen}
-                onClose={() => setLoadConfirmOpen(false)}
-                onConfirm={confirmLoadFromHistory}
-                showCancel={true}
-                title="Visualizar Detalhes da Simulação?"
-                description={selectedHistoryEntry ? `Deseja visualizar os detalhes completos da simulação de "${selectedHistoryEntry.clientName}" de ${new Date(selectedHistoryEntry.date).toLocaleString()}? Os dados também serão carregados no simulador.` : ''}
-                type="info"
-            />
-
-            <AlertModal
-                isOpen={deleteConfirmOpen}
-                onClose={() => setDeleteConfirmOpen(false)}
-                onConfirm={confirmDeleteFromHistory}
-                showCancel={true}
-                title="Eliminar Simulação?"
-                description={selectedHistoryEntry ? `Tem a certeza que deseja eliminar permanentemente a simulação de "${selectedHistoryEntry.clientName}" de ${new Date(selectedHistoryEntry.date).toLocaleString()}? Esta ação não pode ser desfeita.` : ''}
-                type="error"
-            />
-
-            {/* Details Modal */}
-            <Dialog open={detailsModalOpen} onOpenChange={(open) => {
-                setDetailsModalOpen(open);
-                if (!open) setSelectedHistoryEntry(null);
-            }}>
-                <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+            {/* Alteração manual do risco */}
+            <Dialog open={riskDialog.open} onOpenChange={open => setRiskDialog(prev => ({ ...prev, open }))}>
+                <DialogContent className="sm:max-w-lg">
                     <DialogHeader>
-                        <DialogTitle className="flex items-center gap-2 text-xl">
-                            <Info className="h-5 w-5 text-primary" />
-                            Detalhes da Simulação Carregada
-                        </DialogTitle>
-                        <DialogDescription>
-                            Informações completas da simulação de crédito
-                        </DialogDescription>
+                        <DialogTitle>Alterar nível de risco</DialogTitle>
+                        <DialogDescription>O risco calculado é {RISK_LABELS[risk.level]} ({risk.score}/100). A alteração fica registada na auditoria com a justificação e o seu nome.</DialogDescription>
                     </DialogHeader>
-
-                    {selectedHistoryEntry && (
-                        <div className="space-y-6 mt-4">
-                            {/* Client Information */}
-                            <div className="p-4 rounded-xl border border-border bg-muted/20">
-                                <h3 className="text-sm font-bold uppercase text-muted-foreground mb-3 flex items-center gap-2">
-                                    <DollarSign className="h-4 w-4" />
-                                    Informações do Cliente
-                                </h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Nome do Cliente</p>
-                                        <p className="font-bold text-foreground">{selectedHistoryEntry.clientName}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Rendimento Mensal</p>
-                                        <p className="font-bold text-foreground">
-                                            {selectedHistoryEntry.clientIncome > 0
-                                                ? formatCurrency(selectedHistoryEntry.clientIncome, companySettings?.currency)
-                                                : 'Não informado'}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Credit Details */}
-                            <div className="p-4 rounded-xl border border-border bg-muted/20">
-                                <h3 className="text-sm font-bold uppercase text-muted-foreground mb-3 flex items-center gap-2">
-                                    <Calculator className="h-4 w-4" />
-                                    Detalhes do Crédito
-                                </h3>
-                                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Valor Solicitado</p>
-                                        <p className="font-bold text-primary text-lg">
-                                            {formatCurrency(selectedHistoryEntry.amount, companySettings?.currency)}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Prazo</p>
-                                        <p className="font-bold text-foreground">{selectedHistoryEntry.term} meses</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Taxa de Juros</p>
-                                        <p className="font-bold text-foreground">{selectedHistoryEntry.interestRate}% ao mês</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Sistema de Amortização</p>
-                                        <p className="font-bold text-foreground uppercase">{selectedHistoryEntry.method}</p>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Perfil de Risco</p>
-                                        <Badge variant={
-                                            selectedHistoryEntry.riskProfile === 'low' ? 'success' :
-                                                selectedHistoryEntry.riskProfile === 'medium' ? 'warning' : 'destructive'
-                                        }>
-                                            {selectedHistoryEntry.riskProfile === 'low' ? 'BAIXO' :
-                                                selectedHistoryEntry.riskProfile === 'medium' ? 'MÉDIO' : 'ALTO'}
-                                        </Badge>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Data da Simulação</p>
-                                        <p className="font-medium text-foreground text-sm">
-                                            {new Date(selectedHistoryEntry.date).toLocaleString()}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* Payment Information */}
-                            <div className="p-4 rounded-xl border border-border bg-gradient-to-br from-emerald-50 to-white dark:from-emerald-950/20 dark:to-background">
-                                <h3 className="text-sm font-bold uppercase text-emerald-700 dark:text-emerald-400 mb-3 flex items-center gap-2">
-                                    <Calendar className="h-4 w-4" />
-                                    Informações de Pagamento
-                                </h3>
-                                <div className="grid grid-cols-2 gap-4">
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Parcela Mensal</p>
-                                        <p className="font-bold text-emerald-600 dark:text-emerald-400 text-xl">
-                                            {formatCurrency(selectedHistoryEntry.monthlyPayment, companySettings?.currency)}
-                                        </p>
-                                    </div>
-                                    <div>
-                                        <p className="text-xs text-muted-foreground">Total a Pagar</p>
-                                        <p className="font-bold text-foreground text-xl">
-                                            {formatCurrency(selectedHistoryEntry.totalPayment, companySettings?.currency)}
-                                        </p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            {/* AI Analysis */}
-                            {selectedHistoryEntry.aiAnalysis && (
-                                <div className={cn(
-                                    "p-4 rounded-xl border",
-                                    selectedHistoryEntry.aiAnalysis.status === 'safe'
-                                        ? "border-emerald-200 bg-emerald-50/50 dark:border-emerald-800 dark:bg-emerald-950/20"
-                                        : selectedHistoryEntry.aiAnalysis.status === 'warning'
-                                            ? "border-amber-200 bg-amber-50/50 dark:border-amber-800 dark:bg-amber-950/20"
-                                            : "border-red-200 bg-red-50/50 dark:border-red-800 dark:bg-red-950/20"
-                                )}>
-                                    <h3 className={cn(
-                                        "text-sm font-bold uppercase mb-3 flex items-center gap-2",
-                                        selectedHistoryEntry.aiAnalysis.status === 'safe' ? "text-emerald-700 dark:text-emerald-400" :
-                                            selectedHistoryEntry.aiAnalysis.status === 'warning' ? "text-amber-700 dark:text-amber-400" :
-                                                "text-red-700 dark:text-red-400"
-                                    )}>
-                                        <Brain className="h-4 w-4" />
-                                        Análise de Risco IA
-                                    </h3>
-                                    <div className="space-y-2">
-                                        <div className="flex items-center gap-2">
-                                            <span className="text-xs text-muted-foreground">Status:</span>
-                                            <Badge className={cn(
-                                                selectedHistoryEntry.aiAnalysis.status === 'safe'
-                                                    ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-100 border-emerald-200"
-                                                    : selectedHistoryEntry.aiAnalysis.status === 'warning'
-                                                        ? "bg-amber-100 text-amber-700 hover:bg-amber-100 border-amber-200"
-                                                        : "bg-red-100 text-red-700 hover:bg-red-100 border-red-200"
-                                            )}>
-                                                {selectedHistoryEntry.aiAnalysis.status === 'safe' ? 'BAIXO RISCO' :
-                                                    selectedHistoryEntry.aiAnalysis.status === 'warning' ? 'RISCO MÉDIO' : 'ALTO RISCO'}
-                                            </Badge>
-                                        </div>
-                                        {selectedHistoryEntry.aiAnalysis.message && (
-                                            <p className="text-sm text-foreground leading-relaxed">
-                                                {selectedHistoryEntry.aiAnalysis.message}
-                                            </p>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Action Buttons */}
-                            <div className="flex justify-between gap-2 pt-4 border-t border-border">
-                                <Button
-                                    variant="outline"
-                                    className="gap-2"
-                                    onClick={() => {
-                                        if (selectedHistoryEntry) {
-                                            // Recalculate simulation with history data
-                                            const rows: AmortizationRow[] = [];
-                                            let balance = selectedHistoryEntry.amount;
-                                            const i = selectedHistoryEntry.interestRate / 100;
-                                            const n = selectedHistoryEntry.term;
-
-                                            if (selectedHistoryEntry.method === 'price') {
-                                                const pmt = (selectedHistoryEntry.amount * i * Math.pow(1 + i, n)) / (Math.pow(1 + i, n) - 1);
-                                                for (let month = 1; month <= n; month++) {
-                                                    const interest = balance * i;
-                                                    const amortization = pmt - interest;
-                                                    balance -= amortization;
-                                                    rows.push({
-                                                        month,
-                                                        payment: pmt,
-                                                        interest,
-                                                        amortization,
-                                                        balance: Math.max(0, balance)
-                                                    });
-                                                }
-                                            } else {
-                                                const amortization = selectedHistoryEntry.amount / n;
-                                                for (let month = 1; month <= n; month++) {
-                                                    const interest = balance * i;
-                                                    const payment = amortization + interest;
-                                                    balance -= amortization;
-                                                    rows.push({
-                                                        month,
-                                                        payment,
-                                                        interest,
-                                                        amortization,
-                                                        balance: Math.max(0, balance)
-                                                    });
-                                                }
-                                            }
-
-                                            const totalInterest = rows.reduce((sum, row) => sum + row.interest, 0);
-                                            const totalPayment = rows.reduce((sum, row) => sum + row.payment, 0);
-
-                                            const simulationData = {
-                                                rows,
-                                                totalInterest,
-                                                totalPayment,
-                                                totalUpfrontCosts: 0,
-                                                totalCost: totalPayment,
-                                                cetTotal: 0
-                                            };
-
-                                            generateSimulationPDF(
-                                                simulationData,
-                                                {
-                                                    name: selectedHistoryEntry.clientName,
-                                                    income: selectedHistoryEntry.clientIncome,
-                                                    requestedAmount: selectedHistoryEntry.amount,
-                                                    term: selectedHistoryEntry.term,
-                                                    interestRate: selectedHistoryEntry.interestRate,
-                                                    method: selectedHistoryEntry.method,
-                                                    reference: selectedHistoryEntry.reference
-                                                },
-                                                companySettings,
-                                                user?.name || 'Consultor',
-                                                selectedHistoryEntry.aiAnalysis
-                                            );
-                                        }
-                                    }}
-                                >
-                                    <Download className="h-4 w-4" />
-                                    Baixar PDF Completo
-                                </Button>
-                                <div className="flex gap-2">
-                                    <Button
-                                        variant="outline"
-                                        onClick={() => {
-                                            setDetailsModalOpen(false);
-                                            setSelectedHistoryEntry(null);
-                                        }}
-                                    >
-                                        Fechar
-                                    </Button>
-                                    <Button
-                                        className="gap-2"
-                                        onClick={() => {
-                                            setDetailsModalOpen(false);
-                                            setSelectedHistoryEntry(null);
-                                            // Switch to simulator tab
-                                            const simulatorTab = document.querySelector('[value="simulator"]') as HTMLElement;
-                                            simulatorTab?.click();
-                                        }}
-                                    >
-                                        <Calculator className="h-4 w-4" />
-                                        Ir para Simulador
-                                    </Button>
-                                </div>
-                            </div>
+                    <div className="space-y-4">
+                        <div className="grid grid-cols-3 gap-2">
+                            {(['low', 'medium', 'high'] as const).map(level => (
+                                <button key={level} type="button" onClick={() => setRiskDialog(prev => ({ ...prev, level }))}
+                                    className={cn('rounded-lg border px-2 py-2 text-xs font-bold transition-all', riskDialog.level === level ? riskTone(level) + ' ring-2 ring-current/20' : 'bg-background text-muted-foreground hover:bg-muted')}>
+                                    Risco {RISK_LABELS[level]}
+                                </button>
+                            ))}
                         </div>
-                    )}
+                        <div className="space-y-1">
+                            <Label>Justificação (obrigatória)</Label>
+                            <Textarea rows={4} value={riskDialog.justification} onChange={event => { setRiskError(''); setRiskDialog(prev => ({ ...prev, justification: event.target.value })); }} placeholder="Ex.: cliente com garantia hipotecária ainda não registada no sistema…" />
+                            <p className="text-xs text-muted-foreground">Pelo menos 20 caracteres e 3 palavras, sem caracteres repetidos e diferente das suas justificações anteriores. Fica na auditoria com gravidade Alta.</p>
+                            {riskError && <p className="text-xs font-semibold text-destructive">{riskError}</p>}
+                        </div>
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setRiskDialog(prev => ({ ...prev, open: false }))}>Cancelar</Button>
+                        <Button disabled={riskDialog.justification.trim().length < 20 || riskDialog.level === risk.level} onClick={() => void applyRiskOverride()}>Aplicar alteração</Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
-            {/* Modal de Sucesso (Auto-fechamento) */}
-            <Dialog open={saveSuccessOpen} onOpenChange={setSaveSuccessOpen}>
-                <DialogContent className="sm:max-w-md text-center py-10 bg-white dark:bg-slate-900 border-none shadow-2xl">
-                    <div className="flex flex-col items-center gap-4">
-                        <div className="h-20 w-20 bg-emerald-100 dark:bg-emerald-900/30 rounded-full flex items-center justify-center animate-bounce">
-                            <CheckCircle2 className="h-12 w-12 text-emerald-600 dark:text-emerald-400" />
+
+            {/* Conversão em pedido de crédito */}
+            <Dialog open={convertOpen} onOpenChange={setConvertOpen}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Converter em pedido de crédito</DialogTitle>
+                        <DialogDescription>O pedido fica pendente de aprovação na página Aprovações. A simulação passa ao estado «Convertida em pedido».</DialogDescription>
+                    </DialogHeader>
+                    {result?.valid && (
+                        <dl className="divide-y rounded-xl border text-sm">
+                            {[
+                                ['Cliente', form.clientName], ['Produto', product.name], ['Montante', formatCurrency(form.principal)], ['Prazo', `${form.months} meses`],
+                                ['Sistema', AMORTIZATION_LABELS[form.system]], ['TAN', formatPercent(annualRate)], ['Prestação', formatCurrency(result.installmentBase) + ' (sem encargos)'],
+                                ['Total de juros', formatCurrency(result.totalInterest)], ['TAEG', result.taeg === null ? '—' : formatPercent(result.taeg)],
+                            ].map(([label, value]) => <div key={label} className="flex justify-between gap-3 px-3 py-1.5"><dt className="text-muted-foreground">{label}</dt><dd className="text-right font-semibold">{value}</dd></div>)}
+                        </dl>
+                    )}
+                    <p className="text-xs text-muted-foreground">O plano do pedido usa o capital, a TAN e o sistema de amortização simulados. Comissões e Imposto do Selo são cobrados conforme o preçário no momento do desembolso.</p>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setConvertOpen(false)}>Cancelar</Button>
+                        <Button className="gap-2 bg-emerald-600 hover:bg-emerald-700" disabled={!!convertReason || busy === 'convert'} onClick={() => void convert()}>
+                            {busy === 'convert' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />} Enviar para aprovação
+                        </Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
+
+            {/* Simulação inversa */}
+            <Dialog open={inverseOpen} onOpenChange={setInverseOpen}>
+                <DialogContent className="sm:max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><Sparkles className="h-5 w-5 text-indigo-600" /> Simulação inversa</DialogTitle>
+                        <DialogDescription>Indique a prestação mensal máxima que o cliente pode pagar. Calculamos o montante máximo para o prazo actual e o prazo mínimo para o montante actual, com a TAN e os encargos escolhidos.</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <div className="space-y-1">
+                            <Label>Prestação mensal máxima (com encargos)</Label>
+                            <CurrencyInput value={inverseTarget} onValueChange={setInverseTarget} />
+                            {form.income > 0 && <p className="text-xs text-muted-foreground">Pela taxa de esforço de {formatPercent(config.effortLimit, 0)}: até {formatCurrency(Math.max(0, (config.effortLimit / 100) * form.income - form.otherDebts))} por mês.</p>}
                         </div>
-                        <div className="space-y-2">
-                            <h3 className="text-2xl font-bold text-foreground">Guardado com Sucesso!</h3>
-                            <p className="text-muted-foreground">O histórico de simulação foi atualizado e está disponível na aba "Histórico".</p>
-                        </div>
+                        {inverse && (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                <div className="rounded-xl border p-3">
+                                    <p className="text-xs text-muted-foreground">Montante máximo em {form.months} meses</p>
+                                    <p className="text-lg font-black">{formatCurrency(inverse.withinProduct)}</p>
+                                    {inverse.maxAmount > product.maxAmount && <p className="text-[11px] text-amber-600">Limitado ao máximo do produto.</p>}
+                                    <Button size="sm" className="mt-2 w-full" disabled={inverse.withinProduct < product.minAmount} onClick={() => { set({ principal: inverse.withinProduct }); setInverseOpen(false); }}>Aplicar montante</Button>
+                                </div>
+                                <div className="rounded-xl border p-3">
+                                    <p className="text-xs text-muted-foreground">Prazo mínimo para {form.principal ? formatCurrency(form.principal) : 'o montante actual'}</p>
+                                    <p className="text-lg font-black">{inverse.minMonths ? `${inverse.minMonths} meses` : form.principal ? `Acima de ${product.maxMonths} meses` : '—'}</p>
+                                    <Button size="sm" variant="outline" className="mt-2 w-full" disabled={!inverse.minMonths} onClick={() => { if (inverse.minMonths) set({ months: inverse.minMonths }); setInverseOpen(false); }}>Aplicar prazo</Button>
+                                </div>
+                            </div>
+                        )}
                     </div>
                 </DialogContent>
             </Dialog>
+
+            <AlertModal
+                isOpen={!!deleteTarget}
+                onClose={() => setDeleteTarget(null)}
+                onConfirm={() => void confirmDelete()}
+                showCancel
+                title="Eliminar simulação?"
+                description={deleteTarget ? `A simulação ${deleteTarget.reference} de ${deleteTarget.clientName} será eliminada do histórico. O código de verificação deixa de poder ser confirmado.` : ''}
+                type="error"
+            />
         </MainLayout>
+    );
+}
+
+function GuiaSimulador({ config, onTerms }: { config: SimulatorConfig; onTerms: () => void }) {
+    const items: Array<[string, string]> = [
+        ['Produto', 'Escolha o produto: os limites de montante e prazo, a TAN, as comissões e o sistema de amortização vêm de Configurações › Simulador e Produtos.'],
+        ['Montante e prazo', 'Use o cursor ou escreva o valor (ex.: 1000000 aparece como 1 000 000,00 Kz). O prazo é escolhido em meses, com atalhos de 6 a 60 meses.'],
+        ['Datas e carência', 'A data de início é a do desembolso. As prestações vencem no dia escolhido (1 a 28); se calhar num fim-de-semana ou feriado, passa para o dia útil seguinte. A carência pode ser só de capital (paga juros) ou de capital e juros (juros capitalizados).'],
+        ['TAN e TAEG', 'A TAN é a taxa anual nominal (a mensal é TAN ÷ 12). A TAEG junta juros, comissões, Imposto do Selo e seguros e é calculada pela TIR dos fluxos reais.'],
+        ['Imposto do Selo', `${formatPercent(config.stampDuty.upToOneYear)} (até 1 ano), ${formatPercent(config.stampDuty.overOneYear)} (mais de 1 ano) ou ${formatPercent(config.stampDuty.fiveYearsOrMore)} (5 anos ou mais) sobre a utilização, e ${formatPercent(config.stampDuty.interest)} sobre os juros de cada prestação.`],
+        ['Taxa de esforço e risco', `(nova prestação + outros encargos) ÷ rendimento líquido. Verde abaixo de 30%, amarelo até ${formatPercent(config.effortLimit, 0)}, vermelho acima. O risco é calculado automaticamente e pode ser alterado com justificação registada na auditoria.`],
+        ['Ficha de Simulação', `PDF com número único, código de verificação e QR code, válido ${config.validityDays} dias, com o plano completo e uma página de termos e legislação.`],
+        ['Converter em pedido', 'Só para clientes registados sem créditos por liquidar. O pedido segue para Aprovações e a simulação fica «Convertida em pedido».'],
+    ];
+    return (
+        <Card>
+            <CardHeader>
+                <CardTitle>Guia do Simulador de Crédito</CardTitle>
+                <CardDescription>Como usar o simulador e o que significa cada valor.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+                <div className="grid gap-3 md:grid-cols-2">
+                    {items.map(([title, text], index) => (
+                        <div key={title} className="flex gap-3 rounded-xl border bg-muted/20 p-4">
+                            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-indigo-600 text-xs font-bold text-white">{index + 1}</span>
+                            <div><p className="font-bold">{title}</p><p className="text-sm text-muted-foreground">{text}</p></div>
+                        </div>
+                    ))}
+                </div>
+                <Button variant="outline" className="gap-2" onClick={onTerms}>Ver Termos, Políticas e legislação aplicável</Button>
+            </CardContent>
+        </Card>
     );
 }
 

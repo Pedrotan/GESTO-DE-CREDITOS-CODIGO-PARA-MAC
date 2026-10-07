@@ -1,10 +1,11 @@
-import { setPdfWatermark } from './pdf-documento';
+import { markPdfPageDecorated, setPdfPageDecorator, setPdfWatermark, getMasterPdfWatermark } from './pdf-documento';
 import jsPDF from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 import { CompanySettings } from '@/tipos/base-dados';
 import { Client, Credit } from '@/tipos/credito';
 import { formatCurrency, formatDate, formatDateTime } from './formatters';
 import { AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
+import { ANGOLAN_BANKS, getBankLogoUrl, identifyBankFromIBAN } from '@/bibliotecas/ibanHelper';
 
 const translateRiskLevel = (risk: string): string => {
     const levels: Record<string, string> = {
@@ -110,7 +111,8 @@ export const getCompanySettings = (providedSettings?: any): CompanySettings => {
         syncEnabled: settings?.syncEnabled || false,
         bankingInfo: settings?.bankingInfo || '[]',
         contractTemplates: settings?.contractTemplates || '[]',
-        location: settings?.location || ''
+        location: settings?.location || '',
+        website: settings?.website || ''
     };
 };
 
@@ -172,7 +174,120 @@ const parseRgbColor = (col: any, fallback: [number, number, number]): [number, n
     return fallback;
 };
 
-export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: string, onlyDecoration: boolean = false) => {
+/** Método de pagamento guardado em inglês, apresentado em português nos documentos. */
+export const paymentMethodLabel = (method?: string | null) => ({
+    cash: 'Numerário', transfer: 'Transferência', reference: 'Referência', multicaixa: 'Multicaixa',
+    card: 'Cartão', check: 'Cheque', cheque: 'Cheque', mobile: 'Pagamento móvel', express: 'Multicaixa Express',
+} as Record<string, string>)[String(method || '').toLowerCase()] || (method ? String(method) : 'Numerário');
+
+/** Estado de crédito/cliente/pagamento guardado em inglês, apresentado em português. */
+export const statusLabelPt = (status?: string | null) => ({
+    active: 'Ativo', overdue: 'Em atraso', paid: 'Pago', renegotiated: 'Renegociado', defaulted: 'Incumprimento',
+    pending_approval: 'Pendente de aprovação', pending: 'Pendente', rejected: 'Rejeitado', cancelled: 'Cancelado',
+    blocked: 'Bloqueado', inactive: 'Inativo', confirmed: 'Confirmado', partial: 'Parcial', approved: 'Aprovado',
+    low: 'Baixo', medium: 'Médio', high: 'Alto', critical: 'Crítico',
+} as Record<string, string>)[String(status || '').toLowerCase()] || (status ? String(status) : '—');
+
+export type BrandingOptions = {
+    /** Multiplica o tamanho do logotipo do cabeçalho (1 = padrão). */
+    logoScale?: number;
+    /** Linha por baixo do nome do responsável (padrão: "GESTOR DE CRÉDITO / OPERAÇÕES"). */
+    roleLabel?: string;
+    /** Texto por baixo do nome da empresa (padrão: "SISTEMA DE GESTÃO DE CRÉDITO"). */
+    tagline?: string;
+};
+
+/**
+ * Linha de contactos do rodapé com ícones (telefone, web, email e localização). Desenhada por applyBranding
+ * em todas as páginas e reutilizada pelos documentos com design próprio (certificados, credenciais).
+ */
+export const drawContactFooter = (doc: jsPDF, config: CompanySettings) => {
+    const pageWidth = doc.internal.pageSize.width;
+    const pageHeight = doc.internal.pageSize.height;
+    const isLandscape = pageWidth > pageHeight;
+    const primary = resolveBrandPrimary(config.primaryColor);
+    const dark = resolveBrandDark(config.secondaryColor);
+    const footInfoY = pageHeight - 17.5;
+    const col1X = isLandscape ? 32 : 26;
+    const col2X = isLandscape ? pageWidth * 0.38 : 82;
+    const col3X = isLandscape ? pageWidth * 0.70 : 138;
+    const footRight = pageWidth - 8;
+    const badgeR = 1.55;
+    // Centros das duas linhas de texto (base em footInfoY e footInfoY + 3.4, corpo 6.8 pt).
+    const line1Y = footInfoY - 0.75;
+    const line2Y = footInfoY + 2.65;
+    const footMidY = (line1Y + line2Y) / 2;
+
+    // Ícones vectoriais (círculo na cor da marca e símbolo branco): telefone, web, email e localização.
+    const drawBadgeIcon = (x: number, y: number, type: 'phone' | 'web' | 'mail' | 'pin') => {
+        doc.setFillColor(primary[0], primary[1], primary[2]);
+        doc.circle(x, y, badgeR, 'F');
+        doc.setFillColor(255, 255, 255);
+        doc.setDrawColor(255, 255, 255);
+        doc.setLineWidth(0.22);
+        if (type === 'phone') {
+            doc.roundedRect(x - 0.6, y - 1.0, 1.2, 2.0, 0.22, 0.22, 'F');
+            doc.setFillColor(primary[0], primary[1], primary[2]);
+            doc.rect(x - 0.42, y - 0.78, 0.84, 1.25, 'F');
+            doc.setFillColor(255, 255, 255);
+            doc.circle(x, y + 0.72, 0.11, 'F');
+        } else if (type === 'web') {
+            doc.circle(x, y, 0.95, 'S');
+            doc.ellipse(x, y, 0.4, 0.95, 'S');
+            doc.line(x - 0.95, y, x + 0.95, y);
+        } else if (type === 'mail') {
+            doc.rect(x - 0.95, y - 0.62, 1.9, 1.24, 'F');
+            doc.setDrawColor(primary[0], primary[1], primary[2]);
+            doc.setLineWidth(0.2);
+            doc.line(x - 0.95, y - 0.62, x, y + 0.08);
+            doc.line(x, y + 0.08, x + 0.95, y - 0.62);
+        } else {
+            doc.circle(x, y - 0.32, 0.72, 'F');
+            doc.triangle(x - 0.62, y - 0.05, x + 0.62, y - 0.05, x, y + 1.08, 'F');
+            doc.setFillColor(primary[0], primary[1], primary[2]);
+            doc.circle(x, y - 0.32, 0.27, 'F');
+        }
+    };
+    // Texto cortado com reticências para nunca invadir a coluna seguinte.
+    const fitText = (text: string, maxWidth: number) => {
+        let value = String(text || '');
+        if (doc.getTextWidth(value) <= maxWidth) return value;
+        while (value.length > 1 && doc.getTextWidth(`${value}...`) > maxWidth) value = value.slice(0, -1);
+        return `${value.trimEnd()}...`;
+    };
+    const footText = (text: string, x: number, y: number, limit: number) => doc.text(fitText(text, limit - x - 2.5), x, y);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(6.8);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+
+    // Coluna 1: telefones
+    drawBadgeIcon(col1X, footMidY, 'phone');
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    footText(config.phone || '+244 941 537 486', col1X + 3.6, footInfoY, col2X - badgeR);
+    footText(config.whatsapp || '+244 923 000 000', col1X + 3.6, footInfoY + 3.4, col2X - badgeR);
+
+    // Coluna 2: website e email, cada um com o seu ícone
+    drawBadgeIcon(col2X, line1Y, 'web');
+    drawBadgeIcon(col2X, line2Y, 'mail');
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    footText(config.website || 'www.tango.co.ao', col2X + 3.6, footInfoY, col3X - badgeR);
+    footText(config.email || 'geral@tango.co.ao', col2X + 3.6, footInfoY + 3.4, col3X - badgeR);
+
+    // Coluna 3: morada (localização)
+    drawBadgeIcon(col3X, footMidY, 'pin');
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    footText(config.address || 'Cuanza Norte, N´dalatando', col3X + 3.6, footInfoY, footRight);
+    footText(config.location || 'Angola', col3X + 3.6, footInfoY + 3.4, footRight);
+    doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.2);
+};
+
+export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: string, onlyDecoration: boolean = false, options: BrandingOptions = {}) => {
+    const logoScale = Math.max(0.5, Math.min(2.5, options.logoScale ?? 1));
+    // Fim do cabeçalho (linha divisória): o conteúdo de cada documento começa abaixo deste valor.
+    let headerBottom = 20;
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
     const isLandscape = pageWidth > pageHeight;
@@ -182,7 +297,7 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
     const dark = resolveBrandDark(config.secondaryColor);   // #2B2D2F
     const lightSilver = BRAND_SILVER;   // #E5E7EB
 
-    setPdfWatermark(doc, config.watermarkLogo);
+    setPdfWatermark(doc, config.watermarkLogo || getMasterPdfWatermark());
 
     // =========================================================================
     // =========================================================================
@@ -316,59 +431,9 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
     // =========================================================================
     // 4. INFORMAÇÕES DE CONTACTO EM 3 COLUNAS COM ÍCONES CIRCULARES
     // =========================================================================
-    const footInfoY = pageHeight - 17.5;
-    const col1X = isLandscape ? 32 : 26;
-    const col2X = isLandscape ? pageWidth * 0.38 : 82;
-    const col3X = isLandscape ? pageWidth * 0.70 : 138;
-
-    // Helper para desenhar o badge circular laranja
-    const drawBadgeIcon = (x: number, y: number, type: 'phone' | 'web' | 'pin') => {
-        doc.setFillColor(primary[0], primary[1], primary[2]);
-        doc.circle(x, y, 2.0, 'F');
-        doc.setFillColor(255, 255, 255);
-        doc.setDrawColor(255, 255, 255);
-        doc.setLineWidth(0.35);
-
-        if (type === 'phone') {
-            doc.circle(x - 0.3, y - 0.3, 0.6, 'F');
-            doc.line(x - 0.3, y - 0.3, x + 0.5, y + 0.5);
-            doc.circle(x + 0.5, y + 0.5, 0.6, 'F');
-        } else if (type === 'web') {
-            doc.circle(x, y, 1.1);
-            doc.line(x - 1.1, y, x + 1.1, y);
-            doc.line(x, y - 1.1, x, y + 1.1);
-        } else {
-            doc.circle(x, y - 0.4, 0.8, 'F');
-            doc.line(x, y + 0.4, x, y + 1.0);
-        }
-    };
-
-    // Coluna 1: Contactos Telefónicos
-    drawBadgeIcon(col1X, footInfoY + 0.5, 'phone');
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(6.8);
-    doc.setTextColor(dark[0], dark[1], dark[2]);
-    doc.text(config.phone || '+244 941 537 486', col1X + 4.2, footInfoY);
-    doc.text(config.whatsapp || '+244 923 000 000', col1X + 4.2, footInfoY + 3.4);
-
-    // Coluna 2: Website & Email
-    drawBadgeIcon(col2X, footInfoY + 0.5, 'web');
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(6.8);
-    doc.setTextColor(dark[0], dark[1], dark[2]);
-    doc.text('www.tango.co.ao', col2X + 4.2, footInfoY);
-    const displayEmail = (config.email || 'geral@tango.co.ao').substring(0, 30);
-    doc.text(displayEmail, col2X + 4.2, footInfoY + 3.4);
-
-    // Coluna 3: Endereço & Localização
-    drawBadgeIcon(col3X, footInfoY + 0.5, 'pin');
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(6.8);
-    doc.setTextColor(dark[0], dark[1], dark[2]);
+    drawContactFooter(doc, config);
     const cleanAddr1 = (config.address || 'Cuanza Norte, N´dalatando').substring(0, 32);
-    doc.text(cleanAddr1, col3X + 4.2, footInfoY);
     const cleanAddr2 = (config.location || 'Angola').substring(0, 32);
-    doc.text(cleanAddr2, col3X + 4.2, footInfoY + 3.4);
 
     // =========================================================================
     // 5. CABEÇALHO COMPLETO NA PÁGINA INICIAL (!onlyDecoration)
@@ -380,8 +445,10 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
         if (isValidLogoData(pdfLogo)) {
             const imgFormat = detectImageFormat(pdfLogo);
             try {
-                let imgWidth = 26;
-                let imgHeight = 18;
+                const maxLogoW = 28 * logoScale;
+                const maxLogoH = 18 * logoScale;
+                let imgWidth = 26 * logoScale;
+                let imgHeight = maxLogoH;
                 try {
                     const properties = doc.getImageProperties(pdfLogo);
                     const originalWidth = properties.width;
@@ -389,17 +456,17 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
                     if (originalWidth && originalHeight) {
                         const aspectRatio = originalWidth / originalHeight;
                         if (aspectRatio > 1.3) {
-                            imgWidth = 28;
-                            imgHeight = 28 / aspectRatio;
+                            imgWidth = maxLogoW;
+                            imgHeight = maxLogoW / aspectRatio;
                         } else {
-                            imgHeight = 18;
-                            imgWidth = 18 * aspectRatio;
+                            imgHeight = maxLogoH;
+                            imgWidth = maxLogoH * aspectRatio;
                         }
                     }
                 } catch (err) {
                     console.warn("Could not get logo properties:", err);
                 }
-                const yOffset = 12 + (18 - imgHeight) / 2;
+                const yOffset = 12 + (maxLogoH - imgHeight) / 2;
                 doc.addImage(pdfLogo, imgFormat, 18, yOffset, imgWidth, imgHeight, undefined, 'NONE');
                 textStartX = 18 + imgWidth + 5;
             } catch (e) {
@@ -425,29 +492,45 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
 
         const maxTitleW = pageWidth - textStartX - (topCutW - 10);
         const compName = (toTitleCase(config.name) || config.name || 'Digital Norte').toUpperCase();
+        const ptToMm = 0.3528;
 
-        // 1. Nome da Empresa (Negrito, Caixa Alta, Carvão Escuro)
+        // 1. Nome da Empresa (Negrito, Caixa Alta, Carvão Escuro). O cabeçalho tem altura limitada para nunca
+        // sobrepor o conteúdo: o nome ocupa uma linha (reduzindo a letra até 11 pt) ou, no máximo, duas.
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(13.5);
         doc.setTextColor(dark[0], dark[1], dark[2]);
-        const nameLines = doc.splitTextToSize(compName, maxTitleW);
+        let nameFontSize = 13.5;
+        doc.setFontSize(nameFontSize);
+        while (nameFontSize > 11 && doc.getTextWidth(compName) > maxTitleW) {
+            nameFontSize -= 0.5;
+            doc.setFontSize(nameFontSize);
+        }
+        let nameLines: string[] = [compName];
+        if (doc.getTextWidth(compName) > maxTitleW) {
+            nameFontSize = 10.5;
+            doc.setFontSize(nameFontSize);
+            nameLines = doc.splitTextToSize(compName, maxTitleW);
+            if (nameLines.length > 2) nameLines = [nameLines[0], `${nameLines.slice(1).join(' ').slice(0, Math.max(10, nameLines[1].length - 1))}…`];
+        }
+        const nameLineH = nameFontSize * ptToMm * 1.15;
         doc.text(nameLines, textStartX, 18.5);
 
         // 2. Tagline Institucional (Letras espaçadas, estilo "YOUR TAGLINE HERE")
-        const taglineY = 18.5 + (nameLines.length * 4.2);
+        const taglineY = 18.5 + (nameLines.length - 1) * nameLineH + 3.6;
         doc.setFont("helvetica", "bold");
         doc.setFontSize(6.8);
         doc.setTextColor(115, 125, 135);
-        const tagText = (config.nif ? `NIF: ${config.nif}   •   ` : '') + 'SISTEMA DE GESTÃO DE CRÉDITO';
+        const tagText = (config.nif ? `NIF: ${config.nif}   •   ` : '') + (options.tagline || 'SISTEMA DE GESTÃO DE CRÉDITO');
         doc.text(tagText, textStartX, taglineY, { maxWidth: maxTitleW });
 
-        // 3. Bloco de Responsável e Data (Estilo Executivo do Modelo)
-        const metaY = Math.max(taglineY + 7.5, 33);
+        // 3. Bloco de Responsável, contactos e Data (compacto: três linhas)
+        const metaY = taglineY + 3.9;
+        // 7 mm abaixo do nome: a data e os contactos ficam afastados da terceira linha decorativa.
+        const contactsY = metaY + 7.0;
 
         // Linha divisória vertical fina à esquerda do bloco de responsável (conforme imagem de referência)
         doc.setDrawColor(210, 215, 225);
         doc.setLineWidth(0.35);
-        doc.line(textStartX, metaY - 1, textStartX, metaY + 15);
+        doc.line(textStartX, metaY - 1, textStartX, contactsY + 1);
 
         const infoStartX = textStartX + 2.5;
 
@@ -461,57 +544,119 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
         doc.setFont("helvetica", "bold");
         doc.setFontSize(6.5);
         doc.setTextColor(dark[0], dark[1], dark[2]);
-        doc.text("GESTOR DE CRÉDITO / OPERAÇÕES", infoStartX, metaY + 3.6);
+        doc.text(options.roleLabel || "GESTOR DE CRÉDITO / OPERAÇÕES", infoStartX, metaY + 3.2);
 
-        // Linhas de Contacto Rápido do Responsável
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(6.0);
-        doc.setTextColor(dark[0], dark[1], dark[2]);
-        doc.text("PHONE : ", infoStartX, metaY + 7.2);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(100, 116, 139);
-        doc.text(config.phone || '+244 941 537 486', infoStartX + 9, metaY + 7.2);
-
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(dark[0], dark[1], dark[2]);
-        doc.text("WEB : ", infoStartX, metaY + 10.4);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(100, 116, 139);
-        doc.text("www.tango.co.ao", infoStartX + 7, metaY + 10.4);
-
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(dark[0], dark[1], dark[2]);
-        doc.text("ADDR : ", infoStartX, metaY + 13.6);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(100, 116, 139);
-        doc.text(`${cleanAddr1}, ${cleanAddr2}`, infoStartX + 8, metaY + 13.6);
-
-        // Data Alinhada à Direita (Estilo do Modelo: "DATE : 25-Set-2026" com DATE : em Laranja)
+        // Data alinhada à direita, na linha dos contactos ("DATA :" em laranja)
         doc.setFont("helvetica", "bold");
         doc.setFontSize(7.5);
-        const dateY = isLandscape ? 34 : metaY + 13.6;
-        const datePrefix = "DATE : ";
+        const datePrefix = "DATA : ";
         const dateFullStr = `${formatDate(new Date())}`;
         const prefixW = doc.getTextWidth(datePrefix);
-        const dateW = doc.getTextWidth(dateFullStr);
-        const totalDateW = prefixW + dateW;
+        const totalDateW = prefixW + doc.getTextWidth(dateFullStr);
         const dateStartX = pageWidth - (isLandscape ? 16 : 14) - totalDateW;
         doc.setTextColor(primary[0], primary[1], primary[2]);
-        doc.text(datePrefix, dateStartX, dateY);
+        doc.text(datePrefix, dateStartX, contactsY);
         doc.setTextColor(dark[0], dark[1], dark[2]);
-        doc.text(dateFullStr, dateStartX + prefixW, dateY);
+        doc.text(dateFullStr, dateStartX + prefixW, contactsY);
 
-        // Linha Divisória Sutil de Separação
-        const divLineY = isLandscape ? 44 : metaY + 18;
+        // Contactos rápidos numa só linha (também repetidos no rodapé)
+        const contactParts: Array<[string, string]> = [
+            ['TEL. : ', config.phone || '+244 941 537 486'],
+            ['WEB : ', config.website || 'www.tango.co.ao'],
+            ['MORADA : ', `${cleanAddr1}, ${cleanAddr2}`],
+        ];
+        // Os contactos terminam antes do nó decorativo da terceira linha (nunca por baixo dele).
+        const contactsMaxX = Math.min(dateStartX - 4, dot3X - 4);
+        let contactX = infoStartX;
+        doc.setFontSize(6.0);
+        for (const [label, value] of contactParts) {
+            doc.setFont("helvetica", "bold");
+            doc.setTextColor(dark[0], dark[1], dark[2]);
+            const labelW = doc.getTextWidth(label);
+            doc.setFont("helvetica", "normal");
+            const room = contactsMaxX - contactX - labelW;
+            if (room < 12) break;
+            let text = value;
+            while (text.length > 4 && doc.getTextWidth(text) > room) text = `${text.slice(0, -2)}…`;
+            doc.setFont("helvetica", "bold");
+            doc.text(label, contactX, contactsY);
+            doc.setFont("helvetica", "normal");
+            doc.setTextColor(100, 116, 139);
+            doc.text(text, contactX + labelW, contactsY);
+            contactX += labelW + doc.getTextWidth(text) + 4;
+        }
+
+        // Linha Divisória Sutil de Separação (nunca acima do fundo do logótipo)
+        const divLineY = Math.max(contactsY + 2.2, 12 + 18 * logoScale + 2);
         doc.setDrawColor(226, 232, 240);
         doc.setLineWidth(0.25);
         doc.line(18, divLineY, pageWidth - 14, divLineY);
+        headerBottom = divLineY;
     }
 
     // Repor configurações padrão para evitar vazamento de estilos
     doc.setTextColor(dark[0], dark[1], dark[2]);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.2);
+    headerBottoms.set(doc, headerBottom);
+    markPdfPageDecorated(doc);
+    // Páginas novas criadas depois (por exemplo, por uma tabela longa) recebem a mesma moldura e contactos.
+    if (!onlyDecoration) setPdfPageDecorator(doc, page => applyBranding(page, config, userName, true, options));
+};
+
+const headerBottoms = new WeakMap<jsPDF, number>();
+/** Posição (mm) onde termina o cabeçalho desenhado pelo último applyBranding neste documento. */
+export const brandingHeaderBottom = (doc: jsPDF) => headerBottoms.get(doc) ?? 20;
+
+/**
+ * Ajusta o tamanho da letra para o texto caber numa largura (até ao mínimo indicado); se ainda assim não couber,
+ * corta com reticências. Deixa o tamanho escolhido activo e devolve o texto a escrever.
+ */
+export const fitPdfText = (doc: jsPDF, text: string, maxWidth: number, size: number, minSize = 5.5): string => {
+    let current = size;
+    doc.setFontSize(current);
+    while (current > minSize && doc.getTextWidth(text) > maxWidth) doc.setFontSize(current = Math.max(minSize, current - 0.25));
+    if (doc.getTextWidth(text) <= maxWidth) return text;
+    let value = text;
+    while (value.length > 1 && doc.getTextWidth(`${value}...`) > maxWidth) value = value.slice(0, -1);
+    return `${value.trimEnd()}...`;
+};
+
+/** Limite inferior do conteúdo (mm a partir do topo): abaixo disto estão os contactos e as barras do rodapé. */
+export const contentBottom = (doc: jsPDF) => doc.internal.pageSize.getHeight() - 28;
+
+/** Garante espaço para `height` mm a partir de `y`; se não couber, abre uma página nova com a moldura da marca. */
+export const ensurePdfSpace = (doc: jsPDF, y: number, height: number, config: CompanySettings, userName?: string, topAfterBreak = 40): number => {
+    if (y + height <= contentBottom(doc)) return y;
+    doc.addPage();
+    applyBranding(doc, config, userName, true);
+    return topAfterBreak;
+};
+
+/**
+ * Nota final do documento (ex.: "Documento gerado automaticamente…"): fica junto ao fundo da página, mas
+ * sempre abaixo do conteúdo e acima dos contactos do rodapé. Se não houver espaço, passa para uma página nova.
+ */
+export const writeClosingNote = (doc: jsPDF, text: string, afterY: number, config: CompanySettings, userName?: string, options: { fontSize?: number; line?: boolean; color?: [number, number, number] } = {}) => {
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const size = options.fontSize ?? 8;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(size);
+    const lines = doc.splitTextToSize(text, pageWidth - 40) as string[];
+    const lineHeight = size * 0.42;
+    const height = (options.line === false ? 0 : 2) + lines.length * lineHeight + 2;
+    let y = Math.max(afterY + 6, contentBottom(doc) - height);
+    y = ensurePdfSpace(doc, y, height, config, userName);
+    const color = options.color ?? [150, 150, 150];
+    doc.setTextColor(color[0], color[1], color[2]);
+    if (options.line !== false) {
+        doc.setDrawColor(203, 213, 225);
+        doc.setLineWidth(0.2);
+        doc.line(20, y, pageWidth - 20, y);
+    }
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(size);
+    doc.text(lines, pageWidth / 2, y + (options.line === false ? 0 : 2) + lineHeight * 0.85, { align: 'center' });
 };
 
 export const generatePaymentReceipt = (payment: any, credit: any, settings?: any, userName?: string) => {
@@ -545,7 +690,7 @@ export const generatePaymentReceipt = (payment: any, credit: any, settings?: any
         startY: 90,
         head: [['Discriminação do Pagamento', 'Montante']],
         body: [
-            ['Amortização do Principal', formatCurrency(payment.allocatedToPrincipal)],
+            ['Amortização do Capital', formatCurrency(payment.allocatedToPrincipal)],
             ['Juros Correntes', formatCurrency(payment.allocatedToInterest)],
             ['Juros de Mora / Penalidades', formatCurrency(payment.allocatedToLateInterest)],
             ['TOTAL PAGO', formatCurrency(payment.amount)]
@@ -556,10 +701,7 @@ export const generatePaymentReceipt = (payment: any, credit: any, settings?: any
         didDrawPage: () => applyBranding(doc, config, userName, true)
     });
 
-    const footerY = 280;
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text('Este documento serve de comprovativo de pagamento.', 105, footerY, { align: 'center' });
+    writeClosingNote(doc, 'Este documento serve de comprovativo de pagamento.', (doc as any).lastAutoTable?.finalY || 200, config, userName, { line: false });
 
     doc.save(`Recibo-${payment.id}.pdf`);
 };
@@ -607,13 +749,13 @@ export const createDebtCollectionNoticePDF = (
     doc.setTextColor(black[0], black[1], black[2]);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(19);
-    doc.text('NOTA DE COBRANCA DE DIVIDA', 105, 55, { align: 'center' });
+    doc.text('NOTA DE COBRANÇA DE DÍVIDA', 105, 55, { align: 'center' });
 
     doc.setFontSize(9);
     doc.setFont("helvetica", "normal");
     doc.text(`Nota: ${noticeNumber}`, 20, 68);
-    doc.text(`Emissao: ${formatDateTime(issueDate)}`, 20, 74);
-    doc.text(`Responsavel: ${userName || 'Sistema de Cobranca'}`, 20, 80);
+    doc.text(`Emissão: ${formatDateTime(issueDate)}`, 20, 74);
+    doc.text(`Responsável: ${userName || 'Sistema de Cobrança'}`, 20, 80);
 
     doc.setFont("helvetica", "bold");
     doc.text('Cliente:', 120, 68);
@@ -628,7 +770,7 @@ export const createDebtCollectionNoticePDF = (
         head: [['Resumo da cobranca', 'Valor']],
         body: [
             ['Total de creditos em cobranca', String(debtCredits.length)],
-            ['Principal cedido', formatCurrency(totalPrincipal, currency)],
+            ['Capital cedido', formatCurrency(totalPrincipal, currency)],
             ['Saldo em aberto', formatCurrency(totalBalance, currency)],
             ['Juros de mora acumulados', formatCurrency(totalLateInterest, currency)],
             ['Valor total a regularizar', formatCurrency(totalDue, currency)],
@@ -643,9 +785,9 @@ export const createDebtCollectionNoticePDF = (
     const detailStartY = (doc as any).lastAutoTable.finalY + 10;
     autoTable(doc, {
         startY: detailStartY,
-        head: [['Credito', 'Referencia', 'Vencimento', 'Atraso', 'Saldo', 'Mora', 'Total']],
+        head: [['Crédito', 'Referência', 'Vencimento', 'Atraso', 'Saldo', 'Mora', 'Total']],
         body: debtCredits.map((credit, index) => [
-            `Credito No ${index + 1}`,
+            `Crédito nº ${index + 1}`,
             credit.id,
             formatDate(credit.dueDate),
             `${calculateDebtDays(credit)} dias`,
@@ -721,6 +863,79 @@ export const generateDebtCollectionNoticePDF = (
     return doc;
 };
 
+export const DEFAULT_CONTRACT_TITLE = 'CONTRATO DE CRÉDITO E CONFISSÃO DE DÍVIDA';
+
+const parseContractTemplates = (val: any): any[] => {
+    if (!val) return [];
+    if (Array.isArray(val)) return val;
+    try { const parsed = JSON.parse(val); return Array.isArray(parsed) ? parsed : []; } catch { return []; }
+};
+
+/**
+ * Texto das cláusulas que o contrato vai usar: o modelo escolhido, as cláusulas personalizadas
+ * das Definições ou o texto padrão. Serve de ponto de partida ao editor em tempo real.
+ */
+export const resolveContractClauses = (contract: any, settings?: any, templateId?: string): string => {
+    const config = getCompanySettings(settings);
+    const templates = parseContractTemplates(config.contractTemplates);
+    const selectedTemplate = templateId ? templates.find((t: any) => t.id === templateId) : templates[0];
+    return String(selectedTemplate?.content || config.customClauses || `CLÁUSULA PRIMEIRA (Objecto)
+1. O CREDOR concede ao CLIENTE um empréstimo no valor de ${formatCurrency(contract.principalAmount || contract.value, config.currency)}.
+2. O CLIENTE confessa-se devedor desta importância e obriga-se a restituí-la acrescida dos juros acordados.
+
+CLÁUSULA SEGUNDA (Prazo e Prestações)
+O montante total deverá ser liquidado em ${contract.installments || 1} prestações, conforme o plano de pagamentos anexo a este contrato.
+
+CLÁUSULA TERCEIRA (Incumprimento)
+Em caso de falta de pagamento de qualquer prestação na data do seu vencimento, o CREDOR reserva-se o direito de cobrar juros de mora, contados diariamente a partir do dia seguinte ao vencimento, sobre o valor em atraso.`).trim();
+};
+
+/** Campos que o editor de contratos pode inserir no texto; são substituídos pelos dados reais ao gerar o PDF. */
+export const CONTRACT_PLACEHOLDERS: Array<{ token: string; label: string }> = [
+    { token: '{{CLIENTE}}', label: 'Nome do cliente' },
+    { token: '{{NIF_CLIENTE}}', label: 'NIF / documento do cliente' },
+    { token: '{{VALOR}}', label: 'Capital concedido' },
+    { token: '{{PRESTACOES}}', label: 'N.º de prestações' },
+    { token: '{{TAXA}}', label: 'Taxa de juro' },
+    { token: '{{DATA_INICIO}}', label: 'Data de início' },
+    { token: '{{DATA_FIM}}', label: 'Data de fim' },
+    { token: '{{EMPRESA}}', label: 'Nome da empresa' },
+    { token: '{{NIF_EMPRESA}}', label: 'NIF da empresa' },
+    { token: '{{REF}}', label: 'Referência do contrato' },
+];
+
+export const fillContractPlaceholders = (text: string, contract: any, settings?: any): string => {
+    const config = getCompanySettings(settings);
+    const rate = Number(contract?.interestRate);
+    const values: Record<string, string> = {
+        '{{CLIENTE}}': contract?.clientName || '',
+        '{{NIF_CLIENTE}}': contract?.clientNif || 'N/A',
+        '{{VALOR}}': formatCurrency(contract?.principalAmount || contract?.value || 0, config.currency),
+        '{{PRESTACOES}}': String(contract?.installments || 1),
+        '{{TAXA}}': Number.isFinite(rate) ? `${rate.toLocaleString('pt-AO')}%` : '—',
+        '{{DATA_INICIO}}': contract?.startDate ? formatDate(contract.startDate) : '—',
+        '{{DATA_FIM}}': contract?.endDate || contract?.dueDate ? formatDate(contract.endDate || contract.dueDate) : '—',
+        '{{EMPRESA}}': config.name || '',
+        '{{NIF_EMPRESA}}': config.nif || '',
+        '{{REF}}': contract?.id || '',
+    };
+    return String(text || '').replace(/\{\{[A-Z_]+\}\}/g, token => values[token] ?? token);
+};
+
+/** Termos editados guardados no contrato (coluna `terms`), em JSON `{ title, clauses }`. */
+export const parseContractTerms = (raw: any): { title?: string; clauses?: string } | null => {
+    if (!raw) return null;
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (parsed && typeof parsed === 'object' && (parsed.clauses || parsed.title)) {
+            return { title: parsed.title ? String(parsed.title) : undefined, clauses: parsed.clauses ? String(parsed.clauses) : undefined };
+        }
+    } catch {
+        // Texto livre antigo na coluna: não é tratado como cláusulas editadas.
+    }
+    return null;
+};
+
 export const generateContractPDF = (
     contract: any,
     settings?: any,
@@ -728,55 +943,58 @@ export const generateContractPDF = (
     returnType: 'save' | 'blob' = 'save',
     userName?: string,
     signerSignature?: string,
-    options: { templateId?: string } = {}
+    options: { templateId?: string; title?: string; clauses?: string } = {}
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
     const orange = resolveBrandPrimary(config.primaryColor);
-    const black = BRAND_CHARCOAL;
+    // Termos editados (pelo editor em tempo real ou guardados no contrato) prevalecem sobre o modelo.
+    const savedTerms = parseContractTerms(contract?.terms);
+    const title = fillContractPlaceholders((options.title ?? savedTerms?.title ?? DEFAULT_CONTRACT_TITLE).trim() || DEFAULT_CONTRACT_TITLE, contract, settings);
+    const clauses = fillContractPlaceholders(options.clauses ?? savedTerms?.clauses ?? resolveContractClauses(contract, settings, options.templateId), contract, settings);
+    // Topo útil das páginas de continuação: abaixo da decoração do canto superior direito.
+    const continuationTop = 44;
 
     const generatePageFormat = (copyType: string) => {
         applyBranding(doc, config, userName);
         doc.setTextColor(0, 0, 0);
         doc.setFont("helvetica", "bold");
-        doc.setFontSize(20);
-        const title = 'CONTRATO DE CRÉDITO E CONFISSÃO DE DÍVIDA';
-        const splitTitle = doc.splitTextToSize(title, 170);
-        doc.text(splitTitle, 105, 50, { align: 'center' });
+        doc.setFontSize(17);
+        const splitTitle = doc.splitTextToSize(title.toUpperCase(), 165);
+        const titleY = Math.max(50, brandingHeaderBottom(doc) + 11);
+        doc.text(splitTitle, 105, titleY, { align: 'center' });
 
-        // Calculate Y position dynamically based on title lines
-        const titleHeight = splitTitle.length * 8; // approx height per line
-        const refY = 50 + titleHeight - 4;
-
+        const refY = titleY + (splitTitle.length - 1) * 7 + 6;
         doc.setFontSize(9);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(150, 150, 150);
         doc.text(`REF: ${contract.id}`, 105, refY, { align: 'center' });
         doc.text(copyType || '', 105, refY + 5, { align: 'center' });
+        return refY + 16;
     };
 
     const generateCopy = (type: 'VIA DO CREDOR' | 'VIA DO CLIENTE', isNewPage: boolean) => {
         if (isNewPage) doc.addPage();
-        generatePageFormat(type);
-
-        let cursorY = 80;
+        let cursorY = generatePageFormat(type);
         const margin = 25;
         const maxWidth = 160;
 
+        const newPage = () => {
+            doc.addPage();
+            applyBranding(doc, config, userName, true);
+            doc.setTextColor(30, 30, 30);
+            cursorY = continuationTop;
+        };
+
         const addParagraph = (text: string, isBold: boolean = false, align: 'left' | 'center' | 'justify' = 'justify') => {
             doc.setFont("helvetica", isBold ? "bold" : "normal");
+            doc.setFontSize(10);
             doc.setTextColor(30, 30, 30);
             const splitText = doc.splitTextToSize(text, maxWidth);
-
-            if (cursorY + (splitText.length * 6) > 260) {
-                doc.addPage();
-                applyBranding(doc, config, userName, true);
-                doc.setTextColor(30, 30, 30);
-                cursorY = 30;
-            }
+            // Um título de cláusula não fica isolado no fim da página.
+            if (cursorY + (splitText.length * 6) > 262 || (isBold && cursorY > 248)) newPage();
 
             if (align === 'justify') {
-                // Justificação Inteligente: Justificar todas as linhas excepto a última
                 splitText.forEach((line: string, index: number) => {
                     const isLastLine = index === splitText.length - 1;
                     doc.text(line, margin, cursorY + (index * 6), {
@@ -792,32 +1010,8 @@ export const generateContractPDF = (
             cursorY += (splitText.length * 6) + 4;
         };
 
-        // Selecionar Modelo de Contrato
-        const safeParse = (val: any) => {
-            if (!val) return [];
-            if (Array.isArray(val) || typeof val === 'object') return val;
-            try { return JSON.parse(val); } catch (e) { return []; }
-        };
-
-        const templates = safeParse(config.contractTemplates);
-        const selectedTemplate = options.templateId
-            ? templates.find((t: any) => t.id === options.templateId)
-            : templates[0]; // Fallback para o primeiro se nenhum for especificado
-
-        const clauses = selectedTemplate?.content || config.customClauses || `
-CLÁUSULA PRIMEIRA (Objeto)
-1. O CREDOR concede ao CLIENTE um empréstimo no valor de ${formatCurrency(contract.principalAmount || contract.value)}.
-2. O CLIENTE confessa-se devedor desta importância e obriga-se a restituí-la acrescida de juros acordados.
-
-CLÁUSULA SEGUNDA (Prazo e Prestações)
-O montante total deverá ser liquidado em ${contract.installments || 1} prestações, conforme plano de pagamentos anexo a este contrato.
-
-CLÁUSULA TERCEIRA (Inadimplemento)
-Em caso de falta de pagamento de qualquer prestação na data do seu vencimento, o CREDOR reserva-se o direito de cobrar juros de mora acumuláveis conforme a taxa legal em vigor.
-`;
-
         addParagraph(`ENTRE:`, true, 'left');
-        addParagraph(`PRIMEIRO OUTORGANTE: ${config.name}, NIF ${config.nif}, com sede em ${config.address}, doravante designado por "CREDOR".`, false, 'left');
+        addParagraph(`PRIMEIRO OUTORGANTE: ${config.name}, NIF ${config.nif || 'N/D'}, com sede em ${config.address || config.location || 'N/D'}, doravante designado por "CREDOR".`, false, 'left');
         addParagraph(`SEGUNDO OUTORGANTE: ${contract.clientName}, NIF/Documento ${contract.clientNif || 'N/A'}, doravante designado por "CLIENTE".`, false, 'left');
 
         const receiveMethodText = contract.receiveMethod === 'cash'
@@ -825,29 +1019,34 @@ Em caso de falta de pagamento de qualquer prestação na data do seu vencimento,
             : `O capital será transferido para uma das coordenadas bancárias associadas ao CLIENTE na ficha de cadastro do sistema.`;
         addParagraph(`MÉTODO DE ENTREGA DE CAPITAL: ${receiveMethodText}`, true, 'left');
 
-        clauses.split('\n').forEach(line => {
+        String(clauses).split('\n').forEach(line => {
             if (!line.trim()) { cursorY += 2; return; }
-            addParagraph(line, line.toUpperCase().includes('CLÁUSULA'));
+            // Só os títulos (linhas que começam por CLÁUSULA) saem a negrito.
+            addParagraph(line, /^\s*CLÁUSULA/u.test(line.toUpperCase()));
         });
 
-        // Adicionar Coordenadas Bancárias da Empresa para Pagamento
-        const companyBanks = safeParse(config.bankingInfo);
-        if (companyBanks && companyBanks.length > 0) {
+        // Coordenadas bancárias da empresa para pagamento
+        const companyBanks = parseContractTemplates(config.bankingInfo);
+        if (companyBanks.length > 0) {
             cursorY += 5;
             addParagraph('COORDENADAS BANCÁRIAS PARA LIQUIDAÇÃO:', true, 'left');
             companyBanks.forEach((b: any) => {
-                addParagraph(`${b.bankName}: ${b.iban} (${b.holder})`, false, 'left');
+                addParagraph(`${b.bankName}: ${b.iban}${b.holder ? ` (${b.holder})` : ''}`, false, 'left');
             });
         }
-        if (cursorY < 230) cursorY = 230;
-        else cursorY += 10;
 
+        // Local, data e assinaturas ficam juntos. O bloco ocupa 28 mm (data, espaço para assinar, linha e
+        // nomes) e fica na mesma página sempre que cabe acima dos contactos do rodapé; só passa para a página
+        // seguinte quando o texto do contrato cresce e deixa de haver espaço. Com pouco texto, desce até aos 222 mm.
+        const signatureBlockHeight = 28;
+        const signatureLimit = contentBottom(doc) - signatureBlockHeight;
+        if (cursorY + 4 > signatureLimit) newPage();
+        else cursorY = Math.min(Math.max(cursorY + 4, 222), signatureLimit);
         addParagraph(`${config.location || 'Luanda'}, ${formatDate(new Date())}`, false, 'left');
-        cursorY += 15;
+        cursorY += 12;
 
         if (signerSignature && config.digitalSignatureEnabled) {
             try {
-                // Posicionar a assinatura acima da linha do Credor
                 doc.addImage(signerSignature, 'PNG', 30, cursorY - 15, 60, 15);
             } catch (e) {
                 console.warn("Digital Signature render failed:", e);
@@ -857,6 +1056,7 @@ Em caso de falta de pagamento de qualquer prestação na data do seu vencimento,
         doc.setDrawColor(orange[0], orange[1], orange[2]);
         doc.line(30, cursorY, 90, cursorY);
         doc.line(120, cursorY, 180, cursorY);
+        doc.setFont("helvetica", "bold");
         doc.setFontSize(9);
         doc.text('O CREDOR', 60, cursorY + 5, { align: 'center' });
         doc.text('O CLIENTE', 150, cursorY + 5, { align: 'center' });
@@ -870,11 +1070,11 @@ Em caso de falta de pagamento de qualquer prestação na data do seu vencimento,
         applyBranding(doc, config, userName, true);
         doc.setTextColor(30, 30, 30);
         doc.setFontSize(14);
-        doc.text('EXTRATO DE PAGAMENTOS', 105, 35, { align: 'center' });
+        doc.text('EXTRATO DE PAGAMENTOS', 105, continuationTop, { align: 'center' });
         autoTable(doc, {
-            startY: 45,
+            startY: continuationTop + 8,
             head: [['Data', 'ID', 'Método', 'Montante']],
-            body: payments.map(p => [formatDate(p.paymentDate), p.id, p.method, formatCurrency(p.amount)]),
+            body: payments.map(p => [formatDate(p.paymentDate), p.id, paymentMethodLabel(p.method), formatCurrency(p.amount)]),
             headStyles: { fillColor: orange as [number, number, number] },
             didDrawPage: () => applyBranding(doc, config, userName, true)
         });
@@ -950,14 +1150,14 @@ export const generatePromessaContractPDF = (
             doc.addPage();
             applyBranding(doc, config, userName, true);
             doc.setTextColor(30, 30, 30);
-            cursorY = 30;
+            cursorY = 44;
         }
 
         if (cursorY + (splitText.length * 5) > 270) {
             doc.addPage();
             applyBranding(doc, config, userName, true);
             doc.setTextColor(30, 30, 30);
-            cursorY = 30;
+            cursorY = 44;
         }
 
         if (align === 'justify') {
@@ -1155,7 +1355,7 @@ export const generateClientProfilePDF = (
     const infoRows = [
         ['Nome:', client.name, 'NIF:', client.nif || 'N/A'],
         ['Telefone:', client.phone, 'Risco:', translateRiskLevel(client.riskLevel || 'medium')],
-        ['Status:', client.status === 'active' ? 'ATIVO' : 'INATIVO', 'Limite:', formatCurrency(client.creditLimit)],
+        ['Estado:', client.status === 'active' ? 'ATIVO' : 'INATIVO', 'Limite:', formatCurrency(client.creditLimit)],
     ];
 
     if (options.includeInterest) {
@@ -1297,7 +1497,7 @@ export const generateFinancialAuditPDF = (
                 ['Margem Líquida (Lucro)', formatCurrency(metrics?.profit || 0, config.currency)],
                 ['Contratos Novos no Período', (metrics?.contractsCount || 0).toString()],
                 ['Total de Irregularidades Detectadas', findings.length.toString()],
-                ['Status de Integridade (Blockchain)', findings.some(f => f.type.includes('Hash')) ? '⚠️ FALHA DETECTADA' : '✅ ÍNTEGRO']
+                ['Estado de Integridade (cadeia de registos)', findings.some(f => f.type.includes('Hash')) ? '⚠️ FALHA DETECTADA' : '✅ ÍNTEGRO']
             ],
             theme: 'striped',
             headStyles: { fillColor: black as [number, number, number] },
@@ -1473,7 +1673,7 @@ export const generateAnalyticalReportPDF = (data: {
 
     autoTable(doc, {
         startY: currentY + 3.5,
-        head: [['Cliente', 'Principal Concedido', 'Saldo em Aberto', 'Data Vencimento', 'Estado do Crédito']],
+        head: [['Cliente', 'Capital Concedido', 'Saldo em Aberto', 'Data Vencimento', 'Estado do Crédito']],
         body: data.credits.map(c => [
             c.clientName || 'N/A',
             formatCurrency(c.principalAmount || 0, config.currency),
@@ -1673,11 +1873,7 @@ export const generateNotificationPDF = (notification: any, settings?: any, userN
     });
 
     // Assinatura de Rodapé
-    const y = 250;
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.line(20, y, 190, y);
-    doc.text("Documento gerado automaticamente pelo sistema Tango Gestão de Créditos.", 105, y + 5, { align: 'center' });
+    writeClosingNote(doc, "Documento gerado automaticamente pelo sistema Tango Gestão de Créditos.", messageY, config, userName);
 
     doc.save(`Notificacao_${formatDate(notification.timestamp)}.pdf`);
 };
@@ -1744,11 +1940,11 @@ export const generateCreditPaymentHistoryPDF = (
     // Tabela de Histórico de Pagamentos
     autoTable(doc, {
         startY: boxY + 28,
-        head: [['Data', 'Ref. Recibo', 'Método', 'Principal', 'Juros', 'Mora', 'Total Pago']],
+        head: [['Data', 'Ref. Recibo', 'Método', 'Capital', 'Juros', 'Mora', 'Total Pago']],
         body: payments.map(p => [
             formatDate(p.date || p.paymentDate || p.createdAt),
             p.receiptNumber || p.reference || p.id || '-',
-            p.method || p.paymentMethod || 'Numerário',
+            paymentMethodLabel(p.method || p.paymentMethod),
             formatCurrency(p.allocatedToPrincipal || 0, config.currency),
             formatCurrency(p.allocatedToInterest || 0, config.currency),
             formatCurrency(p.allocatedToLateInterest || 0, config.currency),
@@ -1772,7 +1968,7 @@ export const generateCreditPaymentHistoryPDF = (
     const finalY = (doc as any).lastAutoTable?.finalY || 200;
 
     // Totais discriminados
-    const summaryY = Math.min(finalY + 10, 245);
+    const summaryY = ensurePdfSpace(doc, finalY + 10, 16, config, userName);
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
@@ -1786,13 +1982,7 @@ export const generateCreditPaymentHistoryPDF = (
     doc.text(`Total Liquidado: ${formatCurrency(totalPaid, config.currency)}`, 190, summaryY + 5, { align: 'right' });
     doc.text(`Saldo em Aberto: ${formatCurrency(remainingAmount, config.currency)}`, 190, summaryY + 11, { align: 'right' });
 
-    // Rodapé
-    const footY = 275;
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(150, 150, 150);
-    doc.line(20, footY, 190, footY);
-    doc.text("Documento gerado automaticamente pelo sistema Tango Gestão de Créditos.", 105, footY + 5, { align: 'center' });
+    writeClosingNote(doc, "Documento gerado automaticamente pelo sistema Tango Gestão de Créditos.", summaryY + 13, config, userName);
 
     doc.save(`Extrato_Pagamentos_${credit.id || 'Credito'}_${formatDate(new Date())}.pdf`);
 };
@@ -1864,13 +2054,13 @@ export const generateClientGeneralPaymentHistoryPDF = (
 
     autoTable(doc, {
         startY: boxY + 28,
-        head: [['Data', 'Crédito Ref.', 'Recibo', 'Método / Canal', 'Principal', 'Juros/Mora', 'Total Pago']],
+        head: [['Data', 'Crédito Ref.', 'Recibo', 'Método / Canal', 'Capital', 'Juros/Mora', 'Total Pago']],
         body: sortedPayments.map(p => {
             const methodLabel = p.method === 'cash' ? 'Numerário' :
                 p.method === 'transfer' ? 'Transferência' :
                 p.method === 'reference' ? 'Multicaixa Express' :
                 p.method === 'deposit' ? 'Depósito Bancário' :
-                p.method || 'Numerário';
+                paymentMethodLabel(p.method);
 
             const channel = p.notes || p.bankName ? ` (${p.bankName || p.notes})` : '';
 
@@ -1900,7 +2090,7 @@ export const generateClientGeneralPaymentHistoryPDF = (
     });
 
     const finalY = (doc as any).lastAutoTable?.finalY || 200;
-    const summaryY = Math.min(finalY + 10, 250);
+    const summaryY = ensurePdfSpace(doc, finalY + 10, 16, config, userName);
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(100, 116, 139);
@@ -1914,12 +2104,7 @@ export const generateClientGeneralPaymentHistoryPDF = (
     doc.text(`Total Amortizado + Juros: ${formatCurrency(totalPaid, config.currency)}`, 190, summaryY + 5, { align: 'right' });
     doc.text(`Saldo Devedor Consolidado: ${formatCurrency(totalDebt, config.currency)}`, 190, summaryY + 11, { align: 'right' });
 
-    const footY = 275;
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(150, 150, 150);
-    doc.line(20, footY, 190, footY);
-    doc.text("Extrato geral emitido automaticamente pelo sistema Tango Gestão de Créditos ERP.", 105, footY + 5, { align: 'center' });
+    writeClosingNote(doc, "Extrato geral emitido automaticamente pelo sistema Tango Gestão de Créditos ERP.", summaryY + 13, config, userName);
 
     doc.save(`Extrato_Geral_Pagamentos_${(client.name || 'Cliente').replace(/\s+/g, '_')}_${formatDate(new Date())}.pdf`);
 };
@@ -1985,7 +2170,7 @@ export const generateDailyCashFlowPDF = (
             o.time || '-',
             o.clientName,
             o.creditId,
-            o.method || 'Transferência',
+            o.method ? paymentMethodLabel(o.method) : 'Transferência',
             formatCurrency(o.amount, config.currency)
         ]),
         headStyles: {
@@ -2013,7 +2198,7 @@ export const generateDailyCashFlowPDF = (
             i.time || '-',
             i.clientName,
             i.receiptId,
-            i.method || 'Numerário',
+            paymentMethodLabel(i.method),
             formatCurrency(i.amount, config.currency)
         ]),
         headStyles: {
@@ -2026,12 +2211,7 @@ export const generateDailyCashFlowPDF = (
         didDrawPage: () => applyBranding(doc, config, userName, true)
     });
 
-    const footY = 275;
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(150, 150, 150);
-    doc.line(20, footY, 190, footY);
-    doc.text("Relatório de tesouraria diária gerado pelo sistema Tango Gestão de Créditos ERP.", 105, footY + 5, { align: 'center' });
+    writeClosingNote(doc, "Relatório de tesouraria diária gerado pelo sistema Tango Gestão de Créditos ERP.", (doc as any).lastAutoTable?.finalY || 200, config, userName);
 
     doc.save(`Fluxo_Diario_${dateStr.replace(/[\/\s:]/g, '_')}.pdf`);
 };
@@ -2088,12 +2268,7 @@ export const generateUserActivityPDF = (
         didDrawPage: () => applyBranding(doc, config, generatedBy, true)
     });
 
-    const y = 275;
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(150, 150, 150);
-    doc.line(20, y, 190, y);
-    doc.text("Documento gerado automaticamente pelo sistema Tango Gestão de Créditos.", 105, y + 5, { align: 'center' });
+    writeClosingNote(doc, "Documento gerado automaticamente pelo sistema Tango Gestão de Créditos.", (doc as any).lastAutoTable?.finalY || 200, config, generatedBy);
 
     doc.save(`Relatorio_Atividade_${userName.replace(/\s+/g, '_')}_${formatDate(new Date())}.pdf`);
 };
@@ -2126,7 +2301,7 @@ export const generateUserProfilePDF = (targetUser: any, settings?: any, generate
             ['Nome Completo:', targetUser.name],
             ['E-mail / Login:', targetUser.email],
             ['Cargo / Nível:', targetUser.role === 'super_admin' ? 'SUPER ADMINISTRADOR' : targetUser.role === 'admin' ? 'ADMINISTRADOR' : 'GESTOR DE CRÉDITO'],
-            ['Status de Ligação:', targetUser.status === 'active' ? 'ONLINE / ATIVO' : targetUser.status === 'blocked' ? 'BLOQUEADO' : 'OFFLINE'],
+            ['Estado da Ligação:', targetUser.status === 'active' ? 'ONLINE / ATIVO' : targetUser.status === 'blocked' ? 'BLOQUEADO' : 'OFFLINE'],
             ['IP da Máquina (Último):', targetUser.ip || 'Não Registado'],
             ['Último Acesso:', targetUser.lastLogin ? formatDateTime(targetUser.lastLogin) : 'Nunca'],
             ['Membro Desde:', targetUser.createdAt ? formatDate(targetUser.createdAt) : 'N/A']
@@ -2172,11 +2347,8 @@ export const generateUserProfilePDF = (targetUser: any, settings?: any, generate
     doc.text('CARIMBO E ASSINATURA DA ADMINISTRAÇÃO', 152, y + 5, { align: 'center' });
 
     // Rodapé de Confidencialidade
-    doc.setFontSize(7);
-    doc.setTextColor(150, 150, 150);
     const disclaimer = "ESTE DOCUMENTO CONTÉM INFORMAÇÕES CONFIDENCIAIS E PRIVILEGIADAS. O SEU USO É ESTRITAMENTE PROFISSIONAL E PARA EFEITOS DE AUDITORIA INTERNA NA TANGO GESTÃO E CRÉDITOS ERP.";
-    const splitDisclaimer = doc.splitTextToSize(disclaimer, 160);
-    doc.text(splitDisclaimer, 105, 275, { align: 'center' });
+    writeClosingNote(doc, disclaimer, y + 8, config, generatedBy, { fontSize: 7, line: false });
 
     doc.save(`Ficha_Utilizador_${targetUser.name.replace(/\s+/g, '_')}.pdf`);
 };
@@ -2319,7 +2491,7 @@ export const generateActiveClientsReport = (
 
     autoTable(doc, {
         startY: 75,
-        head: [['Cliente', 'Contratos Ativos', 'Início', 'Próximo Vencimento', 'Valor em Dívida', 'Status']],
+        head: [['Cliente', 'Contratos Ativos', 'Início', 'Próximo Vencimento', 'Valor em Dívida', 'Estado']],
         body: activeClientsData.map(({ client, activeCredits, totalDue, nextDueDate, oldestCreditDate, hasOverdue }) => [
             client.name,
             activeCredits.length.toString(),
@@ -2535,252 +2707,6 @@ export const generateClientInfoSheetPDF = (
 /**
  * Gera uma proposta de simulação de crédito em PDF
  */
-export const generateSimulationPDF = (
-    simulationData: {
-        rows: any[],
-        totalInterest: number,
-        totalPayment: number,
-        totalUpfrontCosts: number,
-        totalCost: number,
-        cetTotal: number
-    },
-    clientInfo: {
-        name: string,
-        income: number,
-        requestedAmount: number,
-        term: number,
-        interestRate: number,
-        method: string,
-        reference?: string
-    },
-    settings?: any,
-    userName?: string,
-    aiAnalysis?: any
-) => {
-    const doc = new jsPDF();
-    const config = getCompanySettings(settings);
-    const orange = resolveBrandPrimary(config.primaryColor);
-    const black = BRAND_CHARCOAL;
-
-    applyBranding(doc, config, userName);
-
-    // Título Proposta
-    doc.setTextColor(black[0], black[1], black[2]);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(22);
-    doc.text("PROPOSTA DE CRÉDITO", 105, 45, { align: 'center' });
-
-    if (clientInfo.reference) {
-        doc.setFont("helvetica", "bolditalic");
-        doc.setFontSize(11);
-        doc.setTextColor(orange[0], orange[1], orange[2]);
-        doc.text(`Ref: ${clientInfo.reference}`, 105, 52, { align: 'center' });
-    }
-
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Simulação gerada em: ${formatDateTime(new Date())}`, 105, 58, { align: 'center' });
-    if (userName) doc.text(`Consultor: ${userName}`, 105, 63, { align: 'center' });
-
-    let currentY = 72;
-
-    // --- AI ANALYSIS SECTION ---
-    if (aiAnalysis) {
-        const statusColors: any = {
-            'safe': [22, 163, 74],      // Green 600
-            'warning': [217, 119, 6],   // Amber 600
-            'danger': [220, 38, 38]     // Red 600
-        };
-        const color = statusColors[aiAnalysis.status] || [71, 85, 105];
-
-        // Background box with solid border and very light fill for clarity
-        doc.setDrawColor(color[0], color[1], color[2]);
-        doc.setLineWidth(0.3);
-        doc.setFillColor(250, 250, 250); // Very light grey instead of color-based fill
-        doc.rect(20, currentY, 170, 28, 'FD');
-
-        doc.setFont("helvetica", "bolditalic");
-        doc.setFontSize(11);
-        doc.setTextColor(color[0], color[1], color[2]);
-        doc.text("ANÁLISE INTELIGENTE TANGO", 25, currentY + 8);
-
-        doc.setFont("helvetica", "italic");
-        doc.setFontSize(10);
-        doc.setTextColor(black[0], black[1], black[2]);
-        const wrappedMsg = doc.splitTextToSize(aiAnalysis.message, 160);
-        doc.text(wrappedMsg, 25, currentY + 14);
-
-        currentY += 35;
-    }
-
-    // Dados do Cliente (Se houver)
-    if (clientInfo.name) {
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(12);
-        doc.setTextColor(orange[0], orange[1], orange[2]);
-        doc.text("DADOS DO CLIENTE", 20, currentY);
-
-        autoTable(doc, {
-            startY: currentY + 5,
-            body: [
-                ['Nome do Cliente:', clientInfo.name.toUpperCase()],
-                ['Rendimento Mensal Declarado:', clientInfo.income > 0 ? formatCurrency(clientInfo.income, config.currency) : 'Não informado'],
-                ['Comprometimento (DTI):', aiAnalysis ? `${aiAnalysis.dti.toFixed(1)}%` : 'N/A']
-            ],
-            theme: 'plain',
-            styles: { fontSize: 10, cellPadding: 2 },
-            columnStyles: {
-                0: { cellWidth: 60, fontStyle: 'bold' }
-            }
-        });
-        currentY = (doc as any).lastAutoTable.finalY + 10;
-    }
-
-    // --- FINANCIAL CHART (Projected vs Income) ---
-    // Mirroring the image: Clustered bar chart for first 6 months
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(orange[0], orange[1], orange[2]);
-    doc.text("GRÁFICO FINANCEIRO - PROJEÇÃO MENSAL", 20, currentY);
-
-    const chartX = 25;
-    const chartY = currentY + 45;
-    const chartWidth = 160;
-    const chartHeight = 35;
-    const monthsToShow = Math.min(6, clientInfo.term);
-
-    // Draw Axis
-    doc.setDrawColor(200, 200, 200);
-    doc.line(chartX, chartY, chartX + chartWidth, chartY); // X axis
-
-    const barSpace = chartWidth / monthsToShow;
-    const maxVal = Math.max(clientInfo.income, ...simulationData.rows.slice(0, monthsToShow).map(r => r.payment)) * 1.2;
-
-    for (let i = 0; i < monthsToShow; i++) {
-        const xPos = chartX + (i * barSpace) + (barSpace / 4);
-        const incomeH = (clientInfo.income / maxVal) * chartHeight;
-        const paymentH = (simulationData.rows[i].payment / maxVal) * chartHeight;
-
-        // Draw Income Bar (Carvão Escuro)
-        doc.setFillColor(black[0], black[1], black[2]);
-        doc.rect(xPos, chartY - incomeH, barSpace / 4, incomeH, 'F');
-
-        // Draw Payment Bar (Orange)
-        doc.setFillColor(orange[0], orange[1], orange[2]);
-        doc.rect(xPos + (barSpace / 4) + 1, chartY - paymentH, barSpace / 4, paymentH, 'F');
-
-        // Month Label
-        doc.setFontSize(7);
-        doc.setTextColor(100, 100, 100);
-        doc.text(`Mês ${i + 1}`, xPos + 2, chartY + 5);
-    }
-
-    // Legend
-    doc.setFontSize(8);
-    doc.setFillColor(black[0], black[1], black[2]);
-    doc.rect(130, currentY + 5, 3, 3, 'F');
-    doc.text("Rendimento", 135, currentY + 8);
-    doc.setFillColor(orange[0], orange[1], orange[2]);
-    doc.rect(160, currentY + 5, 3, 3, 'F');
-    doc.text("Parcela", 165, currentY + 8);
-
-    currentY += 60;
-
-    // Resumo da Simulação
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(orange[0], orange[1], orange[2]);
-    doc.text("RESUMO DA OPERAÇÃO", 20, currentY);
-
-    autoTable(doc, {
-        startY: currentY + 5,
-        head: [['Parâmetro', 'Valor']],
-        body: [
-            ['Valor do Crédito Solicitado', formatCurrency(clientInfo.requestedAmount, config.currency)],
-            ['Prazo de Pagamento', `${clientInfo.term} meses`],
-            ['Taxa de Juros Mensal', `${clientInfo.interestRate.toFixed(2)}%`],
-            ['Sistema de Amortização', clientInfo.method === 'price' ? 'PRICE (Parcelas Fixas)' : 'SAC (Amortização Constante)'],
-            ['Total de Juros', formatCurrency(simulationData.totalInterest, config.currency)],
-            ['Custo Efetivo Total (CET)', `${simulationData.cetTotal.toFixed(2)}%`],
-            ['TOTAL A PAGAR', formatCurrency(simulationData.totalPayment, config.currency)]
-        ],
-        theme: 'grid',
-        headStyles: { fillColor: black },
-        styles: { fontSize: 10, cellPadding: 4 },
-        columnStyles: {
-            0: { fontStyle: 'bold', cellWidth: 80 },
-            1: { halign: 'right' }
-        },
-        didParseCell: (data: any) => {
-            if (data.section === 'body') {
-                if (data.row.index === 0) { // Valor do Crédito
-                    data.cell.styles.fillColor = [232, 245, 233]; // Verde Bebé
-                } else if (data.row.index === 1) { // Prazo
-                    data.cell.styles.fillColor = [255, 249, 196]; // Amarelo
-                } else if (data.row.index === 2 || data.row.index === 4) { // Juros (Taxa e Total)
-                    data.cell.styles.fillColor = [225, 245, 254]; // Azul Bebé
-                } else if (data.row.index === 6) { // TOTAL A PAGAR
-                    data.cell.styles.fillColor = [200, 230, 201]; // Verde
-                    data.cell.styles.fontStyle = 'bold';
-                }
-            }
-        },
-        didDrawPage: () => applyBranding(doc, config, userName, true)
-    });
-
-    currentY = (doc as any).lastAutoTable.finalY + 15;
-
-    // Check page break for Schedule
-    if (currentY > 210) {
-        doc.addPage();
-        applyBranding(doc, config, userName, true);
-        currentY = 40;
-    }
-
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(12);
-    doc.setTextColor(orange[0], orange[1], orange[2]);
-    doc.text("PLANO DE REEMBOLSO PREVISTO", 20, currentY);
-
-    autoTable(doc, {
-        startY: currentY + 5,
-        head: [['Mês', 'Prestação', 'Juros', 'Amortização', 'Saldo Devedor']],
-        body: simulationData.rows.map(row => [
-            `${row.month}º`,
-            formatCurrency(row.payment, config.currency),
-            formatCurrency(row.interest, config.currency),
-            formatCurrency(row.amortization, config.currency),
-            formatCurrency(row.balance, config.currency)
-        ]),
-        headStyles: { fillColor: orange },
-        theme: 'grid',
-        styles: { fontSize: 9, cellPadding: 2 },
-        columnStyles: {
-            0: { halign: 'center', cellWidth: 20 },
-            1: { halign: 'right' },
-            2: { halign: 'right' },
-            3: { halign: 'right' },
-            4: { halign: 'right', fontStyle: 'bold' }
-        },
-        didDrawPage: () => applyBranding(doc, config, userName, true)
-    });
-
-    // Disclaimer
-    const finalY = (doc as any).lastAutoTable.finalY + 20;
-    const pageHeight = doc.internal.pageSize.height;
-    if (finalY < pageHeight - 30) {
-        doc.setFontSize(8);
-        doc.setTextColor(150, 150, 150);
-        doc.setFont("helvetica", "normal");
-        const disclaimer = "Atenção: Esta simulação não garante a aprovação do crédito. Os valores apresentados são estimativos baseados na análise de risco Tango AI. A concessão definitiva depende da entrega de documentação e validação física.";
-        doc.text(doc.splitTextToSize(disclaimer, 170), 20, finalY);
-    }
-
-    doc.save(`Simulacao_TangoAI_${clientInfo.name ? clientInfo.name.replace(/\s+/g, '_') : 'Proposta'}_${Date.now()}.pdf`);
-};
-
-
 export const generateMonthlyConsolidationReport = (
     closedMonth: {
         id: string;
@@ -2878,7 +2804,7 @@ export const generateMonthlyConsolidationReport = (
             formatCurrency(c.principalAmount, config.currency),
             formatCurrency(c.accruedInterest, config.currency),
             formatCurrency(c.currentBalance, config.currency),
-            statusLabelMap[c.status] || c.status.toUpperCase()
+            statusLabelMap[c.status] || statusLabelPt(c.status)
         ]);
 
         autoTable(doc, {
@@ -3071,7 +2997,7 @@ export const generatePeriodReportPDF = (
                 ['Clientes Únicos Concedidos', String(uniqueClients)],
                 ['Capital Total Concedido', formatCurrency(capitalApplied, config.currency)],
                 ['Juros Projetados Concedidos', formatCurrency(projectedProfit, config.currency)],
-                ['Saldo Devedor de Principal Restante', formatCurrency(outstandingCapital, config.currency)],
+                ['Saldo Devedor de Capital Restante', formatCurrency(outstandingCapital, config.currency)],
                 ['Juros & Moras Arrecadados no Período', formatCurrency(realizedProfit, config.currency)],
                 ['Taxa de Liquidação de Capital', `${liquidationRate.toFixed(2)}%`]
             ],
@@ -3112,7 +3038,7 @@ export const generatePeriodReportPDF = (
                 formatCurrency(c.principalAmount, config.currency),
                 formatCurrency(c.accruedInterest, config.currency),
                 formatCurrency(remainingPrincipal, config.currency),
-                statusLabelMap[c.status] || c.status.toUpperCase()
+                statusLabelMap[c.status] || statusLabelPt(c.status)
             ];
         });
 
@@ -3261,7 +3187,7 @@ export const generateSupplierReportPDF = (
                 formatCurrency(paidPrincipal, config.currency),
                 formatCurrency(paidInterest, config.currency),
                 formatCurrency(remainingPrincipal, config.currency),
-                statusLabelMap[c.status] || c.status.toUpperCase()
+                statusLabelMap[c.status] || statusLabelPt(c.status)
             ];
         });
 
@@ -3299,162 +3225,189 @@ export const generateSupplierReportPDF = (
     }
 };
 
-export const generatePermanentTransferLetterPDF = (
+/** Carrega uma imagem (ex.: logótipo do banco em WEBP) e devolve-a em PNG, formato aceite por todos os leitores de PDF. */
+const loadImageAsPng = (url: string): Promise<{ dataUrl: string; width: number; height: number } | null> => new Promise(resolve => {
+    if (typeof document === 'undefined') { resolve(null); return; }
+    const image = new Image();
+    image.crossOrigin = 'anonymous';
+    image.onload = () => {
+        try {
+            const canvas = document.createElement('canvas');
+            canvas.width = image.naturalWidth;
+            canvas.height = image.naturalHeight;
+            canvas.getContext('2d')?.drawImage(image, 0, 0);
+            resolve({ dataUrl: canvas.toDataURL('image/png'), width: image.naturalWidth, height: image.naturalHeight });
+        } catch { resolve(null); }
+    };
+    image.onerror = () => resolve(null);
+    image.src = url;
+});
+
+/** Conta bancária da empresa (Definições › Dados Bancários): a primeira da lista. */
+export const companyBankAccount = (settings?: any): { bankName: string; iban: string; holder?: string } | null => {
+    try {
+        const raw = settings?.bankingInfo;
+        const list = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const first = Array.isArray(list) ? list.find((item: any) => item?.iban) : null;
+        return first ? { bankName: String(first.bankName || ''), iban: String(first.iban || ''), holder: first.holder } : null;
+    } catch {
+        return null;
+    }
+};
+
+const PLACEHOLDER_IBAN = /^AO06[.\s]?0000/i;
+
+/**
+ * Carta de ordem de transferência bancária permanente, em dois exemplares (banco e cliente/entidade credora),
+ * com o logótipo do banco do cliente e todo o conteúdo entre o cabeçalho e o rodapé do modelo do sistema.
+ */
+export const generatePermanentTransferLetterPDF = async (
     letter: any,
     settings?: any,
-    userName?: string
-) => {
+    userName?: string,
+    /** 'blob' devolve um URL do PDF (para imprimir ou pré-visualizar) em vez de o descarregar. */
+    output: 'save' | 'blob' = 'save'
+): Promise<string | void> => {
     try {
-        const doc = new jsPDF({
-            orientation: 'portrait',
-            unit: 'mm',
-            format: 'a4'
-        });
-
+        const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
         const config = getCompanySettings(settings);
         const primaryColor = resolveBrandPrimary(config.primaryColor);
         const black = BRAND_CHARCOAL;
+        const left = 20;
+        const right = 190;
+        const width = right - left;
 
-        // Apply formal company header/branding
-        applyBranding(doc, config, userName);
+        // Dados bancários da empresa: os da carta, ou os configurados nas Definições.
+        const account = companyBankAccount(settings);
+        const companyIban = letter.companyIban && !PLACEHOLDER_IBAN.test(letter.companyIban) ? letter.companyIban : account?.iban || '';
+        const companyBank = letter.companyBank && letter.companyBank !== 'Banco Comercial' ? letter.companyBank : account?.bankName || '';
+        const installment = Number(letter.installmentAmount) || 0;
 
-        let currentY = 50;
+        // Logótipo do banco do cliente (pelo IBAN; se não houver, pelo nome do banco).
+        const bank = identifyBankFromIBAN(String(letter.clientIban || ''))
+            || ANGOLAN_BANKS.find(item => String(letter.bankDestinationName || '').toUpperCase().includes(item.shortName.toUpperCase()));
+        const logoUrl = getBankLogoUrl(bank?.code);
+        const logo = logoUrl ? await loadImageAsPng(logoUrl) : null;
+        const bankName = letter.bankDestinationName || bank?.name || 'Banco de Domicílio';
 
-        // Cabeçalho de Envio ao Banco
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(10);
-        doc.setTextColor(black[0], black[1], black[2]);
-        doc.text("Ao", 20, currentY);
-        currentY += 5;
-        doc.text(`Exmo.(a) Senhor(a) Gerente do ${letter.bankDestinationName || 'Banco de Domicílio'}`, 20, currentY);
-        currentY += 5;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        doc.text(`Balcão / Agência: ${letter.destinationBranch || 'Balcão Central'}`, 20, currentY);
+        const todayFormatted = new Date().toLocaleDateString('pt-PT', { day: 'numeric', month: 'long', year: 'numeric' });
+        const copies = ['EXEMPLAR PARA O BANCO', 'EXEMPLAR PARA O CLIENTE / ENTIDADE CREDORA'];
 
-        // Data alinhada à direita
-        const todayFormatted = new Date().toLocaleDateString('pt-PT', {
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric'
+        copies.forEach((copyLabel, copyIndex) => {
+            if (copyIndex > 0) doc.addPage();
+            applyBranding(doc, config, userName);
+            let y = brandingHeaderBottom(doc) + 6;
+
+            // Identificação do exemplar e data, na mesma linha.
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(7);
+            const labelW = doc.getTextWidth(copyLabel) + 6;
+            doc.setFillColor(primaryColor[0], primaryColor[1], primaryColor[2]);
+            doc.roundedRect(left, y - 3.6, labelW, 5.2, 1.2, 1.2, 'F');
+            doc.setTextColor(255, 255, 255);
+            doc.text(copyLabel, left + 3, y);
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(black[0], black[1], black[2]);
+            doc.text(`Luanda, ${todayFormatted}`, right, y, { align: 'right' });
+            y += 9;
+
+            // Destinatário: logótipo do banco à esquerda, nome ao lado.
+            let textX = left;
+            if (logo) {
+                const maxW = 30; const maxH = 13;
+                const scale = Math.min(maxW / logo.width, maxH / logo.height);
+                const logoW = logo.width * scale; const logoH = logo.height * scale;
+                doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.3);
+                doc.roundedRect(left, y - 4, maxW + 4, maxH + 4, 1.5, 1.5, 'S');
+                doc.addImage(logo.dataUrl, 'PNG', left + 2 + (maxW - logoW) / 2, y - 2 + (maxH - logoH) / 2, logoW, logoH, undefined, 'FAST');
+                textX = left + maxW + 9;
+            }
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(black[0], black[1], black[2]);
+            doc.text('Ao', textX, y);
+            const recipient = doc.splitTextToSize(`Exmo.(a) Senhor(a) Gerente do ${bankName}`, right - textX);
+            doc.text(recipient, textX, y + 5);
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(80, 80, 80);
+            doc.text(`Balcão / Agência: ${letter.destinationBranch || 'Balcão Central'}`, textX, y + 5 + recipient.length * 4.4);
+            y += Math.max(logo ? 17 : 0, 9 + recipient.length * 4.4) + 6;
+
+            // Assunto
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5); doc.setTextColor(black[0], black[1], black[2]);
+            const subject = doc.splitTextToSize(letter.subject || 'ASSUNTO: ORDEM DE TRANSFERÊNCIA BANCÁRIA PERMANENTE', width);
+            doc.text(subject, left, y);
+            y += (subject.length - 1) * 4.6 + 1.6;
+            doc.setDrawColor(203, 213, 225); doc.setLineWidth(0.3);
+            doc.line(left, y, right, y);
+            y += 6;
+
+            // Texto introdutório
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(40, 40, 40);
+            const intro = doc.splitTextToSize(`Eu, ${letter.clientName}, titular do BI / NIF n.º ${letter.clientNif || 'N/D'}, titular da conta domiciliada nessa conceituada instituição financeira com o IBAN n.º ${letter.clientIban || 'N/D'}, venho por este meio solicitar a constituição e execução de uma ORDEM DE TRANSFERÊNCIA BANCÁRIA PERMANENTE, com as seguintes condições e termos de referência:`, width);
+            doc.text(intro, left, y);
+            y += intro.length * 4.3 + 3;
+
+            autoTable(doc, {
+                startY: y,
+                head: [['Termo / Condição', 'Especificação']],
+                body: [
+                    ['Beneficiário', `${letter.companyAccountName || config.name || 'Entidade credora (configure em Definições)'} (NIF: ${config.nif || 'Não informado'})`],
+                    ['Banco de Destino', companyBank || 'A indicar (configure em Definições › Dados Bancários)'],
+                    ['IBAN de Destino', companyIban || 'A indicar (configure em Definições › Dados Bancários)'],
+                    ['Montante por Prestação', installment > 0 ? formatCurrency(installment, config.currency) : 'A indicar'],
+                    ['Periodicidade', 'Mensal e Consecutiva'],
+                    ['Dia de Débito em Conta', `Dia ${letter.dayOfMonth || 28} de cada mês (ou dia útil seguinte)`],
+                    ['Finalidade / Referência', `Amortização de Prestação de Crédito - Ref. ${letter.creditReference || 'Contrato'}`],
+                ],
+                headStyles: { fillColor: primaryColor, textColor: [255, 255, 255], fontStyle: 'bold', fontSize: 8.5 },
+                styles: { fontSize: 8.2, cellPadding: 2.2, lineColor: [203, 213, 225], lineWidth: 0.2, overflow: 'linebreak' },
+                columnStyles: { 0: { fontStyle: 'bold', cellWidth: 52, fillColor: [248, 250, 252] }, 1: { cellWidth: width - 52 } },
+                theme: 'grid',
+                margin: { left, right: 210 - right },
+            });
+            y = ((doc as any).lastAutoTable?.finalY || y) + 6;
+
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(8.8); doc.setTextColor(40, 40, 40);
+            const clause = doc.splitTextToSize('Mais declaro que a presente ordem é de execução regular e irrevogável sem o prévio consentimento formal da entidade credora acima identificada, autorizando desde já a instituição bancária a debitar na minha referida conta os montantes devidos acrescidos dos encargos regulamentares aplicáveis.', width);
+            doc.text(clause, left, y);
+            y += clause.length * 4.2 + 3;
+            doc.text('Sem outro assunto de momento, subscrevo-me com a mais elevada consideração.', left, y);
+            y += 16;
+
+            // Assinaturas (cliente e entidade credora)
+            doc.setDrawColor(black[0], black[1], black[2]); doc.setLineWidth(0.3);
+            doc.line(left, y, 95, y);
+            doc.line(115, y, right, y);
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(black[0], black[1], black[2]);
+            doc.text(letter.clientName || 'O(A) Cliente', 57.5, y + 4.5, { align: 'center', maxWidth: 74 });
+            doc.text('Pela Entidade Credora', 152.5, y + 4.5, { align: 'center' });
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100, 116, 139);
+            doc.text('(Assinatura conforme o BI / Ficha Bancária)', 57.5, y + 8.5, { align: 'center' });
+            doc.text(doc.splitTextToSize(`(${config.name || 'Assinatura Autorizada e Carimbo'})`, 74), 152.5, y + 8.5, { align: 'center' });
+            y += 16;
+
+            // Reservado ao banco: sempre acima da zona do rodapé.
+            const boxH = 22;
+            const boxY = Math.min(y, 262 - boxH - 6);
+            doc.setDrawColor(148, 163, 184);
+            doc.setLineDashPattern([2, 2], 0);
+            doc.roundedRect(left, boxY, width, boxH, 2, 2, 'S');
+            doc.setLineDashPattern([], 0);
+            doc.setFontSize(7.2); doc.setFont('helvetica', 'bold'); doc.setTextColor(71, 85, 105);
+            doc.text('RESERVADO À INSTITUIÇÃO BANCÁRIA DE DOMICÍLIO', left + 4, boxY + 5.5);
+            doc.setFont('helvetica', 'normal');
+            doc.text('Recepcionado por: ______________________________________', left + 4, boxY + 11.5);
+            doc.text('Data: ____ / ____ / ______', right - 4, boxY + 11.5, { align: 'right' });
+            doc.text('Carimbo e validação do balcão:', left + 4, boxY + 17.5);
+
+            doc.setFontSize(6.8); doc.setTextColor(150, 150, 150);
+            doc.text(`Documento oficial emitido pelo sistema Tango Gestão de Créditos ERP  •  ${copyLabel.toLowerCase()}  •  página ${copyIndex + 1} de ${copies.length}`, 105, 266, { align: 'center' });
         });
-        doc.text(`Luanda, ${todayFormatted}`, 190, 50, { align: 'right' });
 
-        currentY += 12;
-
-        // Assunto em destaque
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.setTextColor(black[0], black[1], black[2]);
-        doc.text(letter.subject || 'ASSUNTO: ORDEM DE TRANSFERÊNCIA BANCÁRIA PERMANENTE', 20, currentY);
-        doc.line(20, currentY + 1.5, 190, currentY + 1.5);
-
-        currentY += 10;
-
-        // Texto introdutório formal
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9.5);
-        doc.setTextColor(40, 40, 40);
-
-        const introText = `Eu, ${letter.clientName}, titular do BI / NIF n.º ${letter.clientNif || 'N/D'}, titular da conta domiciliada nessa conceituada instituição financeira com o IBAN n.º ${letter.clientIban || 'N/D'}, venho por este meio solicitar a constituição e execução de uma ORDEM DE TRANSFERÊNCIA BANCÁRIA PERMANENTE, com as seguintes condições e termos de referência:`;
-
-        const splitIntro = doc.splitTextToSize(introText, 170);
-        doc.text(splitIntro, 20, currentY);
-        currentY += splitIntro.length * 5 + 4;
-
-        // Tabela com Termos de Referência da Transferência Permanente
-        autoTable(doc, {
-            startY: currentY,
-            head: [['Termo / Condição', 'Especificação']],
-            body: [
-                ['Beneficiário:', `${letter.companyAccountName || config.name} (NIF: ${config.nif || 'Não informado'})`],
-                ['Banco de Destino:', letter.companyBank || 'Banco Comercial'],
-                ['IBAN de Destino:', letter.companyIban || 'AO06.0000.0000.0000.0000.0000.0'],
-                ['Montante por Prestação:', formatCurrency(letter.installmentAmount || 0, config.currency)],
-                ['Periodicidade:', 'Mensal e Consecutiva'],
-                ['Dia de Débito em Conta:', `Dia ${letter.dayOfMonth || 28} de cada mês (ou dia útil seguinte)`],
-                ['Finalidade / Referência:', `Amortização de Prestação de Crédito - Ref. ${letter.creditReference || 'Contrato'}`]
-            ],
-            headStyles: {
-                fillColor: primaryColor,
-                textColor: [255, 255, 255],
-                fontStyle: 'bold',
-                fontSize: 9
-            },
-            styles: {
-                fontSize: 8.5,
-                cellPadding: 3,
-                lineColor: [203, 213, 225],
-                lineWidth: 0.2
-            },
-            columnStyles: {
-                0: { fontStyle: 'bold', cellWidth: 60, fillColor: [248, 250, 252] },
-                1: { cellWidth: 110 }
-            },
-            theme: 'grid',
-            didDrawPage: () => applyBranding(doc, config, userName, true)
-        });
-
-        currentY = (doc as any).lastAutoTable?.finalY + 8;
-
-        // Cláusula de irrevogabilidade
-        const clauseText = "Mais declaro que a presente ordem é de execução regular e irrevogável sem o prévio consentimento formal da entidade credora acima identificada, autorizando desde já a instituição bancária a debitar na minha referida conta os montantes devidos acrescidos dos encargos regulamentares aplicáveis.";
-        const splitClause = doc.splitTextToSize(clauseText, 170);
-        doc.text(splitClause, 20, currentY);
-        currentY += splitClause.length * 5 + 6;
-
-        doc.text("Sem outro assunto de momento, subscrevo-me com a mais elevada consideração.", 20, currentY);
-        currentY += 18;
-
-        // Bloco de Assinatura de Ambas as Partes (Cliente e Entidade Credora)
-        doc.setFont("helvetica", "normal");
-        // Linha Cliente (Esquerda)
-        doc.line(20, currentY, 95, currentY);
-        // Linha Entidade Credora (Direita)
-        doc.line(115, currentY, 190, currentY);
-        currentY += 5;
-        
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(8.5);
-        doc.setTextColor(black[0], black[1], black[2]);
-        doc.text(letter.clientName || 'O(A) Cliente', 57.5, currentY, { align: 'center' });
-        doc.text("Pela Entidade Credora", 152.5, currentY, { align: 'center' });
-        currentY += 4;
-        
-        doc.setFontSize(7.5);
-        doc.setFont("helvetica", "normal");
-        doc.setTextColor(100, 116, 139);
-        doc.text("(Assinatura conforme o Bilhete de Identidade / Ficha Bancária)", 57.5, currentY, { align: 'center' });
-        doc.text(`(${config.name || 'Assinatura Autorizada e Carimbo'})`, 152.5, currentY, { align: 'center' });
-
-        currentY += 14;
-
-        // Caixa reservada ao balcão bancário
-        doc.setDrawColor(148, 163, 184);
-        doc.setLineDashPattern([2, 2], 0);
-        doc.roundedRect(20, currentY, 170, 25, 2, 2, 'S');
-        doc.setLineDashPattern([], 0);
-
-        doc.setFontSize(7.5);
-        doc.setFont("helvetica", "bold");
-        doc.setTextColor(71, 85, 105);
-        doc.text("RESERVADO À INSTITUIÇÃO BANCÁRIA DE DOMICÍLIO:", 25, currentY + 6);
-        doc.setFont("helvetica", "normal");
-        doc.text("Recepcionado por: _________________________________________    Data: _____ / _____ / 202___", 25, currentY + 12);
-        doc.text("Carimbo e Validação do Balcão:", 25, currentY + 18);
-
-        // Rodapé de segurança
-        const footY = 282;
-        doc.setFontSize(7.5);
-        doc.setTextColor(150, 150, 150);
-        doc.line(20, footY, 190, footY);
-        doc.text("Documento oficial emitido pelo sistema Tango Gestão de Créditos ERP.", 105, footY + 4, { align: 'center' });
-
+        if (output === 'blob') return URL.createObjectURL(doc.output('blob'));
         doc.save(`Carta_Transferencia_${(letter.clientName || 'Cliente').replace(/\s+/g, '_')}_${formatDate(new Date())}.pdf`);
     } catch (e) {
         console.error("Erro ao gerar PDF da Carta de Transferência:", e);
+        throw e;
     }
 };
+
 
 export const exportCompanyCredentialsPDF = (company: {
     name: string;
@@ -3512,9 +3465,12 @@ export const exportCompanyCredentialsPDF = (company: {
         doc.setFont("helvetica", "bold");
         doc.setTextColor(100, 116, 139);
         doc.text("EMPRESA LICENCIADA:", 28, boxStartY);
-        doc.setFontSize(13);
         doc.setTextColor(darkColor[0], darkColor[1], darkColor[2]);
-        doc.text(company.name.toUpperCase(), 28, boxStartY + 7);
+        let nameSize = 13;
+        doc.setFontSize(nameSize);
+        while (nameSize > 8 && doc.getTextWidth(company.name.toUpperCase()) > 154) doc.setFontSize(nameSize -= 0.5);
+        const companyNameLines = doc.splitTextToSize(company.name.toUpperCase(), 154) as string[];
+        doc.text(companyNameLines.slice(0, 1).map(line => companyNameLines.length > 1 ? `${line.slice(0, -3)}...` : line), 28, boxStartY + 7);
 
         doc.setFontSize(8.5);
         doc.setFont("helvetica", "bold");
@@ -3609,10 +3565,12 @@ export const exportCompanyCredentialsPDF = (company: {
         doc.text("auditado centralmente pelo Tango Master Gen para efeitos de conformidade e integridade.", 28, currentY + 17);
 
         // Rodapé
-        doc.setFontSize(7.5);
+        drawContactFooter(doc, getCompanySettings());
+        doc.setFontSize(7);
         doc.setTextColor(148, 163, 184);
-        doc.line(20, 280, 190, 280);
-        doc.text("TangoMaster Gen • Sistema Integrado de Licenciamento e Gestão de Créditos", 105, 285, { align: 'center' });
+        doc.setDrawColor(226, 232, 240);
+        doc.line(20, 287, 190, 287);
+        doc.text("TangoMaster Gen • Sistema Integrado de Licenciamento e Gestão de Créditos", 105, 291.5, { align: 'center' });
 
         doc.save(`Credencial_Acesso_${company.nif}_${(company.name || 'Empresa').replace(/\s+/g, '_')}.pdf`);
     } catch (e) {
@@ -3669,7 +3627,7 @@ export const generatePaymentPlanPDF = (
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
     const labels = progress
-        ? ['VALOR CONCEDIDO', 'TOTAL A PAGAR', `JÁ PAGO (${progress.percent}%)`, 'EM FALTA']
+        ? ['VALOR CONCEDIDO', 'TOTAL A PAGAR', `JÁ PAGO (${progress.percent.toLocaleString('pt-AO')}%)`, 'EM FALTA']
         : ['VALOR CONCEDIDO', `JUROS (${plan.ratePercent}%)`, 'TOTAL A PAGAR', `${plan.months} PRESTAÇÕES DE`];
     const values = progress
         ? [money(plan.principalMinor), money(plan.totalMinor), money(progress.paidMinor), money(progress.remainingMinor)]
@@ -3722,8 +3680,10 @@ export const generatePaymentPlanPDF = (
             : [['', 'TOTAL', money(plan.principalMinor), money(plan.interestMinor), money(plan.totalMinor), '']],
         headStyles: { fillColor: primary, textColor: [255, 255, 255], fontStyle: 'bold' },
         footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
-        styles: { fontSize: 9 },
-        columnStyles: { 0: { halign: 'center', cellWidth: 10 }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: progress ? 'center' : 'right' }, 5: { halign: 'right' } },
+        styles: { fontSize: progress ? 8 : 9, cellPadding: 1.8 },
+        columnStyles: progress
+            ? { 0: { halign: 'center', cellWidth: 8 }, 2: { halign: 'right', cellWidth: 27 }, 3: { halign: 'right', cellWidth: 27 }, 4: { halign: 'center', cellWidth: 22 }, 5: { halign: 'right', cellWidth: 28 }, 6: { cellWidth: 18 } }
+            : { 0: { halign: 'center', cellWidth: 10 }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'right' } },
         didParseCell: (hook: any) => {
             if (!progress || hook.section !== 'body' || hook.column.index !== 6) return;
             const status = plan.installments[hook.row.index]?.status;
@@ -3732,12 +3692,302 @@ export const generatePaymentPlanPDF = (
             hook.cell.styles.fontStyle = 'bold';
         },
         margin: { left: 20, right: 20 },
+        didDrawPage: (hook: any) => { if (hook.pageNumber > 1) applyBranding(doc, config, userName, true); },
     });
 
     const finalY = (doc as any).lastAutoTable?.finalY || 200;
     doc.setFontSize(8);
     doc.setTextColor(120, 120, 120);
-    doc.text('Os pagamentos em atraso estão sujeitos à taxa de mora prevista no contrato.', 20, Math.min(finalY + 10, 280));
+    doc.text('Os pagamentos em atraso estão sujeitos à taxa de mora prevista no contrato.', 20, ensurePdfSpace(doc, finalY + 10, 4, config, userName) + 3);
 
     doc.save(`${progress ? 'situacao' : 'plano'}-pagamento-${data.clientName.replace(/[^\w]+/g, '-').toLowerCase()}.pdf`);
+};
+
+export type LicenseCertificateData = {
+    clientName: string;
+    clientNif?: string;
+    clientPhone?: string;
+    clientEmail?: string;
+    machineId: string;
+    planLabel: string;
+    tierLabel: string;
+    devices?: number;
+    issuedAt: string;
+    expiresAt: string;
+    key: string;
+    verificationCode: string;
+    /** NIF para o qual a licença foi emitida: vale em todos os dispositivos dessa empresa. */
+    companyNif?: string | null;
+};
+
+/**
+ * Certificado de licença emitido pelo Tango Master, com o mesmo modelo gráfico dos documentos do ERP.
+ * Página 1: titular, dados da licença, âmbito e guia de activação. Página 2: chave de activação completa.
+ */
+export const generateLicenseCertificatePDF = (
+    data: LicenseCertificateData,
+    issuer: { name: string; logo?: string | null; phone?: string; email?: string; address?: string; signerName?: string },
+    output: 'save' | 'datauri' = 'save'
+): string | undefined => {
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const config = getCompanySettings({
+        name: issuer.name, logo: issuer.logo || null, reportLogo: issuer.logo || null, watermarkLogo: null,
+        phone: issuer.phone, email: issuer.email, address: issuer.address || 'Cuanza Norte, N´dalatando', location: 'Angola',
+    });
+    const primary = resolveBrandPrimary(config.primaryColor);
+    const dark = resolveBrandDark(config.secondaryColor);
+    const muted: [number, number, number] = [100, 116, 139];
+    const left = 18;
+    const right = pageWidth - 14;
+    const width = right - left;
+    const daysLeft = Math.ceil((new Date(data.expiresAt).getTime() - Date.now()) / 86_400_000);
+    const active = daysLeft >= 0;
+    const signer = issuer.signerName || 'ADMINISTRAÇÃO TANGO';
+    const branding = { logoScale: 1.6, roleLabel: 'LICENCIAMENTO / TANGO MASTER', tagline: 'LICENCIAMENTO DO TANGO GESTÃO DE CRÉDITOS' };
+
+    // ---------------- Página 1: certificado ----------------
+    applyBranding(doc, config, signer, false, branding);
+    let y = brandingHeaderBottom(doc) + 12;
+
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(21); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text('CERTIFICADO DE LICENÇA', pageWidth / 2, y, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text('Licença de utilização do software Tango Gestão de Créditos (ERP)', pageWidth / 2, y + 6, { align: 'center' });
+
+    // Faixa de estado
+    y += 13;
+    const statusColor: [number, number, number] = active ? [22, 163, 74] : [220, 38, 38];
+    if (active) doc.setFillColor(240, 253, 244); else doc.setFillColor(254, 242, 242);
+    doc.setDrawColor(statusColor[0], statusColor[1], statusColor[2]); doc.setLineWidth(0.4);
+    doc.roundedRect(left, y, width, 13, 2.5, 2.5, 'FD');
+    doc.setFillColor(statusColor[0], statusColor[1], statusColor[2]);
+    doc.circle(left + 7, y + 6.5, 2.2, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(statusColor[0], statusColor[1], statusColor[2]);
+    doc.text(active ? 'LICENÇA ACTIVA' : 'LICENÇA EXPIRADA', left + 12, y + 8.2);
+    doc.setFontSize(10); doc.setTextColor(dark[0], dark[1], dark[2]);
+    const remaining = active ? `  (${daysLeft} ${daysLeft === 1 ? 'dia' : 'dias'})` : '';
+    doc.text(`Válida até ${formatDate(data.expiresAt)}${remaining}`, right - 6, y + 8.2, { align: 'right' });
+
+    // Cartões: titular e dados da licença
+    y += 19;
+    const cardW = (width - 6) / 2;
+    const drawCard = (x: number, title: string, rows: Array<[string, string]>) => {
+        doc.setFillColor(248, 250, 252); doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.3);
+        doc.roundedRect(x, y, cardW, 62, 2.5, 2.5, 'FD');
+        doc.setFillColor(primary[0], primary[1], primary[2]);
+        doc.rect(x, y + 3, 1.6, 8, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(primary[0], primary[1], primary[2]);
+        doc.text(title, x + 5, y + 8.6);
+        let rowY = y + 17;
+        rows.forEach(([label, value]) => {
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(muted[0], muted[1], muted[2]);
+            doc.text(label.toUpperCase(), x + 5, rowY);
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(dark[0], dark[1], dark[2]);
+            const lines: string[] = doc.splitTextToSize(value || '—', cardW - 10).slice(0, 2);
+            doc.text(lines, x + 5, rowY + 4.4);
+            rowY += 6.6 + lines.length * 4.2;
+        });
+    };
+    drawCard(left, 'TITULAR DA LICENÇA', [
+        ['Cliente', data.clientName || '—'],
+        ['NIF', data.clientNif || '—'],
+        ['Telefone', data.clientPhone || '—'],
+        ['Email', data.clientEmail || '—'],
+    ]);
+    const devicesText = data.devices ? ` • ${data.devices} ${data.devices === 1 ? 'dispositivo' : 'dispositivos'}` : '';
+    drawCard(left + cardW + 6, 'DADOS DA LICENÇA', [
+        ['Plano', data.planLabel],
+        ['Modalidade', `${data.tierLabel}${devicesText}`],
+        ['Emitida em', formatDate(data.issuedAt)],
+        ['Válida até', formatDate(data.expiresAt)],
+    ]);
+
+    // Âmbito
+    y += 68;
+    doc.setFillColor(255, 247, 237); doc.setDrawColor(primary[0], primary[1], primary[2]); doc.setLineWidth(0.3);
+    doc.roundedRect(left, y, width, 20, 2.5, 2.5, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(primary[0], primary[1], primary[2]);
+    doc.text('ONDE ESTA LICENÇA É VÁLIDA', left + 5, y + 6.5);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(dark[0], dark[1], dark[2]);
+    const scope = data.companyNif
+        ? `Em todos os dispositivos da empresa com o NIF ${data.companyNif} (computadores e versão web). Basta activá-la num deles: os restantes recebem-na pela sincronização.`
+        : `Apenas no computador com o ID de máquina ${data.machineId}.`;
+    doc.text(doc.splitTextToSize(scope, width - 10), left + 5, y + 12);
+
+    // Código de verificação e máquina
+    y += 27;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text('CÓDIGO DE VERIFICAÇÃO', left, y);
+    doc.text('ID DA MÁQUINA DE EMISSÃO', left + width / 2, y);
+    doc.setFont('courier', 'bold'); doc.setFontSize(12); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(data.verificationCode, left, y + 6);
+    doc.text(data.machineId, left + width / 2, y + 6);
+
+    // Guia de activação
+    y += 15;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text('COMO ACTIVAR', left, y);
+    const steps = [
+        'No Tango ERP, entre como administrador e abra Definições › Licença.',
+        'Copie a chave de activação completa da página 2 (todo o bloco, incluindo os sinais "=" do fim).',
+        'Cole-a em "Chave de Licença Atual" e clique em "Validar e Salvar Licença".',
+        'O estado passa a "Activa". Em caso de dúvida, contacte o suporte indicado no rodapé.',
+    ];
+    y += 3;
+    steps.forEach((step, index) => {
+        y += 7;
+        doc.setFillColor(primary[0], primary[1], primary[2]);
+        doc.circle(left + 3, y - 1.3, 3, 'F');
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(255, 255, 255);
+        doc.text(String(index + 1), left + 3, y - 0.2, { align: 'center' });
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(dark[0], dark[1], dark[2]);
+        doc.text(doc.splitTextToSize(step, width - 10), left + 9, y);
+    });
+
+    // Assinatura
+    const signY = Math.max(y + 16, 252);
+    doc.setDrawColor(dark[0], dark[1], dark[2]); doc.setLineWidth(0.3);
+    doc.line(left, signY, left + 70, signY);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(signer.toUpperCase(), left, signY + 5);
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7.5); doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text(doc.splitTextToSize(issuer.name, 110), left, signY + 9);
+    doc.text('Página 1 de 2', right, signY + 9, { align: 'right' });
+
+    // ---------------- Página 2: chave de activação ----------------
+    doc.addPage();
+    applyBranding(doc, config, signer, false, branding);
+    y = brandingHeaderBottom(doc) + 12;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(19); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text('CHAVE DE ACTIVAÇÃO', pageWidth / 2, y, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text(`${data.clientName}  •  ${data.planLabel}  •  válida até ${formatDate(data.expiresAt)}`, pageWidth / 2, y + 6, { align: 'center', maxWidth: width });
+
+    // Escolhe o maior tamanho de letra em que a chave inteira cabe no espaço disponível.
+    const key = data.key.replace(/\s+/g, '');
+    const boxTop = y + 15;
+    const maxBoxBottom = 246;
+    const innerW = width - 12;
+    const ptToMm = 0.3528;
+    let fontSize = 10;
+    let lines: string[] = [key];
+    let lineH = fontSize * ptToMm * 1.45;
+    for (; fontSize >= 6; fontSize -= 0.5) {
+        const charsPerLine = Math.max(1, Math.floor(innerW / (fontSize * 0.6 * ptToMm))); // Courier: 0,6 em por carácter
+        lines = key.match(new RegExp(`.{1,${charsPerLine}}`, 'g')) || [key];
+        lineH = fontSize * ptToMm * 1.45;
+        if (boxTop + 12 + lines.length * lineH <= maxBoxBottom) break;
+    }
+    const boxH = 12 + lines.length * lineH;
+    doc.setFillColor(248, 250, 252); doc.setDrawColor(primary[0], primary[1], primary[2]); doc.setLineWidth(0.6);
+    doc.roundedRect(left, boxTop, width, boxH, 3, 3, 'FD');
+    doc.setFillColor(primary[0], primary[1], primary[2]);
+    doc.roundedRect(left + 6, boxTop - 3.2, 46, 6.4, 1.5, 1.5, 'F');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(255, 255, 255);
+    doc.text('COPIE TODO ESTE BLOCO', left + 29, boxTop + 1, { align: 'center' });
+    doc.setFont('courier', 'bold'); doc.setFontSize(fontSize); doc.setTextColor(15, 23, 42);
+    lines.forEach((line, index) => doc.text(line, left + 6, boxTop + 8 + index * lineH));
+
+    y = boxTop + boxH + 8;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(doc.splitTextToSize(
+        `A chave tem ${key.length} caracteres: começa por "${key.slice(0, 6)}" e termina em "${key.slice(-6)}". ` +
+        `Ao colar, as quebras de linha e os espaços são ignorados. Código de verificação: ${data.verificationCode}.`,
+        width), left, y);
+    const noteY = Math.min(y + 12, 262);
+    doc.setFontSize(7.5); doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text('Esta chave é pessoal e intransmissível. Não a partilhe fora da empresa titular.', left, noteY);
+    doc.text('Página 2 de 2', right, noteY, { align: 'right' });
+
+    if (output === 'datauri') return doc.output('datauristring');
+    doc.save(`Certificado_Licenca_${(data.clientName || 'Cliente').replace(/[^\wÀ-ÿ]+/g, '_')}.pdf`);
+    return undefined;
+};
+
+export type ApprovalReportRow = {
+    clientName: string;
+    creditId: string;
+    amount: number;
+    rate: number;
+    installments: number;
+    status: 'pending' | 'approved' | 'rejected';
+    requestedBy?: string | null;
+    requestedAt?: Date | string | null;
+    decidedBy?: string | null;
+    decidedAt?: Date | string | null;
+    reason?: string | null;
+};
+
+/** Relatório de aprovações de crédito (mensal ou de outro período), em paisagem. */
+export const generateApprovalsReportPDF = (
+    rows: ApprovalReportRow[],
+    meta: { periodLabel: string; filterLabel?: string },
+    settings?: any,
+    userName?: string
+) => {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const config = getCompanySettings(settings);
+    const primary = resolveBrandPrimary(config.primaryColor);
+    const statusText = { pending: 'Pendente', approved: 'Aprovado', rejected: 'Rejeitado' } as const;
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    applyBranding(doc, config, userName);
+    let y = brandingHeaderBottom(doc) + 10;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(0, 0, 0);
+    doc.text('RELATÓRIO DE APROVAÇÕES DE CRÉDITO', pageWidth / 2, y, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.setTextColor(90, 90, 90);
+    doc.text(`Período: ${meta.periodLabel}${meta.filterLabel ? `  •  ${meta.filterLabel}` : ''}  •  Emitido em ${formatDateTime(new Date())}`, pageWidth / 2, y + 6, { align: 'center' });
+
+    const approved = rows.filter(row => row.status === 'approved');
+    const rejected = rows.filter(row => row.status === 'rejected');
+    const pending = rows.filter(row => row.status === 'pending');
+    const sum = (list: ApprovalReportRow[]) => list.reduce((total, row) => total + (Number(row.amount) || 0), 0);
+    const decided = approved.length + rejected.length;
+    const cards: Array<[string, string]> = [
+        ['PEDIDOS', String(rows.length)],
+        ['APROVADOS', `${approved.length}  (${formatCurrency(sum(approved), config.currency)})`],
+        ['REJEITADOS', `${rejected.length}  (${formatCurrency(sum(rejected), config.currency)})`],
+        ['PENDENTES', `${pending.length}  (${formatCurrency(sum(pending), config.currency)})`],
+        ['TAXA DE APROVAÇÃO', decided ? `${Math.round((approved.length / decided) * 1000) / 10}%`.replace('.', ',') : '—'],
+    ];
+    y += 12;
+    const cardW = (pageWidth - 36 - 4 * 4) / 5;
+    cards.forEach(([label, value], index) => {
+        const x = 18 + index * (cardW + 4);
+        doc.setFillColor(245, 247, 250); doc.roundedRect(x, y, cardW, 16, 2, 2, 'F');
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(100, 116, 139);
+        doc.text(label, x + 3, y + 5.5);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9.5); doc.setTextColor(30, 41, 59);
+        doc.text(value, x + 3, y + 12, { maxWidth: cardW - 6 });
+    });
+
+    autoTable(doc, {
+        startY: y + 22,
+        head: [['Data do pedido', 'Cliente', 'Crédito', 'Valor', 'Taxa', 'Prest.', 'Estado', 'Decidido por', 'Data da decisão', 'Motivo / observações']],
+        body: rows.map(row => [
+            row.requestedAt ? formatDate(row.requestedAt) : '—',
+            row.clientName,
+            row.creditId,
+            formatCurrency(row.amount, config.currency),
+            `${Number(row.rate || 0).toLocaleString('pt-AO')}%`,
+            String(row.installments || '—'),
+            statusText[row.status],
+            row.decidedBy || '—',
+            row.decidedAt ? formatDateTime(row.decidedAt) : '—',
+            row.reason || '—',
+        ]),
+        headStyles: { fillColor: primary, textColor: [255, 255, 255], fontStyle: 'bold' },
+        styles: { fontSize: 7.5, cellPadding: 1.6 },
+        columnStyles: { 2: { cellWidth: 34 }, 3: { halign: 'right' }, 4: { halign: 'right' }, 5: { halign: 'center' }, 9: { cellWidth: 55 } },
+        didParseCell: (hook: any) => {
+            if (hook.section !== 'body' || hook.column.index !== 6) return;
+            const status = rows[hook.row.index]?.status;
+            hook.cell.styles.fontStyle = 'bold';
+            hook.cell.styles.textColor = status === 'approved' ? [22, 163, 74] : status === 'rejected' ? [220, 38, 38] : [217, 119, 6];
+        },
+        didDrawPage: () => applyBranding(doc, config, userName, true),
+    });
+
+    doc.save(`relatorio-aprovacoes-${meta.periodLabel.replace(/[^\wÀ-ÿ]+/g, '-').toLowerCase()}.pdf`);
 };

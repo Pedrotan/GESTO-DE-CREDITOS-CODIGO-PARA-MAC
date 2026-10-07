@@ -6,6 +6,8 @@ import { db } from '@/bibliotecas/bd';
 export const SHARED_SETTING_KEYS = {
     interestTiers: 'interest_tiers',
     licenseKey: 'license_key',
+    accessSchedule: 'access_schedule',
+    simulatorConfig: 'simulator_config',
 } as const;
 
 // Upsert com "última alteração ganha": uma operação remota mais antiga não substitui uma mais recente.

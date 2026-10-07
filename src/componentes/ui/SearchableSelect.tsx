@@ -21,6 +21,10 @@ interface Option {
     label: string;
     disabled?: boolean;
     subLabel?: string;
+    /** Classes extra da opção (por exemplo, meses passados a vermelho). */
+    className?: string;
+    /** Texto de pesquisa adicional (além do rótulo). */
+    keywords?: string;
 }
 
 interface SearchableSelectProps {
@@ -58,7 +62,7 @@ export function SearchableSelect({
                     className={cn("w-full justify-between font-normal h-11", className)}
                     disabled={disabled}
                 >
-                    <span className="truncate">
+                    <span className={cn("truncate", selectedOption?.className)}>
                         {selectedOption ? selectedOption.label : placeholder}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -73,7 +77,7 @@ export function SearchableSelect({
                             {options.map((option) => (
                                 <CommandItem
                                     key={option.value}
-                                    value={option.label}
+                                    value={option.keywords ? `${option.label} ${option.keywords}` : option.label}
                                     disabled={option.disabled}
                                     onSelect={() => {
                                         onValueChange(option.value);
@@ -81,7 +85,8 @@ export function SearchableSelect({
                                     }}
                                     className={cn(
                                         "flex flex-col items-start gap-0.5 px-3 py-2",
-                                        option.disabled && "opacity-50 grayscale pointer-events-none"
+                                        option.disabled && "opacity-50 grayscale pointer-events-none",
+                                        option.className
                                     )}
                                 >
                                     <div className="flex w-full items-center justify-between">
@@ -94,7 +99,7 @@ export function SearchableSelect({
                                         />
                                     </div>
                                     {option.subLabel && (
-                                        <span className="text-[10px] text-muted-foreground uppercase tracking-tight">
+                                        <span className={cn("text-[10px] uppercase tracking-tight", option.className ? "opacity-80" : "text-muted-foreground")}>
                                             {option.subLabel}
                                         </span>
                                     )}

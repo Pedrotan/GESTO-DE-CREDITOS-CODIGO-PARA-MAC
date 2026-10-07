@@ -1,3 +1,4 @@
+import { KzIcon } from '@/componentes/ui/KzIcon';
 import { BankLogo } from '@/componentes/BankLogo';
 import { ANGOLAN_BANKS } from '@/bibliotecas/ibanHelper';
 import { useState, useEffect, useRef, useMemo } from 'react';
@@ -6,8 +7,10 @@ import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { Client, Credit } from '@/tipos/credito';
 import { formatCurrency, formatDate } from '@/bibliotecas/formatters';
-import { generatePermanentTransferLetterPDF } from '@/bibliotecas/pdf';
+import { generatePermanentTransferLetterPDF, companyBankAccount } from '@/bibliotecas/pdf';
 import { ServicoCartasTransferencia, CartaTransferencia, ModeloCarta } from '@/servicos/ServicoCartasTransferencia';
+import { printPdfFromUrl } from '@/bibliotecas/pdfPrint';
+import { HistoricoCartas } from '@/componentes/cartas/HistoricoCartas';
 import { useToast } from '@/ganchos/usar-toast';
 import { cn } from '@/bibliotecas/utils';
 import { sanitizeRichHtml } from '@/bibliotecas/sanitizar-html';
@@ -34,9 +37,7 @@ import {
     Trash2,
     Eye,
     Landmark,
-    Calendar,
-    DollarSign,
-    UserCheck,
+    Calendar,    UserCheck,
     ScrollText,
     Check,
     Building,
@@ -300,8 +301,8 @@ export function CartasTransferencia() {
             bankDestinationName,
             destinationBranch,
             companyAccountName: companySettings?.name || 'Tango Créditos, Lda.',
-            companyIban: (companySettings as any)?.bankDetails?.iban || (companySettings as any)?.iban || 'AO06.0000.0000.0000.0000.0000.0',
-            companyBank: (companySettings as any)?.bankDetails?.bankName || 'Banco Comercial',
+            companyIban: companyBankAccount(companySettings)?.iban || '',
+            companyBank: companyBankAccount(companySettings)?.bankName || '',
             installmentAmount,
             creditReference: creditRef,
             startDate: new Date().toISOString(),
@@ -322,9 +323,7 @@ export function CartasTransferencia() {
         });
     };
 
-    // Download PDF com dados atuais
-    const handleDownloadPDF = (letterToDownload?: CartaTransferencia) => {
-        const letter: CartaTransferencia = letterToDownload || {
+    const buildCurrentLetter = (): CartaTransferencia => ({
             id: currentLetterId,
             clientId: selectedClient?.id,
             clientName: selectedClient?.name || 'Nome do Cliente',
@@ -335,8 +334,8 @@ export function CartasTransferencia() {
             bankDestinationName,
             destinationBranch,
             companyAccountName: companySettings?.name || 'Tango Créditos, Lda.',
-            companyIban: (companySettings as any)?.bankDetails?.iban || (companySettings as any)?.iban || 'AO06.0000.0000.0000.0000.0000.0',
-            companyBank: (companySettings as any)?.bankDetails?.bankName || 'Banco Comercial',
+            companyIban: companyBankAccount(companySettings)?.iban || '',
+            companyBank: companyBankAccount(companySettings)?.bankName || '',
             installmentAmount,
             creditReference: creditRef,
             startDate: new Date().toISOString(),
@@ -346,13 +345,41 @@ export function CartasTransferencia() {
             templateId: selectedTemplateId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
-        };
+    });
 
-        generatePermanentTransferLetterPDF(letter, companySettings, user?.name || 'Operador');
+    // Download PDF com dados atuais
+    const handleDownloadPDF = async (letterToDownload?: CartaTransferencia) => {
+        const letter: CartaTransferencia = letterToDownload || buildCurrentLetter();
+
+        try {
+            await generatePermanentTransferLetterPDF(letter, companySettings, user?.name || 'Operador');
+        } catch {
+            toast({ title: 'Erro ao gerar a carta', description: 'Não foi possível gerar o PDF da carta bancária.', variant: 'destructive' });
+            return;
+        }
         toast({
             title: "Gerando PDF",
             description: "O documento formal A4 está pronto para download."
         });
+    };
+
+    const handlePrint = async (letterToPrint?: CartaTransferencia) => {
+        const letter: CartaTransferencia = letterToPrint || buildCurrentLetter();
+        let url: string | void;
+        try {
+            url = await generatePermanentTransferLetterPDF(letter, companySettings, user?.name || 'Operador', 'blob');
+        } catch {
+            toast({ title: 'Erro ao gerar a carta', description: 'Não foi possível preparar a carta para impressão.', variant: 'destructive' });
+            return;
+        }
+        if (!url) return;
+        const pdfUrl = url;
+        toast({ title: 'A preparar a impressão', description: `Carta de ${letter.clientName} (exemplar do banco e do cliente).` });
+        await printPdfFromUrl(pdfUrl,
+            message => toast({ title: 'Impressão indisponível', description: message || 'Não foi possível imprimir a carta.', variant: 'destructive' }),
+            printerName => toast({ title: 'Carta enviada para impressão', description: printerName ? `Impressora: ${printerName}` : undefined }),
+            `Carta_${(letter.clientName || 'Cliente').replace(/\s+/g, '_')}.pdf`);
+        window.setTimeout(() => URL.revokeObjectURL(pdfUrl), 60_000);
     };
 
     const handleLoadFromHistory = (letter: CartaTransferencia) => {
@@ -441,9 +468,9 @@ export function CartasTransferencia() {
                         <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => window.print()}
+                            onClick={() => void handlePrint()}
                             className="h-9 px-2 text-xs rounded-xl"
-                            title="Imprimir"
+                            title="Imprimir a carta (exemplar do banco e do cliente)"
                         >
                             <Printer className="h-4 w-4" />
                         </Button>
@@ -592,7 +619,7 @@ export function CartasTransferencia() {
 
                             <div className="space-y-1">
                                 <Label className="text-[11px] font-bold text-muted-foreground flex items-center gap-1">
-                                    <DollarSign className="h-3.5 w-3.5 text-primary" />
+                                    <KzIcon className="h-3.5 w-3.5 text-primary" />
                                     Prestação ({companySettings.currency})
                                 </Label>
                                 <Input
@@ -1042,98 +1069,19 @@ export function CartasTransferencia() {
                                         Cartas Salvas no Histórico
                                     </h3>
                                     <p className="text-xs text-muted-foreground">
-                                        Consulte, reabra para editar ou volte a baixar qualquer carta já elaborada.
+                                        Uma linha por cliente com o número de cartas emitidas. "Ver histórico" mostra todas as cartas do cliente para editar, baixar, imprimir ou excluir.
                                     </p>
                                 </div>
                             </div>
 
-                            {savedLetters.length === 0 ? (
-                                <div className="text-center py-12 border-2 border-dashed rounded-2xl bg-muted/10">
-                                    <ScrollText className="h-10 w-10 text-muted-foreground/40 mx-auto mb-2" />
-                                    <p className="text-sm font-semibold text-muted-foreground">Nenhuma carta guardada ainda</p>
-                                    <p className="text-xs text-muted-foreground/80 mt-1">
-                                        Assim que elaborar uma carta e clicar em "Guardar no Histórico", ela ficará registada aqui.
-                                    </p>
-                                </div>
-                            ) : (
-                                <div className="border rounded-2xl overflow-hidden shadow-2xs">
-                                    <table className="w-full text-xs">
-                                        <thead className="bg-muted/60 text-muted-foreground font-semibold">
-                                            <tr>
-                                                <th className="p-3 text-left">Data de Criação</th>
-                                                <th className="p-3 text-left">Cliente</th>
-                                                <th className="p-3 text-left">Banco Domiciliário</th>
-                                                <th className="p-3 text-right">Prestação Mensal</th>
-                                                <th className="p-3 text-center">Dia Débito</th>
-                                                <th className="p-3 text-center w-36">Ações</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody className="divide-y">
-                                            {savedLetters.map((letter) => (
-                                                <tr key={letter.id} className="hover:bg-muted/20 transition-colors">
-                                                    <td className="p-3 font-mono text-muted-foreground">
-                                                        {formatDate(letter.createdAt)}
-                                                    </td>
-                                                    <td className="p-3 font-semibold text-foreground">
-                                                        {letter.clientName}
-                                                        {letter.clientNif && (
-                                                            <span className="block text-[10px] text-muted-foreground font-normal">
-                                                                NIF: {letter.clientNif}
-                                                            </span>
-                                                        )}
-                                                    </td>
-                                                    <td className="p-3">
-                                                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-muted text-foreground border">
-                                                            {letter.bankDestinationName}
-                                                        </span>
-                                                    </td>
-                                                    <td className="p-3 text-right font-black text-emerald-600 dark:text-emerald-400">
-                                                        {formatCurrency(letter.installmentAmount, companySettings.currency)}
-                                                    </td>
-                                                    <td className="p-3 text-center font-bold">
-                                                        Dia {letter.dayOfMonth}
-                                                    </td>
-                                                    <td className="p-3 text-center whitespace-nowrap">
-                                                        <div className="flex items-center justify-center gap-1">
-                                                            <Button
-                                                                size="sm"
-                                                                variant="outline"
-                                                                onClick={() => handleLoadFromHistory(letter)}
-                                                                className="h-7 px-2 text-[10px] gap-1 font-semibold rounded-lg"
-                                                                title="Abrir no Editor"
-                                                            >
-                                                                <Edit3 className="h-3 w-3" />
-                                                                Editar
-                                                            </Button>
-
-                                                            <Button
-                                                                size="sm"
-                                                                variant="secondary"
-                                                                onClick={() => handleDownloadPDF(letter)}
-                                                                className="h-7 px-2 text-[10px] gap-1 font-semibold rounded-lg"
-                                                                title="Baixar em PDF"
-                                                            >
-                                                                <Download className="h-3 w-3" />
-                                                                PDF
-                                                            </Button>
-
-                                                            <Button
-                                                                size="sm"
-                                                                variant="ghost"
-                                                                onClick={() => handleDeleteLetter(letter.id)}
-                                                                className="h-7 w-7 p-0 text-destructive hover:bg-destructive/10 rounded-lg"
-                                                                title="Excluir do Histórico"
-                                                            >
-                                                                <Trash2 className="h-3.5 w-3.5" />
-                                                            </Button>
-                                                        </div>
-                                                    </td>
-                                                </tr>
-                                            ))}
-                                        </tbody>
-                                    </table>
-                                </div>
-                            )}
+                            <HistoricoCartas
+                                letters={savedLetters}
+                                currency={companySettings.currency}
+                                onEdit={handleLoadFromHistory}
+                                onDownload={letter => void handleDownloadPDF(letter)}
+                                onPrint={letter => void handlePrint(letter)}
+                                onDelete={letter => handleDeleteLetter(letter.id)}
+                            />
                         </div>
                     </TabsContent>
                 </Tabs>

@@ -1,5 +1,5 @@
-
 // Platform Adapter to abstract Electron API vs Web Browser capabilities
+import { isLanLicenseServer } from './payload-licenca';
 
 export interface NetworkInfo {
     ip: string;
@@ -135,6 +135,9 @@ export const appAdapter: AppAdapter = {
     },
 
     activateLicense: async (url: string, licenseKey: string, machineId: string) => {
+        // O controlo de uso único só existe no servidor Master da rede local (http). A nuvem (https) não tem
+        // este endpoint: a licença já é validada pela assinatura do Tango Master.
+        if (!isLanLicenseServer(url)) return { success: true, message: 'Sem servidor local de licenças.' };
         try {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);

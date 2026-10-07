@@ -1,5 +1,6 @@
+import { formatCurrency } from '@/bibliotecas/formatters';
 import jsPDF from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 import QRCode from 'qrcode';
 import { EInvoiceData } from './eInvoiceGenerator';
 import { SAFTOptions } from './saftGenerator';
@@ -107,7 +108,7 @@ export const generateInvoicePDF = async (data: EInvoiceData): Promise<void> => {
     doc.setFont('helvetica', 'bold');
     doc.text('Quadro Resumo de Impostos:', margin, yPos);
     doc.setFont('helvetica', 'normal');
-    doc.text('Isento (Art. 12.º CST) - 0.00 AOA', margin, yPos + 5);
+    doc.text(`Isento (Art. 12.º CST) - ${formatCurrency(0)}`, margin, yPos + 5);
 
     // Totais à Direita
     // CORREÇÃO: Aumentar separação entre Rótulo e Valor
@@ -118,15 +119,15 @@ export const generateInvoicePDF = async (data: EInvoiceData): Promise<void> => {
     doc.setTextColor(0, 0, 0); // Garantir preto
 
     doc.text('Total Ilíquido:', matchX, yPos);
-    doc.text(`${netTotal.toLocaleString('pt-AO', { minimumFractionDigits: 2 })} AOA`, valueX, yPos, { align: 'right' });
+    doc.text(formatCurrency(netTotal), valueX, yPos, { align: 'right' });
 
     yPos += 6;
     doc.text('Total Descontos:', matchX, yPos);
-    doc.text('0.00 AOA', valueX, yPos, { align: 'right' });
+    doc.text(formatCurrency(0), valueX, yPos, { align: 'right' });
 
     yPos += 6;
     doc.text('Total Imposto:', matchX, yPos);
-    doc.text('0.00 AOA', valueX, yPos, { align: 'right' });
+    doc.text(formatCurrency(0), valueX, yPos, { align: 'right' });
 
     yPos += 14;
     doc.setFontSize(14);
@@ -136,8 +137,11 @@ export const generateInvoicePDF = async (data: EInvoiceData): Promise<void> => {
     doc.rect(matchX - 5, yPos - 10, 90, 15, 'FD'); // Box maior
 
     doc.setTextColor(0, 0, 0);
-    doc.text('TOTAL A PAGAR:', matchX, yPos); // Label à esquerda
-    doc.text(`${grossTotal.toLocaleString('pt-AO', { minimumFractionDigits: 2 })} AOA`, valueX, yPos, { align: 'right' }); // Valor à direita
+    // Rótulo por cima e valor por baixo: com montantes grandes não se sobrepõem.
+    doc.setFontSize(9);
+    doc.text('TOTAL A PAGAR:', matchX, yPos - 4.5);
+    doc.setFontSize(14);
+    doc.text(formatCurrency(grossTotal), valueX, yPos + 2.5, { align: 'right' });
 
     // Área de Validação (Hash + QR)
     const footerAreaStart = pageHeight - 75;

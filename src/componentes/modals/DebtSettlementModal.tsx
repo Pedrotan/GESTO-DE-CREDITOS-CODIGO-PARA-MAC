@@ -4,6 +4,7 @@ import { Download, PartyPopper, Share2 } from "lucide-react";
 import { formatCurrency, formatDate } from "@/bibliotecas/formatters";
 import { CompanySettings } from "@/tipos/base-dados";
 import jsPDF from '@/bibliotecas/pdf-documento';
+import { drawContactFooter, getCompanySettings } from '@/bibliotecas/pdf';
 
 interface DebtSettlementModalProps {
     isOpen: boolean;
@@ -133,15 +134,18 @@ export function DebtSettlementModal({
 
         currentY += 7;
 
-        doc.setFontSize(12);
+        doc.setFontSize(9.5);
         doc.setFont("helvetica", "bold");
         doc.setTextColor(darkText[0], darkText[1], darkText[2]);
-        doc.text(creditId, col1Ex, currentY);
+        // A referência (ex.: CR-<uuid>) é quebrada dentro da coluna para não tocar no valor ao lado.
+        const referenceLines = doc.splitTextToSize(creditId, col2Ex - col1Ex - 6) as string[];
+        doc.text(referenceLines, col1Ex, currentY);
+        doc.setFontSize(12);
 
         doc.setTextColor(22, 163, 74); // Green-600
         doc.text(formatCurrency(amountPaid), col2Ex, currentY);
 
-        currentY += 25;
+        currentY += 21 + (referenceLines.length - 1) * 4;
 
         // --- Benefits List ---
         doc.setFontSize(12);
@@ -171,15 +175,17 @@ export function DebtSettlementModal({
         });
 
         // --- Footer ---
-        const footerY = pageHeight - 20;
+        // Acima da linha de contactos (telefone, web, email e localização) desenhada no fundo da página.
+        const footerY = Math.max(currentY + 8, pageHeight - 30);
         doc.setDrawColor(229, 231, 235);
-        doc.line(20, footerY - 10, pageWidth - 20, footerY - 10);
+        doc.line(20, footerY - 6, pageWidth - 20, footerY - 6);
 
         doc.setFontSize(8);
         doc.setTextColor(lightText[0], lightText[1], lightText[2]);
         doc.text(`${companySettings.name}`, pageWidth / 2, footerY, { align: "center" });
         doc.text(`Certificado emitido em ${formatDate(new Date())}`, pageWidth / 2, footerY + 5, { align: "center" });
 
+        drawContactFooter(doc, getCompanySettings(companySettings));
         doc.save(`Certificado-Liquidacao-${creditId}.pdf`);
     };
 

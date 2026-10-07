@@ -1,4 +1,5 @@
 import { Client, Credit } from '@/tipos/credito';
+import { companyBankAccount } from '@/bibliotecas/pdf';
 import { formatCurrency, formatDate } from '@/bibliotecas/formatters';
 import { getScopedLocalStorageItem, setScopedLocalStorageItem } from '@/bibliotecas/contas';
 import { identifyBankFromIBAN } from '@/bibliotecas/ibanHelper';
@@ -261,8 +262,8 @@ export class ServicoCartasTransferencia {
         const currency = companySettings?.currency || 'Kz';
         const companyName = companySettings?.name || 'Tango Créditos, Lda.';
         const companyNif = companySettings?.nif || 'Não informado';
-        const companyIban = (companySettings as any)?.bankDetails?.iban || (companySettings as any)?.iban || 'AO06.0000.0000.0000.0000.0000.0';
-        const companyBank = (companySettings as any)?.bankDetails?.bankName || 'Banco Comercial';
+        const companyIban = companyBankAccount(companySettings)?.iban || '';
+        const companyBank = companyBankAccount(companySettings)?.bankName || '';
 
         const clientName = client?.name || 'Nome do Cliente';
         const clientNif = client?.nif || 'BI/NIF Não informado';

@@ -1,5 +1,6 @@
+import { formatCurrency } from '@/bibliotecas/formatters';
 import jsPDF from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from './pdf';
@@ -101,10 +102,10 @@ export const generateLixeiraReport = (data: LixeiraReportData) => {
                         return [item.name, item.nif || 'N/A', formatDate(item.deletedAt), getUserName(item.deletedBy)];
                     }
                     if (section.title.includes('CRÉDITOS')) {
-                        return [item.clientName || item.id, `${item.principalAmount?.toLocaleString()} AOA`, formatDate(item.deletedAt), getUserName(item.deletedBy)];
+                        return [item.clientName || item.id, formatCurrency(item.principalAmount), formatDate(item.deletedAt), getUserName(item.deletedBy)];
                     }
                     if (section.title.includes('PAGAMENTOS')) {
-                        return [item.clientName || item.id, `${item.amount?.toLocaleString()} AOA`, formatDate(item.deletedAt), getUserName(item.deletedBy)];
+                        return [item.clientName || item.id, formatCurrency(item.amount), formatDate(item.deletedAt), getUserName(item.deletedBy)];
                     }
                     if (section.title.includes('PROCESSOS')) {
                         return [item.id, item.creditId, formatDate(item.deletedAt), getUserName(item.deletedBy)];

@@ -1,3 +1,6 @@
+import { LembretesCobranca } from './LembretesCobranca';
+import { ProcessamentoAlcadas } from './ProcessamentoAlcadas';
+import { VerificacaoContabilisticaDiaria } from './VerificacaoContabilisticaDiaria';
 import React, { ReactNode, useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
@@ -5,6 +8,10 @@ import { Header } from './Header';
 import { TickerTaxas } from './TickerTaxas';
 import { LembreteFechoMes } from './LembreteFechoMes';
 import { LigacaoNuvemDesktop } from './LigacaoNuvemDesktop';
+import { ControloHorarioAcesso } from './ControloHorarioAcesso';
+import { BannerCongelamento } from '@/componentes/contabilidade/ControloPanico';
+import { MonitorSeguranca } from '@/componentes/seguranca/MonitorSeguranca';
+import { EnvioRelatoriosAgendados } from '@/componentes/pagamentos/EnvioRelatoriosAgendados';
 import { cn } from '@/bibliotecas/utils';
 import { discardDraftsOnRouteChange } from '@/ganchos/usar-rascunho-formulario';
 
@@ -71,8 +78,15 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
           subtitle={subtitle}
           onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
+        <BannerCongelamento />
+        <MonitorSeguranca />
+        <EnvioRelatoriosAgendados />
+        <VerificacaoContabilisticaDiaria />
+        <LembretesCobranca />
+        <ProcessamentoAlcadas />
         <LembreteFechoMes />
         <LigacaoNuvemDesktop />
+        <ControloHorarioAcesso />
         <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">{children}</main>
         <footer className="shrink-0 border-t p-4 text-center text-[10px] text-muted-foreground/50">
           Desenvolvido por DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA | Cuanza Norte, N´dalatando

@@ -25,3 +25,13 @@ test('sem marca configurada não desenha imagem', () => {
     setPdfWatermark(doc, null);
     assert.equal((doc.output().match(/\/I\d+ Do/g) || []).length, 0);
 });
+
+test('marca configurada no Master cobre os PDFs sem configuração individual',()=>{
+    const descriptor=Object.getOwnPropertyDescriptor(globalThis,'localStorage');
+    try {
+        Object.defineProperty(globalThis,'localStorage',{configurable:true,value:{getItem:(key:string)=>key==='tango_master_watermark'?png:null}});
+        const doc=new jsPDF();doc.addPage();
+        setPdfWatermark(doc,undefined);
+        assert.equal((doc.output().match(/\/I\d+ Do/g)||[]).length,2);
+    }finally{if(descriptor)Object.defineProperty(globalThis,'localStorage',descriptor);else Reflect.deleteProperty(globalThis,'localStorage');}
+});

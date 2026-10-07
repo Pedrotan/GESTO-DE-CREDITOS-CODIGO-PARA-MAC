@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { ACCESS_DENIED_MESSAGE_KEY } from '@/servicos/ServicoHorarioAcesso';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useNavigate, Link } from 'react-router-dom';
 import { Button } from '@/componentes/ui/button';
@@ -28,6 +29,7 @@ import { AccountSwitcher } from '@/componentes/contas/AccountSwitcher';
 import { scopedStorageKey } from '@/bibliotecas/contas';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import QRCode from 'qrcode';
+import { ModalAvisoHorario } from '@/componentes/modals/ModalAvisoHorario';
 
 const systemSlides = [
     {
@@ -230,6 +232,15 @@ export default function Login() {
             setLoading(false);
         }
     };
+
+    // Sessão terminada pelo horário de acesso: mostra o motivo e quando pode voltar.
+    useEffect(() => {
+        const message = localStorage.getItem(ACCESS_DENIED_MESSAGE_KEY);
+        if (!message) return;
+        localStorage.removeItem(ACCESS_DENIED_MESSAGE_KEY);
+        setErrorMessage(message);
+        setIsErrorModalOpen(true);
+    }, []);
 
     // Check for session expiration on mount
     useEffect(() => {
@@ -624,7 +635,29 @@ export default function Login() {
                 </DialogContent>
             </Dialog>
 
-            <Dialog open={isErrorModalOpen} onOpenChange={setIsErrorModalOpen}>
+            {/* Modal de Aviso de Horário de Acesso (padrão visual específico solicitado) */}
+            {(() => {
+                const isOutsideSchedule = /horário|pode voltar a entrar|sem acesso ao sistema|acesso ao sistema/i.test(errorMessage);
+                if (!isOutsideSchedule) return null;
+
+                const matchRetorno = errorMessage.match(/Pode voltar a entrar ([^.]+)\./i);
+                const proximoHorario = matchRetorno ? `Pode voltar a entrar ${matchRetorno[1]}` : null;
+                const motivoLimpo = errorMessage.replace(/^A sua sessão terminou:\s*/i, '').replace(/Pode voltar a entrar [^.]+\./i, '').trim();
+
+                return (
+                    <ModalAvisoHorario
+                        aberto={isErrorModalOpen}
+                        aoFechar={() => setIsErrorModalOpen(false)}
+                        titulo="HORÁRIO DE ACESSO EXPIRADO?"
+                        motivo={motivoLimpo || 'O seu período de expediente no sistema terminou. Para garantir a segurança das operações bancárias, a sessão foi encerrada de forma segura.'}
+                        proximoAcesso={proximoHorario}
+                        nomeUtilizador={email}
+                    />
+                );
+            })()}
+
+            {/* Modal de Outros Erros e Suspensão de Conta */}
+            <Dialog open={isErrorModalOpen && !/horário|pode voltar a entrar|sem acesso ao sistema|acesso ao sistema/i.test(errorMessage)} onOpenChange={setIsErrorModalOpen}>
                 <DialogContent className="sm:max-w-[420px] border-none bg-white/95 backdrop-blur-xl p-0 overflow-hidden text-center shadow-2xl">
                     {(() => {
                         const isBlocked = errorMessage.toLowerCase().includes('bloqueada');

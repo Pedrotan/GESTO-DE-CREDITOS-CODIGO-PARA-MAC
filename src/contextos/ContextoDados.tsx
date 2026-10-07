@@ -1,3 +1,4 @@
+import { formatCurrency } from '@/bibliotecas/formatters';
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
 
 import {
@@ -31,6 +32,19 @@ import { generateClientProfilePDF, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPri
 import { resolveLicenseKey, setActiveLicenseCompanyNif, setGlobalLicenseKey, validateLicense } from '@/bibliotecas/licenciamento';
 import { useToast } from '@/ganchos/usar-toast';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
+import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
+
+// Nomes legíveis das definições da empresa, para o registo de auditoria ("Atualizou definições: ...").
+const SETTING_LABELS: Record<string, string> = {
+    name: 'Nome da empresa', nif: 'NIF', address: 'Morada', location: 'Localização', phone: 'Telefone', email: 'Email', website: 'Website',
+    whatsapp: 'WhatsApp', logo: 'Logótipo', reportLogo: 'Logótipo dos relatórios', watermarkLogo: 'Marca de água', primaryColor: 'Cor principal',
+    secondaryColor: 'Cor secundária', currency: 'Moeda', sessionTimeout: 'Tempo de sessão', maintenanceMode: 'Modo de manutenção',
+    financialLock: 'Bloqueio financeiro', smtpHost: 'Servidor de email', smtpPort: 'Porta do email', smtpUser: 'Utilizador do email',
+    smtpPassword: 'Palavra-passe do email', syncEnabled: 'Sincronização', syncUrl: 'Endereço de sincronização', licenseKey: 'Licença',
+    defaultSimulationInterestRate: 'Taxa de juro por omissão do simulador', defaultSimulationAdminFee: 'Comissão de abertura por omissão',
+    defaultSimulationIof: 'Imposto do Selo por omissão', customClauses: 'Cláusulas do contrato', contractTemplates: 'Modelos de contrato',
+    bankingInfo: 'Dados bancários', authorizedSigners: 'Assinantes autorizados',
+};
 import { ServicoCliente } from '@/servicos/ServicoCliente';
 import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
 import { ServicoNotificacao } from '@/servicos/ServicoNotificacao';
@@ -45,6 +59,7 @@ import { ServicoFornecedor } from '@/servicos/ServicoFornecedor';
 import { ServicoTarefaCalendario } from '@/servicos/ServicoTarefaCalendario';
 import { ServicoTaxasJuro } from '@/servicos/ServicoTaxasJuro';
 import { SHARED_SETTING_KEYS, ServicoDefinicoesPartilhadas } from '@/servicos/ServicoDefinicoesPartilhadas';
+import { DEFAULT_ACCESS_SCHEDULE, normalizeAccessSchedule, validateAccessSchedule, type AccessSchedule } from '@/bibliotecas/horario-acesso';
 import { isCloudSyncUrl, startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { LegalCase, Warranty } from '@/tipos/contencioso';
 import { getScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from '@/bibliotecas/contas';
@@ -78,7 +93,7 @@ interface ContextoDadosType {
     deleteClient: (id: string, user?: { id: string; name: string }) => Promise<void>;
     addDocumentToClient: (clientId: string, doc: any, user?: { id: string; name: string }) => Promise<void>;
     deleteDocumentFromClient: (clientId: string, docId: string, user?: { id: string; name: string }) => Promise<void>;
-    addCredit: (credit: Credit, user?: { id: string; name: string }) => Promise<void>;
+    addCredit: (credit: Credit, user?: { id: string; name: string }, context?: { productId?: string | null; effortRate?: number | null }) => Promise<Credit & { escalationReason?: string }>;
     updateCredit: (id: string, updates: Partial<Credit>, user?: { id: string; name: string }) => Promise<void>;
     adjustCreditCharges: (id: string, accruedInterest: number, lateInterest: number,
         reason: string, idempotencyKey: string, user?: { id: string; name: string }) => Promise<void>;
@@ -89,13 +104,15 @@ interface ContextoDadosType {
         user?: { id: string; name: string }
     ) => Promise<void>;
     deleteCredit: (id: string, user?: { id: string; name: string }, justification?: string) => Promise<void>;
-    approveCredit: (id: string, adminId: string, adminName: string, notes?: string) => Promise<void>;
+    approveCredit: (id: string, adminId: string, adminName: string, notes?: string) => Promise<{ final: boolean; message?: string }>;
     rejectCredit: (id: string, adminId: string, adminName: string, notes?: string) => Promise<void>;
     addPayment: (payment: Payment, user?: { id: string; name: string }) => Promise<void>;
     deletePayment: (id: string, user?: { id: string; name: string }, justification?: string) => Promise<void>;
     addSimulation: (simulation: Simulation) => Promise<void>;
     deleteSimulation: (id: string) => Promise<void>;
+    updateSimulationStatus: (id: string, status: 'simulated' | 'converted', convertedCreditId?: string | null) => Promise<void>;
     addContract: (contract: Contract) => Promise<void>;
+    updateContract: (id: string, updates: Partial<Contract>) => Promise<void>;
     addNotification: (notification: Notification) => Promise<void>;
     markNotificationAsRead: (id: string) => Promise<void>;
     markAllAsRead: () => Promise<void>;
@@ -115,6 +132,9 @@ interface ContextoDadosType {
     /** Tabela de taxas de juro por prazo, partilhada entre dispositivos pela nuvem. */
     interestTiers: InterestTier[];
     saveInterestTiers: (tiers: InterestTier[]) => Promise<void>;
+    /** Horário de acesso ao sistema (partilhado por todos os dispositivos da empresa). */
+    accessSchedule: AccessSchedule;
+    saveAccessSchedule: (schedule: AccessSchedule) => Promise<void>;
     sendMessage: (message: Omit<ChatMessage, 'id' | 'timestamp' | 'read'>) => Promise<void>;
     markMessageAsRead: (id: string) => Promise<void>;
     deleteMessage: (id: string) => Promise<void>;
@@ -187,6 +207,8 @@ interface ContextoDadosType {
     dbAdapterMode: 'local' | 'remote';
 
     activeContextUserId: string | null;
+    /** Conjuntos de dados que não foi possível carregar (os restantes continuam disponíveis). */
+    dataLoadIssues: string[];
     setContextUserId: (userId: string | null) => void;
     closedMonths: any[];
     closeMonth: (
@@ -200,7 +222,7 @@ interface ContextoDadosType {
         liquidationRate: number,
         closedBy: string
     ) => Promise<void>;
-    reopenMonth: (id: string) => Promise<void>;
+    reopenMonth: (id: string, reason: string) => Promise<void>;
 }
 
 const syncDictionary = async () => {
@@ -321,6 +343,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const { user: authUser } = useAuth();
     const authRole = authUser?.role;
     const [activeContextUserId, setContextUserId] = useState<string | null>(null);
+    const [dataLoadIssues, setDataLoadIssues] = useState<string[]>([]);
     const [users, setUsers] = useState<any[]>([]);
     const [clients, setClients] = useState<Client[]>([]);
     const [credits, setCredits] = useState<Credit[]>([]);
@@ -343,6 +366,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const [interestTiers, setInterestTiers] = useState<InterestTier[]>(DEFAULT_INTEREST_TIERS);
     // Incrementa a cada recarga de dados: volta a comparar a licença local com a partilhada pela nuvem.
     const [sharedSettingsVersion, setSharedSettingsVersion] = useState(0);
+    const [accessSchedule, setAccessSchedule] = useState<AccessSchedule>(DEFAULT_ACCESS_SCHEDULE);
     const [calendarTasks, setCalendarTasks] = useState<CalendarTask[]>([]);
     const [closedMonths, setClosedMonths] = useState<any[]>([]);
     const [dbAdapterMode, setDbAdapterModeState] = useState<'local' | 'remote'>(() => {
@@ -661,28 +685,36 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
             setIsDataLoading(false);
 
+            // Cada conjunto carrega de forma independente: se um falhar (ex.: tabela com problema nesta cópia da base),
+            // os restantes continuam a aparecer e a falha fica registada e visível, em vez de deixar tudo vazio.
+            const loadFailures: string[] = [];
+            const settle = <T,>(label: string, promise: Promise<T>): Promise<T> => promise.catch(error => {
+                loadFailures.push(label);
+                console.error(`[ContextoDados] Falha ao carregar ${label}:`, error);
+                return [] as unknown as T;
+            });
             Promise.all([
-                db.all<PaymentGateway>('SELECT * FROM payment_gateways ORDER BY createdAt DESC'),
-                db.all<PaymentReference>('SELECT * FROM payment_references ORDER BY createdAt DESC'),
-                ServicoContrato.getAll(),
-                ServicoFinanceiro.getAllCredits(),
-                ServicoCliente.getAll(),
-                ServicoFinanceiro.getAllPayments(),
-                ServicoNotificacao.getAll(),
-                ServicoContencioso.getAll(),
-                ServicoGarantias.getAll(),
-                ServicoSimulacao.getAll(),
-                db.all<MessageTemplate>('SELECT * FROM message_templates'),
-                db.all<any>('SELECT * FROM user_limits'),
-                ServicoMensagem.getAll(),
-                ServicoContabilidade.getAll(),
-                ServicoCliente.getDeleted(),
-                ServicoFinanceiro.getDeletedCredits(),
-                ServicoFinanceiro.getDeletedPayments(),
-                ServicoAuditoria.getLogs(100),
-                db.all<any>('SELECT * FROM closed_months'),
-                ServicoFornecedor.findAll(),
-                ServicoTarefaCalendario.getAll(),
+                settle('gateways de pagamento', db.all<PaymentGateway>('SELECT * FROM payment_gateways ORDER BY createdAt DESC')),
+                settle('referências de pagamento', db.all<PaymentReference>('SELECT * FROM payment_references ORDER BY createdAt DESC')),
+                settle('contratos', ServicoContrato.getAll()),
+                settle('créditos', ServicoFinanceiro.getAllCredits()),
+                settle('clientes', ServicoCliente.getAll()),
+                settle('pagamentos', ServicoFinanceiro.getAllPayments()),
+                settle('notificações', ServicoNotificacao.getAll()),
+                settle('contencioso', ServicoContencioso.getAll()),
+                settle('garantias', ServicoGarantias.getAll()),
+                settle('simulações', ServicoSimulacao.getAll()),
+                settle('modelos de mensagem', db.all<MessageTemplate>('SELECT * FROM message_templates')),
+                settle('limites', db.all<any>('SELECT * FROM user_limits')),
+                settle('mensagens', ServicoMensagem.getAll()),
+                settle('lançamentos contabilísticos', ServicoContabilidade.getAll()),
+                settle('clientes eliminados', ServicoCliente.getDeleted()),
+                settle('créditos eliminados', ServicoFinanceiro.getDeletedCredits()),
+                settle('pagamentos eliminados', ServicoFinanceiro.getDeletedPayments()),
+                settle('auditoria', ServicoAuditoria.getLogs(100)),
+                settle('meses fechados', db.all<any>('SELECT * FROM closed_months')),
+                settle('fornecedores', ServicoFornecedor.findAll()),
+                settle('tarefas do calendário', ServicoTarefaCalendario.getAll()),
                 ServicoTaxasJuro.load().catch(() => DEFAULT_INTEREST_TIERS)
             ]).then(([
                 gateways,
@@ -714,6 +746,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                     return acc;
                 }, {});
 
+                setDataLoadIssues(loadFailures);
                 setPaymentGateways(gateways || []);
                 setPaymentReferences(references || []);
                 setContracts(loadedContracts || []);
@@ -778,6 +811,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 setSuppliers(loadedSuppliers || []);
                 setInterestTiers(loadedInterestTiers);
                 setSharedSettingsVersion(version => version + 1);
+                void ServicoDefinicoesPartilhadas.get(SHARED_SETTING_KEYS.accessSchedule)
+                    .then(value => setAccessSchedule(normalizeAccessSchedule(value)))
+                    .catch(error => console.warn('[Horário de acesso] Não foi possível ler as regras:', error));
                 setCalendarTasks(loadedCalendarTasks || []);
 
                 if (serverInfo?.isRunning && Definicoes) {
@@ -860,8 +896,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const addLog = async (
-        action: 'create' | 'update' | 'delete' | 'login' | 'logout',
-        entity: 'client' | 'credit' | 'payment' | 'user' | 'system' | 'contencioso' | 'garantia' | 'payment_gateway',
+        action: AuditLog['action'],
+        entity: AuditLog['entity'],
         details: string,
         userId?: string,
         userName?: string,
@@ -873,10 +909,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         setLogs(prev => [newLog, ...prev.slice(0, 400)]);
     };
 
+    // A auditoria é só de inserção: a tentativa fica registada como acesso negado e é recusada.
     const clearAllLogs = async (user?: { id: string; name: string }) => {
+        await addLog('security_alert', 'audit', 'Tentativa de apagar o histórico de auditoria (recusada: os registos são imutáveis)', user?.id, user?.name, undefined, undefined, { result: 'denied' });
         await ServicoAuditoria.clearAllLogs();
-        setLogs([]);
-        await addLog('delete', 'system', 'Limpou todo o histórico de logs de auditoria', user?.id, user?.name);
     };
 
     const updateCompanySettings = async (updates: Partial<ContextoDadosType['companySettings']>, user?: { id: string; name: string }) => {
@@ -904,7 +940,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
         setCompanySettings(hydratedSettings);
         setScopedLocalStorageItem('cached_company_settings', JSON.stringify(effectiveSettings));
-        await addLog('update', 'system', changes.length ? changes.join(', ') : 'Atualizou definições', user?.id, user?.name);
+        // Só os campos alterados, com o valor anterior e o novo (segredos e imagens nunca entram no registo).
+        const SECRET_SETTING = /password|rescueKey|passkey|apiKey|licenseKey|smtpPassword/i;
+        const changedKeys = Object.keys(updates).filter(key => JSON.stringify((companySettings as any)[key] ?? null) !== JSON.stringify((updates as any)[key] ?? null));
+        const describe = (key: string, value: unknown) => SECRET_SETTING.test(key) ? (value ? '(definida)' : '(vazia)')
+            : typeof value === 'string' && value.startsWith('data:image') ? '(imagem)' : value;
+        const before = Object.fromEntries(changedKeys.map(key => [key, describe(key, (companySettings as any)[key])]));
+        const after = Object.fromEntries(changedKeys.map(key => [key, describe(key, (updates as any)[key])]));
+        const fieldNames = changedKeys.map(key => SETTING_LABELS[key] || key);
+        await addLog('update', 'system',
+            changes.length ? `Atualizou definições: ${changes.join(', ')}` : changedKeys.length ? `Atualizou definições: ${fieldNames.slice(0, 6).join(', ')}${fieldNames.length > 6 ? ` e mais ${fieldNames.length - 6}` : ''}` : 'Atualizou definições (sem alterações de valores)',
+            user?.id, user?.name, changedKeys.length ? before : undefined, changedKeys.length ? after : undefined, { area: 'definicoes', fields: changedKeys });
 
         // A licença activada aqui vale para toda a empresa: publica-a para os outros dispositivos (web e PCs).
         const newLicenseKey = String(updates.licenseKey || '').trim();
@@ -951,9 +997,27 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
         performAutoSync();
     };
+    const saveAccessSchedule = async (schedule: AccessSchedule) => {
+        if (authUser?.role !== 'super_admin') throw new Error('Só o super administrador pode alterar o horário de acesso.');
+        const normalized = normalizeAccessSchedule(schedule);
+        const error = validateAccessSchedule(normalized);
+        if (error) throw new Error(error);
+        const previousSchedule = accessSchedule;
+        await ServicoDefinicoesPartilhadas.set(SHARED_SETTING_KEYS.accessSchedule, JSON.stringify(normalized), authUser.name);
+        setAccessSchedule(normalized);
+        // Horário anterior e novo (ex.: "Seg–Sex 07:00–19:00 → Seg–Sex 06:00–22:00").
+        await addLog('update', 'system', normalized.enabled ? 'Atualizou o horário de acesso ao sistema' : 'Desativou o horário de acesso ao sistema', authUser.id, authUser.name,
+            { enabled: previousSchedule.enabled, days: previousSchedule.days, allowedMonths: previousSchedule.allowedMonths, blockedDates: previousSchedule.blockedDates, warnMinutes: previousSchedule.warnMinutes, userModes: previousSchedule.userModes },
+            { enabled: normalized.enabled, days: normalized.days, allowedMonths: normalized.allowedMonths, blockedDates: normalized.blockedDates, warnMinutes: normalized.warnMinutes, userModes: normalized.userModes },
+            { area: 'horario_acesso' });
+    };
+
     const saveInterestTiers = async (tiers: InterestTier[]) => {
+        const previousTiers = interestTiers;
         const saved = await ServicoTaxasJuro.save(tiers, authUser?.name);
         setInterestTiers(saved);
+        await addLog('update', 'system', 'Atualizou a tabela de taxas de juro', authUser?.id, authUser?.name,
+            { taxas: previousTiers }, { taxas: saved }, { area: 'taxas_juro' }).catch(() => undefined);
     };
 
     const updateCompanySettingsRef = useRef(updateCompanySettings);
@@ -1320,21 +1384,36 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const simWithUser = { ...simulation, usuario_id: targetUserId };
         await ServicoSimulacao.add(simWithUser);
         setSimulations(prev => [simWithUser, ...prev]);
+        await addLog('create', 'system', `Simulador: guardou a simulação ${simWithUser.reference || simWithUser.id} de ${simWithUser.clientName || 'cliente não identificado'}`, authUser?.id, authUser?.name,
+            undefined, undefined, { simulationId: simWithUser.id, amount: simWithUser.amount, term: simWithUser.term }).catch(() => undefined);
         performAutoSync();
     };
 
     const deleteSimulation = async (id: string) => {
+        const removedSimulation = simulations.find(s => s.id === id);
         await ServicoSimulacao.delete(id);
         setSimulations(prev => prev.filter(s => s.id !== id));
+        await addLog('delete', 'system', `Simulador: eliminou a simulação ${removedSimulation?.reference || id}`, authUser?.id, authUser?.name,
+            undefined, undefined, { simulationId: id }).catch(() => undefined);
         performAutoSync();
     };
 
-    const addCredit = async (credit: Credit, user?: { id: string; name: string }) => {
+    const updateSimulationStatus = async (id: string, status: 'simulated' | 'converted', convertedCreditId: string | null = null) => {
+        await ServicoSimulacao.updateStatus(id, status, convertedCreditId);
+        if (status === 'converted') await addLog('update', 'system', `Simulador: simulação convertida em pedido de crédito`, authUser?.id, authUser?.name,
+            undefined, undefined, { simulationId: id, creditId: convertedCreditId || undefined }).catch(() => undefined);
+        setSimulations(prev => prev.map(s => s.id === id ? { ...s, status, convertedCreditId, updatedAt: new Date() } : s));
+        performAutoSync();
+    };
+
+    const addCredit = async (credit: Credit, user?: { id: string; name: string }, context: { productId?: string | null; effortRate?: number | null } = {}) => {
         try {
             const targetUserId = activeContextUserId || user?.id || authUser?.id;
             const creditWithUser = { ...credit, usuario_id: targetUserId };
-            let finalCredit = { ...creditWithUser, status: credit.status || 'active' } as Credit;
-            finalCredit = await ServicoFinanceiro.addCredit(finalCredit);
+            let finalCredit = { ...creditWithUser, status: credit.status || 'active' } as Credit & { escalationReason?: string };
+            // Alçadas: quem regista o crédito é o utilizador autenticado (o seu perfil e agência definem o limite).
+            const limitActor = authUser ? { id: authUser.id, name: authUser.name, role: authUser.role, branchId: authUser.branchId || null } : null;
+            finalCredit = await ServicoFinanceiro.addCredit(finalCredit, limitActor, context);
             const nextCredits = [finalCredit, ...credits];
             setCredits(prev => [finalCredit, ...prev]);
             await refreshClientCreditLimit(finalCredit.clientId, nextCredits, payments, user);
@@ -1350,11 +1429,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             }
             setNotifications(prev => [{
                 id: `notification:credit:${finalCredit.id}`, userId: targetUserId,
-                title: 'Novo Crédito', message: `Crédito de ${finalCredit.principalAmount} AOA criado para ${finalCredit.clientName}.`,
+                title: 'Novo Crédito', message: `Crédito de ${formatCurrency(finalCredit.principalAmount)} criado para ${finalCredit.clientName}.`,
                 type: 'success', read: false, timestamp: new Date()
             }, ...prev]);
 
             performAutoSync();
+            return finalCredit;
         } catch (error: any) {
             console.error("[ContextoDados] Erro ao adicionar crédito:", error);
             throw new Error(error.message || "Erro interno ao salvar crédito no banco de dados.");
@@ -1470,14 +1550,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             approvalNotes: notes || 'Aprovado sem observações adicionais.'
         };
 
-        await ServicoFinanceiro.decideCredit({ credit, decision: 'approved', actorId: adminId, actorName: adminName,
+        const outcome = await ServicoFinanceiro.decideCredit({ credit, decision: 'approved', actorId: adminId, actorName: adminName,
             notes, notificationId: crypto.randomUUID(), auditId: crypto.randomUUID() });
+        // Dupla aprovação: a primeira aprovação fica registada e o crédito continua pendente.
+        if (!outcome.final) { performAutoSync(); return outcome; }
         setCredits(prev => prev.map(item => item.id === id ? { ...item, ...updates, version: (item.version ?? 0) + 1 } : item));
         await refreshData();
 
         await refreshClientCreditLimit(credit.clientId, credits.map(c => c.id === id ? { ...c, ...updates } as Credit : c), payments, { id: adminId, name: adminName });
 
         performAutoSync();
+        return outcome;
     };
 
     const rejectCredit = async (id: string, adminId: string, adminName: string, notes?: string) => {
@@ -1577,7 +1660,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         setCredits(previous => previous.map(item => item.id === credit.id ? updatedCredit : item));
         setNotifications(previous => [{
             id: `notification:payment:${payment.id}`, userId: targetUserId || undefined,
-            title: 'Pagamento Recebido', message: `Recebido pagamento de ${payment.amount} AOA de ${payment.clientName}.`,
+            title: 'Pagamento Recebido', message: `Recebido pagamento de ${formatCurrency(payment.amount)} de ${payment.clientName}.`,
             type: 'success', read: false, timestamp: new Date()
         }, ...previous]);
         const nextPayments = [paymentWithUser, ...payments];
@@ -1610,9 +1693,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                     payment, credit, user.id, justification
                 );
                 const updatedCredit: Credit = { ...credit, ...creditState };
-                const deletedPayment = { ...payment!, deletedAt: new Date(), deletedBy: user.id } as Payment;
+                // O pagamento fica "Anulado" (não vai para a lixeira): sai só da lista de dinheiro recebido.
                 setPayments(prev => prev.filter(p => p.id !== id));
-                setDeletedPayments(prev => [deletedPayment, ...prev]);
                 setCredits(previous => previous.map(item => item.id === credit.id ? updatedCredit : item));
                 if (credit.status === 'paid' && updatedCredit.status !== 'paid') {
                     setContracts(previous => previous.map(contract => contract.id === credit.id
@@ -1629,7 +1711,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 await addLog(
                     'delete',
                     'payment',
-                    `Enviou pagamento para a lixeira: ${id} ${justification ? `(${justification})` : ''}`,
+                    `Anulou o pagamento ${id} ${justification ? `(${justification})` : ''}`,
                     user.id,
                     user.name,
                     previousState,
@@ -1640,8 +1722,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
             await addNotification({
                 id: crypto.randomUUID(),
-                title: 'Pagamento na Lixeira',
-                message: `O pagamento de ${payment.clientName} foi movido para a lixeira.`,
+                title: 'Pagamento Anulado',
+                message: `O pagamento de ${payment.clientName} foi anulado e estornado.`,
                 type: 'warning',
                 read: false,
                 timestamp: new Date()
@@ -1877,6 +1959,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const runCollectionAutomation = useCallback(async () => {
         if (isDataLoading || credits.length === 0) return;
+        // Em atraso no dia seguinte ao vencimento de uma prestação não paga; volta a Ativo quando regulariza.
+        const delinquency = await ServicoCarteira.refreshDelinquency().catch(error => { console.warn('[Cobrança] Atualização de atrasos:', error); return { changed: 0 }; });
+        if (delinquency.changed) await refreshData().catch(() => undefined);
 
         const todayKey = new Date().toISOString().slice(0, 10);
         const thresholds = [0, 3, 7, 15, 30, 60];
@@ -1890,14 +1975,6 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             const daysOverdue = Math.floor((Date.now() - dueDate.getTime()) / (24 * 60 * 60 * 1000));
             if (daysOverdue < 0) continue;
 
-            if (daysOverdue > 0 && credit.status === 'active') {
-                await updateCreditRef.current(credit.id, {
-                    status: 'overdue',
-                    daysOverdue
-                }, { id: 'system', name: 'Sistema de Cobrança' });
-            } else if (daysOverdue !== credit.daysOverdue) {
-                await updateCreditRef.current(credit.id, { daysOverdue }, { id: 'system', name: 'Sistema de Cobrança' });
-            }
 
             const stage = thresholds.reduce((current, threshold) => daysOverdue >= threshold ? threshold : current, 0);
             const notificationKey = `collection:${credit.id}:${stage}:${todayKey}`;
@@ -1907,7 +1984,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                     id: crypto.randomUUID(),
                     userId: credit.usuario_id,
                     title,
-                    message: `${credit.clientName} tem saldo de ${credit.currentBalance.toLocaleString('pt-AO')} AOA no crédito ${credit.id}.`,
+                    message: `${credit.clientName} tem saldo de ${formatCurrency(credit.currentBalance)} no crédito ${credit.id}.`,
                     type: stage >= 30 ? 'error' : stage >= 7 ? 'warning' : 'info',
                     read: false,
                     timestamp: new Date()
@@ -1940,6 +2017,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const contractWithUser = { ...contract, usuario_id: targetUserId };
         await ServicoContrato.add(contractWithUser);
         setContracts(prev => [contractWithUser, ...prev]);
+        await addLog('create', 'credit', `Criou o contrato de ${contractWithUser.clientName || 'cliente'}`, authUser?.id, authUser?.name,
+            undefined, undefined, { creditId: contractWithUser.id }).catch(() => undefined);
         performAutoSync();
     };
 
@@ -1950,9 +2029,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             const updated = { ...contract, ...updates };
             await ServicoContrato.update(id, updated);
             setContracts(prev => prev.map(c => c.id === id ? updated : c));
+            const changedFields = Object.keys(updates).filter(key => JSON.stringify((contract as any)[key]) !== JSON.stringify((updates as any)[key]));
+            if (changedFields.length) await addLog('update', 'credit', `Editou o contrato de ${contract.clientName || 'cliente'}`, authUser?.id, authUser?.name,
+                Object.fromEntries(changedFields.map(key => [key, (contract as any)[key]])), Object.fromEntries(changedFields.map(key => [key, (updates as any)[key]])),
+                { creditId: id }).catch(() => undefined);
             performAutoSync();
         } catch (error) {
             console.error("[ContextoDados] Erro ao atualizar contrato:", error);
+            throw error;
         }
     };
 
@@ -2401,6 +2485,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             setPaymentReferences(prev =>
                 prev.map(ref => ref.id === id ? { ...ref, status, paidAt } : ref)
             );
+            const validatedRef = paymentReferences.find(ref => ref.id === id);
+            await addLog('update', 'payment', `${approve ? 'Aprovou' : 'Rejeitou'} o comprovativo da referência de pagamento ${validatedRef?.reference || id}`, authUser?.id, authUser?.name,
+                { status: validatedRef?.status }, { status }, { creditId: validatedRef?.creditId, referenceId: id, amountMinor: Math.round(Number(validatedRef?.amount || 0) * 100), decision: approve ? 'approved' : 'rejected' }).catch(() => undefined);
 
             performAutoSync();
         } catch (error) {
@@ -2415,6 +2502,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 'UPDATE payment_references SET proofImage = ?, status = ?, submittedAt = ? WHERE id = ?',
                 [proofImage, 'pending_validation', new Date().toISOString(), referenceId]
             );
+            await addLog('update', 'payment', 'Enviou o comprovativo de uma referência de pagamento', authUser?.id, authUser?.name,
+                undefined, undefined, { referenceId }).catch(() => undefined);
 
             setPaymentReferences(prev =>
                 prev.map(ref =>
@@ -2512,7 +2601,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 ]
             );
 
+            const previousLimit = userLimits.find(l => l.role === limit.role);
             setUserLimits(prev => prev.map(l => l.role === limit.role ? { ...limit, updatedAt: new Date(updatedAt) } : l));
+            await addLog('update', 'user', `Atualizou os limites de operação do perfil ${limit.role}`, authUser?.id, authUser?.name,
+                previousLimit ? { maxTransaction: previousLimit.maxTransaction, dailyLimit: previousLimit.dailyLimit, monthlyLimit: previousLimit.monthlyLimit, restrictionsEnabled: previousLimit.restrictionsEnabled } : undefined,
+                { maxTransaction: limit.maxTransaction, dailyLimit: limit.dailyLimit, monthlyLimit: limit.monthlyLimit, restrictionsEnabled: limit.restrictionsEnabled },
+                { area: 'limites' }).catch(() => undefined);
             performAutoSync();
         } catch (error) {
             console.error('[ContextoDados] Erro ao atualizar limites:', error);
@@ -2549,18 +2643,18 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         );
     };
 
-    const reopenMonth = async (id: string) => {
-        await db.run('DELETE FROM closed_months WHERE id = ?', [id]);
-        const allClosed = await db.all<any>('SELECT * FROM closed_months');
-        setClosedMonths(allClosed);
-
-        await addLog(
-            'delete',
-            'system',
-            `Reabertura da folha mensal do período ${id} efetuada com sucesso.`,
-            authUser?.id || 'system',
-            authUser?.name || 'Sistema'
-        );
+    const reopenMonth = async (id: string, reason: string) => {
+        if (!['admin', 'super_admin'].includes(authUser?.role || '')) throw new Error('Apenas administradores podem reabrir períodos.');
+        await ServicoAuditoriaAvancada.assertJustification(reason, authUser?.id);
+        await db.transaction([
+            { sql: 'DELETE FROM closed_months WHERE id = ?', params: [id], expectChanges: 1 },
+            { sql: `INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata)
+                VALUES (?, ?, ?, ?, 'delete', 'system', ?, ?)`,
+                params: [crypto.randomUUID(), new Date().toISOString(), authUser!.id, authUser!.name,
+                    `Reabertura do período ${id}. Justificação: ${reason.trim()}`, JSON.stringify({ periodId: id, reason: reason.trim() })],
+                expectChanges: 1 }
+        ]);
+        setClosedMonths(await db.all<any>('SELECT * FROM closed_months'));
     };
 
     const value: ContextoDadosType = {
@@ -2597,7 +2691,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         deletePayment,
         addSimulation,
         deleteSimulation,
+        updateSimulationStatus,
         addContract,
+        updateContract,
         addNotification,
         markNotificationAsRead,
         markAllAsRead,
@@ -2607,6 +2703,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         updateCompanySettings,
         interestTiers,
         saveInterestTiers,
+        accessSchedule,
+        saveAccessSchedule,
         sendMessage,
         markMessageAsRead,
         deleteMessage,
@@ -2669,6 +2767,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         restoreWarranty,
         hardDeleteWarranty,
         activeContextUserId,
+        dataLoadIssues,
         setContextUserId,
         dbAdapterMode,
         closedMonths,

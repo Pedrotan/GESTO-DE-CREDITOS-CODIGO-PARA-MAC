@@ -1,3 +1,4 @@
+import { auditSqlHash } from '@/bibliotecas/cadeia-auditoria';
 import initSqlJs, { Database } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
@@ -106,9 +107,11 @@ const initDB = async (): Promise<Database> => {
 
         if (persisted) {
             db = new SQL.Database(persisted);
+            (db as any).create_function('tango_audit_hash',auditSqlHash);
             await createTables();
         } else {
             db = new SQL.Database();
+            (db as any).create_function('tango_audit_hash',auditSqlHash);
             await createTables();
         }
     } catch (e) {
@@ -298,7 +301,7 @@ const createTables = async () => {
             email TEXT UNIQUE NOT NULL,
             username TEXT UNIQUE,
             password TEXT NOT NULL,
-            role TEXT NOT NULL CHECK(role IN ('super_admin', 'admin', 'manager')),
+            role TEXT NOT NULL,
             avatar TEXT,
             createdAt TEXT NOT NULL,
             lastLogin TEXT,
@@ -885,6 +888,11 @@ const createTables = async () => {
         CREATE INDEX IF NOT EXISTS idx_calendar_tasks_date ON calendar_tasks(date);
         CREATE INDEX IF NOT EXISTS idx_calendar_tasks_usuario ON calendar_tasks(usuario_id);
 
+        -- Histórico das decisões de aprovação/rejeição de créditos (auditoria e relatórios mensais).
+        CREATE TABLE IF NOT EXISTS credit_approvals (id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT, clientName TEXT, principalAmount REAL, interestRate REAL, installments INTEGER, decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')), reason TEXT, requestedBy TEXT, requestedAt TEXT, decidedBy TEXT NOT NULL, decidedById TEXT, decidedAt TEXT NOT NULL);
+        CREATE INDEX IF NOT EXISTS idx_credit_approvals_decidedAt ON credit_approvals(decidedAt);
+        CREATE INDEX IF NOT EXISTS idx_credit_approvals_creditId ON credit_approvals(creditId);
+
         -- Definições partilhadas entre dispositivos pela sincronização cloud (ex.: tabela de taxas de juro).
         CREATE TABLE IF NOT EXISTS shared_settings (
             key TEXT PRIMARY KEY,
@@ -1062,7 +1070,66 @@ const createTables = async () => {
         await safeAddColumn('credits', 'reinforcedAmount', 'REAL DEFAULT 0');
     });
 
+    // Pagamentos: recibo sequencial por ano, data de registo distinta da data-valor, validação de
+    // transferências, anulação sem apagar, lotes de importação, comprovativos e relatórios gerados.
+    await safeAddColumn("payments", "registeredAt", "TEXT");
+    await safeAddColumn("payments", "receiptYear", "INTEGER");
+    await safeAddColumn("payments", "receiptSeq", "INTEGER");
+    await safeAddColumn("payments", "allocationDetail", "TEXT");
+    await safeAddColumn("payments", "balanceAfterMinor", "INTEGER");
+    await safeAddColumn("payments", "validatedAt", "TEXT");
+    await safeAddColumn("payments", "validatedBy", "TEXT");
+    await safeAddColumn("payments", "cancelledAt", "TEXT");
+    await safeAddColumn("payments", "cancelledBy", "TEXT");
+    await safeAddColumn("payments", "cancelReason", "TEXT");
+    await safeAddColumn("payments", "cancelApprovedBy", "TEXT");
+    await safeAddColumn("payments", "batchId", "TEXT");
+    await safeAddColumn("payments", "hasProof", "INTEGER DEFAULT 0");
+    await executeSql(`CREATE TABLE IF NOT EXISTS payment_import_batches (
+        id TEXT PRIMARY KEY, number TEXT NOT NULL, fileName TEXT, createdAt TEXT NOT NULL, createdBy TEXT NOT NULL,
+        createdById TEXT, rowsCount INTEGER NOT NULL DEFAULT 0, totalMinor INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'cancelled')),
+        cancelledAt TEXT, cancelledBy TEXT, cancelReason TEXT
+    )`);
+    await executeSql(`CREATE TABLE IF NOT EXISTS payment_proofs (
+        paymentId TEXT PRIMARY KEY, fileName TEXT NOT NULL, mimeType TEXT NOT NULL, dataUrl TEXT NOT NULL,
+        uploadedAt TEXT NOT NULL, uploadedBy TEXT
+    )`);
+    await executeSql(`CREATE TABLE IF NOT EXISTS report_history (
+        id TEXT PRIMARY KEY, reportType TEXT NOT NULL, title TEXT NOT NULL, format TEXT NOT NULL CHECK(format IN ('pdf', 'xlsx')),
+        filters TEXT, fileName TEXT NOT NULL, fileData TEXT, generatedAt TEXT NOT NULL, generatedBy TEXT NOT NULL, generatedById TEXT
+    )`);
+    await executeSql(`CREATE TABLE IF NOT EXISTS report_schedules (
+        id TEXT PRIMARY KEY, reportType TEXT NOT NULL, recipients TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+        lastRunMonth TEXT, lastRunAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, createdBy TEXT
+    )`);
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_report_history_generatedAt ON report_history(generatedAt)");
+    await applyMigration(2026100601, 'payment-receipts-and-registration-time', async () => {
+        await executeSql("UPDATE payments SET registeredAt = paymentDate WHERE registeredAt IS NULL");
+        // Recibos dos pagamentos antigos: numeração por ano (data-valor em Luanda), pela ordem dos pagamentos.
+        const legacy = await querySql(`SELECT id, paymentDate FROM payments
+            WHERE receiptSeq IS NULL AND status = 'confirmed' AND deletedAt IS NULL ORDER BY paymentDate, id`) as any[];
+        const used = await querySql('SELECT receiptYear, MAX(receiptSeq) AS last FROM payments WHERE receiptSeq IS NOT NULL GROUP BY receiptYear') as any[];
+        const next = new Map<number, number>(used.map(row => [Number(row.receiptYear), Number(row.last) || 0]));
+        for (const row of legacy) {
+            const year = new Date(new Date(row.paymentDate).getTime() + 3_600_000).getUTCFullYear();
+            if (!Number.isFinite(year)) continue;
+            const seq = (next.get(year) || 0) + 1;
+            next.set(year, seq);
+            await runSql('UPDATE payments SET receiptYear = ?, receiptSeq = ? WHERE id = ? AND receiptSeq IS NULL', [year, seq, row.id]);
+        }
+    });
+    await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receipt ON payments(receiptYear, receiptSeq) WHERE receiptSeq IS NOT NULL");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_payments_batch ON payments(batchId)");
+
     // safeAddColumns for migrations
+    await safeAddColumn("users", "permissionExceptions", "TEXT");
+    await safeAddColumn("users", "approvalLimits", "TEXT");
+    await safeAddColumn("users", "dataScope", "TEXT DEFAULT 'todos'");
+    await safeAddColumn("users", "branchId", "TEXT");
+    await safeAddColumn("users", "branchName", "TEXT");
+    await safeAddColumn("users", "temporaryRoleExpiry", "TEXT");
+    await safeAddColumn("users", "mustChangePassword", "INTEGER DEFAULT 0");
     await safeAddColumn("users", "status", "TEXT DEFAULT 'active'");
     await safeAddColumn("users", "lastSeen", "TEXT");
     await safeAddColumn("users", "permissions", "TEXT");
@@ -1130,6 +1197,22 @@ const createTables = async () => {
         amountLateInterestMinor = CAST(ROUND(amountLateInterest * 100) AS INTEGER),
         amountTotalMinor = CAST(ROUND(amountTotal * 100) AS INTEGER)
         WHERE amountTotalMinor IS NULL`);
+    await executeSql(`CREATE TABLE IF NOT EXISTS accounting_cash_sessions (
+    id TEXT PRIMARY KEY,
+    operatorId TEXT NOT NULL,
+    operatorName TEXT NOT NULL,
+    sessionDate TEXT NOT NULL,
+    openedAt TEXT NOT NULL,
+    closedAt TEXT,
+    openingMinor INTEGER NOT NULL CHECK(openingMinor >= 0),
+    expectedMinor INTEGER,
+    countedMinor INTEGER,
+    reason TEXT,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')),
+    UNIQUE(operatorId, sessionDate),
+    CHECK(status = 'open' OR (expectedMinor IS NOT NULL AND countedMinor IS NOT NULL AND countedMinor >= 0
+          AND (expectedMinor = countedMinor OR length(trim(reason)) >= 10)))
+);`);
     for (const statement of LEDGER_PROTECTION_SQL) await executeSql(statement);
 
     await safeAddColumn("contracts", "startDate", "TEXT");
@@ -1219,6 +1302,15 @@ const createTables = async () => {
     await safeAddColumn("user_limits", "restrictionsEnabled", "INTEGER DEFAULT 1");
     await safeAddColumn("notifications", "source", "TEXT DEFAULT 'system'");
     await safeAddColumn("simulations", "createdAt", "TEXT");
+    // Simulador ao nível dos bancos: estado, cliente, produto, código de verificação, validade e detalhes.
+    await safeAddColumn("simulations", "status", "TEXT DEFAULT 'simulated'");
+    await safeAddColumn("simulations", "clientId", "TEXT");
+    await safeAddColumn("simulations", "productId", "TEXT");
+    await safeAddColumn("simulations", "verificationCode", "TEXT");
+    await safeAddColumn("simulations", "expiresAt", "TEXT");
+    await safeAddColumn("simulations", "details", "TEXT");
+    await safeAddColumn("simulations", "convertedCreditId", "TEXT");
+    await safeAddColumn("simulations", "updatedAt", "TEXT");
     await safeAddColumn("collection_messages", "legalTriggered", "INTEGER DEFAULT 0");
     await safeAddColumn("collection_messages", "attemptNumber", "INTEGER DEFAULT 1");
     await safeAddColumn("collection_messages", "totalDue", "REAL DEFAULT 0");
@@ -1307,6 +1399,7 @@ const createTables = async () => {
 const persistDB = async () => {
     if (!db) return;
     const data = db.export();
+    (db as any).create_function('tango_audit_hash',auditSqlHash);
 
     // 1. Verificar Electron IPC
     if ((window as any).electronAPI?.dbSave) {
@@ -1577,7 +1670,9 @@ export const sqlite = {
             return new Uint8Array();
         }
         const database = await initDB();
-        return database.export();
+        const exported = database.export();
+        (database as any).create_function('tango_audit_hash',auditSqlHash);
+        return exported;
     },
 
     close: async () => {

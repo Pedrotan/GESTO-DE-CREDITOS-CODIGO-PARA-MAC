@@ -8,7 +8,7 @@ import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
 import { planFromStoredInstallments, INSTALLMENT_STATUS_LABEL, type InstallmentStatus } from '@/bibliotecas/plano-pagamento';
 import { formatCurrency } from '@/bibliotecas/formatters';
 import jsPDF from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 import { applyBranding, getCompanySettings } from '@/bibliotecas/pdf';
 import { PlanoPagamentoDialog } from '@/componentes/creditos/PlanoPagamentoDialog';
 

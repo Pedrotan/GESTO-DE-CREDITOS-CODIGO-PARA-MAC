@@ -99,7 +99,7 @@ Para pagar o seu crédito #${data.creditId}:
 1. Abra o app *Unitel Money*        
 2. Vá em *Pagamentos* -> *Serviços*
 3. Procure por *${data.accountName}*
-4. Digite o valor: *${data.amount} AOA*
+4. Digite o valor: *${data.amount} Kz*
 5. Referência: *${data.reference}*
 6. Confirme com o seu PIN
 

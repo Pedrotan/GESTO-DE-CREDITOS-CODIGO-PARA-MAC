@@ -46,12 +46,13 @@ import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
-import { generateContractPDF, generatePermanentTransferLetterPDF } from '@/bibliotecas/pdf';
+import { generateContractPDF, generatePermanentTransferLetterPDF, companyBankAccount } from '@/bibliotecas/pdf';
 import { ServicoCartasTransferencia } from '@/servicos/ServicoCartasTransferencia';
 import { cn } from '@/bibliotecas/utils';
 
 import { InterestTier, canManageInterestTiers, tierForMonths, tierMonths, tierPeriodLabel } from '@/bibliotecas/taxas-juro';
 import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
+import { RestanteLimite } from '@/componentes/alcadas/RestanteLimite';
 
 const labelClass ='text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300';
 const inputClass = 'h-10 rounded-xl border-slate-200 bg-white text-sm dark:border-slate-700 dark:bg-slate-950';
@@ -126,9 +127,11 @@ interface CreditFormProps {
     credits?: Credit[]; // New prop for history lookup
     onCancel: () => void;
     submitLabel?: string;
+    /** Novo crédito após liquidação: o valor tem de ser igual ou superior ao do crédito anterior. */
+    minPrincipalAmount?: number;
 }
 
-export function CreditForm({ onSubmit, initialData, prefillData, clients, credits, onCancel, submitLabel }: CreditFormProps) {
+export function CreditForm({ onSubmit, initialData, prefillData, clients, credits, onCancel, submitLabel, minPrincipalAmount }: CreditFormProps) {
     const { toast } = useToast();
     const { companySettings, interestTiers } = useData();
     const { user } = useAuth();
@@ -140,41 +143,35 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
     const canEditRates = canManageInterestTiers(user?.role);
 
     const getReflectionMonthOptions = () => {
-        const options = [];
-        const now = new Date();
-        const currentYear = now.getFullYear();
         const MONTH_NAMES = [
             'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
             'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
         ];
-        
-        // Ano anterior (últimos 3 meses)
-        for (let m = 9; m < 12; m++) {
-            const monthVal = (m + 1).toString().padStart(2, '0');
-            options.push({
-                value: `${currentYear - 1}-${monthVal}`,
-                label: `${MONTH_NAMES[m]} de ${currentYear - 1}`
-            });
+        const now = new Date();
+        const currentKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const startKey = tempFormData?.startDate ? tempFormData.startDate.substring(0, 7) : currentKey;
+        // Do ano anterior ao seguinte, incluindo sempre o mês de início do crédito.
+        const anchors = [now.getFullYear(), Number(startKey.slice(0, 4))];
+        const firstYear = Math.min(...anchors) - 1;
+        const lastYear = Math.max(...anchors) + 1;
+        const options: Array<{ value: string; label: string; subLabel?: string; className?: string; keywords?: string }> = [];
+        for (let year = firstYear; year <= lastYear; year++) {
+            for (let month = 0; month < 12; month++) {
+                const value = `${year}-${String(month + 1).padStart(2, '0')}`;
+                const past = value < currentKey;
+                const tags = [
+                    value === startKey ? 'Mês de início do crédito' : '',
+                    value === currentKey ? 'Mês actual' : past ? 'Mês já passado' : '',
+                ].filter(Boolean);
+                options.push({
+                    value,
+                    label: `${MONTH_NAMES[month]} de ${year}`,
+                    subLabel: tags.join(' · ') || undefined,
+                    className: past ? 'text-red-600 dark:text-red-400' : value === currentKey ? 'font-semibold text-primary' : undefined,
+                    keywords: `${String(month + 1).padStart(2, '0')}/${year} ${past ? 'passado' : ''}`,
+                });
+            }
         }
-
-        // Ano corrente (todos os 12 meses)
-        for (let m = 0; m < 12; m++) {
-            const monthVal = (m + 1).toString().padStart(2, '0');
-            options.push({
-                value: `${currentYear}-${monthVal}`,
-                label: `${MONTH_NAMES[m]} de ${currentYear}`
-            });
-        }
-
-        // Ano seguinte (todos os 12 meses)
-        for (let m = 0; m < 12; m++) {
-            const monthVal = (m + 1).toString().padStart(2, '0');
-            options.push({
-                value: `${currentYear + 1}-${monthVal}`,
-                label: `${MONTH_NAMES[m]} de ${currentYear + 1}`
-            });
-        }
-
         return options;
     };
 
@@ -347,6 +344,11 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
     };
 
     const handleSubmit = (data: CreditFormValues) => {
+        if (minPrincipalAmount && !initialData && data.principalAmount < minPrincipalAmount) {
+            form.setError('principalAmount', { type: 'min', message: `O novo crédito tem de ser igual ou superior ao anterior (${formatCurrency(minPrincipalAmount)}).` });
+            toast({ title: 'Valor abaixo do mínimo', description: `O novo crédito tem de ser igual ou superior ao anterior (${formatCurrency(minPrincipalAmount)}).`, variant: 'destructive' });
+            return;
+        }
         const client = clients.find(c => c.id === data.clientId);
         if (client && data.principalAmount > client.availableCredit && !initialData) {
             setShowLimitWarning(true);
@@ -411,7 +413,7 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
     };
 
     // Gerar Carta de Transferência Bancária
-    const handleGenerateBankLetter = () => {
+    const handleGenerateBankLetter = async () => {
         if (!selectedClient) {
             toast({
                 title: "Selecione um cliente",
@@ -444,8 +446,8 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
                 clientBank: ServicoCartasTransferencia.resolveClientBank(selectedClient),
                 clientIban: ServicoCartasTransferencia.resolveClientIBAN(selectedClient),
                 companyName: companySettings?.name || 'Tango Créditos, Lda.',
-                companyIban: (companySettings as any)?.bankDetails?.iban || (companySettings as any)?.iban || 'AO06.0000.0000.0000.0000.0000.0',
-                companyBank: (companySettings as any)?.bankDetails?.bankName || 'Banco Comercial',
+                companyIban: companyBankAccount(companySettings)?.iban || '',
+                companyBank: companyBankAccount(companySettings)?.bankName || '',
                 installmentAmount: valuePerInstallment,
                 creditReference: mockCredit.id,
                 startDate: currentVals.startDate,
@@ -454,7 +456,7 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
                 createdAt: new Date().toISOString()
             };
 
-            generatePermanentTransferLetterPDF(letterData, companySettings, user?.name || 'Operador');
+            await generatePermanentTransferLetterPDF(letterData, companySettings, user?.name || 'Operador');
             toast({
                 title: "Carta de Transferência Gerada",
                 description: "A carta bancária para ordem de transferência foi emitida em PDF.",
@@ -473,6 +475,12 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
         <Form {...form}>
             <form onSubmit={form.handleSubmit(handleSubmit, handleError)} className="flex min-h-0 flex-1 flex-col">
                 <div className="min-h-0 flex-1 space-y-5 overflow-y-auto bg-slate-50/70 p-4 md:p-6 dark:bg-slate-950/40">
+                    {minPrincipalAmount ? (
+                        <div className="rounded-xl border border-secondary/40 bg-secondary/10 p-3 text-sm text-foreground">
+                            <strong>Novo crédito após liquidação.</strong> O valor tem de ser igual ou superior ao do crédito anterior
+                            ({formatCurrency(minPrincipalAmount)}) e o pedido segue o fluxo normal de aprovação.
+                        </div>
+                    ) : null}
                     {/* 1. Cliente */}
                     <FormSection step={1} icon={User} title="Cliente Solicitante" description="Selecione o beneficiário do crédito.">
                         <FormField
@@ -706,6 +714,8 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
                                 )}
                             />
                         </div>
+                        {/* Alçada: quanto resta do limite e o que acontece ao submeter (só em novos créditos). */}
+                        {!initialData && <RestanteLimite operationType="credit_approval" amount={principal} clientId={selectedClientId} className="mt-4" />}
                     </FormSection>
 
                     {/* 3. Resumo */}
@@ -848,18 +858,17 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
                     <div className="space-y-4 py-2 text-foreground">
                         <div className="flex flex-col gap-2">
                             <label className="text-xs font-bold text-muted-foreground uppercase">Mês de Competência</label>
-                            <Select value={selectedReflectionMonth} onValueChange={setSelectedReflectionMonth}>
-                                <SelectTrigger className="h-11">
-                                    <SelectValue placeholder="Selecione o mês" />
-                                </SelectTrigger>
-                                <SelectContent className="max-h-[300px]">
-                                    {getReflectionMonthOptions().map(opt => (
-                                        <SelectItem key={opt.value} value={opt.value}>
-                                            {opt.label}
-                                        </SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <SearchableSelect
+                                options={getReflectionMonthOptions()}
+                                value={selectedReflectionMonth}
+                                onValueChange={setSelectedReflectionMonth}
+                                placeholder="Selecione o mês"
+                                searchPlaceholder="Pesquisar mês ou ano (ex.: Outubro, 2026)..."
+                                emptyMessage="Nenhum mês encontrado."
+                            />
+                            <p className="flex items-center gap-1.5 text-[11px] font-semibold text-red-600 dark:text-red-400">
+                                <span className="inline-block h-2 w-2 rounded-full bg-red-500" /> Meses a vermelho já passaram.
+                            </p>
                             <p className="text-[11px] text-muted-foreground mt-1 leading-relaxed">
                                 Nota: Por padrão, o sistema sugere o mês de início do crédito ({tempFormData?.startDate ? new Date(tempFormData.startDate + 'T00:00:00').toLocaleDateString('pt-PT', { month: 'long', year: 'numeric' }) : ''}). Pode alterar se o recebimento for previsto para outro mês.
                             </p>

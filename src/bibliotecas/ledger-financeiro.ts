@@ -1,4 +1,6 @@
 export type PaymentJournalInput = {
+    // Numerário entra em Caixa; transferência, Multicaixa, TPA, referência e depósito entram no Banco.
+    method?: 'cash' | 'transfer' | 'multicaixa' | 'tpa' | 'reference' | 'deposit';
     id: string;
     creditId: string;
     clientId?: string;
@@ -54,7 +56,7 @@ export async function buildPaymentAccountingEntry(payment: PaymentJournalInput, 
         id, timestamp, type: 'payment' as const,
         description: `Pagamento recebido de ${payment.clientName}`,
         clientId: payment.clientId, creditId: payment.creditId, paymentId: payment.id,
-        debit: 'cash' as const, credit: 'portfolio' as const,
+        debit: payment.method && payment.method !== 'cash' ? 'bank' as const : 'cash' as const, credit: 'portfolio' as const,
         amountPrincipal: principalMinor / 100,
         amountInterest: interestMinor / 100,
         amountLateInterest: lateInterestMinor / 100,
@@ -79,8 +81,10 @@ export async function buildPaymentCorrectionEntry(
     const isReversal = operation === 'reversal';
     const id = `${operation}:${payment.id}:${entryId}`;
     const type = isReversal ? 'reversal' as const : 'adjustment' as const;
-    const debit = isReversal ? 'portfolio' as const : 'cash' as const;
-    const credit = isReversal ? 'cash' as const : 'portfolio' as const;
+    // O estorno e a reposição usam a mesma conta de disponibilidades do pagamento original (caixa ou banco).
+    const settlement = base.debit;
+    const debit = isReversal ? 'portfolio' as const : settlement;
+    const credit = isReversal ? settlement : 'portfolio' as const;
     const entry = {
         ...base, id, type, debit, credit,
         description: isReversal
@@ -94,6 +98,8 @@ export async function buildPaymentCorrectionEntry(
 export async function buildDisbursementAccountingEntry(input: {
     id: string; creditId: string; clientId?: string; amount: number; processedBy: string;
     usuario_id?: string; description: string; justification?: string;
+    /** Conta de onde sai o dinheiro: caixa (entrega em mão) ou banco (transferência). */
+    fundingAccount?: 'cash' | 'bank';
 }, previousHash: string, timestamp = new Date()) {
     const amountMinor = toMinorUnits(input.amount, 'Desembolso');
     if (amountMinor <= 0) throw new Error('O desembolso deve ser superior a zero.');
@@ -102,7 +108,7 @@ export async function buildDisbursementAccountingEntry(input: {
     const entry = {
         id: `disbursement:${input.id}`, timestamp, timestampIso, type: 'disbursement' as const,
         description: input.description, clientId: input.clientId, creditId: input.creditId,
-        paymentId: undefined, debit: 'portfolio' as const, credit: 'cash' as const,
+        paymentId: undefined, debit: 'portfolio' as const, credit: input.fundingAccount === 'bank' ? 'bank' as const : 'cash' as const,
         amountPrincipal: amountMinor / 100, amountInterest: 0, amountLateInterest: 0,
         amountTotal: amountMinor / 100, amountPrincipalMinor: amountMinor,
         amountInterestMinor: 0, amountLateInterestMinor: 0, amountTotalMinor: amountMinor,
@@ -136,6 +142,45 @@ export async function buildChargeAdjustmentEntry(input: {
         amountTotalMinor: amount, processedBy: input.processedBy,
         justification: input.justification, previousHash, usuario_id: input.usuario_id,
         hashVersion: 2
+    };
+    return { ...entry, integrityHash: await calculateLedgerHash(entry) };
+}
+
+export type JournalLineInput = { account: string; side: 'debit' | 'credit'; amountMinor: number; component: string };
+
+/**
+ * Lançamento genérico em partidas dobradas (entrada de capital, despesa, transferência, provisão, abate,
+ * estorno…). Recusa linhas inválidas e lançamentos desequilibrados; o resumo fica na cadeia de hashes.
+ */
+export async function buildJournalEntry(input: {
+    id: string; type: string; description: string; lines: JournalLineInput[];
+    sourceType: string; sourceId: string; processedBy: string;
+    clientId?: string; creditId?: string; paymentId?: string; usuario_id?: string; justification?: string;
+}, previousHash: string, timestamp = new Date()) {
+    if (!/^[a-f0-9]{64}$/iu.test(previousHash)) throw new Error('Hash contabilístico anterior inválido.');
+    if (!input.description?.trim()) throw new Error('Indique a descrição do lançamento.');
+    if (!input.processedBy?.trim()) throw new Error('Indique o responsável pelo lançamento.');
+    const lines = input.lines.filter(line => line.amountMinor !== 0);
+    if (lines.length < 2) throw new Error('Um lançamento precisa de pelo menos uma linha a débito e outra a crédito.');
+    for (const line of lines) {
+        if (!Number.isSafeInteger(line.amountMinor) || line.amountMinor <= 0) throw new Error('Valor de linha inválido.');
+        if (!/^[a-z_]{2,40}$/u.test(line.account)) throw new Error('Conta inválida: ' + line.account);
+        if (line.side !== 'debit' && line.side !== 'credit') throw new Error('Sentido de linha inválido.');
+    }
+    const debitMinor = lines.filter(line => line.side === 'debit').reduce((sum, line) => sum + line.amountMinor, 0);
+    const creditMinor = lines.filter(line => line.side === 'credit').reduce((sum, line) => sum + line.amountMinor, 0);
+    if (debitMinor <= 0 || debitMinor !== creditMinor) throw new Error('O lançamento não está equilibrado (débito ≠ crédito).');
+    const firstDebit = lines.find(line => line.side === 'debit')!;
+    const firstCredit = lines.find(line => line.side === 'credit')!;
+    const entry = {
+        id: input.id, timestamp, timestampIso: timestamp.toISOString(), type: input.type,
+        description: input.description.trim(), clientId: input.clientId, creditId: input.creditId, paymentId: input.paymentId,
+        debit: firstDebit.account, credit: firstCredit.account,
+        amountPrincipal: 0, amountInterest: 0, amountLateInterest: 0, amountTotal: debitMinor / 100,
+        amountPrincipalMinor: 0, amountInterestMinor: 0, amountLateInterestMinor: 0, amountTotalMinor: debitMinor,
+        processedBy: input.processedBy.trim(), justification: input.justification, previousHash,
+        usuario_id: input.usuario_id, hashVersion: 2,
+        sourceType: input.sourceType, sourceId: input.sourceId, journalLines: lines,
     };
     return { ...entry, integrityHash: await calculateLedgerHash(entry) };
 }

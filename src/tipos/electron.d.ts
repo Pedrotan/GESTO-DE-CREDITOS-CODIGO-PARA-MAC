@@ -1,9 +1,13 @@
 export interface ElectronAPI {
-    userAuthLogin: (login: string, password: string) => Promise<{ authenticated: boolean; requires2FA?: boolean; requiresMfaEnrollment?: boolean; notFound?: boolean; userId?: string; user?: any }>;
+    userAuthLogin: (login: string, password: string) => Promise<{ authenticated: boolean; requires2FA?: boolean; requiresMfaEnrollment?: boolean; notFound?: boolean; userId?: string; user?: any; accessDenied?: boolean; message?: string }>;
     userAuthVerifyTotp: (userId: string, token: string) => Promise<{ authenticated: boolean; reason?: 'challenge_expired' | 'replayed_code' | 'invalid_code'; user?: any }>;
     userAuthStatus: () => Promise<{ authenticated: boolean; user?: any; expiresAt?: string }>;
     userAuthBootstrapStatus: () => Promise<{ hasUsers: boolean }>;
     userAuthLogout: () => Promise<{ authenticated: false }>;
+    userAuthConfirmPassword?: (password: string) => Promise<{ confirmed: boolean }>;
+    accountingSealVerify?: () => Promise<import('@/bibliotecas/selo-contabilistico').SealVerification>;
+    auditSealVerify?: () => Promise<{ available: boolean; reason?: string; sealedCount: number; keyFingerprint?: string; tampered: string[]; broken: string[]; missing: string[]; unsealed: number; checkedAt: string }>;
+    accountingSealPending?: () => Promise<{ sealed: number }>;
     companyPublicInfo?: () => Promise<{ name: string; logo: string | null; enableMultiTenant: boolean | null } | null>;
     userAuthMfaBegin: () => Promise<{ secret: string; qrCode: string }>;
     userAuthMfaEnable: (token: string) => Promise<{ enabled: boolean; reason?: 'session_expired' | 'qr_expired' | 'invalid_code'; user?: any; recoveryCodes?: string[] }>;

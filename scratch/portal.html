@@ -1,0 +1,563 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html>
+<html><head id="j_id_4"><link type="text/css" rel="stylesheet" href="/javax.faces.resource/theme.css.jsf?ln=primefaces-bootstrap" /><link rel="stylesheet" type="text/css" href="/javax.faces.resource/bootstrap-3.3.6-dist/css/bootstrap.min.css.jsf" /><link rel="stylesheet" type="text/css" href="/javax.faces.resource/css/font-awesome.css.jsf" /><link rel="stylesheet" type="text/css" href="/javax.faces.resource/css/zabuto_calendar.css.jsf" /><script type="text/javascript" src="/javax.faces.resource/jquery/jquery.js.jsf?ln=primefaces&amp;v=6.1"></script><script type="text/javascript" src="/javax.faces.resource/jquery/jquery-plugins.js.jsf?ln=primefaces&amp;v=6.1"></script><script type="text/javascript" src="/javax.faces.resource/core.js.jsf?ln=primefaces&amp;v=6.1"></script><script type="text/javascript" src="/javax.faces.resource/components.js.jsf?ln=primefaces&amp;v=6.1"></script><link rel="stylesheet" type="text/css" href="/javax.faces.resource/components.css.jsf?ln=primefaces&amp;v=6.1" /><link rel="stylesheet" type="text/css" href="/javax.faces.resource/css/style.css.jsf" /><script type="text/javascript" src="/javax.faces.resource/validation/validation.js.jsf?ln=primefaces&amp;v=6.1"></script><script type="text/javascript" src="/javax.faces.resource/validation/beanvalidation.js.jsf?ln=primefaces&amp;v=6.1"></script><script type="text/javascript">if(window.PrimeFaces){PrimeFaces.settings.locale='pt';PrimeFaces.settings.validateEmptyFields=true;PrimeFaces.settings.considerEmptyStringNull=false;}</script>
+		<title>Consultar NIF | Portal do Contribuinte</title>
+        <link rel="shortcut icon" type="image/png" href="/resources/images/fav/favicon-16x16.png" /><script type="text/javascript" src="/javax.faces.resource/zabuto_calendar.min.js.jsf?ln=js"></script>
+
+    	<!-- Global site tag (gtag.js) - Google Analytics -->
+		<script async="async" src="https://www.googletagmanager.com/gtag/js?id=UA-50373626-2"></script>
+		<script>
+		  window.dataLayer = window.dataLayer || [];
+		  function gtag(){dataLayer.push(arguments);}
+		  gtag('js', new Date());
+
+		  gtag('config', 'UA-50373626-2');
+		</script></head><body>
+	    <div id="header"><form id="j_id_g" name="j_id_g" method="post" action="/consultar-headNifId-do-contribuinte" enctype="application/x-www-form-urlencoded">
+			<header class="header">
+				<div class="banner clearfix">
+					<div class="banner-top">
+
+					</div>
+					<div class="banner-middle"><img src="/javax.faces.resource/images/roda_dentada.png.jsf" alt="insignia da republica de angola" />
+					</div>
+					<div class="banner-bottom">
+
+					</div>
+					<div class="container">
+
+						<div class="col-md-8 inner-banner">
+							<a class="banner-agt-logo" href="/"><img src="/javax.faces.resource/images/agt-banner-blue.png.jsf" alt="insignia da republica de angola" class="pull-right" /></a>
+
+							<a class="governo-angola-logo" href="/"><img src="/javax.faces.resource/images/logo-governo-Minfin.png.jsf" alt="republica de angola" class="pull-right hidden-xs hidden-sm hidden-md" /></a>
+
+						</div>
+
+						<div class="user-container">
+							<nav class="navbar-right-content navbar-default navbar-static-top">
+								<div class="navbar-right-header">
+									<button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar1" aria-expanded="false" aria-controls="navbar1">
+										<span class="sr-only">Toggle navigation</span>
+									</button>
+								</div>
+							</nav>
+						</div>
+
+						<div class="col-md-4">
+						<ul class="login-button-container">
+								<li class="login-button"><a href="/login">
+									<i class="fa fa-unlock" aria-hidden="true"></i>Entrar</a>
+								</li>
+						</ul>
+						</div>
+					</div>
+				</div>
+
+				<div class="header-container-holder"><img src="/javax.faces.resource/images/agt-banner.png.jsf" alt="agt baner" class="image-banner" />
+
+					<div class="header-container">
+						<div class="container">
+							<div class="nome-do-site">
+								<h1>
+									<a href="/">Portal do Contribuinte</a>
+								</h1>
+							</div>
+							<!-- Navigation -->
+							<nav class="navbar main-menu navbar-default navbar-static-top">
+								<div class="navbar-header">
+									<button type="button" class="navbar-toggle collapsed" data-toggle="collapse" data-target="#navbar" aria-expanded="false" aria-controls="navbar">
+										<span class="sr-only">Toggle navigation</span>
+										<span class="icon-bar"></span>
+										<span class="icon-bar"></span>
+										<span class="icon-bar"></span>
+									</button>
+								</div>
+								<div id="navbar" class="navbar-collapse collapse">
+									<ul class="nav navbar-nav">
+										<li class="inicio">
+											<a href="/"><i class="fa fa-home"></i>Início</a>
+										</li>
+										<li class="dropdown">
+											<a href="#" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false">Serviços<span class="caret"></span>
+											</a>
+											<ul class="dropdown-menu">
+												<!--<h:panelGroup rendered="false">
+													<li class="dropdown-submenu">
+														<a tabindex="-1" class="dropdown-toggle"
+														   data-toggle="dropdown" role="button"
+														   aria-haspopup="true" aria-expanded="false" href="#">
+															Cadastro de Património<span class="caret" />
+														</a>
+														<ul class="dropdown-menu">
+															<li>
+																<a tabindex="-1" href="/consultar-patrimonio">
+																	Consultar Património
+																</a>
+															</li>
+                                                            <li>
+																<a tabindex="-1" href="/cadastrar-fraccao">
+                                                                    Cadastrar Fracção
+																</a>
+															</li>
+                                                            <li>
+                                                                <a tabindex="-1" href="/pre-cadastro-eletronico-de-patrimonio">
+                                                                    Pré-Cadastro Electrónico
+                                                                </a>
+                                                            </li>
+														</ul>
+													</li>
+												</h:panelGroup>-->
+												<li class="dropdown-submenu">
+													<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">
+														Liquidações<span class="caret"></span>
+													</a>
+													<ul class="dropdown-menu">
+															<li>
+																<a tabindex="-1" href="/liquidacao-de-receita-consignada">
+																	Receitas Consignadas
+																</a>
+															</li>
+													</ul>
+												</li>
+												<li class="dropdown-submenu">
+													<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">
+														Pagamentos<span class="caret"></span>
+													</a>
+													<ul class="dropdown-menu">
+														<!--<li>
+															<a tabindex="-1" href="/imprimir-verificar-nota-de-liquidacao">
+																Verificar Nota de Liquidação
+															</a>
+														</li>
+														<li>
+															<a tabindex="-1" href="/imprimir-verificar-recibo-de-pagamento">
+																Verificar Recibo de Pagamento
+															</a>
+														</li>-->
+														<li>
+															<a tabindex="-1" href="/imprimir-verificar-nf-nl">
+																Verificar Nº NL / RP
+															</a>
+														</li>
+													</ul>
+
+												</li>
+													<li class="dropdown-submenu">
+														<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">Cadastro de Contribuinte<span class="caret"></span></a>
+														<ul class="dropdown-menu">
+														<li><a href="/registrar-singular-solicitacao"><span>Registar NIF Singular</span></a></li>
+
+																<li>
+																	<a href="/consultar-nif-do-contribuinte"><span>Consulta de NIF</span></a>
+																</li>
+
+														</ul>
+													</li>
+													<li class="dropdown-submenu">
+														<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">Produtores de software<span class="caret"></span></a>
+														<ul class="dropdown-menu">
+															<li class="fatura"><a id="j_id_g:j_id_1q" href="#" class="ui-commandlink ui-widget" onclick="PrimeFaces.ab({s:&quot;j_id_g:j_id_1q&quot;});return false;">
+																	<span>Submissão do Modelo 8</span></a><a id="j_id_g:j_id_1u" href="#" class="ui-commandlink ui-widget" onclick="PrimeFaces.ab({s:&quot;j_id_g:j_id_1u&quot;});return false;">
+																	<span>Consultar Certificado</span></a>
+															</li>
+														</ul>
+													</li>
+
+												<li class="dropdown-submenu">
+													<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">Verificar Certificado<span class="caret"></span></a>
+													<ul class="dropdown-menu">
+														<li><a href="/verificar-certificado-residencia-fiscal"><span>Residência Fiscal</span></a></li>
+													</ul>
+												</li>
+													<li class="dropdown-submenu">
+														<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">Gráficas e Tipografias<span class="caret"></span></a>
+														<ul class="dropdown-menu">
+															<li class="fatura"><a id="j_id_g:j_id_22" href="#" class="ui-commandlink ui-widget" onclick="PrimeFaces.ab({s:&quot;j_id_g:j_id_22&quot;});return false;">
+																	<span>Solicitação de Licenciamento</span></a><a id="j_id_g:j_id_26" href="#" class="ui-commandlink ui-widget" onclick="PrimeFaces.ab({s:&quot;j_id_g:j_id_26&quot;});return false;">
+																	<span>Consultar Factura</span></a>
+															</li>
+														</ul>
+													</li>
+
+												<li class="dropdown-submenu">
+													<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">
+														Validar Documentos<span class="caret"></span>
+													</a>
+													<ul class="dropdown-menu">
+														<li><a href="/verificar-autenticidade-certidao-conformidade-tributaria"><span>Certidão de Conformidade Tributária</span></a></li>
+
+														<li><a href="/verificar-autenticidade-certidao-divida-tributaria"><span>Certidão de Dívida Tributária</span></a></li>
+														<li><a href="/verificar-autenticidade-mandado-citacao"><span>Mandado de Citação</span></a></li>
+														<li><a href="/verificar-autenticidade-mandado-penhora"><span>Mandado de Penhora</span></a></li>
+														<li><a href="/verificar-autenticidade-mandado-notificacao"><span>Mandado de Notificação</span></a></li>
+														<li><a href="/verificar-autenticidade-levantamento-penhora"><span>Levantamento de Penhora</span></a></li>
+
+													</ul>
+												</li>
+											</ul>
+										</li>
+										<li class="dropdown">
+											<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">
+												Ajuda<span class="caret"></span>
+											</a>
+											<ul class="dropdown-menu">
+												<li>
+													<a tabindex="-1" href="/perguntas-frequentes">Perguntas Frequentes</a>
+												</li>
+												<li>
+													<a tabindex="-1" href="/fale-connosco">Fale Connosco</a>
+												</li>
+												<li>
+													<a tabindex="-1" href="/contactos">Contactos</a>
+												</li>
+												<li class="dropdown-submenu">
+													<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">
+														Guias Rápidos<span class="caret"></span>
+													</a>
+													<ul class="dropdown-menu">
+														<li class="dropdown-submenu">
+															<li>
+																<a tabindex="-1" href="/guia-rapido-acordos-dupla-tributacao">
+																	Acordos de Dupla Tributação (ADT)
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-cadastro-patrimonio">
+																	Cadastro de Património
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-certidao-conformidade-tributaria">
+																	Certidão de Conformidade Tributária
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-do-ceoc">
+																	CEOC
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-dossier-de-precos-de-transferencia">
+																	Dossier de Preços de Transferência
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-emissao-de-facturas">
+																	Emissão de Facturas
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-execucoes-fiscais">
+																	Execuções Fiscais
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-facturacao-electronica">
+																	Facturação Electrónica
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-fiscalizacao">
+																	Fiscalização
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-do-iac">
+																	IAC
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-do-iec">
+																	IEC
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-do-iej">
+																	IEJ
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-imposto-industrial">
+																	II
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-imposto-selo">
+																	Imposto de Selo
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-imposto-predial-urbano">
+																	IP
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-do-irt">
+																	IRT
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-do-iva">
+																	IVA
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-do-ivm">
+																	IVM
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-pagamento-prestacoes">
+																	Pagamento em Prestações
+																</a>
+															</li>
+															<li>
+																<a tabindex="-1" href="/guia-rapido-do-utilizador">
+																	Portal do Contribuinte
+																</a>
+															</li>
+														</li>
+													</ul>
+												</li>
+												<li>
+													<a tabindex="-1" href="/selecionar-novo-acesso">
+														Solicitar Novo Acesso
+													</a>
+												</li>
+											</ul>
+										</li>
+										<li class="dropdown">
+											<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">
+												Biblioteca Virtual<span class="caret"></span>
+											</a>
+											<ul class="dropdown-menu">
+												<li>
+													<a tabindex="-1" href="/legislacao">Legislação</a>
+												</li>
+												<li class="inicio">
+													<a href="modelos">Modelos</a>
+												</li>
+
+												<li class="dropdown-submenu">
+													<a tabindex="-1" class="dropdown-toggle" data-toggle="dropdown" role="button" aria-haspopup="true" aria-expanded="false" href="#">
+														Formulários<span class="caret"></span>
+													</a>
+													<ul class="dropdown-menu">
+														<li>
+															<a tabindex="-1" href="/formularios-nao-editaveis">
+																Não Editáveis
+															</a>
+														</li>
+														<li>
+															<a tabindex="-1" href="/formularios-editaveis">
+																Editáveis
+															</a>
+														</li>
+													</ul>
+												</li>
+												<li>
+													<a tabindex="-1" href="/impostos-e-taxas">
+														Impostos e Taxas
+													</a>
+												</li>
+												<li>
+													<a tabindex="-1" href="/noticias">Notícias</a>
+												</li>
+												<li>
+													<a tabindex="-1" href="/videos">Videos</a>
+												</li>
+												<li>
+													<a tabindex="-1" href="/links-uteis">Links Úteis</a>
+												</li>
+											</ul>
+										</li>
+									</ul>
+								</div>
+							</nav>
+						</div>
+					</div>
+				</div>
+
+				<div id="popover_content_wrapper" class="popover" role="tooltip">
+					<div class="arrow"></div>
+					<h3 class="popover-title">sdfsd</h3>
+					<div class="popover-content"></div>
+				</div>
+
+			</header><input type="hidden" name="j_id_g_SUBMIT" value="1" /><input type="hidden" name="javax.faces.ViewState" id="j_id__v_0:javax.faces.ViewState:1" value="JZ++gCT0gqOPrGRsLX/aFqB+iL9DnRj8IoCI5z1eB0bjTnr2" autocomplete="off" /></form>
+	    </div>
+	    
+	    <section class="container" id="content">
+	    	<div class="row-md">
+		<div class="col-md-3 column">
+			<ul id="accordion" class="nav nav-pills nav-stacked margin-bottom-fitteen">
+				<li class="menu-titulo"><a href="#"><span>Menu de Serviços</span></a></li>
+				<li class="submenu servico-1 panel">
+					<a href="javascript:" id="btn-cadastro" class="collapsed" data-parent="#accordion" data-toggle="collapse" data-target="#cadastromenuid" aria-expanded="false">
+						<span>Cadastro de Contribuinte</span></a>
+					<ul class="nav collapse" id="cadastromenuid" role="menu" aria-labelledby="btn-cadastro">
+						<li>
+							<li><a href="/registrar-singular-solicitacao"><span>Registar NIF Singular</span></a></li>
+						</li>
+					</ul>
+				</li>
+				<li class="submenu servico-1 panel">
+					<a href="javascript:" id="btn-reg" class="collapsed" data-parent="#accordion" data-toggle="collapse" data-target="#submenu1" aria-expanded="false">
+						<span>Liquidações</span></a>
+					<ul class="nav collapse" id="submenu1" role="menu" aria-labelledby="btn-reg">
+						<li>
+							<li><a href="/liquidacao-de-receita-consignada"><span>Receitas Consignadas</span></a></li>
+						</li>
+					</ul>
+				</li>
+				<li class="submenu servico-3 panel">
+					<a href="javascript:" id="btn-dli" class="collapsed" data-parent="#accordion" data-toggle="collapse" data-target="#submenu2" aria-expanded="false">
+						<span>Pagamentos</span></a>
+					<ul class="nav collapse" id="submenu2" role="menu" aria-labelledby="btn-dli">
+						<!--<li><a href="/imprimir-verificar-nota-de-liquidacao" ><span>Verificar Nota de Liquidação</span></a></li>
+						<li><a href="/imprimir-verificar-recibo-de-pagamento" style="padding-left: 58px !important;"><span style="padding-left: 0 !important;">Verificar Recibo de Pagamento</span></a></li>-->
+						<li><a href="/imprimir-verificar-nf-nl" style="padding-left: 58px !important;"><span style="padding-left: 0 !important;">Verificar Nº NL / RP</span></a></li>
+						<li><a href="/consultar-comprovativo-liquidacao"><span>Comprovativo Liquidação</span></a></li>
+						<!--<li><a href="/consultar-nota-credito"><span>Nota de Crédito</span></a></li>-->
+					</ul>
+				</li>
+				<li class="submenu servico-4 panel">
+					<a href="javascript:" id="btn-verificar" class="collapsed" data-parent="#accordion" data-toggle="collapse" data-target="#verificar-menu" aria-expanded="false">
+						<span>Verificar Certificado</span></a>
+					<ul class="nav collapse" id="verificar-menu" role="menu" aria-labelledby="btn-dli">
+						<li><a href="/verificar-certificado-residencia-fiscal"><span>Residência Fiscal</span></a></li>
+<!--						<li><a href="/verificar-certificado-declaracao-conformidade-adt"><span>Declaração de Conformidade ADT</span></a></li>-->
+					</ul>
+				</li>
+
+				<li class="submenu produtores-software panel">
+					<a href="javascript:" id="btn-software" class="collapsed" data-parent="#accordion" data-toggle="collapse" data-target="#producto-software" aria-expanded="false">
+						<span>Produtores de software</span>
+					</a>
+					<ul class="nav collapse" id="producto-software" role="menu" aria-labelledby="btn-ipu-pat">
+						<li><a id="portalExtarno-saf-t3" href="#" class="ui-commandlink ui-widget" onclick="PrimeFaces.ab({s:&quot;portalExtarno-saf-t3&quot;});return false;">
+								<span>Submissão do Modelo 8</span></a><a id="j_id_2u_9" href="#" class="ui-commandlink ui-widget" onclick="PrimeFaces.ab({s:&quot;j_id_2u_9&quot;});return false;">
+								<span>Consultar Certificado</span></a>
+						</li>
+					</ul>
+				</li>
+
+				<li class="submenu tipografia panel">
+					<a href="javascript:" class="collapsed" data-parent="#accordion" data-toggle="collapse" data-target="#btn-grafica" aria-expanded="false">
+						<span>Gráficas e Tipografias</span></a>
+					<ul class="nav collapse" id="btn-grafica" role="menu" aria-labelledby="btn-ipu-pat">
+						<li><a id="j_id_2u_e" href="#" class="ui-commandlink ui-widget" onclick="PrimeFaces.ab({s:&quot;j_id_2u_e&quot;});return false;">
+								<span>Solicitação de Licenciamento</span></a><a id="j_id_2u_i" href="#" class="ui-commandlink ui-widget" onclick="PrimeFaces.ab({s:&quot;j_id_2u_i&quot;});return false;">
+								<span>Consultar Factura</span></a>
+						</li>
+					</ul>
+				</li>
+
+				<li class="submenu cnd-submenu panel">
+					<a href="javascript:" class="collapsed" data-parent="#accordion" data-toggle="collapse" data-target="#btn-validar-documentos" aria-expanded="false">
+						<span>Validar Documentos</span>
+					</a>
+					<ul class="nav collapse" id="btn-validar-documentos" role="menu">
+						<li>
+							<li><a href="/verificar-autenticidade-certidao-conformidade-tributaria"><span>Certidão de Conformidade Tributária</span></a></li>
+
+							<li><a href="/verificar-autenticidade-certidao-divida-tributaria"><span>Certidão de Dívida Tributária</span></a></li>
+							<li><a href="/verificar-autenticidade-mandado-citacao"><span>Mandado de Citação</span></a></li>
+							<li><a href="/verificar-autenticidade-mandado-penhora"><span>Mandado de Penhora</span></a></li>
+							<li><a href="/verificar-autenticidade-mandado-notificacao"><span>Mandado de Notificação</span></a></li>
+							<li><a href="/verificar-autenticidade-levantamento-penhora"><span>Levantamento de Penhora</span></a></li>
+
+						</li>
+					</ul>
+				</li>
+			</ul>
+		</div>
+				<main class="main-content">
+            		<div class="col-md-9">
+            <div class="panel panel-default clearfix">
+                <h1>Consultar NIF </h1>
+
+                <div class="panel panel-default form-horizontal panel-bckground-color grey"><form id="j_id_2x" name="j_id_2x" method="post" action="/consultar-headNifId-do-contribuinte" enctype="application/x-www-form-urlencoded">
+                        <div class="form-group">
+                            <div class="row"><label class="col-sm-4 control-label bold" for="j_id_2x:txtNIFNumber"> NIF: </label>
+                                <div class="col-sm-4"><input id="j_id_2x:txtNIFNumber" name="j_id_2x:txtNIFNumber" type="text" value="" class="form-control" />
+                                </div>
+                            </div>
+
+                            <div class="row margin-top-5">
+                                <div class="col-sm-4 col-md-offset-4"><button id="j_id_2x:j_id_34" name="j_id_2x:j_id_34" class="ui-button ui-widget ui-state-default ui-corner-all ui-button-text-only" onclick="PrimeFaces.ab({s:&quot;j_id_2x:j_id_34&quot;,p:&quot;j_id_2x&quot;,u:&quot;showpanelNIF&quot;});return false;" type="submit"><span class="ui-button-text ui-c">Pesquisar</span></button><script id="j_id_2x:j_id_34_s" type="text/javascript">PrimeFaces.cw("CommandButton","widget_j_id_2x_j_id_34",{id:"j_id_2x:j_id_34"});</script>
+                                </div>
+                            </div>
+
+                            <div class="row">
+                                <div class="col-sm-9"><span id="j_id_2x:j_id_36" class="ui-growl-pl" data-widget="widget_j_id_2x_j_id_36" data-detail="data-detail" data-severity="all,error" data-redisplay="true"></span><script id="j_id_2x:j_id_36_s" type="text/javascript">$(function(){PrimeFaces.cw('Growl','widget_j_id_2x_j_id_36',{id:'j_id_2x:j_id_36',sticky:false,life:6000,escape:true,msgs:[]});});</script>
+                                </div>
+                            </div>
+                        </div><input type="hidden" name="j_id_2x_SUBMIT" value="1" /><input type="hidden" name="javax.faces.ViewState" id="j_id__v_0:javax.faces.ViewState:2" value="JZ++gCT0gqOPrGRsLX/aFqB+iL9DnRj8IoCI5z1eB0bjTnr2" autocomplete="off" /></form>
+                </div><div id="showpanelNIF" class="ui-panel ui-widget ui-widget-content ui-corner-all no-border" data-widget="widget_showpanelNIF"><div id="showpanelNIF_content" class="ui-panel-content ui-widget-content"></div></div><script id="showpanelNIF_s" type="text/javascript">PrimeFaces.cw("Panel","widget_showpanelNIF",{id:"showpanelNIF"});</script>
+            </div>
+					</div>
+				</main>
+	    	</div>
+	    </section><div id="outdate-reg" class="ui-dialog ui-widget ui-widget-content ui-corner-all ui-shadow ui-hidden-container custom-dialog dialog-title-left font-arial bckcolor-grey bckcolor-gradient"><div class="ui-dialog-titlebar ui-widget-header ui-helper-clearfix ui-corner-top"><span id="outdate-reg_title" class="ui-dialog-title">
+                <div>
+                    <ul class="margin-left-15 margin-bottom-0">
+                        <li class="font-size-13 color-bullet">Aviso</li>
+                    </ul>
+                </div></span></div><div class="ui-dialog-content ui-widget-content">
+
+            <div>
+                <div>
+                    <p>Caro Contribuinte,</p>
+                    <p>Os seus dados de cadastro encontram-se desactualizados. Deverá proceder à sua actualização na opção</p>
+                    <p>Cadastro de Contribuinte -&gt; Actualizar Cadastro.</p>
+                    <p>Persistindo esta situação, poderá ser limitada a sua utilização do Portal, em nome próprio</p>
+                    <p>ou através dos seus representantes, passando a disponibilizar somente consultas e actualização ao Cadastro.</p>
+                    <div align="right">
+                    <p> <i><b>Resta 0 dia</b></i></p>
+                    </div>
+                </div>
+
+            </div>
+
+
+            <div class="col-sm-12 text-center clearfix" style="border-top: 1px solid #AAA;"><form id="formOutDatedReg" name="formOutDatedReg" method="post" action="/consultar-headNifId-do-contribuinte" enctype="application/x-www-form-urlencoded">
+                    <br /><button id="formOutDatedReg:confirm-outdate-reg" name="formOutDatedReg:confirm-outdate-reg" class="ui-button ui-widget ui-state-default ui-corner-all ui-button-text-only btn continue margin-left box-shadow-none fixed-size bckcolor-gradient" onclick="PrimeFaces.ab({s:&quot;formOutDatedReg:confirm-outdate-reg&quot;,onco:function(xhr,status,args){PF('outdate-reg').hide();;}});return false;" style="margin-top: 10px" type="submit"><span class="ui-button-text ui-c">Fechar</span></button><script id="formOutDatedReg:confirm-outdate-reg_s" type="text/javascript">PrimeFaces.cw("CommandButton","widget_formOutDatedReg_confirm_outdate_reg",{id:"formOutDatedReg:confirm-outdate-reg"});</script><input type="hidden" name="formOutDatedReg_SUBMIT" value="1" /><input type="hidden" name="javax.faces.ViewState" id="j_id__v_0:javax.faces.ViewState:3" value="JZ++gCT0gqOPrGRsLX/aFqB+iL9DnRj8IoCI5z1eB0bjTnr2" autocomplete="off" /></form>
+            </div></div></div><script id="outdate-reg_s" type="text/javascript">$(function(){PrimeFaces.cw("Dialog","outdate-reg",{id:"outdate-reg",draggable:false,resizable:false,modal:true,width:"auto",appendTo:"@(body)"});});</script>
+		<!-- Footer -->
+<footer class="footer">
+	<div class="footer-top">
+		<div class="container">
+			<p><a href="#"><img src="/javax.faces.resource/images/portal-do-contribuinte-footer.png.jsf" alt="Portal do contribuinte logo" /></a></p>
+			<div class="footer-top-right">
+				<ul class="social-network">
+					<li class="facebook"><a title="Facebook AGT Angola" target="_blank" href="https://facebook.com/AGTAngola"><i class="fa fa-facebook"></i></a></li>
+                    <li class="twitter"><a title="Twitter AGT Angola" target="_blank" href="https://twitter.com/agtangola"><i class="fa fa-twitter"></i></a></li>
+                    <li class="linkedin"><a title="Linkedin AGT Angola" target="_blank" href="https://www.linkedin.com/company/administra%C3%A7%C3%A3o-geral-tribut%C3%A1ria-agt/"><i class="fa  fa-linkedin"></i></a></li>
+                    <li class="youtube"><a title="Youtube AGT Angola" target="_blank" href="https://www.youtube.com/channel/UCPK5NFtJb7QJwOBF8TpM3ag/featured?disable_polymer=1"><i class="fa fa-youtube"></i></a></li>
+					<li class="agt"><a class="text-hide" title="AGT" target="_blank" href="https://agt.minfin.gov.ao/PortalAGT/#!/">AGT</a></li>
+				</ul>
+				<ul class="footer-links">
+				 	<li><a href="/fale-connosco">Fale Connosco</a></li>
+					<li><a href="/contactos">Contactos</a></li>
+					<li><a href="/perguntas-frequentes ">Perguntas Frequentes</a></li>
+					<li><a href="/imprimir-verificar-nota-de-liquidacao">Verificar Nota de Liquidação</a></li>
+				</ul>
+			</div>
+		</div>
+	</div>
+    <div class="footer-bottom clearfix">
+    	<div class="footer-separator-container"><img src="/javax.faces.resource/images/footer-separator.png.jsf" alt="footer separator" class="footer-separator" />
+    	</div>
+    	<div class="footer-bottom-left"><img src="/javax.faces.resource/images/logoAngola-dark.png.jsf" alt="Ministerio das finanças" class="pull-right" />
+    	</div>
+    	<div class="footer-bottom-right"><img src="/javax.faces.resource/images/agt-logo.png.jsf" alt="agt" class="pull-left" />
+    	</div>
+<!--		<div style="float: left; z-index: 5000; position: absolute; text-align: center; margin-left: 10%; padding: 24px 20px; color: #636363">-->
+<!--			<p:outputLabel value="v"/>-->
+<!--		</div>-->
+    </div>           
+</footer><div id="j_id_4x"></div><script id="j_id_4x_s" type="text/javascript">$(function(){PrimeFaces.cw("AjaxStatus","widget_j_id_4x",{id:"j_id_4x",start:function(){PF('statusDialog').show()},complete:function(){PF('statusDialog').hide()}});});</script><div id="dialog" class="ui-dialog ui-widget ui-widget-content ui-corner-all ui-shadow ui-hidden-container"><div class="ui-dialog-content ui-widget-content"><img src="/javax.faces.resource/relatorios/loading.gif.jsf" alt="loading" /></div></div><script id="dialog_s" type="text/javascript">$(function(){PrimeFaces.cw("Dialog","statusDialog",{id:"dialog",draggable:false,resizable:false,modal:true});});</script>
+	<!-- Versao do primefaces nao e comaptivel com a versao mais recente do jquery -->
+	<!-- <h:outputScript library="jquery" name="jquery-3.1.1.min.js" target="body"/> --><script type="text/javascript" src="/javax.faces.resource/primefaces-pt.js.jsf?ln=js"></script><script type="text/javascript" src="/javax.faces.resource/1.12.1-jquery-ui.js.jsf?ln=jquery-ui"></script><script type="text/javascript" src="/javax.faces.resource/js/bootstrap.min.js.jsf?ln=bootstrap-3.3.6-dist"></script><script type="text/javascript" src="/javax.faces.resource/custom.js.jsf?ln=js"></script></body>
+</html>

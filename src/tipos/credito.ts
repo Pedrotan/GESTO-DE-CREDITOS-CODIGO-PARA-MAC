@@ -159,6 +159,8 @@ export interface CreditReinforcement {
   usuario_id?: string;
 }
 
+export type PaymentMethod = 'cash' | 'transfer' | 'multicaixa' | 'tpa' | 'reference' | 'deposit';
+
 export interface Payment {
   id: string;
   creditId: string;
@@ -173,12 +175,32 @@ export interface Payment {
   idempotencyKey?: string;
   /** Pedido transitório: liquida sempre as N prestações mais antigas em aberto. */
   installmentCount?: number;
-  method: 'cash' | 'transfer' | 'reference';
+  method: PaymentMethod;
   reference?: string;
+  /** Data-valor: dia em que o cliente pagou (conta para a mora e para os relatórios). Guardada em UTC. */
   paymentDate: Date;
   dueDate?: Date;
   processedBy: string;
+  /** pending = pendente de validação (transferências e depósitos); cancelled = anulado (nunca apagado). */
   status: 'confirmed' | 'pending' | 'cancelled';
+  /** Momento em que o operador registou o pagamento no sistema (UTC). */
+  registeredAt?: Date | string;
+  /** Recibo sequencial por ano, sem saltos: RC <receiptYear>/<receiptSeq>. */
+  receiptYear?: number | null;
+  receiptSeq?: number | null;
+  /** Prestações liquidadas por este pagamento: [{ n, principalMinor, interestMinor, lateMinor }]. */
+  allocationDetail?: string | null;
+  /** Capital em dívida do contrato logo após o pagamento (cêntimos). */
+  balanceAfterMinor?: number | null;
+  validatedAt?: Date | string | null;
+  validatedBy?: string | null;
+  cancelledAt?: Date | string | null;
+  cancelledBy?: string | null;
+  cancelReason?: string | null;
+  cancelApprovedBy?: string | null;
+  /** Lote de importação de onde o pagamento veio. */
+  batchId?: string | null;
+  hasProof?: number | boolean | null;
   deletedAt?: Date;
   deletedBy?: string;
   restoredAt?: Date;
@@ -253,8 +275,8 @@ export interface AgingData {
 
 export interface AuditLog {
   id: string;
-  action: 'create' | 'update' | 'delete' | 'login' | 'logout' | 'login_failure';
-  entity: 'client' | 'credit' | 'payment' | 'user' | 'system' | 'contencioso' | 'garantia' | 'payment_gateway';
+  action: 'create' | 'update' | 'delete' | 'login' | 'logout' | 'login_failure' | 'view' | 'export' | 'import' | 'restore' | 'security_alert';
+  entity: 'client' | 'credit' | 'payment' | 'user' | 'system' | 'contencioso' | 'garantia' | 'payment_gateway' | 'audit' | 'report' | 'security' | 'accounting_entry';
   entityId?: string;
   details: string;
   userId: string;
@@ -311,6 +333,17 @@ export interface Simulation {
   aiAnalysis?: string;
   usuario_id?: string;
   createdAt: Date | string;
+  /** simulated = simulada; converted = convertida em pedido de crédito (expirada é calculada pela validade). */
+  status?: 'simulated' | 'converted';
+  clientId?: string | null;
+  productId?: string | null;
+  /** Código de verificação impresso na ficha de simulação. */
+  verificationCode?: string | null;
+  expiresAt?: Date | string | null;
+  /** Parâmetros e resultados completos da simulação (JSON). */
+  details?: string | null;
+  convertedCreditId?: string | null;
+  updatedAt?: Date | string | null;
 }
 
 export type AccountingAccount = 'cash' | 'bank' | 'portfolio' | 'receivable_interest' | 'receivable_late_interest' | 'revenue_interest' | 'revenue_late_interest' | 'equity' | 'provision' | 'expenses' | 'capital' | 'pdd';

@@ -36,6 +36,10 @@ export default defineConfig({
             },
         },
     },
+    // @noble/hashes só existe em ESM: tem de ser incluído no bundle CommonJS do processo principal.
+    ssr: {
+        noExternal: ['@noble/hashes'],
+    },
     resolve: {
         alias: {
             '@': path.resolve(__dirname, './src'),

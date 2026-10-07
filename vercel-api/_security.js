@@ -1,4 +1,7 @@
 import crypto from 'node:crypto';
+import { clientIp, recordSecurityEvent } from './_alertas.js';
+
+export { clientIp };
 
 const buckets = new Map();
 
@@ -8,25 +11,52 @@ export const safeEqual = (left, right) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
+/**
+ * Origens que podem chamar a API a partir de um navegador: as configuradas em TANGO_ALLOWED_ORIGINS e,
+ * por omissão, o próprio domínio da aplicação na Vercel, a aplicação desktop (origem "null" de file://)
+ * e o ambiente de desenvolvimento local. Qualquer outro site é recusado.
+ */
+export const allowedOrigins = (req) => {
+  const configured = String(process.env.TANGO_ALLOWED_ORIGINS || '').split(',').map(value => value.trim()).filter(Boolean);
+  const vercelHosts = [process.env.VERCEL_PROJECT_PRODUCTION_URL, process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL]
+    .filter(Boolean).map(host => `https://${host}`);
+  const host = String(req?.headers?.host || '').trim();
+  const sameHost = host && !/[\s/]/.test(host) ? [`https://${host}`] : [];
+  return new Set([
+    ...configured, ...vercelHosts, ...sameHost,
+    'https://tango-gestao-creditos.vercel.app',
+    'null',
+    'http://localhost:8081', 'http://localhost:8082', 'http://localhost:5173', 'http://localhost:4173', 'http://127.0.0.1:8081',
+  ]);
+};
+
+/** Cabeçalhos de segurança de todas as respostas da API (JSON, nunca incorporável numa página). */
+export const applySecurityHeaders = (res) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+  res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
+};
+
 export const applyCors = (req, res) => {
+  applySecurityHeaders(res);
   const origin = String(req.headers.origin || '');
-  const configured = String(process.env.TANGO_ALLOWED_ORIGINS || '')
-    .split(',')
-    .map(value => value.trim())
-    .filter(Boolean);
-  if (origin && (configured.length === 0 || configured.includes(origin))) {
+  const allowed = !origin || allowedOrigins(req).has(origin);
+  if (origin && allowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret, x-tenant-id');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('Referrer-Policy', 'no-referrer');
-  return !origin || configured.length === 0 || configured.includes(origin);
+  return allowed;
 };
 
 export const enforceRateLimit = (req, res, { limit, windowMs, scope }) => {
-  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  const ip = clientIp(req);
   const key = `${scope}:${ip}`;
   const now = Date.now();
   const previous = buckets.get(key);
@@ -53,7 +83,7 @@ export const enforceDistributedRateLimit = async (sql, req, res, { limit, window
   if (!Number.isSafeInteger(limit) || limit < 1 || !Number.isSafeInteger(windowMs) || windowMs < 1000) {
     throw new Error('Política de rate limit inválida.');
   }
-  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
+  const ip = clientIp(req);
   if (!['ip', 'subject'].includes(dimension) || dimension === 'subject' && !subject) {
     throw new Error('Dimensão de rate limit inválida.');
   }
@@ -76,6 +106,11 @@ export const enforceDistributedRateLimit = async (sql, req, res, { limit, window
   res.setHeader('RateLimit-Remaining', String(Math.max(0, limit - count)));
   res.setHeader('RateLimit-Reset', String(reset));
   if (count > limit) {
+    // Excesso de pedidos: possível ataque de negação de serviço ou força bruta. Fica registado.
+    await recordSecurityEvent(req, {
+      type: 'rate_limit_exceeded', severity: count > limit * 3 ? 'high' : 'medium', title: 'Excesso de pedidos à API',
+      details: `${count} pedidos em ${Math.round(windowMs / 1000)} s na rota ${scope} (limite ${limit}).`, subject: scope,
+    }, sql);
     res.setHeader('Retry-After', String(Math.max(1, reset - Math.floor(Date.now() / 1000))));
     res.status(429).json({ success: false, message: 'Demasiados pedidos. Tente novamente mais tarde.' });
     return false;

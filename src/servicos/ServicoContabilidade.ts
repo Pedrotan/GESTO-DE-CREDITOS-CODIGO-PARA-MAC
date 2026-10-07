@@ -1,3 +1,5 @@
+import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
+import { validateReceipt, type ExpenseReceipt } from '@/bibliotecas/comprovativo-despesa';
 import { RepositorioContabilidade } from '@/repositorios/RepositorioContabilidade';
 import { AccountingEntry } from '@/tipos/credito';
 import { calculateLedgerHash, toMinorUnits } from '@/bibliotecas/ledger-financeiro';
@@ -42,6 +44,11 @@ export class ServicoContabilidade {
         if (amountPrincipalMinor + amountInterestMinor + amountLateInterestMinor > amountTotalMinor) {
             throw new Error('Os componentes do lançamento excedem o total.');
         }
+        if (await ServicoFinanceiro.getPanicLock()) throw new Error('Movimentação financeira congelada.');
+        if ((await ServicoFinanceiro.getAccountingConfig()).cashGuard) {
+            const available=await ServicoFinanceiro.liquidBalancesMinor();
+            if (available[entry.credit as 'cash'|'bank'] < amountTotalMinor) throw new Error('Saldo insuficiente na conta de saída da despesa.');
+        }
         const unsignedEntry = {
             ...entry,
             id,
@@ -58,9 +65,14 @@ export class ServicoContabilidade {
             integrityHash: await calculateLedgerHash(unsignedEntry)
         };
 
+        const receipt=(entry as any).receipt as ExpenseReceipt|undefined;
+        let receiptDigest:string|undefined;
+        if(receipt){validateReceipt(receipt);receiptDigest=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(receipt.data)))).map(b=>b.toString(16).padStart(2,'0')).join('');}
         const timestampIso = timestamp.toISOString();
         await db.transaction([
             { ...RepositorioContabilidade.buildInsertStatement(newEntry), expectChanges: 1 },
+            ...(receipt ? [{sql:'INSERT INTO accounting_receipts (id,entryId,fileName,mime,data,digest,createdAt) VALUES (?,?,?,?,?,?,?)',
+                params:['receipt:'+id,id,receipt.name.slice(0,255),receipt.mime,receipt.data,receiptDigest,timestampIso],expectChanges:1}] : []),
             {
                 sql: `INSERT INTO ledger_transactions
                       (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor,
@@ -86,7 +98,7 @@ export class ServicoContabilidade {
                 sql: `INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata)
                       VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)`,
                 params: [crypto.randomUUID(), timestampIso, entry.usuario_id || null, entry.processedBy,
-                    `Despesa ${id} registada`, JSON.stringify({ accountingEntryId: id, amountTotalMinor })],
+                    `Despesa ${id} registada`, JSON.stringify({ accountingEntryId: id, amountTotalMinor, receiptDigest, category:(entry as any).category })],
                 expectChanges: 1
             }
         ]);

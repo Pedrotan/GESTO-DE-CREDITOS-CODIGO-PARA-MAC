@@ -1,282 +1,113 @@
-import { useState, useEffect } from 'react';
+import { useState, type ComponentType } from 'react';
+import { BarChart3, FileBarChart, GitBranch, Globe2, History, Info, Loader2, RefreshCw, ShieldCheck, Timer, UserCog } from 'lucide-react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
-import { useAuth } from '@/contextos/ContextoAutenticacao';
-import { useData } from '@/contextos/ContextoDados';
-import { formatCurrency } from '@/bibliotecas/formatters';
 import { Button } from '@/componentes/ui/button';
-import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
-import { Label } from '@/componentes/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/componentes/ui/card';
-import { ShieldCheck, Save, Info, AlertTriangle } from 'lucide-react';
-import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
-import { UserLimit } from '@/tipos/credito';
-import { Switch } from '@/componentes/ui/switch';
+import { AlertModal, type AlertModalType } from '@/componentes/ui/AlertModal';
+import { cn } from '@/bibliotecas/utils';
+import { chainLabel } from '@/bibliotecas/alcadas';
+import { useAlcadas } from '@/componentes/alcadas/useAlcadas';
+import { CartoesAlcadas, type LimitsTab } from '@/componentes/alcadas/CartoesAlcadas';
+import { AvisosAlcadas } from '@/componentes/alcadas/AvisosAlcadas';
+import { TabelaLimitesPerfil } from '@/componentes/alcadas/TabelaLimitesPerfil';
+import { CadeiaAprovacao } from '@/componentes/alcadas/CadeiaAprovacao';
+import { LimitesIndividuais } from '@/componentes/alcadas/LimitesIndividuais';
+import { LimitesGlobais } from '@/componentes/alcadas/LimitesGlobais';
+import { ConsumoLimites } from '@/componentes/alcadas/ConsumoLimites';
+import { ExcecoesTemporarias } from '@/componentes/alcadas/ExcecoesTemporarias';
+import { HistoricoLimites } from '@/componentes/alcadas/HistoricoLimites';
+import { BarraAlteracoes, ModalGuardarLimites } from '@/componentes/alcadas/GuardarAlteracoes';
+import { RelatoriosLimites } from '@/componentes/alcadas/RelatoriosLimites';
+
+// Limites de Transação (alçadas bancárias): limites por perfil e por tipo de operação, cadeia de aprovação
+// com dupla aprovação, limites individuais e globais, consumo em tempo real, exceções temporárias e histórico
+// de versões. A verificação real acontece nos serviços e no servidor; esta página mostra e gere.
+
+const TABS: Array<{ id: LimitsTab; label: string; icon: ComponentType<{ className?: string }> }> = [
+    { id: 'perfil', label: 'Limites por Perfil', icon: ShieldCheck },
+    { id: 'cadeia', label: 'Cadeia de Aprovação', icon: GitBranch },
+    { id: 'individuais', label: 'Limites Individuais', icon: UserCog },
+    { id: 'globais', label: 'Limites Globais', icon: Globe2 },
+    { id: 'consumo', label: 'Consumo', icon: BarChart3 },
+    { id: 'excecoes', label: 'Exceções Temporárias', icon: Timer },
+    { id: 'historico', label: 'Histórico', icon: History },
+];
 
 export default function UserLimits() {
-    const { user } = useAuth();
-    const { getUserLimit, updateUserLimit } = useData();
-
-    const [adminLimit, setAdminLimit] = useState<UserLimit>({
-        id: 'admin_default',
-        role: 'admin',
-        maxTransaction: 1000000,
-        dailyLimit: 5000000,
-        monthlyLimit: 20000000,
-        restrictionsEnabled: false,
-        updatedAt: new Date()
-    } as UserLimit);
-
-    const [managerLimit, setManagerLimit] = useState<UserLimit>({
-        id: 'manager_default',
-        role: 'manager',
-        maxTransaction: 500000,
-        dailyLimit: 2000000,
-        monthlyLimit: 10000000,
-        restrictionsEnabled: false,
-        updatedAt: new Date()
-    } as UserLimit);
-
-    const [loading, setLoading] = useState(true);
-
-    // Estados do Modal
-    const [modalOpen, setModalOpen] = useState(false);
-    const [modalConfig, setModalConfig] = useState<{
-        title: string;
-        description: string;
-        type: AlertModalType;
-    }>({
-        title: '',
-        description: '',
-        type: 'success'
-    });
-
-    useEffect(() => {
-        const loadLimits = async () => {
-            try {
-                const admin = await getUserLimit('admin');
-                const manager = await getUserLimit('manager');
-
-                // Fallbacks to prevent blank fields if DB is empty
-                setAdminLimit(admin || {
-                    id: 'admin_default',
-                    role: 'admin',
-                    maxTransaction: 1000000,
-                    dailyLimit: 5000000,
-                    monthlyLimit: 20000000,
-                    restrictionsEnabled: false,
-                    updatedAt: new Date()
-                } as UserLimit);
-
-                setManagerLimit(manager || {
-                    id: 'manager_default',
-                    role: 'manager',
-                    maxTransaction: 500000,
-                    dailyLimit: 2000000,
-                    monthlyLimit: 10000000,
-                    restrictionsEnabled: false,
-                    updatedAt: new Date()
-                } as UserLimit);
-            } catch (error) {
-                console.error("Erro ao carregar limites:", error);
-            } finally {
-                setLoading(false);
-            }
-        };
-        loadLimits();
-    }, [getUserLimit]);
-
-    const handleSave = async (role: 'admin' | 'manager', limit: UserLimit) => {
-        try {
-            await updateUserLimit(limit);
-            setModalConfig({
-                title: "Limites Atualizados",
-                description: `Os limites para o cargo de ${role === 'admin' ? 'Administrador' : 'Gestor'} foram guardados com sucesso.`,
-                type: 'success'
-            });
-            setModalOpen(true);
-        } catch (error) {
-            setModalConfig({
-                title: "Erro ao Salvar",
-                description: "Não foi possível atualizar os limites.",
-                type: 'error'
-            });
-            setModalOpen(true);
-        }
-    };
-
-    if (loading) return null;
+    const state = useAlcadas();
+    const [tab, setTab] = useState<LimitsTab>('perfil');
+    const [saving, setSaving] = useState(false);
+    const [reports, setReports] = useState(false);
+    const [notice, setNotice] = useState<{ title: string; description: string; type: AlertModalType } | null>(null);
+    const editTabs: LimitsTab[] = ['perfil', 'cadeia', 'individuais', 'globais'];
 
     return (
-        <MainLayout title="Limites de Transação" subtitle="Controle de tetos financeiros">
+        <MainLayout title="Limites de Transação" subtitle="Alçadas, cadeia de aprovação e consumo">
             <div className="space-y-6">
-                <div>
-                    <h1 className="text-3xl font-bold tracking-tight text-foreground">Limites de Transação</h1>
-                    <p className="text-muted-foreground">Defina os tetos financeiros para cada nível de acesso no sistema.</p>
-                </div>
-
-                <div className="flex items-center gap-3 p-4 rounded-xl bg-primary/5 text-primary text-sm border border-primary/10">
-                    <Info className="h-5 w-5 shrink-0" />
-                    <p>As transações que excederem o <strong>"Limite p/ Transação"</strong> serão enviadas automaticamente para a fila de aprovações.</p>
-                </div>
-
-                <div className="grid gap-6 md:grid-cols-2">
-                    {/* Admin Limits */}
-                    <Card className="glass overflow-hidden border-blue-200/50 shadow-blue-500/10 flex flex-col h-full animate-fade-in">
-                        <CardHeader className="bg-gradient-to-br from-blue-500/10 to-transparent border-b border-blue-100/30">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-500/20">
-                                        <ShieldCheck className="h-7 w-7" />
-                                    </div>
-                                    <div>
-                                        <CardTitle className="text-blue-900 text-xl">Administradores</CardTitle>
-                                        <CardDescription className="text-blue-700/60 font-medium">Limites para cargos administrativos</CardDescription>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2 bg-white/40 backdrop-blur-md p-2 rounded-xl border border-blue-200/50 shadow-sm">
-                                    <Label htmlFor="admin-toggle" className="text-[10px] font-black text-blue-800 cursor-pointer tracking-wider px-1">
-                                        {adminLimit?.restrictionsEnabled ? 'ATIVADO' : 'DESATIVADO'}
-                                    </Label>
-                                    <Switch
-                                        id="admin-toggle"
-                                        checked={adminLimit?.restrictionsEnabled || false}
-                                        onCheckedChange={(val) => setAdminLimit(prev => prev ? { ...prev, restrictionsEnabled: val } : null)}
-                                        className="data-[state=checked]:bg-blue-600"
-                                    />
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="pt-6 flex flex-col flex-1 space-y-4">
-                            <div className="space-y-2 opacity-100 data-[disabled=true]:opacity-50 transition-opacity" data-disabled={!adminLimit.restrictionsEnabled}>
-                                <Label htmlFor="admin-max" className="font-semibold text-blue-900/70">Limite por Operação</Label>
-                                <CurrencyInput
-                                    id="admin-max"
-                                    disabled={!adminLimit.restrictionsEnabled}
-                                    value={adminLimit.maxTransaction}
-                                    onValueChange={(val) => setAdminLimit({ ...adminLimit, maxTransaction: val })}
-                                />
-                                <p className="text-[10px] text-muted-foreground italic">Valor máximo permitido para um único crédito sem aprovação adicional.</p>
-                            </div>
-                            <div className="space-y-2 opacity-100 data-[disabled=true]:opacity-50 transition-opacity" data-disabled={!adminLimit.restrictionsEnabled}>
-                                <Label htmlFor="admin-daily" className="font-semibold text-blue-900/70">Volume Máximo Diário</Label>
-                                <CurrencyInput
-                                    id="admin-daily"
-                                    disabled={!adminLimit.restrictionsEnabled}
-                                    value={adminLimit.dailyLimit}
-                                    onValueChange={(val) => setAdminLimit({ ...adminLimit, dailyLimit: val })}
-                                />
-                                <p className="text-[10px] text-muted-foreground italic">Limite acumulado de créditos libertados em 24 horas.</p>
-                            </div>
-                            <div className="space-y-2 opacity-100 data-[disabled=true]:opacity-50 transition-opacity" data-disabled={!adminLimit.restrictionsEnabled}>
-                                <Label htmlFor="admin-monthly" className="font-semibold text-blue-900/70">Volume Máximo Mensal</Label>
-                                <CurrencyInput
-                                    id="admin-monthly"
-                                    disabled={!adminLimit.restrictionsEnabled}
-                                    value={adminLimit.monthlyLimit}
-                                    onValueChange={(val) => setAdminLimit({ ...adminLimit, monthlyLimit: val })}
-                                />
-                            </div>
-                            <div className="mt-auto pt-4">
-                                <Button
-                                    className="w-full gap-2 bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200"
-                                    onClick={() => handleSave('admin', adminLimit)}
-                                >
-                                    <Save className="h-4 w-4" />
-                                    Guardar Configurações Administrativas
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-
-                    {/* Manager Limits */}
-                    <Card className="glass overflow-hidden border-amber-200/50 shadow-amber-500/10 flex flex-col h-full animate-fade-in [animation-delay:200ms]">
-                        <CardHeader className="bg-gradient-to-br from-amber-500/10 to-transparent border-b border-amber-100/30">
-                            <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-3">
-                                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-600 text-white shadow-lg shadow-amber-500/20">
-                                        <ShieldCheck className="h-7 w-7" />
-                                    </div>
-                                    <div>
-                                        <CardTitle className="text-amber-900 text-xl">Gestores de Crédito</CardTitle>
-                                        <CardDescription className="text-amber-700/60 font-medium">Restrições para operações de balcão</CardDescription>
-                                    </div>
-                                </div>
-                                <div className="flex items-center gap-2 bg-white/40 backdrop-blur-md p-2 rounded-xl border border-amber-200/50 shadow-sm">
-                                    <Label htmlFor="manager-toggle" className="text-[10px] font-black text-amber-800 cursor-pointer tracking-wider px-1">
-                                        {managerLimit?.restrictionsEnabled ? 'ATIVADO' : 'DESATIVADO'}
-                                    </Label>
-                                    <Switch
-                                        id="manager-toggle"
-                                        checked={managerLimit?.restrictionsEnabled || false}
-                                        onCheckedChange={(val) => setManagerLimit(prev => prev ? { ...prev, restrictionsEnabled: val } : null)}
-                                        className="data-[state=checked]:bg-amber-600"
-                                    />
-                                </div>
-                            </div>
-                        </CardHeader>
-                        <CardContent className="pt-6 flex flex-col flex-1 space-y-4">
-                            <div className="space-y-2 opacity-100 data-[disabled=true]:opacity-50 transition-opacity" data-disabled={!managerLimit.restrictionsEnabled}>
-                                <Label htmlFor="manager-max" className="font-semibold text-amber-900/70">Limite por Operação</Label>
-                                <CurrencyInput
-                                    id="manager-max"
-                                    disabled={!managerLimit.restrictionsEnabled}
-                                    value={managerLimit.maxTransaction}
-                                    onValueChange={(val) => setManagerLimit({ ...managerLimit, maxTransaction: val })}
-                                />
-                                <p className="text-[10px] text-muted-foreground italic">Acima deste valor, o crédito ficará retido para aprovação admin.</p>
-                            </div>
-                            <div className="space-y-2 opacity-100 data-[disabled=true]:opacity-50 transition-opacity" data-disabled={!managerLimit.restrictionsEnabled}>
-                                <Label htmlFor="manager-daily" className="font-semibold text-amber-900/70">Volume Máximo Diário</Label>
-                                <CurrencyInput
-                                    id="manager-daily"
-                                    disabled={!managerLimit.restrictionsEnabled}
-                                    value={managerLimit.dailyLimit}
-                                    onValueChange={(val) => setManagerLimit({ ...managerLimit, dailyLimit: val })}
-                                />
-                                <p className="text-[10px] text-muted-foreground italic">Limite acumulado de créditos libertados por balcão em 24 horas.</p>
-                            </div>
-                            <div className="space-y-2 opacity-100 data-[disabled=true]:opacity-50 transition-opacity" data-disabled={!managerLimit.restrictionsEnabled}>
-                                <Label htmlFor="manager-monthly" className="font-semibold text-amber-900/70">Volume Máximo Mensal</Label>
-                                <CurrencyInput
-                                    id="manager-monthly"
-                                    disabled={!managerLimit.restrictionsEnabled}
-                                    value={managerLimit.monthlyLimit}
-                                    onValueChange={(val) => setManagerLimit({ ...managerLimit, monthlyLimit: val })}
-                                />
-                            </div>
-                            <div className="mt-auto pt-4">
-                                <Button
-                                    className="w-full gap-2 bg-amber-600 hover:bg-amber-700 text-white shadow-lg shadow-amber-200"
-                                    onClick={() => handleSave('manager', managerLimit)}
-                                >
-                                    <Save className="h-4 w-4" />
-                                    Actualizar Limites Gestor
-                                </Button>
-                            </div>
-                        </CardContent>
-                    </Card>
-                </div>
-
-                <div className="p-4 rounded-xl border border-warning/20 bg-warning/5 flex gap-3">
-                    <AlertTriangle className="h-6 w-6 text-warning shrink-0" />
-                    <div className="space-y-1">
-                        <p className="text-sm font-bold text-warning-foreground">Atenção Crítica</p>
-                        <p className="text-xs text-muted-foreground">Alterar estes limites afeta imediatamente a capacidade operativa de todos os utilizadores do respetivo cargo. Reduzir limites de volume pode travar operações legítimas se o teto diário/mensal já tiver sido atingido.</p>
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h1 className="text-3xl font-bold tracking-tight text-foreground">Limites de Transação</h1>
+                        <p className="text-muted-foreground">Alçadas por perfil e por operação, como num banco: quem pode aprovar o quê, até quanto, e o que sobe na cadeia.</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => setReports(true)} disabled={!state.data}><FileBarChart className="h-4 w-4" /> Relatórios</Button>
+                        <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void state.reload({ silent: false })} disabled={state.loading}>
+                            {state.loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Atualizar
+                        </Button>
                     </div>
                 </div>
+
+                {state.policy && (
+                    <div className="flex items-start gap-3 rounded-xl border border-primary/10 bg-primary/5 p-4 text-sm text-primary">
+                        <Info className="mt-0.5 h-5 w-5 shrink-0" />
+                        <p>Cada operação é verificada no servidor, na mesma transação, contra a alçada de quem a faz. Acima dela vai para a fila de <strong>Aprovações</strong> com o motivo e o nível exigido.
+                            Cadeia em vigor: <strong>{chainLabel(state.policy)}</strong>. Sem limite definido, a operação fica bloqueada.</p>
+                    </div>
+                )}
+                {!state.canEdit && state.data && <p className="rounded-lg border bg-muted/40 p-3 text-sm text-muted-foreground">Pode consultar os limites; alterá-los exige a permissão «Limites › Editar».</p>}
+                {state.error && <p className="rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{state.error}</p>}
+
+                <CartoesAlcadas state={state} onSelect={setTab} />
+                <AvisosAlcadas state={state} onOpenExceptions={() => setTab('excecoes')} />
+
+                <div className="-mx-1 overflow-x-auto px-1">
+                    <div role="tablist" aria-label="Secções dos limites" className="inline-flex min-w-full gap-1 rounded-xl border bg-card p-1 shadow-sm">
+                        {TABS.map(item => {
+                            const Icon = item.icon;
+                            const dirtyHere = state.dirty && editTabs.includes(item.id) && state.changes.some(change => ({ perfil: 'profile', cadeia: 'chain', individuais: 'override', globais: 'global' } as Record<string, string>)[item.id] === change.kind
+                                || (item.id === 'cadeia' && change.kind === 'risk'));
+                            return (
+                                <button key={item.id} type="button" role="tab" aria-selected={tab === item.id} onClick={() => setTab(item.id)}
+                                    className={cn('relative flex shrink-0 items-center gap-2 whitespace-nowrap rounded-lg px-3 py-2 text-sm font-semibold transition-colors',
+                                        tab === item.id ? 'bg-primary text-primary-foreground shadow' : 'text-muted-foreground hover:bg-muted hover:text-foreground')}>
+                                    <Icon className="h-4 w-4" /> {item.label}
+                                    {dirtyHere && <span className="h-2 w-2 rounded-full bg-sky-400" title="Alterações por guardar" />}
+                                </button>
+                            );
+                        })}
+                    </div>
+                </div>
+
+                {!state.draft || !state.policy ? (
+                    <div className="flex h-60 items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-5 w-5 animate-spin" /> A carregar limites…</div>
+                ) : (
+                    <div role="tabpanel" className="animate-fade-in">
+                        {tab === 'perfil' && <TabelaLimitesPerfil state={state} />}
+                        {tab === 'cadeia' && <CadeiaAprovacao state={state} />}
+                        {tab === 'individuais' && <LimitesIndividuais state={state} />}
+                        {tab === 'globais' && <LimitesGlobais state={state} />}
+                        {tab === 'consumo' && <ConsumoLimites state={state} />}
+                        {tab === 'excecoes' && <ExcecoesTemporarias state={state} />}
+                        {tab === 'historico' && <HistoricoLimites state={state} />}
+                    </div>
+                )}
+
+                <BarraAlteracoes state={state} onSave={() => setSaving(true)} />
             </div>
 
-            <AlertModal
-                isOpen={modalOpen}
-                onClose={() => setModalOpen(false)}
-                title={modalConfig.title}
-                description={modalConfig.description}
-                type={modalConfig.type}
-            />
+            <ModalGuardarLimites state={state} open={saving} onClose={() => setSaving(false)}
+                onSaved={message => setNotice({ title: message.title, description: message.description, type: message.pending ? 'warning' : 'success' })} />
+            <RelatoriosLimites state={state} open={reports} onClose={() => setReports(false)} />
+            <AlertModal isOpen={!!notice} onClose={() => setNotice(null)} title={notice?.title || ''} description={notice?.description || ''} type={notice?.type || 'success'} />
         </MainLayout>
     );
 }
-
-
-
-

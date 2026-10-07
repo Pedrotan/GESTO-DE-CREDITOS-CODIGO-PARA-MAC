@@ -12,6 +12,22 @@ import { useToast } from '@/ganchos/usar-toast';
 const payableStatuses = new Set<Credit['status']>(['active', 'overdue', 'defaulted', 'renegotiated']);
 const money = (minor: number) => formatCurrency(minor / 100);
 
+/**
+ * Prestações com a mora acumulada até hoje: a mora ainda não lançada é somada à de cada prestação, para o valor
+ * a pagar já a incluir (o serviço lança-a no mesmo pagamento).
+ */
+const loadScheduleWithLateInterest = async (creditId: string): Promise<InstallmentBalance[]> => {
+    const [rows, mora] = await Promise.all([
+        ServicoFinanceiro.getCreditInstallments(creditId),
+        ServicoFinanceiro.getLateInterestSummary(creditId).catch(() => null),
+    ]);
+    if (!mora) return rows;
+    return rows.map(item => {
+        const accrued = mora.installments.find(entry => entry.id === item.id)?.accruedMinor ?? 0;
+        return { ...item, lateInterestMinor: Math.max(item.lateInterestMinor, accrued) };
+    });
+};
+
 function InstallmentRows({ schedule }: { schedule: InstallmentBalance[] }) {
     const firstOpen = schedule.findIndex(item => item.status !== 'cancelled' &&
         item.principalMinor + item.interestMinor + item.lateInterestMinor >
@@ -20,7 +36,7 @@ function InstallmentRows({ schedule }: { schedule: InstallmentBalance[] }) {
         <table className="w-full min-w-[620px] text-sm">
             <thead className="bg-muted/50"><tr>
                 <th className="p-2 text-left">Parcela</th><th className="p-2 text-left">Vencimento</th>
-                <th className="p-2 text-right">Valor</th><th className="p-2 text-right">Em aberto</th>
+                <th className="p-2 text-right">Valor</th><th className="p-2 text-right">Mora</th><th className="p-2 text-right">Em aberto</th>
                 <th className="p-2 text-left">Estado / pagamento</th>
             </tr></thead>
             <tbody>{schedule.map((item, index) => {
@@ -31,7 +47,10 @@ function InstallmentRows({ schedule }: { schedule: InstallmentBalance[] }) {
                 return <tr key={item.id} className="border-t">
                     <td className="p-2 font-medium">{item.installmentNumber}/{schedule.length}</td>
                     <td className="p-2">{formatDate(item.dueDate)}</td>
-                    <td className="p-2 text-right">{money(total)}</td>
+                    <td className="p-2 text-right">{money(item.principalMinor + item.interestMinor)}</td>
+                    <td className={`p-2 text-right ${item.lateInterestMinor > item.paidLateInterestMinor ? 'font-semibold text-destructive' : 'text-muted-foreground'}`}>
+                        {item.lateInterestMinor > 0 ? money(item.lateInterestMinor) : '—'}
+                    </td>
                     <td className="p-2 text-right">{money(Math.max(0, remaining))}</td>
                     <td className="p-2">
                         <Badge variant={paid ? 'success' : overdue ? 'destructive' : index === firstOpen ? 'warning' : 'outline'}>
@@ -57,13 +76,12 @@ function ActiveCredit({ credit }: { credit: Credit }) {
     const [method, setMethod] = useState<'cash' | 'transfer' | 'reference'>('cash');
     const [saving, setSaving] = useState(false);
     const refresh = async () => {
-        const rows = await ServicoFinanceiro.getCreditInstallments(credit.id);
-        setSchedule(rows);
+        setSchedule(await loadScheduleWithLateInterest(credit.id));
     };
     useEffect(() => {
         let cancelled = false;
         setLoading(true);
-        ServicoFinanceiro.getCreditInstallments(credit.id)
+        loadScheduleWithLateInterest(credit.id)
             .then(rows => { if (!cancelled) { setSchedule(rows); setError(''); } })
             .catch(reason => { if (!cancelled) setError(reason instanceof Error ? reason.message : 'Falha ao ler prestações.'); })
             .finally(() => { if (!cancelled) setLoading(false); });
@@ -80,9 +98,10 @@ function ActiveCredit({ credit }: { credit: Credit }) {
         if (!planned || !pendingCount || saving) return;
         setSaving(true);
         try {
-            const fresh = planConsecutiveInstallments(await ServicoFinanceiro.getCreditInstallments(credit.id), pendingCount);
+            const fresh = planConsecutiveInstallments(await loadScheduleWithLateInterest(credit.id), pendingCount);
             if (fresh.amountMinor !== planned.amountMinor || fresh.selected.some((item, index) =>
                 item.id !== planned.selected[index].id || item.version !== planned.selected[index].version)) {
+                await refresh();
                 throw new Error('O cronograma foi alterado. Atualize e tente novamente.');
             }
             await addPayment({

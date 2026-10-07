@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import jsPDF from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
@@ -17,6 +17,7 @@ import { useToast } from '@/ganchos/usar-toast';
 import { cn } from '@/bibliotecas/utils';
 import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from '@/bibliotecas/pdf';
 import { format } from 'date-fns';
+import { ServicoAlcadas } from '@/servicos/ServicoAlcadas';
 
 type CategoriaFiltro = 'TODOS' | 'COMUM' | 'APOSENTADO' | 'ESTRANGEIRO';
 
@@ -93,12 +94,15 @@ export default function Contactos() {
     const pctTelefone = totalFiltrados > 0 ? Math.round((comTelefone / totalFiltrados) * 100) : 0;
 
     /** Exporta lista de contactos em PDF profissional */
-    const descarregarPDF = (apenasFiltrados: boolean = false) => {
+    const descarregarPDF = async (apenasFiltrados: boolean = false) => {
         const dados = apenasFiltrados ? lista : clients;
         if (dados.length === 0) {
             toast({ title: 'Nenhum contacto', description: 'Não há contactos para exportar.' });
             return;
         }
+        // Alçada de exportação de dados de clientes (registos por exportação e exportações por dia).
+        try { await ServicoAlcadas.authorizeExport(user?.id, dados.length, 'agenda de contactos'); }
+        catch (error: any) { toast({ title: 'Exportação acima do limite', description: error?.message, variant: 'destructive' }); return; }
 
         const config = getCompanySettings(companySettings);
         const generatedBy = user?.name || 'Sistema';

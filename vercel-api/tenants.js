@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
+import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
 
@@ -91,7 +92,10 @@ const normalizeSecret = (value) => String(value ?? '')
   .trim();
 
 export default async function handler(req, res) {
-  if (!applyCors(req, res)) return send(res, 403, { success: false, message: 'Origem não autorizada.' });
+  if (!applyCors(req, res)) {
+    await recordRejectedOrigin(req);
+    return send(res, 403, { success: false, message: 'Origem não autorizada.' });
+  }
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
   if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
   
@@ -116,6 +120,21 @@ export default async function handler(req, res) {
     return send(res, 401, { success: false, message: 'Chave mestra inválida. Use o valor de TANGO_MASTER_SECRET configurado no projeto na Vercel.' });
   }
 
+  const client = neon(databaseUrl);
+  const sql = (text, params) => client.query(text, params);
+  try {
+    // Limite de pedidos e bloqueio por IP: impede abusos no painel
+    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 60, windowMs: 60_000, scope: 'tenants' })) return;
+    const remaining = await lockoutRemaining(sql, req, { scope: 'master' });
+    if (remaining > 0) {
+      res.setHeader('Retry-After', String(remaining));
+      return send(res, 429, { success: false, message: `Acesso bloqueado por tentativas falhadas. Tente novamente em ${Math.ceil(remaining / 60)} minuto(s).` });
+    }
+  } catch (error) {
+    console.error('[tenants][rate-limit]', error);
+    return send(res, 503, { success: false, message: 'O controlo de acesso está temporariamente indisponível.' });
+  }
+
   const body = req.body || {};
   const action = String(body.action || '').trim();
   const rawTenantId = String(body.tenantId || '').trim();
@@ -126,14 +145,6 @@ export default async function handler(req, res) {
     return send(res, 400, { success: false, message: 'Data de expiração inválida.' });
   }
 
-  const client = neon(databaseUrl);
-  const sql = (text, params) => client.query(text, params);
-  try {
-    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 60, windowMs: 60_000, scope: 'tenants' })) return;
-  } catch (error) {
-    console.error('[tenants][rate-limit]', error);
-    return send(res, 503, { success: false, message: 'O controlo de acesso está temporariamente indisponível.' });
-  }
 
   try {
     await ensureTable(sql);
@@ -287,6 +298,22 @@ export default async function handler(req, res) {
         await ensureUsageTable(sql);
         await sql('DELETE FROM tango_usage_reports WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       }
+      return send(res, 200, { success: true });
+    }
+
+    // Alertas de segurança do servidor (tentativas de intrusão, força bruta, origens recusadas).
+    if (action === 'security-events') {
+      const { ensureSecurityTables } = await import('./_alertas.js');
+      await ensureSecurityTables(sql);
+      const rows = await sql(`SELECT id, created_at, last_seen, type, severity, title, details, ip, path, subject, count, acknowledged
+        FROM security_events ORDER BY last_seen DESC LIMIT 300`);
+      const open = await sql(`SELECT severity, COUNT(*)::int AS total FROM security_events WHERE acknowledged = FALSE GROUP BY severity`);
+      return send(res, 200, { success: true, events: rows, open: Object.fromEntries(open.map(row => [row.severity, row.total])) });
+    }
+    if (action === 'security-events-ack') {
+      const { ensureSecurityTables } = await import('./_alertas.js');
+      await ensureSecurityTables(sql);
+      await sql('UPDATE security_events SET acknowledged = TRUE WHERE acknowledged = FALSE');
       return send(res, 200, { success: true });
     }
 

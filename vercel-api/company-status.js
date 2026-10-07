@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
+import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { normalizeNif } from './_pedidos-cadastro.js';
 
 // Indica se um NIF tem empresa registada no Tango Master, sem revelar códigos de acesso.
@@ -13,7 +14,10 @@ const send = (res, status, body) => {
 };
 
 export default async function handler(req, res) {
-  if (!applyCors(req, res)) return send(res, 403, { success: false, message: 'Origem não autorizada.' });
+  if (!applyCors(req, res)) {
+    await recordRejectedOrigin(req);
+    return send(res, 403, { success: false, message: 'Origem não autorizada.' });
+  }
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
   if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
   if (!process.env.DATABASE_URL) {

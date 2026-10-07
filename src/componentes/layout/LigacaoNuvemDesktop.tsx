@@ -128,7 +128,7 @@ export function LigacaoNuvemDesktop() {
                 description: result?.state === 'error'
                     ? `${result.message || 'Erro de sincronização.'} Vai tentar de novo automaticamente.`
                     : result
-                        ? `${result.pushed || 0} alterações enviadas e ${result.pulled || 0} recebidas. A partir de agora é automática.`
+                        ? `${result.pushed || 0} alterações enviadas e ${result.pulled || 0} recebidas.${result.skipped ? ` ${result.skipped} alterações antigas, cifradas com uma chave anterior, foram ignoradas.` : ''} A partir de agora é automática.`
                         : 'A sincronização continua em segundo plano e passa a ser automática.',
                 variant: result?.state === 'error' ? 'destructive' : undefined,
             });

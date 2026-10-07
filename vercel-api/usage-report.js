@@ -1,5 +1,6 @@
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
+import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { authorizeTenant } from './_autorizacao-empresa.js';
 import { ensureUsageTable, sanitizeUsageReport } from './_uso-empresas.js';
 
@@ -14,7 +15,10 @@ const send = (res, status, body) => {
 };
 
 export default async function handler(req, res) {
-  if (!applyCors(req, res)) return send(res, 403, { success: false, message: 'Origem não autorizada.' });
+  if (!applyCors(req, res)) {
+    await recordRejectedOrigin(req);
+    return send(res, 403, { success: false, message: 'Origem não autorizada.' });
+  }
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
   if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
   const databaseUrl = process.env.DATABASE_URL;
@@ -36,7 +40,7 @@ export default async function handler(req, res) {
   try {
     if (!await enforceDistributedRateLimit(sql, req, res, { limit: 30, windowMs: 60 * 60_000, scope: 'usage_report' })) return;
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
-    const auth = await authorizeTenant(sql, tenantId, req.headers['x-sync-passkey'] || bearer);
+    const auth = await authorizeTenant(sql, tenantId, req.headers['x-sync-passkey'] || bearer, req);
     if (!auth.ok) return send(res, auth.status, { success: false, message: auth.message });
 
     await ensureUsageTable(sql);

@@ -1,10 +1,10 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import jsPDF from '@/bibliotecas/pdf-documento';
-import autoTable from 'jspdf-autotable';
+import autoTable from '@/bibliotecas/pdf-tabela';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { formatDateSafe } from '@/bibliotecas/utils';
-import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, BRAND_SILVER, resolveBrandPrimary, resolveBrandDark } from '@/bibliotecas/pdf';
+import { applyBranding, fitPdfText, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, BRAND_SILVER, resolveBrandPrimary, resolveBrandDark } from '@/bibliotecas/pdf';
 import { cn } from '../bibliotecas/utils';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/componentes/ui/card';
 import {
@@ -709,15 +709,14 @@ export default function Dashboard() {
 
       // Rótulo
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.2);
       doc.setTextColor(isProfitCard ? primary[0] : 100, isProfitCard ? primary[1] : 116, isProfitCard ? primary[2] : 139);
-      doc.text(label.toUpperCase(), x + 2.5, cardY + 5.2);
+      doc.text(fitPdfText(doc, label.toUpperCase(), cardWidth - 4, 6.2, 4.8), x + 2.5, cardY + 5.2);
 
       // Valor
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(cardWidth < 36 ? 6.5 : 7.2);
       doc.setTextColor(isProfitCard ? primary[0] : dark[0], isProfitCard ? primary[1] : dark[1], isProfitCard ? primary[2] : dark[2]);
-      doc.text(doc.splitTextToSize(value, cardWidth - 4), x + 2.5, cardY + 10.5);
+      // O valor fica numa só linha dentro do cartão (letra reduzida se o montante for muito grande).
+      doc.text(fitPdfText(doc, value, cardWidth - 4, cardWidth < 36 ? 6.5 : 7.2, 5), x + 2.5, cardY + 10.5);
     });
 
     const detailHead = includeProfit
@@ -998,14 +997,13 @@ export default function Dashboard() {
       doc.rect(x + 1.8, cardY, cardWidth - 3.6, 1.2, 'F');
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(6.2);
       doc.setTextColor(isProfitCard ? primary[0] : 100, isProfitCard ? primary[1] : 116, isProfitCard ? primary[2] : 139);
-      doc.text(label.toUpperCase(), x + 2.5, cardY + 5.2);
+      doc.text(fitPdfText(doc, label.toUpperCase(), cardWidth - 4, 6.2, 4.8), x + 2.5, cardY + 5.2);
 
       doc.setFont('helvetica', 'bold');
-      doc.setFontSize(cardWidth < 36 ? 6.5 : 7.2);
       doc.setTextColor(isProfitCard ? primary[0] : dark[0], isProfitCard ? primary[1] : dark[1], isProfitCard ? primary[2] : dark[2]);
-      doc.text(doc.splitTextToSize(value, cardWidth - 4), x + 2.5, cardY + 10.5);
+      // O valor fica numa só linha dentro do cartão (letra reduzida se o montante for muito grande).
+      doc.text(fitPdfText(doc, value, cardWidth - 4, cardWidth < 36 ? 6.5 : 7.2, 5), x + 2.5, cardY + 10.5);
     });
 
     autoTable(doc, {
@@ -1459,14 +1457,12 @@ export default function Dashboard() {
         doc.roundedRect(x, kpiY, cardWidth, cardHeight, 1.5, 1.5, 'FD');
 
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(6.5);
         doc.setTextColor(100, 116, 139);
-        doc.text(kpi.label, x + 3.5, kpiY + 5);
+        doc.text(fitPdfText(doc, kpi.label, cardWidth - 6, 6.5, 5), x + 3.5, kpiY + 5);
 
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(8.5);
         doc.setTextColor(kpi.color[0], kpi.color[1], kpi.color[2]);
-        doc.text(kpi.value, x + 3.5, kpiY + 12);
+        doc.text(fitPdfText(doc, kpi.value, cardWidth - 6, 8.5, 5.5), x + 3.5, kpiY + 12);
       });
 
       // Tabela 1: Balanço Consolidado do Período
@@ -3636,7 +3632,7 @@ export default function Dashboard() {
                               </TableCell>
                               <TableCell className="text-xs whitespace-nowrap">
                                 <div className="font-bold text-slate-800 dark:text-slate-100">{credit?.id || payment.creditId}</div>
-                                <div className="text-[11px] text-muted-foreground">{credit ? `Principal: ${formatCurrency(credit.principalAmount)}` : 'Contrato não encontrado'}</div>
+                                <div className="text-[11px] text-muted-foreground">{credit ? `Capital: ${formatCurrency(credit.principalAmount)}` : 'Contrato não encontrado'}</div>
                               </TableCell>
                               <TableCell className="text-xs whitespace-nowrap">
                                 <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground border">

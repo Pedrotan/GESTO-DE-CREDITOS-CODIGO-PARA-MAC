@@ -1,3 +1,4 @@
+import { KzIcon } from '@/componentes/ui/KzIcon';
 import React, { useState, useMemo, useCallback } from 'react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Button } from '@/componentes/ui/button';
@@ -45,7 +46,6 @@ import {
   ChevronDown,
   ChevronUp,
   TrendingUp,
-  DollarSign,
   Users,
   Eye
 } from 'lucide-react';
@@ -581,7 +581,7 @@ export default function Fornecedores() {
                 >
                   <Eye className="h-3.5 w-3.5" />
                 </Button>
-                <DollarSign className="h-4 w-4 text-emerald-500" />
+                <KzIcon className="h-4 w-4 text-emerald-500" />
               </div>
             </CardHeader>
             <CardContent>

@@ -263,19 +263,6 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
                                         <span className="font-bold text-destructive">{formatCurrency(totalDebt)}</span>
                                     </div>
                                 </div>
-                                {canGrantRemaining && onGrantRemaining && (
-                                    <Button
-                                        onClick={() => {
-                                            onOpenChange(false);
-                                            onGrantRemaining(client);
-                                        }}
-                                        className="w-full mt-3 gap-2 bg-success text-white hover:bg-success/90 font-bold"
-                                        size="sm"
-                                    >
-                                        <CreditCard className="h-4 w-4" />
-                                        Conceder Restante do Valor
-                                    </Button>
-                                )}
                             </div>
                         </div>
 

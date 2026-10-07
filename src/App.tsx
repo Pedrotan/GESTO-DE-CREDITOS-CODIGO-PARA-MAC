@@ -1,4 +1,5 @@
-import { Suspense, lazy, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
+import { isChunkLoadError, lazyWithReload, reloadForNewVersion } from "@/bibliotecas/carregamento-modulos";
 import { TooltipProvider } from "@/componentes/ui/tooltip";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import { useData } from "@/contextos/ContextoDados";
@@ -16,38 +17,41 @@ import Entrar from "./paginas/Entrar";
 import Utilizadores from "./paginas/Utilizadores";
 
 // --- Lazy Loading Routes for Performance ---
-const Inicio = lazy(() => import("./paginas/Inicio"));
-const Clientes = lazy(() => import("./paginas/Clientes"));
-const Mercado = lazy(() => import("./paginas/Mercado"));
-const PlanoMensal = lazy(() => import("./paginas/PlanoMensal"));
-const Contactos = lazy(() => import("./paginas/Contactos"));
-const Despesas = lazy(() => import("./paginas/Despesas"));
-const Sessoes = lazy(() => import("./paginas/Sessoes"));
-const Creditos = lazy(() => import("./paginas/Creditos"));
-const Pagamentos = lazy(() => import("./paginas/Pagamentos"));
-const Contratos = lazy(() => import("./paginas/Contratos"));
-const Notificacoes = lazy(() => import("./paginas/Notificacoes"));
-const Definicoes = lazy(() => import("./paginas/Definicoes"));
-const Relatorios = lazy(() => import("./paginas/Relatorios"));
-const LogsAuditoria = lazy(() => import("./paginas/LogsAuditoria"));
-const Guia = lazy(() => import("./paginas/Guia"));
-const PortaisPagamento = lazy(() => import("./paginas/PortaisPagamento"));
-const EsqueciSenha = lazy(() => import("./paginas/EsqueciSenha"));
-const Aprovacoes = lazy(() => import("./paginas/Aprovacoes"));
-const LimitesUtilizador = lazy(() => import("./paginas/LimitesUtilizador"));
-const RelatoriosAtividadeUtilizador = lazy(() => import("./paginas/RelatoriosAtividadeUtilizador"));
-const Chat = lazy(() => import("./paginas/Chat"));
-const RelatoriosFiscais = lazy(() => import("./paginas/RelatoriosFiscais"));
-const Contabilidade = lazy(() => import("./paginas/Contabilidade"));
-const CentralWhatsApp = lazy(() => import("./paginas/CentralWhatsApp"));
-const Garantias = lazy(() => import("./paginas/Garantias"));
-const Contencioso = lazy(() => import("./paginas/Contencioso"));
-const Fornecedores = lazy(() => import("./paginas/Fornecedores"));
-const Scoring = lazy(() => import("./paginas/Scoring"));
-const SimuladorCredito = lazy(() => import("./paginas/SimuladorCredito"));
-const CartasTransferencia = lazy(() => import("./paginas/CartasTransferencia").then(m => ({ default: m.CartasTransferencia })));
-const LixeiraPage = lazy(() => import("./paginas/Lixeira"));
-const NaoEncontrado = lazy(() => import("./paginas/NaoEncontrado"));
+const Inicio = lazyWithReload(() => import("./paginas/Inicio"));
+const Clientes = lazyWithReload(() => import("./paginas/Clientes"));
+const Mercado = lazyWithReload(() => import("./paginas/Mercado"));
+const PlanoMensal = lazyWithReload(() => import("./paginas/PlanoMensal"));
+const Contactos = lazyWithReload(() => import("./paginas/Contactos"));
+const Despesas = lazyWithReload(() => import("./paginas/Despesas"));
+const Sessoes = lazyWithReload(() => import("./paginas/Sessoes"));
+const Creditos = lazyWithReload(() => import("./paginas/Creditos"));
+const Pagamentos = lazyWithReload(() => import("./paginas/Pagamentos"));
+const Contratos = lazyWithReload(() => import("./paginas/Contratos"));
+const Notificacoes = lazyWithReload(() => import("./paginas/Notificacoes"));
+const Definicoes = lazyWithReload(() => import("./paginas/Definicoes"));
+const Relatorios = lazyWithReload(() => import("./paginas/Relatorios"));
+const LogsAuditoria = lazyWithReload(() => import("./paginas/LogsAuditoria"));
+const CentroSeguranca = lazyWithReload(() => import("./paginas/CentroSeguranca"));
+const Guia = lazyWithReload(() => import("./paginas/Guia"));
+const PortaisPagamento = lazyWithReload(() => import("./paginas/PortaisPagamento"));
+const EsqueciSenha = lazyWithReload(() => import("./paginas/EsqueciSenha"));
+const Aprovacoes = lazyWithReload(() => import("./paginas/Aprovacoes"));
+const LimitesUtilizador = lazyWithReload(() => import("./paginas/LimitesUtilizador"));
+const RelatoriosAtividadeUtilizador = lazyWithReload(() => import("./paginas/RelatoriosAtividadeUtilizador"));
+const Chat = lazyWithReload(() => import("./paginas/Chat"));
+const RelatoriosFiscais = lazyWithReload(() => import("./paginas/RelatoriosFiscais"));
+const Contabilidade = lazyWithReload(() => import("./paginas/Contabilidade"));
+const CentralWhatsApp = lazyWithReload(() => import("./paginas/CentralWhatsApp"));
+const Garantias = lazyWithReload(() => import("./paginas/Garantias"));
+const Contencioso = lazyWithReload(() => import("./paginas/Contencioso"));
+const Fornecedores = lazyWithReload(() => import("./paginas/Fornecedores"));
+const Scoring = lazyWithReload(() => import("./paginas/Scoring"));
+const SimuladorCredito = lazyWithReload(() => import("./paginas/SimuladorCredito"));
+const TermosPoliticas = lazyWithReload(() => import("./paginas/TermosPoliticas"));
+const CartasTransferencia = lazyWithReload(() => import("./paginas/CartasTransferencia").then(m => ({ default: m.CartasTransferencia })));
+const LixeiraPage = lazyWithReload(() => import("./paginas/Lixeira"));
+const Perfis = lazyWithReload(() => import("./paginas/Perfis"));
+const NaoEncontrado = lazyWithReload(() => import("./paginas/NaoEncontrado"));
 
 import { LicenseGuard } from "./componentes/LicenseGuard";
 import Ativacao from "./paginas/Ativacao";
@@ -118,19 +122,25 @@ const AppContent = () => {
 
     // Global listener for chunk load errors
     const handleChunkError = (event: ErrorEvent | PromiseRejectionEvent) => {
-      const errorMsg = 'message' in event ? event.message : (event as any).reason?.message;
-      if (errorMsg && (errorMsg.includes('Failed to fetch dynamically imported module') || errorMsg.includes('Loading chunk'))) {
-        console.warn("Detected chunk load error. Reloading app...", errorMsg);
-        window.location.reload();
+      const error = 'message' in event ? event.message : (event as PromiseRejectionEvent).reason;
+      if (isChunkLoadError(error)) {
+        console.warn("Ficheiro de uma versão anterior: a recarregar a aplicação.", error);
+        reloadForNewVersion();
       }
+    };
+    // O Vite avisa quando o pré-carregamento de um ficheiro falha (típico depois de um deploy).
+    const handlePreloadError = (event: Event) => {
+      if (reloadForNewVersion()) event.preventDefault();
     };
 
     window.addEventListener('error', handleChunkError);
     window.addEventListener('unhandledrejection', handleChunkError);
+    window.addEventListener('vite:preloadError', handlePreloadError);
 
     return () => {
       window.removeEventListener('error', handleChunkError);
       window.removeEventListener('unhandledrejection', handleChunkError);
+      window.removeEventListener('vite:preloadError', handlePreloadError);
     };
   }, []);
 
@@ -352,6 +362,14 @@ const AppContent = () => {
               }
             />
             <Route
+              path="/perfis"
+              element={
+                <ProtectedRoute permission="manage_users">
+                  <Perfis />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/relatorios"
               element={
                 <ProtectedRoute permission="view_reports">
@@ -360,9 +378,18 @@ const AppContent = () => {
               }
             />
             <Route
-              path="/logs-auditoria"
+              path="/seguranca"
               element={
                 <ProtectedRoute permission="view_audit_logs">
+                  <CentroSeguranca />
+                </ProtectedRoute>
+              }
+            />
+            {/* Todos os utilizadores: a página mostra a auditoria completa ao Super Administrador e ao Auditor Interno e, aos restantes, só a própria atividade. */}
+            <Route
+              path="/logs-auditoria"
+              element={
+                <ProtectedRoute>
                   <LogsAuditoria />
                 </ProtectedRoute>
               }
@@ -412,6 +439,14 @@ const AppContent = () => {
               element={
                 <ProtectedRoute>
                   <Guia />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/termos-e-politicas"
+              element={
+                <ProtectedRoute>
+                  <TermosPoliticas />
                 </ProtectedRoute>
               }
             />

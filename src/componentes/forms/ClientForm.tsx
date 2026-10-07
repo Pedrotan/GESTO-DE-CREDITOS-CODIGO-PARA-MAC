@@ -481,9 +481,9 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
             } else {
                 setGenericAlert({
                     isOpen: true,
-                    title: clientType === 'PARTICULAR' ? "BI não encontrado automaticamente" : "NIF não encontrado automaticamente",
-                    description: `${data?.message || 'Não foi possível encontrar os dados para este documento.'} Pode consultar diretamente através dos links oficiais (Portal do Contribuinte do MINFIN ou catálogo SEPE) disponíveis logo abaixo do campo.`,
-                    type: "warning"
+                    title: clientType === 'PARTICULAR' ? "Preencha os dados do BI manualmente" : "Preencha os dados do NIF manualmente",
+                    description: data?.message || 'Não foi possível obter os dados automaticamente. Preencha os dados manualmente a partir do documento do cliente.',
+                    type: "info"
                 });
             }
         } catch (error) {

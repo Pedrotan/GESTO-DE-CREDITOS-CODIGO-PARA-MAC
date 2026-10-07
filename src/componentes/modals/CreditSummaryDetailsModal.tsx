@@ -6,7 +6,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/component
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/componentes/ui/table';
 import { formatCurrency, formatPercentage, formatDate } from '@/bibliotecas/formatters';
 import { Credit, Client, Payment } from '@/tipos/credito';
-import { TrendingUp, DollarSign, AlertCircle, PieChart, Calculator, Clock, Download, Eye, Layers, Users, Search } from 'lucide-react';
+import { TrendingUp, AlertCircle, PieChart, Calculator, Clock, Download, Eye, Layers, Users, Search } from 'lucide-react';
 import { useMemo, useState, useEffect } from 'react';
 import { ClientDetailsModal } from './ClientDetailsModal';
 import { Input } from '@/componentes/ui/input';

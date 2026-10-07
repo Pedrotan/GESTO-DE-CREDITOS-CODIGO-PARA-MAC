@@ -55,6 +55,7 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@noble/hashes": "2.2.0",
     "@djosekispy/nifvalidation": "github:Djosekispy/nifvalidation",
     "@hookform/resolvers": "^3.10.0",
     "@radix-ui/react-accordion": "^1.2.11",

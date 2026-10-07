@@ -1,5 +1,6 @@
+import { EMPTY_USAGE, canApproveAtLevel, diffPolicies, evaluateOperation, needsSecondApproval, parsePolicy, policyFromRows, requiredLevelFor } from '../src/bibliotecas/alcadas';
 import * as electron from 'electron';
-import { app, BrowserWindow, ipcMain, dialog, protocol, Menu, safeStorage } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, protocol, Menu, safeStorage, Notification } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as http from 'http';
@@ -13,8 +14,13 @@ import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
 import { RENDERER_SQL_BY_ID } from './renderer-sql-allowlist';
 import { applyRemoteGroups, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
+import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
+import { createLedgerSealer } from './selos-contabilisticos';
+import { createAuditSealer } from './selos-auditoria';
+import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
+import { MASTER_PUBLIC_KEY } from '../src/bibliotecas/chave-publica-licencas';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
@@ -29,7 +35,102 @@ app.commandLine.appendSwitch("disable-gpu-compositing");
 app.commandLine.appendSwitch("disable-gpu-rasterization");
 app.commandLine.appendSwitch("disable-accelerated-2d-canvas");
 app.commandLine.appendSwitch("disable-vulkan");
-const disableRendererSandbox = process.env.TANGO_RENDERER_SANDBOX !== "true";
+// A sandbox do renderer está SEMPRE activa nos instaladores; só em desenvolvimento pode ser desligada
+// explicitamente (TANGO_RENDERER_SANDBOX=false).
+let disableRendererSandbox = process.env.TANGO_RENDERER_SANDBOX === "false" && !app.isPackaged;
+// Alguns antivírus (ex.: Norton/Avast, aswhook.dll) injectam DLLs que não carregam dentro da sandbox e a
+// interface fica em branco (0xC0000135). Nesse caso a incompatibilidade fica registada neste computador,
+// a aplicação reinicia sem sandbox e volta a tentar ao fim de 30 dias ou numa nova versão do Electron.
+const SANDBOX_DLL_NOT_FOUND = -1073741515;
+let sandboxFallbackReason: string | null = null;
+const sandboxCompatFile = () => path.join(app.getPath("userData"), "sandbox-compat.json");
+const applySandboxCompatibility = () => {
+  if (disableRendererSandbox) return;
+  try {
+    const record = JSON.parse(fs.readFileSync(sandboxCompatFile(), "utf8"));
+    const fresh = Date.now() - new Date(record.at).getTime() < 30 * 86_400_000;
+    if (record.incompatible && fresh && record.electron === process.versions.electron) {
+      disableRendererSandbox = true;
+      sandboxFallbackReason = String(record.reason || "Incompatível com software instalado neste computador.");
+    }
+  } catch { /* sem registo: a sandbox fica activa */ }
+};
+const markSandboxIncompatible = (reason: string) => {
+  try {
+    fs.writeFileSync(sandboxCompatFile(), JSON.stringify({ incompatible: true, reason, at: new Date().toISOString(), electron: process.versions.electron }, null, 2));
+  } catch { /* sem escrita: não reinicia para evitar ciclos */ return false; }
+  return true;
+};
+// Ferramentas de programador apenas em desenvolvimento (ou com TANGO_DEVTOOLS=true para suporte técnico).
+const allowDevTools = !app.isPackaged || process.env.TANGO_DEVTOOLS === "true";
+
+// ── Monitor de segurança: regista, agrupa e alerta tentativas de intrusão ─────────────────────
+type SecurityQuery = (type: string, sql: string, params?: unknown[]) => Promise<any>;
+let securityQuery: SecurityQuery | null = null;
+const pendingSecurityEvents: SecurityEvent[] = [];
+const SECURITY_EVENTS_TABLE_SQL = `CREATE TABLE IF NOT EXISTS security_events (
+  id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL,
+  details TEXT, source TEXT, ip TEXT, channel TEXT, count INTEGER DEFAULT 1, metadata TEXT,
+  acknowledged INTEGER DEFAULT 0, acknowledgedBy TEXT, acknowledgedAt TEXT)`;
+const persistSecurityEvent = async (event: SecurityEvent) => {
+  if (!securityQuery) {
+    pendingSecurityEvents.push(event);
+    if (pendingSecurityEvents.length > 200) pendingSecurityEvents.shift();
+    return;
+  }
+  await securityQuery("exec", SECURITY_EVENTS_TABLE_SQL);
+  await securityQuery("execute", `INSERT OR IGNORE INTO security_events
+    (id, timestamp, type, severity, title, details, source, ip, channel, count, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [event.id, event.timestamp, event.type, event.severity, event.title, event.details, event.source, event.ip || null,
+      event.channel || null, event.count, JSON.stringify(event.metadata || {})]);
+  if (event.severity === "high" || event.severity === "critical") {
+    // Fica também na auditoria e nas notificações dos administradores (sino), mesmo com a app fechada.
+    await securityQuery("execute", `INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata)
+      VALUES (?, ?, NULL, 'Monitor de segurança', 'security_alert', 'system', ?, ?)`,
+      [crypto.randomUUID(), event.timestamp, `${event.title}: ${event.details}`, JSON.stringify({ type: event.type, severity: event.severity, ip: event.ip || null, count: event.count })]);
+    await securityQuery("execute", `INSERT OR IGNORE INTO notifications (id, userId, title, message, type, source, read, timestamp)
+      SELECT ? || ':' || id, id, ?, ?, 'error', 'system', 0, ? FROM users WHERE role IN ('super_admin', 'admin') AND (status IS NULL OR status <> 'deleted')`,
+      [`security:${event.id}`, `Alerta de segurança: ${event.title}`, event.details.slice(0, 900), event.timestamp]).catch(() => undefined);
+  }
+};
+const flushPendingSecurityEvents = () => {
+  const queued = pendingSecurityEvents.splice(0, pendingSecurityEvents.length);
+  for (const event of queued) void persistSecurityEvent(event).catch(() => undefined);
+};
+const notifySecurityEvent = (event: SecurityEvent) => {
+  console.warn(`[Seguranca] ${event.severity.toUpperCase()} ${event.type}: ${event.details}`);
+  try { if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("security-alert", event); } catch { /* janela fechada */ }
+  if ((event.severity === "high" || event.severity === "critical") && Notification.isSupported()) {
+    try { new Notification({ title: `Alerta de segurança: ${event.title}`, body: event.details.slice(0, 240), urgency: "critical" }).show(); } catch { /* sem notificações */ }
+  }
+};
+const securityMonitor = createSecurityMonitor({ persist: persistSecurityEvent, notify: notifySecurityEvent });
+const reportSecurity = (input: SecurityEventInput) => securityMonitor.report(input);
+const senderUrlOf = (event: any) => {
+  try {
+    const parsed = new URL(event?.senderFrame?.url || event?.sender?.getURL?.() || "");
+    return parsed.protocol === "file:" ? `file://…/${path.basename(parsed.pathname)}` : `${parsed.origin}${parsed.pathname}`;
+  } catch { return "desconhecido"; }
+};
+// Todos os canais IPC passam por este filtro: um pedido rejeitado por motivo de segurança gera um alerta.
+const registerIpcHandle = ipcMain.handle.bind(ipcMain);
+(ipcMain as any).handle = (channel: string, listener: (...args: any[]) => any) => registerIpcHandle(channel, async (event: any, ...args: any[]) => {
+  try {
+    return await listener(event, ...args);
+  } catch (error: any) {
+    const message = String(error?.message || error);
+    const classified = classifyIpcError(channel, message);
+    if (classified) reportSecurity({ ...classified, details: `Canal "${channel}": ${message.slice(0, 300)}`, source: "ipc", channel, metadata: { sender: senderUrlOf(event) } });
+    throw error;
+  }
+});
+// Nenhum conteúdo pode incorporar <webview> (seria uma janela fora das protecções).
+app.on("web-contents-created", (_event, contents) => {
+  contents.on("will-attach-webview", (attachEvent) => {
+    attachEvent.preventDefault();
+    reportSecurity({ type: "webview_blocked", severity: "high", title: SECURITY_EVENT_LABELS.webview_blocked, details: "Pedido para incorporar um <webview> recusado.", source: "electron" });
+  });
+});
 protocol.registerSchemesAsPrivileged([
   {
     scheme: "safe-file",
@@ -491,6 +592,7 @@ function installRendererDebugConsole(window, startUrl) {
   }, 800);
 }
 function createWindow() {
+  applySandboxCompatibility();
   const primaryDisplay = electron.screen.getPrimaryDisplay();
   const { x, y, width, height } = primaryDisplay.workArea;
   const minimumWindowSize = { width: 800, height: 600 };
@@ -520,8 +622,12 @@ function createWindow() {
       webSecurity: true,
       // Habilitar segurança web
       sandbox: !disableRendererSandbox,
-      plugins: false
+      devTools: allowDevTools,
+      plugins: false,
       // Habilitar plugins (Necessário para PDF Viewer)
+      // Temporizadores a tempo mesmo com a janela minimizada: o horário de acesso termina a sessão à hora exacta
+      // e a sincronização continua em segundo plano.
+      backgroundThrottling: false
     },
     icon: process.platform === "darwin" ? void 0 : iconPath
   });
@@ -530,22 +636,45 @@ function createWindow() {
   mainWindow.webContents.on("render-process-gone", () => masterAuth?.revokeSender(masterSenderId));
   mainWindow.webContents.once("destroyed", () => userAuth.revokeSender(masterSenderId));
   mainWindow.webContents.on("render-process-gone", () => userAuth.revokeSender(masterSenderId));
-  mainWindow.webContents.setWindowOpenHandler(({ url: url2 }) => {
-    if (url2.startsWith("https:") || url2.startsWith("mailto:")) {
+  // Janelas novas nunca abrem dentro da aplicação: https, email e telefone vão para o programa do sistema;
+  // qualquer outro destino (file:, smb:, javascript:, ms-*) é recusado e registado.
+  const openOutside = (target: string, origin: string) => {
+    if (isSafeExternalUrl(target)) {
       const { shell } = require("electron");
-      shell.openExternal(url2);
-      return { action: "deny" };
+      void shell.openExternal(target);
+      return;
     }
+    reportSecurity({ type: "navigation_blocked", severity: /^(file|smb|ms-|javascript|vbscript|data):/i.test(target) ? "high" : "medium",
+      title: SECURITY_EVENT_LABELS.navigation_blocked, details: `${origin}: ${String(target).slice(0, 200)}`, source: "electron" });
+  };
+  mainWindow.webContents.setWindowOpenHandler(({ url: url2 }) => {
+    openOutside(url2, "Janela nova");
     return { action: "deny" };
   });
-  mainWindow.webContents.on("will-navigate", (event, url2) => {
-    const parsedUrl = new URL(url2);
-    const isSelf = parsedUrl.origin === "http://localhost:8081" || parsedUrl.origin === "http://localhost:3000" || parsedUrl.protocol === "file:";
-    if (!isSelf) {
-      event.preventDefault();
-      const { shell } = require("electron");
-      shell.openExternal(url2);
+  const guardNavigation = (event, url2) => {
+    if (isTrustedRendererUrl(url2)) return;
+    event.preventDefault();
+    openOutside(url2, "Navegação");
+  };
+  mainWindow.webContents.on("will-navigate", guardNavigation);
+  mainWindow.webContents.on("will-redirect", guardNavigation);
+  mainWindow.webContents.on("devtools-opened", () => {
+    if (!app.isPackaged) return;
+    reportSecurity({ type: "devtools_opened", severity: "high", title: SECURITY_EVENT_LABELS.devtools_opened, details: "As ferramentas de programador foram abertas na aplicação instalada.", source: "electron" });
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    if (details?.reason === "clean-exit") return;
+    if (!disableRendererSandbox && details?.exitCode === SANDBOX_DLL_NOT_FOUND) {
+      const reason = "A interface isolada (sandbox) não arrancou: um programa instalado (normalmente o antivírus, ex.: Norton/Avast) injecta uma DLL incompatível.";
+      reportSecurity({ type: "sandbox_incompatible", severity: "medium", title: "Isolamento da interface desactivado neste computador",
+        details: `${reason} A aplicação reiniciou sem sandbox; as restantes protecções continuam activas.`, source: "electron" });
+      if (markSandboxIncompatible(reason)) {
+        setTimeout(() => { app.relaunch(); app.exit(0); }, 800);
+      }
+      return;
     }
+    reportSecurity({ type: "renderer_crash", severity: details?.reason === "killed" ? "high" : "medium", title: SECURITY_EVENT_LABELS.renderer_crash,
+      details: `Motivo: ${details?.reason || "desconhecido"} (código ${details?.exitCode ?? "?"}).`, source: "electron" });
   });
   electron.session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     const allowedPermissions = ["notifications"];
@@ -832,11 +961,17 @@ const validateDbTransaction = (statements) => {
     return { ...validated, type, expectChanges: item.expectChanges };
   });
 };
+const trustedRendererRoots = () => [path.join(__dirname, "../dist"), path.join(__dirname, "../dist-admin")].map((root) => path.resolve(root));
 const isTrustedRendererUrl = (urlValue) => {
   try {
     const parsed = new URL(urlValue);
-    if (parsed.protocol === "file:") return true;
-    if (parsed.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)) {
+    // Em produção só as páginas da própria aplicação (pasta dist) são de confiança: um ficheiro HTML
+    // descarregado ou noutra pasta nunca recebe acesso ao sistema.
+    if (parsed.protocol === "file:") {
+      const filePath = path.resolve(url.fileURLToPath(parsed));
+      return trustedRendererRoots().some((root) => isPathInside(filePath, root));
+    }
+    if (!app.isPackaged && parsed.protocol === "http:" && ["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)) {
       return ["8081", "8082", "3000"].includes(parsed.port);
     }
   } catch {
@@ -874,21 +1009,146 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   clients: "manage_clients",
   company_settings: "manage_settings",
   user_limits: "manage_limits",
+  limit_policy_versions: "manage_limits",
+  limit_exceptions: "manage_limits",
   payment_gateways: "manage_settings",
   payment_references: "manage_payments",
   closed_months: "manage_fiscal",
+  accounting_cash_sessions: "manage_payments",
+  collection_events: "manage_credits",
+  accounting_bank_imports: "manage_fiscal",
+  accounting_receipts: "manage_fiscal",
+  audit_log_chain: "manage_fiscal",
+  accounting_divergence_events: "manage_fiscal",
   message_templates: "manage_settings",
-  sync_conflicts: "manage_credits"
+  sync_conflicts: "manage_credits",
+  accounting_daily_closes: "manage_fiscal",
+  credit_writeoffs: "manage_fiscal"
 };
 // Tabelas que o assistente de configuração inicial grava antes de existir o primeiro utilizador (sem sessão).
 const FIRST_SETUP_TABLES = new Set(["company_settings", "audit_logs"]);
-const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string }>, firstSetup = false) => {
+const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>, firstSetup = false) => {
   if (financialSchemaBootstrapOpen) return;
   for (const statement of statements) {
     const table = mutationTable(statement.sql);
     if (!table || ["credits", "payments", "accounting_entries", "ledger_transactions", "ledger_lines", "credit_installments", "users"].includes(table)) continue;
     if (firstSetup && FIRST_SETUP_TABLES.has(table)) continue;
+    if (table === 'closed_months' && /^\s*DELETE\s/i.test(statement.sql)) {
+      const actor = assertUserPermission(event, 'manage_fiscal');
+      if (!['admin', 'super_admin'].includes(String(actor.role))) throw new Error('Apenas administradores podem reabrir períodos.');
+      const audit = statements.find(item => /INSERT\s+INTO\s+audit_logs/i.test(item.sql) &&
+        item.params?.some(value => {
+          if (typeof value !== 'string') return false;
+          try { const metadata = JSON.parse(value); return metadata.periodId === statement.params?.[0] && typeof metadata.reason === 'string' && metadata.reason.trim().length >= 10; }
+          catch { return false; }
+        }));
+      if (!audit) throw new Error('A reabertura exige justificação e auditoria na mesma transação.');
+    }
+    if (table === 'accounting_divergence_events') {
+      const actor = assertUserPermission(event, 'manage_fiscal');
+      if (!['admin','super_admin'].includes(String(actor.role)) || statement.params?.[7] !== actor.id)
+        throw new Error('A decisão exige um administrador autenticado.');
+      if (typeof statement.params?.[6] !== 'string' || statement.params[6].trim().length < 10)
+        throw new Error('A decisão exige uma justificação.');
+      const audit = statements.find(item => /INSERT\s+INTO\s+audit_logs/i.test(item.sql) && item.params?.[2] === actor.id &&
+        item.params?.some(value => { try { return typeof value === 'string' && JSON.parse(value).decisionId === statement.params?.[0]; } catch { return false; } }));
+      if (!audit) throw new Error('A decisão exige auditoria na mesma transação.');
+    }
+    if (table === 'accounting_requests' && /^\s*UPDATE\s/i.test(statement.sql)) {
+      const actor = assertUserPermission(event, 'manage_fiscal');
+      if (!['admin', 'super_admin'].includes(String(actor.role)) || statement.params?.[2] !== actor.id)
+        throw new Error('A decisão do pedido exige um administrador autenticado.');
+    }
+    if (table === 'credit_writeoffs') {
+      const actor = assertUserPermission(event, 'manage_fiscal');
+      if (!['admin', 'super_admin'].includes(String(actor.role)) || statement.params?.[10] !== actor.id)
+        throw new Error('O abate tem de ser aprovado pelo administrador autenticado.');
+    }
+    if (table === 'accounting_bank_imports') {
+      const actor=assertUserPermission(event,'manage_fiscal');
+      if(statement.params?.[3]!==actor.id) throw new Error('O extrato deve ser importado pelo utilizador autenticado.');
+    }
+    if (table === 'collection_events') {
+      const actor = assertUserPermission(event, 'manage_credits');
+      if (statement.params?.[10] !== actor.id) throw new Error('O responsável pelo registo de cobrança deve ser o utilizador autenticado.');
+      if (['assignment','target'].includes(String(statement.params?.[2])) && !['admin','super_admin'].includes(String(actor.role)))
+        throw new Error('Atribuições e metas exigem um administrador.');
+      const audit = statements.find(item => /INSERT\s+INTO\s+audit_logs/i.test(item.sql) && item.params?.[2]===actor.id &&
+        item.params?.some(value=>{try{return typeof value==='string' && JSON.parse(value).collectionEventId===statement.params?.[0];}catch{return false;}}));
+      if (!audit) throw new Error('A cobrança exige auditoria na mesma transação.');
+    }
+    if (table === 'accounting_cash_sessions') {
+      const actor = assertUserPermission(event, 'manage_payments');
+      const operator = /^\s*INSERT\s/i.test(statement.sql) ? statement.params?.[1] : statement.params?.[statement.params.length - 1];
+      if (operator !== actor.id) throw new Error('Só pode abrir ou fechar o seu próprio caixa.');
+    }
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
+  }
+};
+// Alçadas verificadas no servidor (processo principal), na mesma chamada que executa a transacção: a interface
+// só mostra informação. Os volumes diário/mensal são garantidos pelos guardas SQL (limit_locks) na transacção.
+const loadLimitPolicy = async (query:(type:string,sql:string,params?:unknown[])=>Promise<any>) => {
+  const rows = await query('query', 'SELECT * FROM limit_policy_versions ORDER BY version DESC').catch(() => []);
+  const legacy = await query('query', 'SELECT * FROM user_limits').catch(() => []);
+  return policyFromRows(Array.isArray(rows) ? rows : [], Array.isArray(legacy) ? legacy : []);
+};
+const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:Array<{sql:string;params?:unknown[]}>,query:(type:string,sql:string,params?:unknown[])=>Promise<any>)=>{
+  if(financialSchemaBootstrapOpen)return;
+  for(const statement of statements){
+    const table=mutationTable(statement.sql);
+    if(table==='limit_policy_versions' && /^\s*INSERT/i.test(statement.sql)){
+      const actor=assertUserPermission(event,'manage_limits');
+      if(statement.params?.[9]!==actor.id)throw new Error('A versão dos limites tem de ser criada pelo utilizador autenticado.');
+      const current=await loadLimitPolicy(query);
+      const second=needsSecondApproval(diffPolicies(current,parsePolicy(String(statement.params?.[2]))),current.governance);
+      if(statement.params?.[5]==='approved' && second.required)throw new Error('Esta alteração aos limites exige a aprovação de um segundo administrador.');
+      if(!statements.some(item=>/INSERT\s+INTO\s+audit_logs/i.test(item.sql) && item.params?.[2]===actor.id))throw new Error('A alteração de limites exige auditoria.');
+    }
+    if((table==='limit_policy_versions' || table==='limit_exceptions') && /^\s*UPDATE/i.test(statement.sql) && !/status = 'revoked'/.test(statement.sql)){
+      const actor=assertUserPermission(event,'manage_limits');
+      if(!['admin','super_admin'].includes(String(actor.role)) || statement.params?.[1]!==actor.id)throw new Error('A decisão tem de ser de um administrador autenticado (segundo administrador).');
+    }
+    if(table==='limit_ledger'){
+      const actor:any=userAuth.assertAuthenticated(event.sender.id);
+      if(statement.params?.[2]!==actor.id)throw new Error('O consumo do limite tem de ser do utilizador autenticado.');
+    }
+    if(table==='limit_escalation_approvals'){
+      const actor:any=userAuth.assertAuthenticated(event.sender.id);
+      if(statement.params?.[2]!==actor.id)throw new Error('A decisão tem de ser do aprovador autenticado.');
+    }
+    if(table==='credits' && /^\s*INSERT/i.test(statement.sql) && statement.params?.[21]==='active'){
+      const actor:any=userAuth.assertAuthenticated(event.sender.id);
+      const creditId=statement.params?.[0];
+      if(!statements.some(item=>mutationTable(item.sql)==='limit_ledger' && item.params?.[1]==='credit_approval' && item.params?.[11]===creditId))
+        throw new Error('Um crédito aprovado directamente tem de consumir a alçada de quem o regista.');
+      const policy=await loadLimitPolicy(query);
+      const exceptions=await query('query','SELECT * FROM limit_exceptions ORDER BY requestedAt DESC').catch(()=>[]);
+      const client=await query('get','SELECT id, riskLevel FROM clients WHERE id = ?',[statement.params?.[1]]).catch(()=>null);
+      const evaluation=evaluateOperation({ policy, actor:{ id:actor.id, name:actor.name, role:String(actor.role), branchId:actor.branchId||null }, operationType:'credit_approval',
+        amountMinor:Number(statement.params?.[4]), usage:{ scope:EMPTY_USAGE, company:EMPTY_USAGE }, exceptions:Array.isArray(exceptions)?exceptions:[], client:{ riskLevel:client?.riskLevel } });
+      if(evaluation.decision!=='allow')throw new Error(`Acima da alçada: ${evaluation.reasons.join('; ')}.`);
+    }
+    if(table!=='credit_approvals')continue;
+    const actor=assertUserPermission(event,'manage_credits');
+    if(statement.params?.[12]!==actor.id || statement.params?.[9]===actor.id)throw new Error('A decisão exige o responsável autenticado e diferente do solicitante.');
+    if(statement.params?.[7]==='approved'){
+      const credit=await query('get','SELECT principalAmountMinor,principalAmount FROM credits WHERE id = ?',[statement.params?.[1]]);
+      if(!credit)throw new Error('Crédito não encontrado.');
+      const policy=await loadLimitPolicy(query);
+      const escalation=await query('get','SELECT * FROM limit_escalations WHERE entityType = ? AND entityId = ? ORDER BY createdAt DESC LIMIT 1',['credit',statement.params?.[1]]).catch(()=>null);
+      const client=await query('get','SELECT id, riskLevel FROM clients WHERE id = ?',[statement.params?.[2]]).catch(()=>null);
+      const amount=Number(credit.principalAmountMinor ?? Math.round(Number(credit.principalAmount)*100));
+      const required=escalation && escalation.status==='pending'
+        ? { index:Number(escalation.requiredLevelIndex)||0, dual:Boolean(Number(escalation.dual)) }
+        : requiredLevelFor(policy,amount,{ riskLevel:client?.riskLevel });
+      if(!canApproveAtLevel(policy,String(actor.role),required))throw new Error('A alçada do aprovador não chega para este crédito.');
+      if(required.dual){
+        const previous=escalation?await query('query','SELECT * FROM limit_escalation_approvals WHERE escalationId = ? ORDER BY decidedAt',[escalation.id]).catch(()=>[]):[];
+        const approvers=new Set((Array.isArray(previous)?previous:[]).filter((row:any)=>row.decision==='approved').map((row:any)=>row.approverId));
+        approvers.add(actor.id);
+        if(approvers.size<2)throw new Error('Este crédito exige dupla aprovação: são precisos dois aprovadores diferentes do nível máximo.');
+      }
+    }
   }
 };
 const normalizeImportBuffer = (data) => {
@@ -916,6 +1176,28 @@ const broadcastToClients = (type, data) => {
   });
   if (mainWindow) mainWindow.webContents.send("db-update", data);
 };
+// 5 chaves de rede erradas em 15 minutos bloqueiam o endereço durante 30 minutos.
+const lanAuthFailures = createFailureTracker({ maxFailures: 5, windowMs: 15 * 60_000, blockMs: 30 * 60_000 });
+const registerLanAuthFailure = (clientIp: string, pathname: string) => {
+  const result = lanAuthFailures.fail(clientIp);
+  if (result.justBlocked || result.failures === 3) {
+    reportSecurity({ type: "lan_bruteforce", severity: result.justBlocked ? "critical" : "high", title: SECURITY_EVENT_LABELS.lan_bruteforce,
+      details: result.justBlocked
+        ? `O endereço ${clientIp} falhou a chave de rede ${result.failures} vezes e foi bloqueado durante 30 minutos (rota ${pathname}).`
+        : `O endereço ${clientIp} falhou a chave de rede ${result.failures} vezes (rota ${pathname}).`,
+      source: "lan-server", ip: clientIp });
+  }
+};
+const licensePublicKeys = () => {
+  const keys = [MASTER_PUBLIC_KEY];
+  for (const folder of [path.join(app.getPath("documents"), "TangoMaster_Config"), app.getAppPath(), process.resourcesPath]) {
+    try {
+      const file = path.join(folder, "public_key.json");
+      if (fs.existsSync(file)) keys.push(String(JSON.parse(fs.readFileSync(file, "utf8")).key || ""));
+    } catch { /* chave ilegível: ignora */ }
+  }
+  return keys.filter(Boolean);
+};
 const startServerInternal = async (passkey) => {
   if (server) return { success: true, message: "Servidor já se encontra em execução." };
   currentSyncPasskey = passkey || null;
@@ -927,6 +1209,8 @@ const startServerInternal = async (passkey) => {
       const requestOrigin = req.headers.origin;
       if (!isAllowedCorsOrigin(requestOrigin)) {
         res.writeHead(403, { "Content-Type": "application/json" });
+        reportSecurity({ type: "lan_origin_rejected", severity: "medium", title: SECURITY_EVENT_LABELS.lan_origin_rejected,
+          details: `Origem ${String(requestOrigin).slice(0, 120)} recusada pelo servidor da rede local.`, source: "lan-server", ip: req.socket.remoteAddress?.replace("::ffff:", "") || null });
         res.end(JSON.stringify({ error: "Origem nao autorizada." }));
         return;
       }
@@ -942,12 +1226,20 @@ const startServerInternal = async (passkey) => {
         return;
       }
       const clientIp = req.socket.remoteAddress?.replace("::ffff:", "") || "desconhecido";
+      // IP bloqueado por tentar adivinhar a chave de rede: recusado antes de qualquer processamento.
+      if (lanAuthFailures.isBlocked(clientIp)) {
+        res.writeHead(403, { "Content-Type": "application/json", "Retry-After": String(lanAuthFailures.retryAfterSeconds(clientIp)) });
+        res.end(JSON.stringify({ success: false, message: "Acesso temporariamente bloqueado por tentativas falhadas." }));
+        return;
+      }
       const now = Date.now();
       const rateData = requestCounts.get(clientIp);
       if (rateData && now < rateData.resetAt) {
         rateData.count++;
         if (rateData.count > MAX_REQUESTS) {
           res.writeHead(429, { "Content-Type": "application/json" });
+          reportSecurity({ type: "lan_rate_limited", severity: "medium", title: SECURITY_EVENT_LABELS.lan_rate_limited,
+            details: `O endereço ${clientIp} excedeu ${MAX_REQUESTS} pedidos por minuto.`, source: "lan-server", ip: clientIp });
           res.end(JSON.stringify({ error: "Muitos pedidos. Por favor, aguarde um minuto." }));
           return;
         }
@@ -959,6 +1251,7 @@ const startServerInternal = async (passkey) => {
       if (pathname === "/events" || pathname === "/events/") {
         const clientPasskey = req.headers["x-sync-passkey"] || url2.searchParams.get("access_token");
         if (!constantTimeEquals(currentSyncPasskey, clientPasskey)) {
+          registerLanAuthFailure(clientIp, pathname);
           res.writeHead(401, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ success: false, message: "Chave invalida." }));
           return;
@@ -980,6 +1273,7 @@ const startServerInternal = async (passkey) => {
       if (req.method === "GET" && (pathname === "/fetch-config" || pathname === "/fetch-config/")) {
         const clientPasskey = req.headers["x-sync-passkey"];
         if (!constantTimeEquals(currentSyncPasskey, clientPasskey)) {
+          registerLanAuthFailure(clientIp, pathname);
           res.writeHead(401, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ success: false, message: "Chave inválida." }));
           return;
@@ -1009,6 +1303,7 @@ const startServerInternal = async (passkey) => {
       if (req.method === "POST" && (pathname === "/sync" || pathname === "/sync/")) {
         const clientPasskey = req.headers["x-sync-passkey"];
         if (!constantTimeEquals(currentSyncPasskey, clientPasskey)) {
+          registerLanAuthFailure(clientIp, pathname);
           res.writeHead(401, { "Content-Type": "application/json" });
           res.end(JSON.stringify({ success: false, message: "Chave inválida." }));
           return;
@@ -1072,7 +1367,18 @@ const startServerInternal = async (passkey) => {
         req.on("end", () => {
           if (bodyTooLarge) return;
           try {
-            const { licenseKey, machineId } = JSON.parse(body);
+            const { licenseKey: rawLicenseKey, machineId: rawMachineId } = JSON.parse(body);
+            // Só licenças assinadas pelo Tango Master são registadas (uma chave forjada nunca ocupa uma licença).
+            const verified = verifyLicenseActivation(rawLicenseKey, rawMachineId, licensePublicKeys());
+            if ('reason' in verified) {
+              reportSecurity({ type: "license_forgery_attempt", severity: "high", title: SECURITY_EVENT_LABELS.license_forgery_attempt,
+                details: `${verified.reason} Pedido de ${clientIp}.`, source: "lan-server", ip: clientIp });
+              res.writeHead(400, { "Content-Type": "application/json" });
+              res.end(JSON.stringify({ success: false, message: verified.reason, code: "LICENSE_INVALID" }));
+              return;
+            }
+            const licenseKey = verified.key;
+            const machineId = verified.machineId;
             if (!licenseKey || !machineId) {
               res.writeHead(400, { "Content-Type": "application/json" });
               res.end(JSON.stringify({ success: false, message: "Dados incompletos." }));
@@ -1090,6 +1396,11 @@ const startServerInternal = async (passkey) => {
               return;
             }
             if (!activations[cleanKey]) {
+              if (Object.keys(activations).length >= 50_000) {
+                res.writeHead(507, { "Content-Type": "application/json" });
+                res.end(JSON.stringify({ success: false, message: "Registo de activações cheio." }));
+                return;
+              }
               saveActivation(cleanKey, machineId);
             }
             res.writeHead(200, { "Content-Type": "application/json" });
@@ -1701,6 +2012,8 @@ app.whenReady().then(async () => {
       }
       const normalized = path.resolve(path.normalize(filePath));
       if (!isAllowedSafeFilePath(normalized)) {
+        reportSecurity({ type: "path_traversal_attempt", severity: "high", title: SECURITY_EVENT_LABELS.path_traversal_attempt,
+          details: `Pedido recusado: ${path.basename(normalized)} (fora das pastas da aplicação ou extensão não permitida).`, source: "safe-file" });
         return new Response("Ficheiro nao autorizado", { status: 403 });
       }
       if (!fs.existsSync(normalized) || fs.statSync(normalized).isDirectory()) {
@@ -2238,6 +2551,42 @@ app.whenReady().then(async () => {
       dbWorker.postMessage({ id, type: "transaction", statements });
     });
   };
+  // Selagem HMAC do razão (chave fora da base de dados) e bloqueio de pânico das tabelas de movimentos.
+  const ledgerSealer = createLedgerSealer({
+    query: (type, sql, params) => runQuery(type, sql, params || []),
+    transaction: (statements) => runTransaction(statements),
+    keyPath: path.join(app.getPath("userData"), "ledger-seal.key"),
+    safeStorage
+  });
+  // Selagem HMAC da auditoria (chave própria fora da base de dados): sela cada registo novo.
+  const auditSealer = createAuditSealer({
+    query: (type, sql, params) => runQuery(type, sql, params || []),
+    transaction: (statements) => runTransaction(statements),
+    keyPath: path.join(app.getPath("userData"), "audit-seal.key"),
+    safeStorage
+  });
+  const insertsAuditLogs = (statements: Array<{ sql: string }>) =>
+    statements.some(statement => /^\s*INSERT\s+(?:OR\s+\w+\s+)?INTO\s+["'`\[]?audit_logs\b/i.test(statement.sql));
+  const sealAuditAfterWrite = () => {
+    auditSealer.sealPending().catch(error => console.warn("[Selos] Falha ao selar a auditoria:", error instanceof Error ? error.message : error));
+  };
+  const LEDGER_MONEY_TABLES = new Set(["payments", "accounting_entries", "ledger_transactions", "ledger_lines", "credit_reinforcements"]);
+  const insertsAccountingEntries = (statements: Array<{ sql: string }>) =>
+    statements.some(statement => /^\s*INSERT\s+(?:OR\s+\w+\s+)?INTO\s+["'`\[]?accounting_entries\b/i.test(statement.sql));
+  const sealAfterWrite = (origin: "local" | "remote") => {
+    ledgerSealer.sealPending(origin).catch(error => console.warn("[Selos] Falha ao selar lançamentos:", error instanceof Error ? error.message : error));
+  };
+  const assertLedgerNotFrozen = async (statements: Array<{ sql: string }>) => {
+    if (financialSchemaBootstrapOpen) return;
+    if (!statements.some(statement => LEDGER_MONEY_TABLES.has(String(mutationTable(statement.sql) || "")))) return;
+    const row: any = await runQuery("get", "SELECT value FROM shared_settings WHERE key = ? LIMIT 1", ["accounting_panic_lock"]).catch(() => null);
+    if (!row?.value) return;
+    let lock: any = null;
+    try { lock = JSON.parse(row.value); } catch { lock = null; }
+    if (lock?.active === true) {
+      throw new Error(`Movimentação financeira congelada por ${lock.lockedBy || "um administrador"} (motivo: ${lock.reason || "não indicado"}). Só outro administrador pode desbloquear.`);
+    }
+  };
   const runBackup = async (destination) => {
     await ensureWorkerRunning();
     return new Promise((resolve, reject) => {
@@ -2260,8 +2609,9 @@ app.whenReady().then(async () => {
         VALUES (?, ?, ?, ?, ?, 'user', ?, ?)`, [
         crypto.randomUUID(), new Date().toISOString(), user?.id || null,
         user?.name || "Utilizador desconhecido", action, details,
-        JSON.stringify({ source: "electron-main", ...metadata })
+        JSON.stringify({ source: "electron-main", device: `${os.platform() === "win32" ? "Windows" : os.platform() === "darwin" ? "macOS" : os.platform()} · Aplicação desktop (${os.hostname()})`, ip: getLocalNetworkInfo()?.ips?.[0] || "", ...metadata })
       ]);
+      sealAuditAfterWrite();
     } catch (error) {
       console.warn("[Auth] Nao foi possivel gravar o evento de auditoria:", error instanceof Error ? error.message : error);
     }
@@ -2321,6 +2671,45 @@ app.whenReady().then(async () => {
       throw error;
     }
   };
+  securityQuery = runQuery;
+  flushPendingSecurityEvents();
+  const assertSecurityViewer = (event) => {
+    assertTrustedIpcSender(event);
+    if (isTangoMaster) {
+      if (!masterAuth) throw new Error("Recurso disponivel apenas no Tango Master.");
+      masterAuth.assertAuthenticated(event.sender.id);
+      return { name: "Administrador Master" };
+    }
+    return assertUserPermission(event, "view_audit_logs");
+  };
+  ipcMain.handle("security-events-list", async (event) => {
+    assertSecurityViewer(event);
+    await runQuery("exec", SECURITY_EVENTS_TABLE_SQL);
+    return runQuery("query", "SELECT * FROM security_events ORDER BY timestamp DESC LIMIT 500");
+  });
+  ipcMain.handle("security-events-ack", async (event) => {
+    const viewer: any = assertSecurityViewer(event);
+    await runQuery("exec", SECURITY_EVENTS_TABLE_SQL);
+    await runQuery("execute", "UPDATE security_events SET acknowledged = 1, acknowledgedBy = ?, acknowledgedAt = ? WHERE acknowledged = 0",
+      [String(viewer?.name || viewer?.email || "Administrador"), new Date().toISOString()]);
+    return { success: true };
+  });
+  ipcMain.handle("security-status", async (event) => {
+    assertSecurityViewer(event);
+    return {
+      packaged: app.isPackaged,
+      sandbox: !disableRendererSandbox,
+      sandboxFallbackReason,
+      contextIsolation: true,
+      nodeIntegration: false,
+      devToolsBlocked: !allowDevTools,
+      trustedOriginsOnly: true,
+      contentSecurityPolicy: true,
+      lanServerRunning: !!server,
+      lanBruteForceProtection: true,
+      encryptedSecrets: safeStorage.isEncryptionAvailable(),
+    };
+  });
   ipcMain.handle("user-auth-login", async (event, credentials) => {
     assertTrustedIpcSender(event);
     financialSchemaBootstrapOpen = false;
@@ -2338,6 +2727,8 @@ app.whenReady().then(async () => {
       const failures = (attempt?.failures || 0) + 1;
       userLoginAttempts.set(login, { failures, blockedUntil: failures >= 3 ? Date.now() + Math.min(300_000, 2 ** (failures - 3) * 1_000) : 0 });
       await writeAuthAudit(null, "login_failure", "Tentativa de login falhada para utilizador desconhecido.", { reason: "not_found" });
+      if (failures >= 3) reportSecurity({ type: "login_bruteforce", severity: failures >= 6 ? "critical" : "high", title: SECURITY_EVENT_LABELS.login_bruteforce,
+        details: `${failures} tentativas com o utilizador inexistente "${maskIdentifier(login)}".`, source: "login", channel: "user-auth-login" });
       return { authenticated: false };
     }
     if (foundUser.status === "blocked") {
@@ -2358,9 +2749,18 @@ app.whenReady().then(async () => {
       await runQuery("execute", "UPDATE users SET failedAttempts = ? WHERE id = ?", [failures, foundUser.id]);
       await writeAuthAudit(foundUser, "login_failure", "Tentativa de login falhada.",
         { reason: "invalid_password", failedAttempts: failures });
+      if (failures >= 3) reportSecurity({ type: "login_bruteforce", severity: failures >= 6 ? "critical" : "high", title: SECURITY_EVENT_LABELS.login_bruteforce,
+        details: `${failures} palavras-passe erradas seguidas para a conta "${maskIdentifier(login)}".`, source: "login", channel: "user-auth-login" });
       return { authenticated: false };
     }
     userLoginAttempts.delete(login);
+    // Horário de acesso definido pelo super administrador (partilhado pela nuvem): recusado aqui, fora do renderer.
+    const scheduleRow: any = await runQuery("get", "SELECT value FROM shared_settings WHERE key = ? LIMIT 1", ["access_schedule"]).catch(() => null);
+    const accessDecision = evaluateAccess(normalizeAccessSchedule(scheduleRow?.value), { id: String(foundUser.id), role: String(foundUser.role || "") });
+    if (!accessDecision.allowed) {
+      await writeAuthAudit(foundUser, "login_failure", "Tentativa de acesso fora do horário permitido.", { reason: "outside_schedule" });
+      return { authenticated: false, accessDenied: true, message: describeDenial(accessDecision) };
+    }
     const now = new Date().toISOString();
     await runQuery("execute", "UPDATE users SET failedAttempts = 0, blockedAt = NULL, lastLogin = ?, status = 'active' WHERE id = ?", [now, foundUser.id]);
     if (foundUser.twoFactorSecret) {
@@ -2486,7 +2886,52 @@ app.whenReady().then(async () => {
   ipcMain.handle("db-schema-ready", async (event) => {
     assertTrustedIpcSender(event);
     financialSchemaBootstrapOpen = false;
+    ledgerSealer.initialize().catch(error => console.warn("[Selos] Falha ao iniciar a selagem:", error instanceof Error ? error.message : error));
+    sealAuditAfterWrite();
     return { ready: true };
+  });
+  // Verificação dos selos HMAC do razão (qualquer utilizador autenticado pode verificar).
+  ipcMain.handle("accounting-seal-verify", async (event) => {
+    assertTrustedIpcSender(event);
+    userAuth.assertAuthenticated(event.sender.id);
+    return ledgerSealer.verify();
+  });
+  // Verificação dos selos HMAC da auditoria (página de Auditoria).
+  ipcMain.handle("audit-seal-verify", async (event) => {
+    assertTrustedIpcSender(event);
+    userAuth.assertAuthenticated(event.sender.id);
+    await auditSealer.sealPending().catch(() => 0);
+    return auditSealer.verify();
+  });
+  // Sela lançamentos pendentes depois de revistos (por exemplo, após uma falha entre a gravação e a selagem).
+  ipcMain.handle("accounting-seal-pending", async (event) => {
+    assertTrustedIpcSender(event);
+    const actor = assertUserPermission(event, "manage_fiscal");
+    if (!['admin', 'super_admin'].includes(String(actor.role))) throw new Error("Só administradores podem selar lançamentos pendentes.");
+    const sealed = await ledgerSealer.sealPending("review");
+    await writeAuthAudit(actor, "update", `Selagem manual de ${sealed} lançamento(s) contabilístico(s) pendente(s).`, { sealed });
+    return { sealed };
+  });
+  // Confirmação da palavra-passe do utilizador com sessão iniciada (botão de pânico e outras acções críticas).
+  const passwordConfirmations = new Map<number, { failures: number; blockedUntil: number }>();
+  ipcMain.handle("user-auth-confirm-password", async (event, password) => {
+    assertTrustedIpcSender(event);
+    const sessionUser: any = userAuth.assertAuthenticated(event.sender.id);
+    const state = passwordConfirmations.get(event.sender.id);
+    if (state?.blockedUntil && state.blockedUntil > Date.now()) {
+      throw new Error(`Demasiadas tentativas. Aguarde ${Math.ceil((state.blockedUntil - Date.now()) / 1000)} segundos.`);
+    }
+    if (typeof password !== "string" || !password || password.length > 256) return { confirmed: false };
+    const row: any = await runQuery("get", "SELECT password FROM users WHERE id = ? LIMIT 1", [sessionUser.id]);
+    const confirmed = Boolean(row?.password) && await bcrypt.compare(password.trim(), String(row.password));
+    if (!confirmed) {
+      const failures = (state?.failures || 0) + 1;
+      passwordConfirmations.set(event.sender.id, { failures, blockedUntil: failures >= 3 ? Date.now() + 30_000 : 0 });
+      await writeAuthAudit(sessionUser, "login_failure", "Confirmação de palavra-passe falhada numa acção crítica.", { reason: "confirm_password" });
+      return { confirmed: false };
+    }
+    passwordConfirmations.delete(event.sender.id);
+    return { confirmed: true };
   });
   ipcMain.handle("db-schema-status", async (event) => {
     assertTrustedIpcSender(event);
@@ -2510,9 +2955,13 @@ app.whenReady().then(async () => {
     assertRendererSqlAllowlisted([request], financialSchemaBootstrapOpen);
     assertFinancialSqlAuthorized(event, [request]);
     assertGenericSqlAuthorized(event, [request], !financialSchemaBootstrapOpen && await isFirstSetup());
+    await assertLedgerNotFrozen([request]);
+    await assertApprovalBatch(event,[request],runQuery);
     const reservedFirstUser = await assertUserSqlAuthorized(event, [request]);
     try {
       const r = await runQuery("execute", request.sql, request.params);
+      if (insertsAccountingEntries([request])) sealAfterWrite("local");
+      if (insertsAuditLogs([request])) sealAuditAfterWrite();
       broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
       return r;
     } finally {
@@ -2557,9 +3006,13 @@ app.whenReady().then(async () => {
     assertRendererSqlAllowlisted(safeStatements, financialSchemaBootstrapOpen);
     assertFinancialSqlAuthorized(event, safeStatements);
     assertGenericSqlAuthorized(event, safeStatements, !financialSchemaBootstrapOpen && await isFirstSetup());
+    await assertLedgerNotFrozen(safeStatements);
+    await assertApprovalBatch(event,safeStatements,runQuery);
     const reservedFirstUser = await assertUserSqlAuthorized(event, safeStatements);
     try {
       const r = await runTransaction(safeStatements);
+      if (insertsAccountingEntries(safeStatements)) sealAfterWrite("local");
+      if (insertsAuditLogs(safeStatements)) sealAuditAfterWrite();
       broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
       return r;
     } finally {
@@ -2586,6 +3039,7 @@ app.whenReady().then(async () => {
       },
       transaction: async (statements) => runTransaction(validateDbTransaction(statements))
     });
+    if (result.applied) { sealAfterWrite("remote"); sealAuditAfterWrite(); }
     if (result.applied || result.conflicts) broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
     return result;
   });

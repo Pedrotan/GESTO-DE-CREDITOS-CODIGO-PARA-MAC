@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { clearAuthFailures, lockoutRemaining, registerAuthFailure } from './_alertas.js';
 
 // Autorização de uma empresa (tenant) pelo seu código de acesso. Partilhada pela sincronização e
 // pelo envio dos relatórios de utilização.
@@ -17,7 +18,7 @@ export const normalizeCode = (val) => String(val || '').trim().replace(/[-\s]/g,
 // Se a empresa estiver registada no Painel Master (tabela tango_tenants),
 // valida a chave/código individual dela + estado + expiração. Caso contrário,
 // mantém a compatibilidade com a chave global TANGO_SYNC_SECRET.
-export const authorizeTenant = async (sql, tenantId, providedKey) => {
+export const authorizeTenant = async (sql, tenantId, providedKey, req = null) => {
   await sql(`
     CREATE TABLE IF NOT EXISTS tango_tenants (
       tenant_id TEXT PRIMARY KEY,
@@ -38,6 +39,15 @@ export const authorizeTenant = async (sql, tenantId, providedKey) => {
     // Ignorar se já existe
   }
 
+  // Quem falhou a chave demasiadas vezes fica bloqueado (por IP e por empresa) antes de qualquer comparação.
+  if (req) {
+    const remaining = await lockoutRemaining(sql, req, { scope: 'tenant_key', subject: tenantId });
+    if (remaining > 0) return { ok: false, status: 429, message: `Acesso bloqueado por tentativas falhadas. Tente novamente em ${Math.ceil(remaining / 60)} minuto(s).` };
+  }
+  const fail = async (result, details) => {
+    if (req) await registerAuthFailure(sql, req, { scope: 'tenant_key', subject: tenantId, type: 'tenant_key_failed', title: 'Chave de sincronização de empresa errada', details });
+    return result;
+  };
   const rows = await sql('SELECT key_hash, status, expires_at, access_code FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
   // Chave global de administração: apenas a configurada no servidor, nunca um valor fixo no código.
   const globalSecret = String(process.env.TANGO_SYNC_SECRET || '').trim();
@@ -52,7 +62,7 @@ export const authorizeTenant = async (sql, tenantId, providedKey) => {
       `, [tenantId, sha256(tenantId), `Empresa ${tenantId}`, sha256(providedKey)]);
       return { ok: true };
     }
-    return { ok: false, status: 403, message: 'Empresa não registada para sincronização.' };
+    return fail({ ok: false, status: 403, message: 'Empresa não registada para sincronização.' }, `Tentativa de sincronizar a empresa ${tenantId}, que não está registada.`);
   }
 
   const tenant = rows[0];
@@ -66,7 +76,7 @@ export const authorizeTenant = async (sql, tenantId, providedKey) => {
     ));
 
   if (!isTenantKeyValid && !isGlobalSecretValid) {
-    return { ok: false, status: 401, message: 'Chave ou Código de Acesso de sincronização inválido para esta empresa.' };
+    return fail({ ok: false, status: 401, message: 'Chave ou Código de Acesso de sincronização inválido para esta empresa.' }, `Chave de sincronização errada para a empresa ${tenantId}.`);
   }
   if (tenant.status !== 'active') {
     return { ok: false, status: 403, message: 'O acesso desta empresa está bloqueado no Tango Master. Contacte o administrador.' };
@@ -75,5 +85,6 @@ export const authorizeTenant = async (sql, tenantId, providedKey) => {
     return { ok: false, status: 403, message: 'A chave ou código de acesso desta empresa expirou. Contacte o administrador.' };
   }
   await sql('UPDATE tango_tenants SET last_sync_at = NOW() WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
+  if (req) await clearAuthFailures(sql, { scope: 'tenant_key', subject: tenantId });
   return { ok: true };
 };

@@ -80,19 +80,5 @@ export class RepositorioAuditoria extends RepositorioBase {
         return await this.query(sql, [lastTimestamp, lastTimestamp, lastId, limit]);
     }
 
-    static async deleteById(id: string): Promise<void> {
-        await this.execute('DELETE FROM audit_logs WHERE id = ?', [id]);
-    }
-
-    static async deleteByUserId(userId: string): Promise<void> {
-        await this.execute('DELETE FROM audit_logs WHERE userId = ?', [userId]);
-    }
-
-    static async clearAll(): Promise<void> {
-        await this.execute('DELETE FROM audit_logs');
-    }
+    // Sem métodos de eliminação: a tabela audit_logs é só de inserção (triggers na base de dados).
 }
-
-
-
-

@@ -1,3 +1,4 @@
+import { KzIcon } from '@/componentes/ui/KzIcon';
 import { useRef, useEffect, useState, useCallback } from 'react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
@@ -22,7 +23,6 @@ import {
     RefreshCcw, 
     Calendar, 
     ChevronDown,
-    DollarSign,
     Briefcase,
     Scale,
     Shield,
@@ -473,7 +473,7 @@ export default function Reports() {
                     className={`pb-3 px-1 text-sm font-bold flex items-center gap-2 border-b-2 transition-all ${activeTab === 'financeiro' ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500 hover:text-slate-800'}`}
                     onClick={() => setActiveTab('financeiro')}
                 >
-                    <DollarSign className="h-4 w-4" />
+                    <KzIcon className="h-4 w-4" />
                     Financeiro & Caixa
                 </button>
                 <button 
@@ -1004,7 +1004,7 @@ export default function Reports() {
                                 <div className="flex items-center justify-between gap-3">
                                     <div className="flex items-center gap-2.5 min-w-0">
                                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0">
-                                            <DollarSign className="h-5 w-5" />
+                                            <KzIcon className="h-5 w-5" />
                                         </div>
                                         <p className="text-sm sm:text-base font-bold text-slate-950 dark:text-white truncate tracking-tight">
                                             Volume Total Atrasado

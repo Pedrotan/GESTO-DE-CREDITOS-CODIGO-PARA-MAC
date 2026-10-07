@@ -3,12 +3,37 @@ import { jsPDF } from 'jspdf';
 const configured = new WeakMap<jsPDF, string | null>();
 const stamped = new WeakMap<jsPDF, Set<number>>();
 
+const pageDecorators = new WeakMap<jsPDF, (doc: jsPDF) => void>();
+const decoratedPages = new WeakMap<jsPDF, Set<number>>();
+const currentPage = (doc: jsPDF) => doc.getCurrentPageInfo().pageNumber;
+
+/** Regista como decorar (moldura, rodapé com contactos) as páginas novas deste documento. */
+export function setPdfPageDecorator(doc: jsPDF, decorate: (doc: jsPDF) => void) {
+    pageDecorators.set(doc, decorate);
+}
+
+/** Marca a página actual como já decorada (chamado pela própria moldura). */
+export function markPdfPageDecorated(doc: jsPDF) {
+    const pages = decoratedPages.get(doc) || new Set<number>();
+    pages.add(currentPage(doc));
+    decoratedPages.set(doc, pages);
+}
+
+/** Decora a página actual se ainda não tiver moldura (ex.: páginas criadas por uma tabela longa). */
+export function decorateCurrentPdfPage(doc: jsPDF) {
+    if (decoratedPages.get(doc)?.has(currentPage(doc))) return;
+    pageDecorators.get(doc)?.(doc);
+}
+
 export function setPdfWatermark(doc: jsPDF, logo: string | null | undefined) {
-    configured.set(doc, logo || null);
+    if (logo === undefined) configured.delete(doc);
+    else configured.set(doc, logo || null);
 }
 
 function storedWatermark(): string | null {
     try {
+        const master = localStorage.getItem('tango_master_watermark');
+        if (master) return master;
         const account = localStorage.getItem('tango_active_account_id') || 'default';
         const saved = localStorage.getItem('cached_company_settings:' + account) || localStorage.getItem('company_settings');
         const settings = saved ? JSON.parse(saved) : null;
@@ -16,6 +41,10 @@ function storedWatermark(): string | null {
     } catch {
         return null;
     }
+}
+
+export function getMasterPdfWatermark(): string | null {
+    try { return localStorage.getItem('tango_master_watermark'); } catch { return null; }
 }
 
 export function applyPdfWatermark(doc: jsPDF) {

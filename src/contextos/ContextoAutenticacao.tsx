@@ -1,8 +1,10 @@
 import React, { createContext, useContext, useState, ReactNode, useEffect, useRef, useCallback } from 'react';
+import { accessDenialFor } from '@/servicos/ServicoHorarioAcesso';
 import { User, Role, AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
 import { db } from '@/bibliotecas/bd';
 import bcrypt from 'bcryptjs';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
+import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 
 const DEFAULT_PERMISSIONS: Record<Role, string[]> = {
     super_admin: AVAILABLE_PERMISSIONS.map(p => p.id),
@@ -40,6 +42,7 @@ interface ContextoAutenticacaoType {
     getResetRequests: () => Promise<any[]>;
     handleResetRequest: (requestId: string, newPassword?: string, action?: 'complete' | 'cancel') => Promise<void>;
     isAuthenticated: boolean;
+    reloadUsers: () => Promise<void>;
     refreshSettings: () => Promise<void>;
     syncUsersFromMaster: (url: string, passkey: string) => Promise<void>;
     generate2FASecret: () => Promise<{ secret: string; qrCode: string }>;
@@ -119,20 +122,35 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 }
 
                 // Load all users for state
-                const allUsersRaw = await db.all<User & { permissions: string, status: string, lastSeen: string, signature: string }>('SELECT id, name, email, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature FROM users');
+                const allUsersRaw = await db.all<any>('SELECT * FROM users');
                 const allUsers = allUsersRaw.map(u => {
                     let parsedPermissions = [];
+                    let parsedExceptions = [];
+                    let parsedLimits = undefined;
                     try {
                         if (u.permissions) parsedPermissions = JSON.parse(u.permissions);
-                    } catch (e) {
-                        // Sanitized: removed email log
-                    }
+                    } catch (e) {}
+                    try {
+                        if (u.permissionExceptions) parsedExceptions = JSON.parse(u.permissionExceptions);
+                    } catch (e) {}
+                    try {
+                        if (u.approvalLimits) parsedLimits = JSON.parse(u.approvalLimits);
+                    } catch (e) {}
+
+                    const efetivas = ServicoControloAcesso.calcularPermissoesEfetivas({
+                        ...u,
+                        role: u.role,
+                        permissionExceptions: parsedExceptions
+                    });
+
                     return {
                         ...u,
-                        permissions: (parsedPermissions && Array.isArray(parsedPermissions) && parsedPermissions.length > 0) ? parsedPermissions : DEFAULT_PERMISSIONS[u.role as Role],
+                        permissions: efetivas.permissoes.length > 0 ? efetivas.permissoes : (parsedPermissions && Array.isArray(parsedPermissions) && parsedPermissions.length > 0 ? parsedPermissions : DEFAULT_PERMISSIONS[u.role as Role]),
+                        permissionExceptions: parsedExceptions,
+                        approvalLimits: parsedLimits,
                         status: (u.status as any) || 'active',
                         lastSeen: u.lastSeen,
-                        ip: (u as any).ip
+                        ip: u.ip
                     };
                 });
                 setUsers(allUsers);
@@ -201,9 +219,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             // Update status to offline on explicit logout
             try {
                 await db.run('UPDATE users SET status = ? WHERE id = ?', ['offline', user.id]);
+                setUsers(prev => prev.map(u => (u.id === user.id ? { ...u, status: 'offline' } : u)));
             } catch (e) {
                 console.warn("Could not update user offline status during logout", e);
             }
+            // Fim de sessão também fica na auditoria (fecha a sessão na linha do tempo).
+            await ServicoAuditoria.addLog('logout', 'user', `Logout de ${user.name}`, user.id, user.name).catch(() => undefined);
+            ServicoAuditoria.endSession();
         }
 
         // Save session recovery items before clearing
@@ -303,6 +325,48 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
     }, [user, idleTimeout, logout, expireSessionAndGoToLogin]);
 
+    // No computador a lista de utilizadores só pode ser lida com sessão iniciada: o arranque sem sessão não a
+    // carrega, por isso volta a ser lida logo após cada login (páginas Utilizadores e Sessões).
+    const reloadUsers = useCallback(async () => {
+        try {
+            const rows = await db.all<any>('SELECT * FROM users');
+            const list = rows.map(u => {
+                let parsedPermissions = [];
+                let parsedExceptions = [];
+                let parsedLimits = undefined;
+                try {
+                    if (u.permissions) parsedPermissions = typeof u.permissions === 'string' ? JSON.parse(u.permissions) : u.permissions;
+                } catch { parsedPermissions = []; }
+                try {
+                    if (u.permissionExceptions) parsedExceptions = typeof u.permissionExceptions === 'string' ? JSON.parse(u.permissionExceptions) : u.permissionExceptions;
+                } catch { parsedExceptions = []; }
+                try {
+                    if (u.approvalLimits) parsedLimits = typeof u.approvalLimits === 'string' ? JSON.parse(u.approvalLimits) : u.approvalLimits;
+                } catch { parsedLimits = undefined; }
+
+                const efetivas = ServicoControloAcesso.calcularPermissoesEfetivas({
+                    ...u,
+                    role: u.role,
+                    permissionExceptions: parsedExceptions
+                });
+
+                return {
+                    ...u,
+                    permissions: efetivas.permissoes.length > 0 ? efetivas.permissoes : (Array.isArray(parsedPermissions) && parsedPermissions.length > 0 ? parsedPermissions : DEFAULT_PERMISSIONS[u.role as Role]),
+                    permissionExceptions: parsedExceptions,
+                    approvalLimits: parsedLimits,
+                    status: (u.status as any) || 'active',
+                    lastSeen: u.lastSeen,
+                    ip: u.ip
+                };
+            }) as User[];
+            setUsers(list);
+            setHasUsers(list.length > 0);
+        } catch (error) {
+            console.warn('[Auth] Não foi possível carregar a lista de utilizadores:', error);
+        }
+    }, []);
+
     const login = async (emailOrUsername: string, password: string): Promise<boolean> => {
         try {
             const cleanInput = emailOrUsername.trim().toLowerCase();
@@ -311,6 +375,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             let retryNativeAfterRemoteImport = false;
             if (window.electronAPI?.userAuthLogin) {
                 const nativeResult = await window.electronAPI.userAuthLogin(cleanInput, cleanPassword);
+                if (nativeResult.accessDenied) throw new Error(nativeResult.message || 'Acesso fora do horário permitido.');
                 if (nativeResult.requires2FA && nativeResult.userId) {
                     pendingTwoFactorUser.current = { id: nativeResult.userId } as User;
                     throw new Error(`2FA_REQUIRED:${nativeResult.userId}`);
@@ -322,6 +387,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     setUser(nativeResult.user as User);
                     setHasUsers(true);
                     sessionStorage.setItem('user', JSON.stringify(nativeResult.user));
+                    void reloadUsers();
                     return true;
                 }
                 if (!nativeResult.notFound) return false;
@@ -520,9 +586,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             // Force clear failed attempts
             await db.run('UPDATE users SET failedAttempts = 0, blockedAt = NULL WHERE id = ?', [foundUser.id]);
 
-            // Update last login and status
+            // Update last login, last seen and status
             const now = new Date().toISOString();
-            await db.run('UPDATE users SET lastLogin = ?, status = ?, ip = ? WHERE id = ?', [now, 'active', ip, foundUser.id]);
+            await db.run('UPDATE users SET lastLogin = ?, lastSeen = ?, status = ?, ip = ? WHERE id = ?', [now, now, 'active', ip, foundUser.id]);
 
             // Set user (without password)
             const { password: _, permissions: permissionsStr, twoFactorSecret: _twoFactorSecret, ...userWithoutPassword } = foundUser as any;
@@ -543,9 +609,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 ...userWithoutPassword,
                 permissions: finalPermissions,
                 lastLogin: now,
+                lastSeen: now,
                 ip: ip,
                 status: 'active'
             };
+
+            // Horário de acesso definido pelo super administrador.
+            const accessDenial = await accessDenialFor({ id: String(foundUser.id), role: foundUser.role });
+            if (accessDenial) throw new Error(accessDenial);
 
             // NEW: Check if 2FA is required
             if (foundUser.twoFactorEnabled) {
@@ -555,6 +626,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             setUser(userWithLogin);
             sessionStorage.setItem('user', JSON.stringify(userWithLogin));
+            void reloadUsers();
 
             // Log de auditoria para login bem-sucedido
             if (foundUser.id === 'dev-admin-emergency') {
@@ -569,6 +641,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     { ip, userAgent: navigator.userAgent }
                 );
             } else {
+                ServicoAuditoria.startSession(ip);
                 await ServicoAuditoria.addLog(
                     'login',
                     'user',
@@ -682,6 +755,34 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             updateFields.push('signature = ?');
             updateValues.push(updates.signature);
         }
+        if (updates.permissionExceptions !== undefined) {
+            updateFields.push('permissionExceptions = ?');
+            updateValues.push(JSON.stringify(updates.permissionExceptions));
+        }
+        if (updates.approvalLimits !== undefined) {
+            updateFields.push('approvalLimits = ?');
+            updateValues.push(JSON.stringify(updates.approvalLimits));
+        }
+        if (updates.dataScope !== undefined) {
+            updateFields.push('dataScope = ?');
+            updateValues.push(updates.dataScope);
+        }
+        if (updates.branchId !== undefined) {
+            updateFields.push('branchId = ?');
+            updateValues.push(updates.branchId);
+        }
+        if (updates.branchName !== undefined) {
+            updateFields.push('branchName = ?');
+            updateValues.push(updates.branchName);
+        }
+        if (updates.temporaryRoleExpiry !== undefined) {
+            updateFields.push('temporaryRoleExpiry = ?');
+            updateValues.push(updates.temporaryRoleExpiry);
+        }
+        if (updates.mustChangePassword !== undefined) {
+            updateFields.push('mustChangePassword = ?');
+            updateValues.push(updates.mustChangePassword ? 1 : 0);
+        }
 
         // 1. Capture Previous State (Deep Clone)
         const previousState = JSON.parse(JSON.stringify(users.find(u => u.id === id) || {}));
@@ -697,7 +798,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
 
         const updatedUser = { ...users.find(u => u.id === id), ...updates };
-        setUsers(prev => prev.map(u => u.id === id ? { ...u, ...updates } : u));
+        if (updates.role || updates.permissionExceptions) {
+            const efetivas = ServicoControloAcesso.calcularPermissoesEfetivas(updatedUser);
+            updatedUser.permissions = efetivas.permissoes;
+        }
+        setUsers(prev => prev.map(u => u.id === id ? updatedUser : u));
 
         // 2. Capture New State (Deep Clone)
         const newState = JSON.parse(JSON.stringify(updatedUser));
@@ -902,7 +1007,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (!user) return;
 
         const updateActivity = async () => {
-            await db.run('UPDATE users SET lastSeen = ? WHERE id = ?', [new Date().toISOString(), user.id]);
+            const agoraIso = new Date().toISOString();
+            const currentIp = user.ip || (await getIP().catch(() => 'Local Machine'));
+            try {
+                await db.run(
+                    'UPDATE users SET lastSeen = ?, status = "active", ip = COALESCE(NULLIF(ip, ""), ?) WHERE id = ?',
+                    [agoraIso, currentIp, user.id]
+                );
+            } catch (e) {
+                console.warn('[Auth] Erro ao atualizar lastSeen na BD:', e);
+            }
+
+            // Sincronizar em tempo real o utilizador e a lista em memória
+            setUser(prev => (prev && prev.id === user.id ? { ...prev, lastSeen: agoraIso, status: 'active', ip: prev.ip || currentIp } : prev));
+            setUsers(prev => prev.map(u => (u.id === user.id ? { ...u, lastSeen: agoraIso, status: 'active', ip: u.ip || currentIp } : u)));
 
             // Um administrador pode terminar esta sessão à distância, pondo o
             // estado a 'offline' (ou bloqueando a conta). O login repõe-o a
@@ -910,23 +1028,32 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             try {
                 const atual = await db.get<any>('SELECT status FROM users WHERE id = ?', [user.id]);
                 if (atual && (atual.status === 'offline' || atual.status === 'blocked')) {
-                    console.warn('[Auth] Sessao terminada remotamente por um administrador.');
+                    console.warn('[Auth] Sessão terminada remotamente por um administrador.');
                     sessionStorage.setItem('sessionExpired', 'true');
                     sessionStorage.setItem('expiredUserEmail', user.email || '');
                     await logout();
                     window.location.hash = '/entrar';
                 }
             } catch (e) {
-                console.warn('Nao foi possivel confirmar o estado da sessao', e);
+                console.warn('Não foi possível confirmar o estado da sessão', e);
             }
         };
 
-        // Update immediately and then every 2 minutes
+        // Atualização imediata e periódica a cada 30 segundos
         updateActivity();
-        const interval = setInterval(updateActivity, 2 * 60 * 1000);
+        const interval = setInterval(updateActivity, 30 * 1000);
 
-        return () => clearInterval(interval);
-    }, [user, logout]);
+        // Atualizar também quando o operador interage ou a janela recupera o foco
+        const onFocus = () => {
+            void updateActivity();
+        };
+        window.addEventListener('focus', onFocus);
+
+        return () => {
+            clearInterval(interval);
+            window.removeEventListener('focus', onFocus);
+        };
+    }, [user?.id, logout]);
 
     // --- 2FA LOGIC (Local TOTP) ---
 
@@ -960,6 +1087,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             pendingTwoFactorUser.current = null;
             setUser(result.user as User);
             sessionStorage.setItem('user', JSON.stringify(result.user));
+            void reloadUsers();
             return { authenticated: true };
         }
         const u = await db.get<User>('SELECT twoFactorSecret FROM users WHERE id = ?', [userId]);
@@ -980,6 +1108,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             if (!result.enabled || !result.user) return { success: false, reason: result.reason || 'invalid_code' };
             setUser(result.user as User);
             sessionStorage.setItem('user', JSON.stringify(result.user));
+            void reloadUsers();
             return { success: true, recoveryCodes: result.recoveryCodes };
         }
         if (!user) return { success: false, reason: 'session_expired' };
@@ -1084,6 +1213,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 getResetRequests,
                 handleResetRequest,
                 isAuthenticated: !!user,
+                reloadUsers,
                 refreshSettings,
                 syncUsersFromMaster,
                 generate2FASecret,

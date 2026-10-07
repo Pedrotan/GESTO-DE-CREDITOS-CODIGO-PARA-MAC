@@ -34,6 +34,24 @@ if (savedVercelLink) {
 }
 cpSync(apiSourceDir, join(outputDir, 'api'), { recursive: true });
 
+// A mesma política de conteúdo do index.html, enviada também como cabeçalho HTTP, com a protecção que uma
+// meta tag não consegue dar: a aplicação nunca pode ser incorporada noutro site (clickjacking).
+const indexHtml = readFileSync(join(outputDir, 'index.html'), 'utf8');
+const metaCsp = indexHtml.match(/http-equiv="Content-Security-Policy"\s+content="([^"]+)"/i)?.[1];
+if (!metaCsp) throw new Error('index.html sem Content-Security-Policy: a publicação foi interrompida por segurança.');
+const contentSecurityPolicy = `${metaCsp.replace(/;\s*$/, '')}; frame-ancestors 'none'`;
+
+const securityHeaders = [
+  { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains; preload' },
+  { key: 'Content-Security-Policy', value: contentSecurityPolicy },
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()' },
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+  { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
+];
+
 const vercelConfig = {
   version: 2,
   cleanUrls: true,
@@ -41,6 +59,20 @@ const vercelConfig = {
     'api/*.js': { maxDuration: 30 }
   },
   headers: [
+    {
+      // Cabeçalhos de segurança em todas as páginas e ficheiros servidos.
+      source: '/(.*)',
+      headers: securityHeaders
+    },
+    {
+      // A página inicial nunca fica em cache: depois de um deploy aponta sempre para os ficheiros novos.
+      source: '/',
+      headers: [{ key: 'Cache-Control', value: 'no-cache, must-revalidate' }]
+    },
+    {
+      source: '/index.html',
+      headers: [{ key: 'Cache-Control', value: 'no-cache, must-revalidate' }]
+    },
     {
       source: '/sql-wasm.wasm',
       headers: [{ key: 'Content-Type', value: 'application/wasm' }]

@@ -6,11 +6,13 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "ALTER TABLE credits RENAME TO credits_old",
   "ALTER TABLE dictionary RENAME TO dictionary_old",
   "ALTER TABLE payments RENAME TO payments_old",
+  "CREATE INDEX IF NOT EXISTS idx_accounting_audit_runs_finished ON accounting_audit_runs(finishedAt)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_clientId ON accounting_entries(clientId)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_creditId ON accounting_entries(creditId)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_timestamp ON accounting_entries(timestamp)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_usuario ON accounting_entries(usuario_id)",
   "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)",
+  "CREATE INDEX IF NOT EXISTS idx_audit_alerts_status ON audit_alerts(status, occurredAt)",
   "CREATE INDEX IF NOT EXISTS idx_audit_entity ON audit_logs(entity)",
   "CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp)",
   "CREATE INDEX IF NOT EXISTS idx_audit_userId ON audit_logs(userId)",
@@ -22,9 +24,12 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)",
   "CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)",
   "CREATE INDEX IF NOT EXISTS idx_clients_usuario ON clients(usuario_id)",
+  "CREATE INDEX IF NOT EXISTS idx_collection_credit ON collection_events(creditId, createdAt)",
   "CREATE INDEX IF NOT EXISTS idx_collection_messages_client ON collection_messages(clientId)",
   "CREATE INDEX IF NOT EXISTS idx_collection_messages_sentAt ON collection_messages(sentAt)",
   "CREATE INDEX IF NOT EXISTS idx_contracts_usuario ON contracts(usuario_id)",
+  "CREATE INDEX IF NOT EXISTS idx_credit_approvals_creditId ON credit_approvals(creditId)",
+  "CREATE INDEX IF NOT EXISTS idx_credit_approvals_decidedAt ON credit_approvals(decidedAt)",
   "CREATE INDEX IF NOT EXISTS idx_credit_installments_due ON credit_installments(creditId, status, dueDate)",
   "CREATE INDEX IF NOT EXISTS idx_credits_clientId ON credits(clientId)",
   "CREATE INDEX IF NOT EXISTS idx_credits_createdAt ON credits(createdAt)",
@@ -37,12 +42,18 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_source ON ledger_transactions(sourceType, sourceId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_timestamp ON ledger_transactions(timestamp)",
   "CREATE INDEX IF NOT EXISTS idx_legal_cases_usuario ON legal_cases(usuario_id)",
+  "CREATE INDEX IF NOT EXISTS idx_limit_escalations_entity ON limit_escalations(entityType, entityId, status)",
+  "CREATE INDEX IF NOT EXISTS idx_limit_ledger_month ON limit_ledger(operationType, monthKey)",
+  "CREATE INDEX IF NOT EXISTS idx_limit_ledger_user ON limit_ledger(operationType, userId, dayKey)",
+  "CREATE INDEX IF NOT EXISTS idx_limit_versions_status ON limit_policy_versions(status, effectiveFrom)",
+  "CREATE INDEX IF NOT EXISTS idx_payments_batch ON payments(batchId)",
   "CREATE INDEX IF NOT EXISTS idx_payments_creditId ON payments(creditId)",
   "CREATE INDEX IF NOT EXISTS idx_payments_credit_date ON payments(creditId, paymentDate)",
   "CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(paymentDate)",
   "CREATE INDEX IF NOT EXISTS idx_payments_paymentDate ON payments(paymentDate)",
   "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)",
   "CREATE INDEX IF NOT EXISTS idx_payments_usuario ON payments(usuario_id)",
+  "CREATE INDEX IF NOT EXISTS idx_report_history_generatedAt ON report_history(generatedAt)",
   "CREATE INDEX IF NOT EXISTS idx_simulations_amount ON simulations(amount)",
   "CREATE INDEX IF NOT EXISTS idx_simulations_clientName ON simulations(clientName)",
   "CREATE INDEX IF NOT EXISTS idx_simulations_createdAt ON simulations(createdAt)",
@@ -54,56 +65,126 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_users_status ON users(status)",
   "CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)",
   "CREATE INDEX IF NOT EXISTS idx_warranties_usuario ON warranties(usuario_id)",
+  "CREATE TABLE IF NOT EXISTS accounting_audit_runs ( id TEXT PRIMARY KEY, kind TEXT NOT NULL, startedAt TEXT NOT NULL, finishedAt TEXT NOT NULL, userId TEXT, userName TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('ok','warning','critical')), criticalCount INTEGER NOT NULL DEFAULT 0, highCount INTEGER NOT NULL DEFAULT 0, mediumCount INTEGER NOT NULL DEFAULT 0, lowCount INTEGER NOT NULL DEFAULT 0, headEntryId TEXT, headHash TEXT, sealStatus TEXT, summary TEXT, findings TEXT )",
+  "CREATE TABLE IF NOT EXISTS accounting_bank_imports (id TEXT PRIMARY KEY, fileName TEXT NOT NULL, movements TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, importedAt TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS accounting_cash_sessions ( id TEXT PRIMARY KEY, operatorId TEXT NOT NULL, operatorName TEXT NOT NULL, sessionDate TEXT NOT NULL, openedAt TEXT NOT NULL, closedAt TEXT, openingMinor INTEGER NOT NULL CHECK(openingMinor >= 0), expectedMinor INTEGER, countedMinor INTEGER, reason TEXT, status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')), UNIQUE(operatorId, sessionDate), CHECK(status = 'open' OR (expectedMinor IS NOT NULL AND countedMinor IS NOT NULL AND countedMinor >= 0 AND (expectedMinor = countedMinor OR length(trim(reason)) >= 10))) )",
+  "CREATE TABLE IF NOT EXISTS accounting_daily_closes ( day TEXT PRIMARY KEY, headEntryId TEXT, headHash TEXT, entryCount INTEGER NOT NULL, debitMinor INTEGER NOT NULL, creditMinor INTEGER NOT NULL, liquidMinor INTEGER NOT NULL, portfolioMinor INTEGER NOT NULL, auditRunId TEXT, sealStatus TEXT, closedAt TEXT NOT NULL, closedBy TEXT NOT NULL, closedById TEXT )",
+  "CREATE TABLE IF NOT EXISTS accounting_divergence_events ( id TEXT PRIMARY KEY, issueKey TEXT NOT NULL, previousId TEXT NOT NULL DEFAULT '', source TEXT NOT NULL, description TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','justified','resolved')), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL, UNIQUE(issueKey, previousId) )",
   "CREATE TABLE IF NOT EXISTS accounting_entries ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, description TEXT, clientId TEXT, creditId TEXT, paymentId TEXT, debit TEXT NOT NULL, credit TEXT NOT NULL, amountPrincipal REAL DEFAULT 0, amountInterest REAL DEFAULT 0, amountLateInterest REAL DEFAULT 0, amountTotal REAL NOT NULL, amountPrincipalMinor INTEGER, amountInterestMinor INTEGER, amountLateInterestMinor INTEGER, amountTotalMinor INTEGER, processedBy TEXT NOT NULL, justification TEXT, integrityHash TEXT, previousHash TEXT, hashVersion INTEGER DEFAULT 1, usuario_id TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) )",
+  "CREATE TABLE IF NOT EXISTS accounting_entry_seals ( seq INTEGER PRIMARY KEY AUTOINCREMENT, entryId TEXT NOT NULL UNIQUE, hmac TEXT NOT NULL, previousHmac TEXT NOT NULL, origin TEXT NOT NULL CHECK(origin IN ('local','remote','legacy','review')), sealedAt TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS accounting_receipts (id TEXT PRIMARY KEY, entryId TEXT NOT NULL UNIQUE, fileName TEXT NOT NULL, mime TEXT NOT NULL, data TEXT NOT NULL, digest TEXT NOT NULL, createdAt TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS accounting_requests ( id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('reversal','writeoff')), targetId TEXT NOT NULL, amountMinor INTEGER, description TEXT, reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, requestedAt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')), decidedBy TEXT, decidedById TEXT, decidedAt TEXT, decisionReason TEXT, resultEntryId TEXT )",
+  "CREATE TABLE IF NOT EXISTS audit_alert_comments ( id TEXT PRIMARY KEY, alertId TEXT NOT NULL, userId TEXT, userName TEXT NOT NULL, status TEXT, comment TEXT NOT NULL, createdAt TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS audit_alerts ( id TEXT PRIMARY KEY, alertKey TEXT NOT NULL UNIQUE, ruleId TEXT NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, description TEXT, eventIds TEXT, originUserId TEXT, originUserName TEXT, occurredAt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in_review','justified','false_positive','resolved')), assignedTo TEXT, assignedToName TEXT, dueAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, closedBy TEXT, closedByName TEXT, closedAt TEXT )",
+  "CREATE TABLE IF NOT EXISTS audit_daily_closes ( day TEXT PRIMARY KEY, lastAuditId TEXT, headHash TEXT, eventCount INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('ok','broken')), brokenSeq INTEGER, verifiedAt TEXT NOT NULL, verifiedBy TEXT )",
+  "CREATE TABLE IF NOT EXISTS audit_log_chain (seq INTEGER PRIMARY KEY AUTOINCREMENT, auditId TEXT NOT NULL UNIQUE, previousHash TEXT NOT NULL, integrityHash TEXT NOT NULL, origin TEXT NOT NULL CHECK(origin IN ('live','legacy')))",
   "CREATE TABLE IF NOT EXISTS audit_logs ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, userId TEXT, userName TEXT, action TEXT NOT NULL, entity TEXT NOT NULL, details TEXT, previousState TEXT, newState TEXT, metadata TEXT )",
   "CREATE TABLE IF NOT EXISTS calendar_tasks ( id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, date TEXT NOT NULL, done INTEGER DEFAULT 0, createdAt TEXT DEFAULT (datetime('now')), usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS chat_messages ( id TEXT PRIMARY KEY, role TEXT, content TEXT, timestamp TEXT, userId TEXT )",
   "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS closed_months ( id TEXT PRIMARY KEY, month INTEGER NOT NULL, year INTEGER NOT NULL, capitalApplied REAL NOT NULL, projectedProfit REAL NOT NULL, realizedProfit REAL NOT NULL, overdueAmount REAL NOT NULL, liquidationRate REAL NOT NULL, closedAt TEXT NOT NULL, closedBy TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS collection_events ( id TEXT PRIMARY KEY, creditId TEXT, kind TEXT NOT NULL CHECK(kind IN ('contact','promise','promise_kept','promise_broken','assignment','target')), agentId TEXT, agentName TEXT, monthKey TEXT, amountMinor INTEGER CHECK(amountMinor IS NULL OR (typeof(amountMinor) = 'integer' AND amountMinor >= 0)), promisedDate TEXT, relatedId TEXT, notes TEXT NOT NULL CHECK(length(trim(notes)) >= 5), actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK((kind NOT IN ('contact','promise','promise_kept','promise_broken','assignment')) OR creditId IS NOT NULL), CHECK(kind <> 'promise' OR (amountMinor > 0 AND promisedDate IS NOT NULL)), CHECK(kind <> 'target' OR (agentId IS NOT NULL AND monthKey IS NOT NULL AND amountMinor IS NOT NULL)), CHECK(kind <> 'assignment' OR agentId IS NOT NULL), CHECK(kind NOT IN ('promise_kept','promise_broken') OR relatedId IS NOT NULL) )",
   "CREATE TABLE IF NOT EXISTS collection_messages ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, creditIds TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, attemptNumber INTEGER DEFAULT 1, totalDue REAL DEFAULT 0, sentAt TEXT NOT NULL, sentBy TEXT, legalTriggered INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS company_settings ( id INTEGER PRIMARY KEY CHECK(id = 1), name TEXT NOT NULL, nif TEXT, address TEXT, logo TEXT, reportLogo TEXT, licenseKey TEXT, currency TEXT DEFAULT 'AOA', customClauses TEXT, rescueKey TEXT, phone TEXT, primaryColor TEXT, secondaryColor TEXT, watermarkLogo TEXT, sessionTimeout INTEGER DEFAULT 5, email TEXT, whatsapp TEXT, whatsappAutoNotify INTEGER DEFAULT 0, whatsappVerified INTEGER DEFAULT 0, syncEnabled INTEGER DEFAULT 0, syncUrl TEXT, syncApiKey TEXT, syncPasskey TEXT, lastSync TEXT, maintenanceMode INTEGER DEFAULT 0, allowedModulesDuringMaintenance TEXT DEFAULT '[]', enableGatewaysModule INTEGER DEFAULT 1, enableGatewaysModuleAdminOnly INTEGER DEFAULT 0, enableProfileActivity INTEGER DEFAULT 1, enableProfileActivityAdminOnly INTEGER DEFAULT 0, lastBackupDate TEXT, digitalSignatureEnabled INTEGER DEFAULT 1, authorizedSigners TEXT DEFAULT '[]', bankingInfo TEXT DEFAULT '[]', contractTemplates TEXT DEFAULT '[]', installDate TEXT, financialLock INTEGER DEFAULT 0, enableWarrantiesModule INTEGER DEFAULT 1, enableWarrantiesModuleAdminOnly INTEGER DEFAULT 0, enableLegalModule INTEGER DEFAULT 1, enableLegalModuleAdminOnly INTEGER DEFAULT 0, enableScoringModule INTEGER DEFAULT 1, enableScoringModuleAdminOnly INTEGER DEFAULT 0, defaultSimulationInterestRate REAL, defaultSimulationAdminFee REAL, defaultSimulationIof REAL, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPassword TEXT, smtpSecure INTEGER DEFAULT 0, smtpFromName TEXT, location TEXT, enableSuppliersModule INTEGER DEFAULT 0, enableSuppliersModuleAdminOnly INTEGER DEFAULT 0, enableMultiTenant INTEGER DEFAULT 1, website TEXT, segment TEXT, slogan TEXT )",
   "CREATE TABLE IF NOT EXISTS contracts ( id TEXT PRIMARY KEY, clientId TEXT, clientName TEXT, title TEXT, value REAL, startDate TEXT, endDate TEXT, status TEXT, terms TEXT, createdAt TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
+  "CREATE TABLE IF NOT EXISTS credit_approvals (id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT, clientName TEXT, principalAmount REAL, interestRate REAL, installments INTEGER, decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')), reason TEXT, requestedBy TEXT, requestedAt TEXT, decidedBy TEXT NOT NULL, decidedById TEXT, decidedAt TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS credit_installments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, installmentNumber INTEGER NOT NULL CHECK(installmentNumber > 0), dueDate TEXT NOT NULL, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL CHECK(interestMinor >= 0), lateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(lateInterestMinor >= 0), paidPrincipalMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidPrincipalMinor >= 0), paidInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidInterestMinor >= 0), paidLateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidLateInterestMinor >= 0), status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','partial','paid','overdue','cancelled')), paidAt TEXT, version INTEGER NOT NULL DEFAULT 0, UNIQUE(creditId, installmentNumber), FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS credit_reinforcements ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), idempotencyKey TEXT NOT NULL UNIQUE, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS credit_reinforcements ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), idempotencyKey TEXT NOT NULL UNIQUE, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT)",
+  "CREATE TABLE IF NOT EXISTS credit_writeoffs ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL UNIQUE, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL, entryId TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK(requestedById <> approvedById) )",
   "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )",
   "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS ledger_lines ( id TEXT PRIMARY KEY, transactionId TEXT NOT NULL, account TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('debit', 'credit')), component TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), FOREIGN KEY(transactionId) REFERENCES ledger_transactions(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS ledger_transactions ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, sourceType TEXT NOT NULL, sourceId TEXT NOT NULL, description TEXT, totalDebitMinor INTEGER NOT NULL CHECK(totalDebitMinor > 0), totalCreditMinor INTEGER NOT NULL CHECK(totalCreditMinor > 0), integrityHash TEXT NOT NULL, previousHash TEXT NOT NULL, hashVersion INTEGER NOT NULL DEFAULT 2, usuario_id TEXT, CHECK(totalDebitMinor = totalCreditMinor) )",
   "CREATE TABLE IF NOT EXISTS legal_cases ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT NOT NULL, stage TEXT DEFAULT 'interpellated', priority TEXT DEFAULT 'normal', assignedLawyer TEXT, notes TEXT, history TEXT DEFAULT '[]', lastActionDate TEXT, debtAmount REAL, lastAction TEXT, updatedAt TEXT, closedAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
+  "CREATE TABLE IF NOT EXISTS limit_escalation_approvals ( id TEXT PRIMARY KEY, escalationId TEXT NOT NULL, approverId TEXT NOT NULL, approverName TEXT NOT NULL, approverRole TEXT, decision TEXT NOT NULL CHECK(decision IN ('approved','rejected')), notes TEXT, decidedAt TEXT NOT NULL, UNIQUE(escalationId, approverId) )",
+  "CREATE TABLE IF NOT EXISTS limit_escalations ( id TEXT PRIMARY KEY, operationType TEXT NOT NULL, entityType TEXT NOT NULL, entityId TEXT NOT NULL, amountMinor INTEGER NOT NULL, requestedById TEXT, requestedByName TEXT, requestedRole TEXT, reason TEXT NOT NULL, details TEXT, requiredLevelId TEXT NOT NULL, requiredLevelIndex INTEGER NOT NULL, requiredLevelName TEXT NOT NULL, dual INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')), createdAt TEXT NOT NULL, levelSince TEXT NOT NULL, escalationCount INTEGER NOT NULL DEFAULT 0, lastReminderAt TEXT, decidedAt TEXT, decidedBy TEXT, decidedByName TEXT )",
+  "CREATE TABLE IF NOT EXISTS limit_exceptions ( id TEXT PRIMARY KEY, userId TEXT NOT NULL, userName TEXT NOT NULL, operationType TEXT NOT NULL, perOperationMinor INTEGER, dailyMinor INTEGER, monthlyMinor INTEGER, dailyCount INTEGER, startsAt TEXT NOT NULL, endsAt TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','revoked')), requestedBy TEXT NOT NULL, requestedByName TEXT NOT NULL, requestedAt TEXT NOT NULL, decidedBy TEXT, decidedByName TEXT, decidedAt TEXT, decisionReason TEXT, expiryNotifiedAt TEXT )",
+  "CREATE TABLE IF NOT EXISTS limit_ledger ( id TEXT PRIMARY KEY, operationType TEXT NOT NULL, userId TEXT NOT NULL, userName TEXT, profileId TEXT, branchId TEXT DEFAULT '', amountMinor INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 1, dayKey TEXT NOT NULL, monthKey TEXT NOT NULL, entityType TEXT, entityId TEXT, createdAt TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS limit_locks ( id TEXT PRIMARY KEY, ledgerId TEXT NOT NULL, scope TEXT NOT NULL, scopeId TEXT NOT NULL, period TEXT NOT NULL, periodKey TEXT NOT NULL, createdAt TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS limit_policy_versions ( id TEXT PRIMARY KEY, version INTEGER NOT NULL, policy TEXT NOT NULL, summary TEXT, reason TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','cancelled')), effectiveFrom TEXT NOT NULL, requiresSecondApproval INTEGER NOT NULL DEFAULT 0, secondApprovalReasons TEXT, createdBy TEXT NOT NULL, createdByName TEXT NOT NULL, createdAt TEXT NOT NULL, decidedBy TEXT, decidedByName TEXT, decidedAt TEXT, decisionReason TEXT, restoredFrom TEXT )",
   "CREATE TABLE IF NOT EXISTS message_templates ( id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, content TEXT NOT NULL, isDefault INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS notifications ( id TEXT PRIMARY KEY, userId TEXT, title TEXT NOT NULL, message TEXT NOT NULL, type TEXT NOT NULL CHECK(type IN ('info', 'success', 'warning', 'error')), source TEXT DEFAULT 'system' CHECK(source IN ('system', 'chat')), read INTEGER DEFAULT 0, timestamp TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS password_reset_requests ( id TEXT PRIMARY KEY, userId TEXT, userName TEXT NOT NULL, email TEXT NOT NULL, timestamp TEXT NOT NULL, status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'completed', 'cancelled')) )",
   "CREATE TABLE IF NOT EXISTS payment_gateways ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, type TEXT NOT NULL, status TEXT DEFAULT 'inactive', environment TEXT DEFAULT 'sandbox', apiKey TEXT, apiSecret TEXT, merchantId TEXT, webhookUrl TEXT, webhookSecret TEXT, config TEXT, transactionFee REAL DEFAULT 0, feeType TEXT DEFAULT 'percentage', logo TEXT, description TEXT, supportedMethods TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, lastTestedAt TEXT, lastTestResult TEXT )",
+  "CREATE TABLE IF NOT EXISTS payment_import_batches ( id TEXT PRIMARY KEY, number TEXT NOT NULL, fileName TEXT, createdAt TEXT NOT NULL, createdBy TEXT NOT NULL, createdById TEXT, rowsCount INTEGER NOT NULL DEFAULT 0, totalMinor INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'cancelled')), cancelledAt TEXT, cancelledBy TEXT, cancelReason TEXT )",
+  "CREATE TABLE IF NOT EXISTS payment_proofs ( paymentId TEXT PRIMARY KEY, fileName TEXT NOT NULL, mimeType TEXT NOT NULL, dataUrl TEXT NOT NULL, uploadedAt TEXT NOT NULL, uploadedBy TEXT )",
   "CREATE TABLE IF NOT EXISTS payment_references ( id TEXT PRIMARY KEY, creditId TEXT, gatewayId TEXT, reference TEXT, entity TEXT, amount REAL, status TEXT DEFAULT 'pending', proofImage TEXT, expiresAt TEXT, paidAt TEXT, submittedAt TEXT, createdAt TEXT NOT NULL, usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS payments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientName TEXT NOT NULL, amount REAL NOT NULL, amountMinor INTEGER, paymentDate TEXT NOT NULL, method TEXT NOT NULL, reference TEXT, allocatedToPrincipal REAL DEFAULT 0, allocatedToPrincipalMinor INTEGER, allocatedToInterest REAL DEFAULT 0, allocatedToInterestMinor INTEGER, allocatedToLateInterest REAL DEFAULT 0, allocatedToLateInterestMinor INTEGER, idempotencyKey TEXT, processedBy TEXT NOT NULL, status TEXT DEFAULT 'confirmed' CHECK(status IN ('pending', 'confirmed', 'cancelled')), deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
+  "CREATE TABLE IF NOT EXISTS report_history ( id TEXT PRIMARY KEY, reportType TEXT NOT NULL, title TEXT NOT NULL, format TEXT NOT NULL CHECK(format IN ('pdf', 'xlsx')), filters TEXT, fileName TEXT NOT NULL, fileData TEXT, generatedAt TEXT NOT NULL, generatedBy TEXT NOT NULL, generatedById TEXT )",
+  "CREATE TABLE IF NOT EXISTS report_schedules ( id TEXT PRIMARY KEY, reportType TEXT NOT NULL, recipients TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, lastRunMonth TEXT, lastRunAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, createdBy TEXT )",
   "CREATE TABLE IF NOT EXISTS schema_migrations ( version INTEGER PRIMARY KEY, name TEXT NOT NULL, appliedAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS shared_settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )",
   "CREATE TABLE IF NOT EXISTS simulations ( id TEXT PRIMARY KEY, reference TEXT, date TEXT NOT NULL, clientName TEXT, clientIncome REAL DEFAULT 0, amount REAL DEFAULT 0, term INTEGER DEFAULT 0, interestRate REAL DEFAULT 0, method TEXT CHECK(method IN ('price', 'sac')), riskProfile TEXT CHECK(riskProfile IN ('low', 'medium', 'high')), totalPayment REAL DEFAULT 0, monthlyPayment REAL DEFAULT 0, aiAnalysis TEXT, usuario_id TEXT, createdAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS suppliers ( id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT, email TEXT, nif TEXT, address TEXT, notes TEXT, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')), createdAt TEXT DEFAULT (datetime('now')), deletedAt TEXT, deletedBy TEXT, usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS sync_conflicts ( id TEXT PRIMARY KEY, entityType TEXT NOT NULL, entityId TEXT, operation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')), createdAt TEXT NOT NULL, resolvedAt TEXT, resolvedBy TEXT )",
   "CREATE TABLE IF NOT EXISTS user_limits ( id TEXT PRIMARY KEY, userId TEXT, role TEXT CHECK(role IN ('admin', 'manager')), maxTransaction REAL NOT NULL, dailyLimit REAL NOT NULL, monthlyLimit REAL NOT NULL, restrictionsEnabled INTEGER DEFAULT 1, updatedAt TEXT NOT NULL )",
-  "CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('super_admin', 'admin', 'manager')), avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT, permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT )",
+  "CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT, permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT )",
   "CREATE TABLE IF NOT EXISTS warranties ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, creditId TEXT, type TEXT NOT NULL, description TEXT NOT NULL, marketValue REAL NOT NULL, estimatedValue REAL, status TEXT DEFAULT 'active', documents TEXT DEFAULT '[]', photos TEXT DEFAULT '[]', location TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
   "CREATE TABLE credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, startDate TEXT, accruedInterest REAL DEFAULT 0, lateInterest REAL DEFAULT 0, totalDue REAL NOT NULL, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, approvedBy TEXT, requestedBy TEXT, requestedAt TEXT, approvalNotes TEXT, targetMonthId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
   "CREATE TABLE dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )",
   "CREATE TABLE payments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientName TEXT NOT NULL, amount REAL NOT NULL, paymentDate TEXT NOT NULL, method TEXT NOT NULL, reference TEXT, allocatedToPrincipal REAL DEFAULT 0, allocatedToInterest REAL DEFAULT 0, allocatedToLateInterest REAL DEFAULT 0, processedBy TEXT NOT NULL, status TEXT DEFAULT 'confirmed' CHECK(status IN ('pending', 'confirmed', 'cancelled')), deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_delete BEFORE DELETE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_update BEFORE UPDATE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_daily_closes_immutable_delete BEFORE DELETE ON accounting_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_daily_closes_immutable_update BEFORE UPDATE ON accounting_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_delete BEFORE DELETE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_update BEFORE UPDATE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_entry_seals_delete BEFORE DELETE ON accounting_entry_seals BEGIN SELECT RAISE(ABORT, 'Os selos contabilísticos são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_entry_seals_update BEFORE UPDATE ON accounting_entry_seals BEGIN SELECT RAISE(ABORT, 'Os selos contabilísticos são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_decided BEFORE UPDATE ON accounting_requests WHEN OLD.status <> 'pending' BEGIN SELECT RAISE(ABORT, 'Pedido já decidido: não pode ser alterado')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_delete BEFORE DELETE ON accounting_requests BEGIN SELECT RAISE(ABORT, 'O histórico de pedidos é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_segregation BEFORE UPDATE ON accounting_requests WHEN NEW.decidedById IS NOT NULL AND NEW.decidedById = OLD.requestedById BEGIN SELECT RAISE(ABORT, 'O pedido tem de ser decidido por outro administrador')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_alert_comments_delete BEFORE DELETE ON audit_alert_comments BEGIN SELECT RAISE(ABORT, 'Os comentários dos alertas são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_alert_comments_update BEFORE UPDATE ON audit_alert_comments BEGIN SELECT RAISE(ABORT, 'Os comentários dos alertas são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_alerts_delete BEFORE DELETE ON audit_alerts BEGIN SELECT RAISE(ABORT, 'Os alertas de auditoria não podem ser apagados')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_alerts_self_close BEFORE UPDATE ON audit_alerts WHEN NEW.status IN ('justified','false_positive','resolved') AND NEW.closedBy IS NOT NULL AND NEW.closedBy = OLD.originUserId BEGIN SELECT RAISE(ABORT, 'Quem originou o alerta não o pode fechar')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_chain_delete BEFORE DELETE ON audit_log_chain BEGIN SELECT RAISE(ABORT,'A cadeia de auditoria é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_chain_insert AFTER INSERT ON audit_logs BEGIN INSERT INTO audit_log_chain (auditId, previousHash, integrityHash, origin) VALUES (NEW.id, COALESCE((SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1), '0000000000000000000000000000000000000000000000000000000000000000'), tango_audit_hash(NEW.id,NEW.timestamp,NEW.userId,NEW.userName,NEW.action,NEW.entity,NEW.details,NEW.previousState,NEW.newState,NEW.metadata, COALESCE((SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1), '0000000000000000000000000000000000000000000000000000000000000000')),'live')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_chain_update BEFORE UPDATE ON audit_log_chain BEGIN SELECT RAISE(ABORT,'A cadeia de auditoria é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_daily_closes_delete BEFORE DELETE ON audit_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários da auditoria são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_daily_closes_update BEFORE UPDATE ON audit_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários da auditoria são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_logs_immutable_delete BEFORE DELETE ON audit_logs BEGIN SELECT RAISE(ABORT, 'Os registos de auditoria são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_audit_logs_immutable_update BEFORE UPDATE ON audit_logs BEGIN SELECT RAISE(ABORT, 'Os registos de auditoria são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_bank_import_delete BEFORE DELETE ON accounting_bank_imports BEGIN SELECT RAISE(ABORT, 'O extrato importado é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_bank_import_update BEFORE UPDATE ON accounting_bank_imports BEGIN SELECT RAISE(ABORT, 'O extrato importado é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_cash_session_closed_update BEFORE UPDATE ON accounting_cash_sessions WHEN OLD.status = 'closed' BEGIN SELECT RAISE(ABORT, 'Fecho de caixa imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_cash_session_delete BEFORE DELETE ON accounting_cash_sessions BEGIN SELECT RAISE(ABORT, 'O histórico de caixa é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_collection_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_delete BEFORE DELETE ON credit_writeoffs BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_update BEFORE UPDATE ON credit_writeoffs BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_delete BEFORE DELETE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_update BEFORE UPDATE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_delete BEFORE DELETE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_update BEFORE UPDATE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_transactions_immutable_delete BEFORE DELETE ON ledger_transactions BEGIN SELECT RAISE(ABORT, 'As transações do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_transactions_immutable_update BEFORE UPDATE ON ledger_transactions BEGIN SELECT RAISE(ABORT, 'As transações do ledger são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_escalation_approvals_delete BEFORE DELETE ON limit_escalation_approvals BEGIN SELECT RAISE(ABORT, 'As decisões dos aprovadores são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_escalation_approvals_update BEFORE UPDATE ON limit_escalation_approvals BEGIN SELECT RAISE(ABORT, 'As decisões dos aprovadores são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_escalation_self BEFORE INSERT ON limit_escalation_approvals WHEN NEW.approverId = (SELECT requestedById FROM limit_escalations WHERE id = NEW.escalationId) BEGIN SELECT RAISE(ABORT, 'Quem pediu a operação não a pode aprovar')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_escalations_delete BEFORE DELETE ON limit_escalations BEGIN SELECT RAISE(ABORT, 'Os pedidos escalados não podem ser apagados')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_delete BEFORE DELETE ON limit_exceptions BEGIN SELECT RAISE(ABORT, 'As exceções de limites não podem ser apagadas')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_four_eyes BEFORE UPDATE ON limit_exceptions WHEN NEW.status = 'approved' AND OLD.status = 'pending' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.requestedBy OR NEW.decidedBy = OLD.userId) BEGIN SELECT RAISE(ABORT, 'A exceção tem de ser aprovada por outro administrador')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_immutable BEFORE UPDATE ON limit_exceptions WHEN NEW.userId <> OLD.userId OR NEW.operationType <> OLD.operationType OR NEW.startsAt <> OLD.startsAt OR NEW.endsAt <> OLD.endsAt OR COALESCE(NEW.perOperationMinor, -1) <> COALESCE(OLD.perOperationMinor, -1) OR COALESCE(NEW.dailyMinor, -1) <> COALESCE(OLD.dailyMinor, -1) OR COALESCE(NEW.monthlyMinor, -1) <> COALESCE(OLD.monthlyMinor, -1) OR NEW.reason <> OLD.reason OR (OLD.status IN ('rejected','revoked') AND NEW.status <> OLD.status) BEGIN SELECT RAISE(ABORT, 'Os valores de uma exceção não podem ser alterados')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_ledger_delete BEFORE DELETE ON limit_ledger BEGIN SELECT RAISE(ABORT, 'O registo de consumo dos limites é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_ledger_update BEFORE UPDATE ON limit_ledger BEGIN SELECT RAISE(ABORT, 'O registo de consumo dos limites é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_versions_delete BEFORE DELETE ON limit_policy_versions BEGIN SELECT RAISE(ABORT, 'As versões dos limites não podem ser apagadas')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_versions_four_eyes BEFORE UPDATE ON limit_policy_versions WHEN NEW.status = 'approved' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.createdBy) BEGIN SELECT RAISE(ABORT, 'A alteração tem de ser aprovada por um segundo administrador')",
+  "CREATE TRIGGER IF NOT EXISTS trg_limit_versions_immutable BEFORE UPDATE ON limit_policy_versions WHEN OLD.status <> 'pending' OR NEW.policy <> OLD.policy OR NEW.version <> OLD.version OR NEW.createdBy <> OLD.createdBy OR NEW.effectiveFrom <> OLD.effectiveFrom OR NEW.reason <> OLD.reason OR NEW.requiresSecondApproval <> OLD.requiresSecondApproval BEGIN SELECT RAISE(ABORT, 'Uma versão dos limites já decidida não pode ser alterada')",
+  "CREATE TRIGGER IF NOT EXISTS trg_receipt_delete BEFORE DELETE ON accounting_receipts BEGIN SELECT RAISE(ABORT,'O comprovativo contabilístico é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_receipt_update BEFORE UPDATE ON accounting_receipts BEGIN SELECT RAISE(ABORT,'O comprovativo contabilístico é imutável')",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_requests_pending ON accounting_requests(kind, targetId) WHERE status = 'pending'",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_promise_decision ON collection_events(relatedId) WHERE kind IN ('promise_kept','promise_broken')",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_reinforcement_idempotency ON credit_reinforcements(idempotencyKey)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(idempotencyKey) WHERE idempotencyKey IS NOT NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receipt ON payments(receiptYear, receiptSeq) WHERE receiptSeq IS NOT NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)",
-  "DELETE FROM audit_logs",
-  "DELETE FROM audit_logs WHERE id = ?",
-  "DELETE FROM audit_logs WHERE userId = ?",
   "DELETE FROM calendar_tasks WHERE id = ?",
   "DELETE FROM chat_messages",
   "DELETE FROM clients",
@@ -126,34 +207,64 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM payment_references WHERE id = ?",
   "DELETE FROM payments",
   "DELETE FROM payments WHERE id = ?",
+  "DELETE FROM report_schedules WHERE id = ?",
   "DELETE FROM simulations WHERE id = ?",
-  "DELETE FROM sqlite_sequence WHERE name IN ('clients', 'credits', 'payments', 'contracts', 'notifications', 'audit_logs', 'chat_messages', 'payment_gateways', 'payment_references')",
+  "DELETE FROM sqlite_sequence WHERE name IN ('clients', 'credits', 'payments', 'contracts', 'notifications', 'chat_messages', 'payment_gateways', 'payment_references')",
   "DELETE FROM users WHERE id = ?",
   "DELETE FROM warranties WHERE id = ?",
   "DROP INDEX IF EXISTS idx_clients_nif_active",
   "DROP TABLE credits_old",
   "DROP TABLE dictionary_old",
   "DROP TABLE payments_old",
+  "INSERT INTO accounting_audit_runs (id, kind, startedAt, finishedAt, userId, userName, status, criticalCount, highCount, mediumCount, lowCount, headEntryId, headHash, sealStatus, summary, findings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO accounting_cash_sessions (id, operatorId, operatorName, sessionDate, openedAt, openingMinor, status) VALUES (?,?,?,?,?,?,?)",
+  "INSERT INTO accounting_daily_closes (day, headEntryId, headHash, entryCount, debitMinor, creditMinor, liquidMinor, portfolioMinor, auditRunId, sealStatus, closedAt, closedBy, closedById) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO accounting_divergence_events (id, issueKey, previousId, source, description, state, reason, actorId, actorName, createdAt) SELECT ?,?,?,?,?,?,?,?,?,? WHERE ? = COALESCE((SELECT id FROM accounting_divergence_events WHERE issueKey = ? ORDER BY createdAt DESC, rowid DESC LIMIT 1),'')",
   "INSERT INTO accounting_entries (id, timestamp, type, description, clientId, creditId, paymentId, debit, credit, amountPrincipal, amountInterest, amountLateInterest, amountTotal, amountPrincipalMinor, amountInterestMinor, amountLateInterestMinor, amountTotalMinor, processedBy, justification, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO accounting_receipts (id,entryId,fileName,mime,data,digest,createdAt) VALUES (?,?,?,?,?,?,?)",
+  "INSERT INTO accounting_requests (id, kind, targetId, amountMinor, description, reason, requestedBy, requestedById, requestedAt, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')",
+  "INSERT INTO audit_alert_comments (id, alertId, userId, userName, status, comment, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO audit_log_chain (auditId,previousHash,integrityHash,origin) SELECT ?,?,?,'legacy' WHERE ? = COALESCE((SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1), ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'credit', ?, ?)",
-  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'payment', ?, ?)",
-  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'delete', 'payment', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'system', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'delete', 'system', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'export', 'client', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'export', 'report', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'restore', 'payment', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'accounting_entry', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'system', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, 'payment', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, NULL, 'Sistema', 'update', 'system', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'create', 'payment', ?, ?, ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'delete', 'payment', ?, ?, ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?, ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'update', 'system', ?, ?, ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO audit_logs (id,timestamp,userId,userName,action,entity,details,metadata) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO calendar_tasks (id, title, description, date, done, createdAt, usuario_id) VALUES (?,?,?,?,?,?,?)",
   "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO collection_messages (id, clientId, clientName, creditIds, channel, message, attemptNumber, totalDue, sentAt, sentBy, legalTriggered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, terms, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO credit_approvals (id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_installments (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor) VALUES (?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_reinforcements (id, creditId, amountMinor, interestMinor, idempotencyKey, notes, createdBy, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO ledger_lines (id, transactionId, account, side, component, amountMinor) VALUES (?,?,?,?,?,?)",
   "INSERT INTO ledger_transactions (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor, totalCreditMinor, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO limit_escalation_approvals (id, escalationId, approverId, approverName, approverRole, decision, notes, decidedAt) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?)",
+  "INSERT INTO limit_escalation_approvals (id, escalationId, approverId, approverName, approverRole, decision, notes, decidedAt) VALUES (?, ?, ?, ?, ?, 'rejected', ?, ?)",
+  "INSERT INTO limit_escalations (id, operationType, entityType, entityId, amountMinor, requestedById, requestedByName, requestedRole, reason, details, requiredLevelId, requiredLevelIndex, requiredLevelName, dual, status, createdAt, levelSince) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)",
+  "INSERT INTO limit_exceptions (id, userId, userName, operationType, perOperationMinor, dailyMinor, monthlyMinor, dailyCount, startsAt, endsAt, reason, status, requestedBy, requestedByName, requestedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)",
+  "INSERT INTO limit_ledger (id, operationType, userId, userName, profileId, branchId, amountMinor, count, dayKey, monthKey, entityType, entityId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO limit_locks (id, ledgerId, scope, scopeId, period, periodKey, createdAt) SELECT ?, ?, ?, ?, ?, ?, ? WHERE COALESCE((SELECT SUM(amountMinor) FROM limit_ledger WHERE operationType = ? AND (CASE ? WHEN 'user' THEN userId WHEN 'branch' THEN COALESCE(profileId, '') || '|' || COALESCE(branchId, '') WHEN 'profile' THEN profileId ELSE 'all' END) = ? AND (CASE ? WHEN 'day' THEN dayKey ELSE monthKey END) = ?), 0) + ? <= ? AND COALESCE((SELECT SUM(count) FROM limit_ledger WHERE operationType = ? AND (CASE ? WHEN 'user' THEN userId WHEN 'branch' THEN COALESCE(profileId, '') || '|' || COALESCE(branchId, '') WHEN 'profile' THEN profileId ELSE 'all' END) = ? AND (CASE ? WHEN 'day' THEN dayKey ELSE monthKey END) = ?), 0) + ? <= ?",
+  "INSERT INTO limit_policy_versions (id, version, policy, summary, reason, status, effectiveFrom, requiresSecondApproval, secondApprovalReasons, createdBy, createdByName, createdAt, restoredFrom) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, ?)",
   "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, 'Novo Crédito', ?, 'success', 0, ?)",
   "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, 'Pagamento Recebido', ?, 'success', 0, ?)",
@@ -161,61 +272,112 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO notifications (id, userId, title, message, type, source, read, timestamp) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO password_reset_requests (id, userId, userName, email, timestamp, status) VALUES (?, ?, ?, ?, ?, ?)",
   "INSERT INTO payment_gateways ( id, name, provider, type, status, environment, apiKey, apiSecret, merchantId, webhookUrl, webhookSecret, transactionFee, feeType, logo, description, supportedMethods, config, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO payment_import_batches (id, number, fileName, createdAt, createdBy, createdById, rowsCount, totalMinor, status) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active')",
   "INSERT INTO payment_references ( id, creditId, gatewayId, reference, entity, amount, status, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO payment_references ( id, creditId, gatewayId, reference, entity, amount, status, createdAt, expiresAt, paidAt, proofImage ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO payments (id, creditId, clientName, amount, amountMinor, paymentDate, method, reference, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor, idempotencyKey, processedBy, status, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO payments (id, creditId, clientName, amount, amountMinor, paymentDate, method, reference, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor, idempotencyKey, processedBy, status, usuario_id, registeredAt, batchId, hasProof) VALUES (?,?,?,?,?,?,?,?,0,0,0,0,0,0,?,?,'pending',?,?,?,?)",
+  "INSERT INTO payments (id, creditId, clientName, amount, amountMinor, paymentDate, method, reference, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor, idempotencyKey, processedBy, status, usuario_id, registeredAt, receiptYear, receiptSeq, allocationDetail, balanceAfterMinor, batchId, hasProof) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO report_history (id, reportType, title, format, filters, fileName, fileData, generatedAt, generatedBy, generatedById) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO report_schedules (id, reportType, recipients, enabled, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET reportType = excluded.reportType, recipients = excluded.recipients, enabled = excluded.enabled",
   "INSERT INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)",
   "INSERT INTO shared_settings (key, value, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy WHERE excluded.updatedAt >= shared_settings.updatedAt",
-  "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO suppliers (id, name, phone, email, nif, address, notes, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
   "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO warranties (id, clientId, creditId, type, description, marketValue, status, location, photos, documents, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT OR IGNORE INTO accounting_bank_imports (id, fileName, movements, actorId, actorName, importedAt) VALUES (?,?,?,?,?,?)",
+  "INSERT OR IGNORE INTO audit_alerts (id, alertKey, ruleId, severity, title, description, eventIds, originUserId, originUserName, occurredAt, status, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
+  "INSERT OR IGNORE INTO audit_daily_closes (day, lastAuditId, headHash, eventCount, status, brokenSeq, verifiedAt, verifiedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)",
   "INSERT OR IGNORE INTO company_settings (id, name, nif) VALUES (1, 'Tango Gestão de Créditos', '000000000')",
   "INSERT OR IGNORE INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
   "INSERT OR IGNORE INTO credit_installments (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor) VALUES (?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO dictionary (word, language) SELECT word, CASE WHEN language = 'ao' THEN 'pt-AO' WHEN language = 'pt' THEN 'pt-PT' WHEN language IN ('pt-AO', 'pt-PT', 'both') THEN language ELSE 'both' END FROM dictionary_old",
   "INSERT OR IGNORE INTO dictionary (word, language) VALUES (?, ?)",
   "INSERT OR IGNORE INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, 1)",
+  "INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, ?, 0, ?)",
   "INSERT OR IGNORE INTO sync_conflicts (id, entityType, entityId, operation, status, createdAt) VALUES (?, ?, ?, ?, 'pending', ?)",
   "INSERT OR IGNORE INTO user_limits (id, role, maxTransaction, dailyLimit, monthlyLimit, restrictionsEnabled, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR REPLACE INTO closed_months (id, month, year, capitalApplied, projectedProfit, realizedProfit, overdueAmount, liquidationRate, closedAt, closedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR REPLACE INTO company_settings ( id, name, nif, address, logo, reportLogo, watermarkLogo, currency, customClauses, rescueKey, phone, primaryColor, secondaryColor, email, whatsapp, whatsappAutoNotify, whatsappVerified, syncEnabled, syncUrl, syncApiKey, syncPasskey, lastSync, maintenanceMode, sessionTimeout, allowedModulesDuringMaintenance, enableGatewaysModule, enableProfileActivity, digitalSignatureEnabled, authorizedSigners, bankingInfo, contractTemplates, lastBackupDate, installDate, financialLock, licenseKey, enableGatewaysModuleAdminOnly, enableProfileActivityAdminOnly, enableWarrantiesModule, enableWarrantiesModuleAdminOnly, enableLegalModule, enableLegalModuleAdminOnly, enableScoringModule, enableScoringModuleAdminOnly, location, enableSuppliersModule, enableSuppliersModuleAdminOnly, enableMultiTenant, website, segment, slogan, defaultSimulationInterestRate, defaultSimulationAdminFee, defaultSimulationIof, smtpHost, smtpPort, smtpUser, smtpPassword, smtpSecure, smtpFromName ) VALUES ( 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? )",
   "INSERT OR REPLACE INTO company_settings ( id, name, nif, currency, sessionTimeout, installDate ) VALUES (1, ?, ?, ?, ?, ?)",
+  "INSERT OR REPLACE INTO payment_proofs (paymentId, fileName, mimeType, dataUrl, uploadedAt, uploadedBy) VALUES (?, ?, ?, ?, ?, ?)",
   "INSERT OR REPLACE INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "PRAGMA integrity_check",
   "PRAGMA table_info(audit_logs)",
   "PRAGMA table_info(credits_old)",
   "PRAGMA table_info(dictionary)",
   "PRAGMA table_info(payments_old)",
+  "SELECT * FROM accounting_audit_runs ORDER BY finishedAt DESC LIMIT ?",
+  "SELECT * FROM accounting_bank_imports ORDER BY importedAt DESC, rowid DESC",
+  "SELECT * FROM accounting_cash_sessions WHERE operatorId = ? AND sessionDate = ?",
+  "SELECT * FROM accounting_cash_sessions WHERE operatorId = ? ORDER BY sessionDate DESC LIMIT 90",
+  "SELECT * FROM accounting_cash_sessions WHERE status = 'closed'",
+  "SELECT * FROM accounting_cash_sessions WHERE status = 'closed' AND expectedMinor <> countedMinor",
+  "SELECT * FROM accounting_daily_closes ORDER BY day DESC",
+  "SELECT * FROM accounting_divergence_events ORDER BY createdAt DESC, rowid DESC",
+  "SELECT * FROM accounting_entries ORDER BY rowid",
   "SELECT * FROM accounting_entries ORDER BY timestamp DESC, id DESC LIMIT ?",
   "SELECT * FROM accounting_entries WHERE timestamp < ? OR (timestamp = ? AND id < ?) ORDER BY timestamp DESC, id DESC LIMIT ?",
+  "SELECT * FROM accounting_requests ORDER BY requestedAt DESC",
+  "SELECT * FROM accounting_requests WHERE id = ?",
+  "SELECT * FROM audit_alert_comments WHERE alertId = ? ORDER BY createdAt",
+  "SELECT * FROM audit_alerts ORDER BY occurredAt DESC LIMIT 1000",
+  "SELECT * FROM audit_log_chain ORDER BY seq",
+  "SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?",
   "SELECT * FROM audit_logs ORDER BY timestamp DESC, id DESC LIMIT ?",
+  "SELECT * FROM audit_logs ORDER BY timestamp DESC, rowid DESC",
   "SELECT * FROM audit_logs WHERE timestamp < ? OR (timestamp = ? AND id < ?) ORDER BY timestamp DESC, id DESC LIMIT ?",
+  "SELECT * FROM audit_logs WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT ?",
   "SELECT * FROM calendar_tasks ORDER BY date ASC",
   "SELECT * FROM clients WHERE deletedAt IS NOT NULL",
   "SELECT * FROM clients WHERE deletedAt IS NULL",
   "SELECT * FROM clients WHERE id = ?",
   "SELECT * FROM closed_months",
+  "SELECT * FROM collection_events ORDER BY createdAt DESC, rowid DESC",
+  "SELECT * FROM collection_events WHERE id = ? AND kind = ?",
   "SELECT * FROM collection_messages ORDER BY sentAt DESC",
   "SELECT * FROM company_settings WHERE id = 1",
   "SELECT * FROM company_settings WHERE id = ?",
   "SELECT * FROM contracts WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM contracts WHERE deletedAt IS NULL ORDER BY createdAt DESC",
+  "SELECT * FROM credit_installments",
+  "SELECT * FROM credit_writeoffs",
+  "SELECT * FROM credits",
   "SELECT * FROM credits WHERE id = ?",
   "SELECT * FROM internal_messages ORDER BY timestamp ASC",
+  "SELECT * FROM ledger_lines ORDER BY rowid",
+  "SELECT * FROM ledger_lines WHERE transactionId = ? ORDER BY id",
+  "SELECT * FROM ledger_transactions ORDER BY rowid",
+  "SELECT * FROM ledger_transactions WHERE id = ?",
   "SELECT * FROM legal_cases WHERE clientId = ?",
   "SELECT * FROM legal_cases WHERE creditId = ?",
   "SELECT * FROM legal_cases WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM legal_cases WHERE deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM legal_cases WHERE id = ?",
+  "SELECT * FROM limit_escalation_approvals ORDER BY decidedAt DESC LIMIT 5000",
+  "SELECT * FROM limit_escalation_approvals WHERE escalationId = ? ORDER BY decidedAt",
+  "SELECT * FROM limit_escalations ORDER BY createdAt DESC LIMIT 2000",
+  "SELECT * FROM limit_escalations WHERE createdAt >= ? ORDER BY createdAt DESC",
+  "SELECT * FROM limit_escalations WHERE entityType = ? AND entityId = ? ORDER BY createdAt DESC LIMIT 1",
+  "SELECT * FROM limit_exceptions ORDER BY requestedAt DESC",
+  "SELECT * FROM limit_ledger WHERE createdAt >= ? AND operationType NOT IN ('credit_approval','disbursement')",
+  "SELECT * FROM limit_ledger WHERE dayKey >= ? ORDER BY createdAt DESC",
+  "SELECT * FROM limit_policy_versions ORDER BY version DESC",
   "SELECT * FROM message_templates",
   "SELECT * FROM notifications ORDER BY timestamp DESC LIMIT ?",
   "SELECT * FROM password_reset_requests WHERE id = ?",
   "SELECT * FROM password_reset_requests WHERE status = \"pending\" ORDER BY timestamp DESC",
   "SELECT * FROM payment_gateways ORDER BY createdAt DESC",
+  "SELECT * FROM payment_import_batches ORDER BY createdAt DESC",
+  "SELECT * FROM payment_import_batches WHERE id = ?",
   "SELECT * FROM payment_references ORDER BY createdAt DESC",
+  "SELECT * FROM payments",
   "SELECT * FROM payments WHERE deletedAt IS NOT NULL",
-  "SELECT * FROM payments WHERE deletedAt IS NULL",
+  "SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed'",
+  "SELECT * FROM payments WHERE deletedAt IS NULL ORDER BY paymentDate DESC",
+  "SELECT * FROM report_schedules ORDER BY createdAt",
   "SELECT * FROM simulations ORDER BY date DESC",
   "SELECT * FROM suppliers WHERE deletedAt IS NULL",
   "SELECT * FROM suppliers WHERE id = ?",
@@ -229,45 +391,113 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM warranties WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE id = ?",
+  "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?",
   "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?",
   "SELECT COUNT(*) AS n FROM users",
+  "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?",
   "SELECT COUNT(*) as count FROM dictionary",
   "SELECT COUNT(*) as count FROM legal_cases WHERE priority = ?",
   "SELECT COUNT(*) as count FROM legal_cases WHERE stage = ?",
   "SELECT COUNT(*) as count FROM warranties WHERE status = ?",
+  "SELECT MAX(receiptSeq) AS last FROM payments WHERE receiptYear = ?",
   "SELECT SUM(debtAmount) as total FROM legal_cases WHERE stage != ?",
   "SELECT SUM(marketValue) as total FROM warranties WHERE status = ?",
+  "SELECT a.* FROM accounting_entries a LEFT JOIN ledger_transactions t ON t.id = a.id WHERE t.id IS NULL ORDER BY a.rowid",
+  "SELECT a.* FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE c.auditId IS NULL ORDER BY a.rowid LIMIT 200",
+  "SELECT a.id, a.timestamp, a.userId, a.userName, a.action, a.entity, a.details, a.previousState, a.newState, a.metadata, c.seq, c.integrityHash, c.previousHash FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE a.userId = ? ORDER BY a.timestamp DESC LIMIT ?",
+  "SELECT account, component, amountMinor FROM ledger_lines WHERE transactionId = ? AND side = 'credit'",
+  "SELECT account, side, SUM(amountMinor) AS total FROM ledger_lines WHERE account IN ('cash', 'bank') GROUP BY account, side",
+  "SELECT alertKey FROM audit_alerts",
   "SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE id = ?",
+  "SELECT auditId, previousHash, integrityHash, seq FROM audit_log_chain ORDER BY seq",
+  "SELECT c.id, c.principalAmount, c.principalAmountMinor, c.createdAt, c.requestedBy, c.usuario_id, cl.riskLevel FROM credits c LEFT JOIN clients cl ON cl.id = c.clientId WHERE c.deletedAt IS NULL AND c.createdAt >= ?",
   "SELECT c.id, c.startDate, c.installments, COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER)) AS principalMinor, MAX(0, COALESCE(c.totalDueMinor, CAST(ROUND(c.totalDue * 100) AS INTEGER)) - COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER))) AS interestMinor FROM credits c WHERE NOT EXISTS (SELECT 1 FROM credit_installments i WHERE i.creditId = c.id)",
+  "SELECT clientId, SUM(COALESCE(currentBalanceMinor, ROUND(currentBalance * 100))) AS balance FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue','defaulted','renegotiated','pending_approval') GROUP BY clientId",
+  "SELECT clientId, version FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments",
+  "SELECT day FROM accounting_daily_closes WHERE day = ?",
+  "SELECT day, status, brokenSeq, verifiedAt FROM audit_daily_closes ORDER BY day DESC LIMIT 1",
+  "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500",
+  "SELECT fileName, fileData, format FROM report_history WHERE id = ?",
+  "SELECT fileName, mimeType, dataUrl, uploadedAt, uploadedBy FROM payment_proofs WHERE paymentId = ?",
+  "SELECT fileName, movements FROM accounting_bank_imports",
+  "SELECT fileName,mime,data,digest FROM accounting_receipts WHERE entryId = ?",
+  "SELECT i.creditId, c.clientId, c.clientName, i.installmentNumber, i.dueDate, i.principalMinor, i.interestMinor, i.lateInterestMinor, i.paidPrincipalMinor, i.paidInterestMinor, i.paidLateInterestMinor FROM credit_installments i JOIN credits c ON c.id = i.creditId WHERE c.deletedAt IS NULL AND c.status IN ('active', 'overdue', 'defaulted', 'renegotiated', 'paid')",
+  "SELECT id FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
+  "SELECT id FROM accounting_requests WHERE kind = ? AND targetId = ? AND status = 'pending'",
+  "SELECT id FROM closed_months",
+  "SELECT id FROM credit_writeoffs WHERE creditId = ?",
+  "SELECT id FROM credit_writeoffs WHERE creditId = ? LIMIT 1",
+  "SELECT id FROM credits WHERE id = ?",
+  "SELECT id FROM ledger_transactions WHERE id = ?",
+  "SELECT id FROM notifications WHERE id = ?",
+  "SELECT id FROM payments WHERE idempotencyKey = ?",
   "SELECT id FROM users WHERE email = ?",
+  "SELECT id FROM users WHERE role IN ('super_admin', 'internal_auditor') AND (status IS NULL OR status <> 'blocked')",
   "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod FROM credits WHERE deletedAt IS NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL",
-  "SELECT id, dueDate, principalMinor, interestMinor, lateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC",
   "SELECT id, entityType, entityId, createdAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 100",
   "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
-  "SELECT id, name, email, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature FROM users",
+  "SELECT id, lateInterestMinor, version FROM credit_installments WHERE creditId = ?",
   "SELECT id, name, email, username, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature, ip FROM users",
   "SELECT id, name, email, username, role, avatar, status, permissions FROM users",
+  "SELECT id, name, nif, phone, riskLevel, fatherName, motherName FROM clients WHERE deletedAt IS NULL",
   "SELECT id, name, role FROM users WHERE LOWER(email) = ?",
+  "SELECT id, name, role, branchId FROM users WHERE id = ?",
+  "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'",
   "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000",
+  "SELECT id, paymentDate FROM payments WHERE receiptSeq IS NULL AND status = 'confirmed' AND deletedAt IS NULL ORDER BY paymentDate, id",
   "SELECT id, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, reportType, title, format, filters, fileName, generatedAt, generatedBy, generatedById FROM report_history ORDER BY generatedAt DESC LIMIT 200",
+  "SELECT id, requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?",
+  "SELECT id, status FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp",
+  "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs",
+  "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp",
+  "SELECT id, totalDueMinor, totalDue, deletedAt FROM credits WHERE id = ?",
   "SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
+  "SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1",
+  "SELECT l.*, t.timestamp, t.sourceId, t.description FROM ledger_lines l LEFT JOIN ledger_transactions t ON t.id = l.transactionId ORDER BY t.timestamp, l.id",
+  "SELECT l.account, l.side, l.amountMinor FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId WHERE a.creditId = ? AND l.account IN ('receivable_interest', 'receivable_late_interest')",
   "SELECT last_insert_rowid() as id",
+  "SELECT lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
+  "SELECT name FROM users WHERE id = ?",
+  "SELECT password FROM users WHERE id = ?",
+  "SELECT paymentDate, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'",
+  "SELECT paymentDate, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'",
   "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT principalAmountMinor, principalAmount FROM credits WHERE id = ?",
+  "SELECT receiptYear, MAX(receiptSeq) AS last FROM payments WHERE receiptSeq IS NOT NULL GROUP BY receiptYear",
+  "SELECT receiveMethod FROM clients WHERE id = ?",
+  "SELECT requestedBy FROM accounting_requests WHERE id = ?",
+  "SELECT requestedById FROM accounting_requests WHERE id = ?",
+  "SELECT requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?",
   "SELECT rescueKey FROM company_settings WHERE id = 1",
+  "SELECT role, name FROM users WHERE id = ?",
+  "SELECT role, name, branchId FROM users WHERE id = ?",
   "SELECT rowid AS ledgerSequence, * FROM accounting_entries ORDER BY rowid ASC",
   "SELECT sessionTimeout FROM company_settings WHERE id = 1",
+  "SELECT side, SUM(amountMinor) AS total FROM ledger_lines WHERE account = ? GROUP BY side",
   "SELECT sql FROM sqlite_master WHERE type='table' AND name='credits'",
   "SELECT sql FROM sqlite_master WHERE type='table' AND name='payments'",
+  "SELECT status FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT status FROM users WHERE id = ?",
   "SELECT syncEnabled, syncUrl, syncPasskey FROM company_settings WHERE id = 1",
   "SELECT twoFactorSecret FROM users WHERE id = ?",
   "SELECT type, COUNT(*) as count FROM warranties WHERE status = ? GROUP BY type",
   "SELECT value FROM shared_settings WHERE key = ?",
+  "UPDATE accounting_cash_sessions SET expectedMinor = openingMinor + (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = accounting_cash_sessions.operatorId AND t.timestamp >= accounting_cash_sessions.openedAt AND t.timestamp <= ?), countedMinor = ?, reason = ?, closedAt = ?, status = 'closed' WHERE id = ? AND operatorId = ? AND status = 'open'",
   "UPDATE accounting_entries SET amountPrincipalMinor = CAST(ROUND(amountPrincipal * 100) AS INTEGER), amountInterestMinor = CAST(ROUND(amountInterest * 100) AS INTEGER), amountLateInterestMinor = CAST(ROUND(amountLateInterest * 100) AS INTEGER), amountTotalMinor = CAST(ROUND(amountTotal * 100) AS INTEGER) WHERE amountTotalMinor IS NULL",
+  "UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ? WHERE id = ? AND status = 'pending'",
+  "UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ? WHERE id = ? AND status = 'pending' AND requestedById <> ?",
+  "UPDATE audit_alerts SET status = ?, assignedTo = ?, assignedToName = ?, dueAt = ?, updatedAt = ?, closedBy = ?, closedByName = ?, closedAt = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber) WHERE id = ?",
@@ -282,19 +512,28 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'",
   "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?",
   "UPDATE credit_installments SET interestMinor = ?, lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
+  "UPDATE credit_installments SET lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credit_installments SET paidPrincipalMinor = ?, paidInterestMinor = ?, paidLateInterestMinor = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credit_installments SET principalMinor = ?, interestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
+  "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL",
+  "UPDATE credits SET status = 'defaulted', version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET status = ?, approvedBy = ?, approvalNotes = ?, version = version + 1 WHERE id = ? AND status = 'pending_approval' AND version = ?",
   "UPDATE credits SET targetMonthId = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE internal_messages SET read = 1 WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
+  "UPDATE limit_escalations SET requiredLevelIndex = ?, requiredLevelId = ?, requiredLevelName = ?, levelSince = ?, escalationCount = escalationCount + 1, lastReminderAt = ? WHERE id = ? AND status = 'pending' AND levelSince = ?",
+  "UPDATE limit_escalations SET status = 'approved', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE id = ? AND status = 'pending'",
+  "UPDATE limit_escalations SET status = 'rejected', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE id = ? AND status = 'pending'",
+  "UPDATE limit_exceptions SET status = 'revoked', decidedBy = COALESCE(decidedBy, ?), decidedByName = COALESCE(decidedByName, ?), decidedAt = COALESCE(decidedAt, ?), decisionReason = ? WHERE id = ? AND status IN ('approved','pending')",
+  "UPDATE limit_exceptions SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'",
+  "UPDATE limit_policy_versions SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'",
   "UPDATE message_templates SET content = ? WHERE id = ?",
   "UPDATE message_templates SET content = REPLACE( REPLACE( REPLACE( REPLACE( REPLACE( REPLACE( REPLACE( REPLACE(content, '{client_name}', '{nome_cliente}'), '{company_name}', '{empresa}' ), '{days_overdue}', '{dias_atraso}' ), '{credit_limit}', '{limite_credito}' ), '{amount}', '{valor}' ), '{due_date}', '{data_vencimento}' ), '{balance}', '{saldo_devedor}' ), '{debt_details}', '{detalhe_dividas}' )",
   "UPDATE notifications SET read = 1 WHERE id = ?",
@@ -302,13 +541,22 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE password_reset_requests SET status = \"cancelled\" WHERE id = ?",
   "UPDATE password_reset_requests SET status = \"completed\" WHERE id = ?",
   "UPDATE payment_gateways SET name = ?, provider = ?, type = ?, status = ?, environment = ?, apiKey = ?, apiSecret = ?, merchantId = ?, webhookUrl = ?, webhookSecret = ?, transactionFee = ?, feeType = ?, description = ?, config = ?, updatedAt = ? WHERE id = ?",
+  "UPDATE payment_import_batches SET rowsCount = ?, totalMinor = ? WHERE id = ?",
+  "UPDATE payment_import_batches SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ? WHERE id = ? AND status = 'active'",
   "UPDATE payment_references SET proofImage = ?, status = ?, submittedAt = ? WHERE id = ?",
   "UPDATE payment_references SET status = ?, paidAt = ? WHERE id = ?",
   "UPDATE payments SET amountMinor = CAST(ROUND(amount * 100) AS INTEGER), allocatedToPrincipalMinor = CAST(ROUND(allocatedToPrincipal * 100) AS INTEGER), allocatedToInterestMinor = CAST(ROUND(allocatedToInterest * 100) AS INTEGER), allocatedToLateInterestMinor = CAST(ROUND(allocatedToLateInterest * 100) AS INTEGER), idempotencyKey = COALESCE(idempotencyKey, id) WHERE amountMinor IS NULL OR idempotencyKey IS NULL",
   "UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
-  "UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ? AND deletedAt IS NULL",
   "UPDATE payments SET deletedAt = NULL, deletedBy = NULL, restoredAt = ? WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE payments SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
+  "UPDATE payments SET hasProof = 1 WHERE id = ?",
+  "UPDATE payments SET receiptYear = ?, receiptSeq = ? WHERE id = ? AND receiptSeq IS NULL",
+  "UPDATE payments SET registeredAt = paymentDate WHERE registeredAt IS NULL",
+  "UPDATE payments SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ? WHERE id = ? AND status = 'pending' AND deletedAt IS NULL",
+  "UPDATE payments SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ?, cancelApprovedBy = ?, originalState = ? WHERE id = ? AND deletedAt IS NULL AND status = 'confirmed'",
+  "UPDATE payments SET status = 'confirmed', paymentDate = ?, allocatedToPrincipal = ?, allocatedToPrincipalMinor = ?, allocatedToInterest = ?, allocatedToInterestMinor = ?, allocatedToLateInterest = ?, allocatedToLateInterestMinor = ?, receiptYear = ?, receiptSeq = ?, allocationDetail = ?, balanceAfterMinor = ?, validatedAt = ?, validatedBy = ? WHERE id = ? AND status = 'pending' AND deletedAt IS NULL",
+  "UPDATE report_schedules SET lastRunMonth = ?, lastRunAt = ?, lastError = ? WHERE id = ?",
+  "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
   "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE sync_conflicts SET status = ?, resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
@@ -316,8 +564,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE users SET failedAttempts = 0, blockedAt = NULL WHERE id = ?",
   "UPDATE users SET failedAttempts = ?, ip = ? WHERE id = ?",
   "UPDATE users SET failedAttempts = ?, status = ?, blockedAt = ?, ip = ? WHERE id = ?",
-  "UPDATE users SET lastLogin = ?, status = ?, ip = ? WHERE id = ?",
-  "UPDATE users SET lastSeen = ? WHERE id = ?",
+  "UPDATE users SET lastLogin = ?, lastSeen = ?, status = ?, ip = ? WHERE id = ?",
+  "UPDATE users SET lastSeen = ?, status = \"active\", ip = COALESCE(NULLIF(ip, \"\"), ?) WHERE id = ?",
   "UPDATE users SET password = ? WHERE id = ?",
   "UPDATE users SET password = ?, status = \"active\", failedAttempts = 0, blockedAt = NULL WHERE id = ?",
   "UPDATE users SET status = \"active\", failedAttempts = 0, blockedAt = NULL WHERE id = ?",
@@ -359,6 +607,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "ALTER TABLE payments RENAME TO payments_old"
   ],
   [
+    "e3b25cc3c53a16bd7171d671a0bfd499148b7251f1be9f4f03493554a4b64ed7",
+    "CREATE INDEX IF NOT EXISTS idx_accounting_audit_runs_finished ON accounting_audit_runs(finishedAt)"
+  ],
+  [
     "4eba0da0606300756dffdca8b07a0d252f08a446666408241b8b2a69b381af57",
     "CREATE INDEX IF NOT EXISTS idx_accounting_clientId ON accounting_entries(clientId)"
   ],
@@ -377,6 +629,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "858da00a7570d0b7d7a93f515149a7b4f86b74b4fffb7ef817fcbed04954be6e",
     "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)"
+  ],
+  [
+    "371f56a396feb6808c6680afabd1a90c6fb1f7d9fe30c10b120d590abef2b3a9",
+    "CREATE INDEX IF NOT EXISTS idx_audit_alerts_status ON audit_alerts(status, occurredAt)"
   ],
   [
     "6ac1903c0ff1a4714ea6fc51751394d2079a26c6b9fe5b100a8a65ff92cac768",
@@ -423,6 +679,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_clients_usuario ON clients(usuario_id)"
   ],
   [
+    "c35e969f84cfd277d4b4d185a8100ad4d2a1ac6a820b3a34d736a95fef8925fc",
+    "CREATE INDEX IF NOT EXISTS idx_collection_credit ON collection_events(creditId, createdAt)"
+  ],
+  [
     "e9804c4b40425d38962c315c32242abbc83eb6e32ea0409f63b8f760de7b809c",
     "CREATE INDEX IF NOT EXISTS idx_collection_messages_client ON collection_messages(clientId)"
   ],
@@ -433,6 +693,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "8197e43059a8893fc18da3faccd0fbd599d9d42c147577320f23f74f56042c1e",
     "CREATE INDEX IF NOT EXISTS idx_contracts_usuario ON contracts(usuario_id)"
+  ],
+  [
+    "1061c470f623762da51d69555b1bc5f314ad4487521c7fc414f2f01704385cfb",
+    "CREATE INDEX IF NOT EXISTS idx_credit_approvals_creditId ON credit_approvals(creditId)"
+  ],
+  [
+    "e38921b4647351f00d6a77a4e8f2cdfd47808bc1271c96797b225eaedd16a6f0",
+    "CREATE INDEX IF NOT EXISTS idx_credit_approvals_decidedAt ON credit_approvals(decidedAt)"
   ],
   [
     "2bbc6ebd4e6ec4f0ae4998607f449d7cc3ae7df164952b3f8d38c63746f3e2db",
@@ -483,6 +751,26 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_legal_cases_usuario ON legal_cases(usuario_id)"
   ],
   [
+    "97146808cf18c2e3ca85f1a61d02024701ea66afa5d7fbc7947da6c9271518d8",
+    "CREATE INDEX IF NOT EXISTS idx_limit_escalations_entity ON limit_escalations(entityType, entityId, status)"
+  ],
+  [
+    "72ba517e878581ce699a8683d3ce2919c2be9c21e9d91af7a7e5837e96f85b2a",
+    "CREATE INDEX IF NOT EXISTS idx_limit_ledger_month ON limit_ledger(operationType, monthKey)"
+  ],
+  [
+    "85c9d7bda561a8084be1897d1f9f15efd1eee5133d66eefd507659880cfb5123",
+    "CREATE INDEX IF NOT EXISTS idx_limit_ledger_user ON limit_ledger(operationType, userId, dayKey)"
+  ],
+  [
+    "19fb946e3f1468f210718acb8339fd44a41af4cca4d463cfe8e9cc6a1644a75a",
+    "CREATE INDEX IF NOT EXISTS idx_limit_versions_status ON limit_policy_versions(status, effectiveFrom)"
+  ],
+  [
+    "1afbae6033ec325a016f6654f3019ca6c7e7e1c25f5227c9abd6ea0ac376a20e",
+    "CREATE INDEX IF NOT EXISTS idx_payments_batch ON payments(batchId)"
+  ],
+  [
     "262d3ad07f6b13adfddb5ce2b4a3961089a4ae6e73b426a82a0db8a770b964ef",
     "CREATE INDEX IF NOT EXISTS idx_payments_creditId ON payments(creditId)"
   ],
@@ -505,6 +793,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "55f178aada1eb375dc4c8d8bbe4b388c708304f557021381a6aaf2036d22a208",
     "CREATE INDEX IF NOT EXISTS idx_payments_usuario ON payments(usuario_id)"
+  ],
+  [
+    "a02434a76e5a05ff3409d74718073abbaf20bd27aee2333bb865bbf7e3f1c46c",
+    "CREATE INDEX IF NOT EXISTS idx_report_history_generatedAt ON report_history(generatedAt)"
   ],
   [
     "1bce91b59310c9d40e8e68bca65f950ba49a5b1a7f6a3db725b0e4aab2f6b577",
@@ -551,8 +843,56 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_warranties_usuario ON warranties(usuario_id)"
   ],
   [
+    "d9f456a068be8d9cadee802547bfe53a8490bb5f22bcf98177b0a62c704841b6",
+    "CREATE TABLE IF NOT EXISTS accounting_audit_runs ( id TEXT PRIMARY KEY, kind TEXT NOT NULL, startedAt TEXT NOT NULL, finishedAt TEXT NOT NULL, userId TEXT, userName TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('ok','warning','critical')), criticalCount INTEGER NOT NULL DEFAULT 0, highCount INTEGER NOT NULL DEFAULT 0, mediumCount INTEGER NOT NULL DEFAULT 0, lowCount INTEGER NOT NULL DEFAULT 0, headEntryId TEXT, headHash TEXT, sealStatus TEXT, summary TEXT, findings TEXT )"
+  ],
+  [
+    "8e065b95a5ee5657ee8838f096ed7c2591ab98947d8affd7d774712f40f30f33",
+    "CREATE TABLE IF NOT EXISTS accounting_bank_imports (id TEXT PRIMARY KEY, fileName TEXT NOT NULL, movements TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, importedAt TEXT NOT NULL)"
+  ],
+  [
+    "cd6fc7613a8cbbbdd5c91d288e14af1c56784174cc16df4c814b95a6809c6147",
+    "CREATE TABLE IF NOT EXISTS accounting_cash_sessions ( id TEXT PRIMARY KEY, operatorId TEXT NOT NULL, operatorName TEXT NOT NULL, sessionDate TEXT NOT NULL, openedAt TEXT NOT NULL, closedAt TEXT, openingMinor INTEGER NOT NULL CHECK(openingMinor >= 0), expectedMinor INTEGER, countedMinor INTEGER, reason TEXT, status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','closed')), UNIQUE(operatorId, sessionDate), CHECK(status = 'open' OR (expectedMinor IS NOT NULL AND countedMinor IS NOT NULL AND countedMinor >= 0 AND (expectedMinor = countedMinor OR length(trim(reason)) >= 10))) )"
+  ],
+  [
+    "f6e91a51e52b0c1a5c23af46750b1473f922b2b61b6bbc3c3bb4b58514bbff26",
+    "CREATE TABLE IF NOT EXISTS accounting_daily_closes ( day TEXT PRIMARY KEY, headEntryId TEXT, headHash TEXT, entryCount INTEGER NOT NULL, debitMinor INTEGER NOT NULL, creditMinor INTEGER NOT NULL, liquidMinor INTEGER NOT NULL, portfolioMinor INTEGER NOT NULL, auditRunId TEXT, sealStatus TEXT, closedAt TEXT NOT NULL, closedBy TEXT NOT NULL, closedById TEXT )"
+  ],
+  [
+    "cbbfdb30f29962b50356eced6435219dc253b375888e9c1eaf6138a7cf14844c",
+    "CREATE TABLE IF NOT EXISTS accounting_divergence_events ( id TEXT PRIMARY KEY, issueKey TEXT NOT NULL, previousId TEXT NOT NULL DEFAULT '', source TEXT NOT NULL, description TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','justified','resolved')), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL, UNIQUE(issueKey, previousId) )"
+  ],
+  [
     "fba4675f0985e1cb5a454ef286147a6885b0b0cce3c6d9ea32fa8336a5359d35",
     "CREATE TABLE IF NOT EXISTS accounting_entries ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, description TEXT, clientId TEXT, creditId TEXT, paymentId TEXT, debit TEXT NOT NULL, credit TEXT NOT NULL, amountPrincipal REAL DEFAULT 0, amountInterest REAL DEFAULT 0, amountLateInterest REAL DEFAULT 0, amountTotal REAL NOT NULL, amountPrincipalMinor INTEGER, amountInterestMinor INTEGER, amountLateInterestMinor INTEGER, amountTotalMinor INTEGER, processedBy TEXT NOT NULL, justification TEXT, integrityHash TEXT, previousHash TEXT, hashVersion INTEGER DEFAULT 1, usuario_id TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) )"
+  ],
+  [
+    "dcc083e1b1138fa252ddce7c9bda5749dea37f8a267a123d46a9382a42bce9b3",
+    "CREATE TABLE IF NOT EXISTS accounting_entry_seals ( seq INTEGER PRIMARY KEY AUTOINCREMENT, entryId TEXT NOT NULL UNIQUE, hmac TEXT NOT NULL, previousHmac TEXT NOT NULL, origin TEXT NOT NULL CHECK(origin IN ('local','remote','legacy','review')), sealedAt TEXT NOT NULL )"
+  ],
+  [
+    "642b31e5cecd49627ad4b402e4c1fa6de6b347956c37fce7c0b88ea77224991c",
+    "CREATE TABLE IF NOT EXISTS accounting_receipts (id TEXT PRIMARY KEY, entryId TEXT NOT NULL UNIQUE, fileName TEXT NOT NULL, mime TEXT NOT NULL, data TEXT NOT NULL, digest TEXT NOT NULL, createdAt TEXT NOT NULL)"
+  ],
+  [
+    "cc8a82fbeae16a23744cbb11be4793442a71a13c1051dd3229bd3265ed82745d",
+    "CREATE TABLE IF NOT EXISTS accounting_requests ( id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK(kind IN ('reversal','writeoff')), targetId TEXT NOT NULL, amountMinor INTEGER, description TEXT, reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, requestedAt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected')), decidedBy TEXT, decidedById TEXT, decidedAt TEXT, decisionReason TEXT, resultEntryId TEXT )"
+  ],
+  [
+    "3fb195bb4ebf078c7c1186d149f4d16ac333efe73730588d4aea3d9307ac47b2",
+    "CREATE TABLE IF NOT EXISTS audit_alert_comments ( id TEXT PRIMARY KEY, alertId TEXT NOT NULL, userId TEXT, userName TEXT NOT NULL, status TEXT, comment TEXT NOT NULL, createdAt TEXT NOT NULL )"
+  ],
+  [
+    "25253bfd339165bd90845ca3088177317c45ca4d61eb1094e7c4808e3ce812e1",
+    "CREATE TABLE IF NOT EXISTS audit_alerts ( id TEXT PRIMARY KEY, alertKey TEXT NOT NULL UNIQUE, ruleId TEXT NOT NULL, severity TEXT NOT NULL, title TEXT NOT NULL, description TEXT, eventIds TEXT, originUserId TEXT, originUserName TEXT, occurredAt TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','in_review','justified','false_positive','resolved')), assignedTo TEXT, assignedToName TEXT, dueAt TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, closedBy TEXT, closedByName TEXT, closedAt TEXT )"
+  ],
+  [
+    "7200494c19609c94450d4870951b0f6b137b0ede1ac39dbeed6bb156862999ca",
+    "CREATE TABLE IF NOT EXISTS audit_daily_closes ( day TEXT PRIMARY KEY, lastAuditId TEXT, headHash TEXT, eventCount INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('ok','broken')), brokenSeq INTEGER, verifiedAt TEXT NOT NULL, verifiedBy TEXT )"
+  ],
+  [
+    "915e04ef9a197119c43594217c6cb4429a42b4e6c69d5df93dca24340e3efea8",
+    "CREATE TABLE IF NOT EXISTS audit_log_chain (seq INTEGER PRIMARY KEY AUTOINCREMENT, auditId TEXT NOT NULL UNIQUE, previousHash TEXT NOT NULL, integrityHash TEXT NOT NULL, origin TEXT NOT NULL CHECK(origin IN ('live','legacy')))"
   ],
   [
     "53fe957f90a62d25d60a7dcf918ed32bb56c5bc0cffa61cc31e18dbbdcbfe688",
@@ -575,6 +915,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS closed_months ( id TEXT PRIMARY KEY, month INTEGER NOT NULL, year INTEGER NOT NULL, capitalApplied REAL NOT NULL, projectedProfit REAL NOT NULL, realizedProfit REAL NOT NULL, overdueAmount REAL NOT NULL, liquidationRate REAL NOT NULL, closedAt TEXT NOT NULL, closedBy TEXT NOT NULL )"
   ],
   [
+    "bdbfbfa7c8e4ffb188d192e0ed1388de26636610e7245cc2b01280003985717a",
+    "CREATE TABLE IF NOT EXISTS collection_events ( id TEXT PRIMARY KEY, creditId TEXT, kind TEXT NOT NULL CHECK(kind IN ('contact','promise','promise_kept','promise_broken','assignment','target')), agentId TEXT, agentName TEXT, monthKey TEXT, amountMinor INTEGER CHECK(amountMinor IS NULL OR (typeof(amountMinor) = 'integer' AND amountMinor >= 0)), promisedDate TEXT, relatedId TEXT, notes TEXT NOT NULL CHECK(length(trim(notes)) >= 5), actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK((kind NOT IN ('contact','promise','promise_kept','promise_broken','assignment')) OR creditId IS NOT NULL), CHECK(kind <> 'promise' OR (amountMinor > 0 AND promisedDate IS NOT NULL)), CHECK(kind <> 'target' OR (agentId IS NOT NULL AND monthKey IS NOT NULL AND amountMinor IS NOT NULL)), CHECK(kind <> 'assignment' OR agentId IS NOT NULL), CHECK(kind NOT IN ('promise_kept','promise_broken') OR relatedId IS NOT NULL) )"
+  ],
+  [
     "7ccc7e6746d1c39d35c94dfe31cde931c34faa848cdb60d01fe49c87eca7592a",
     "CREATE TABLE IF NOT EXISTS collection_messages ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, creditIds TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, attemptNumber INTEGER DEFAULT 1, totalDue REAL DEFAULT 0, sentAt TEXT NOT NULL, sentBy TEXT, legalTriggered INTEGER DEFAULT 0 )"
   ],
@@ -587,6 +931,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS contracts ( id TEXT PRIMARY KEY, clientId TEXT, clientName TEXT, title TEXT, value REAL, startDate TEXT, endDate TEXT, status TEXT, terms TEXT, createdAt TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )"
   ],
   [
+    "770aeb26bfba8ef483876bc7b4d019fcb67a66f02cd8f547b7a0563a797ef7e0",
+    "CREATE TABLE IF NOT EXISTS credit_approvals (id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT, clientName TEXT, principalAmount REAL, interestRate REAL, installments INTEGER, decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')), reason TEXT, requestedBy TEXT, requestedAt TEXT, decidedBy TEXT NOT NULL, decidedById TEXT, decidedAt TEXT NOT NULL)"
+  ],
+  [
     "8c08344cc6cde3ff2f4f340a5e20147b8ec5efb9f1d9daff49a3a76fcf9c1e32",
     "CREATE TABLE IF NOT EXISTS credit_installments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, installmentNumber INTEGER NOT NULL CHECK(installmentNumber > 0), dueDate TEXT NOT NULL, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL CHECK(interestMinor >= 0), lateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(lateInterestMinor >= 0), paidPrincipalMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidPrincipalMinor >= 0), paidInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidInterestMinor >= 0), paidLateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidLateInterestMinor >= 0), status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','partial','paid','overdue','cancelled')), paidAt TEXT, version INTEGER NOT NULL DEFAULT 0, UNIQUE(creditId, installmentNumber), FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )"
   ],
@@ -597,6 +945,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "79a691d81d37e174aa631492123e9e448eb05234f0cfb0cd153aaf71db71c3cc",
     "CREATE TABLE IF NOT EXISTS credit_reinforcements ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), idempotencyKey TEXT NOT NULL UNIQUE, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT)"
+  ],
+  [
+    "2bc2de045392367e0d1c88214291acfff3feae2dca9340f295272763c93c280f",
+    "CREATE TABLE IF NOT EXISTS credit_writeoffs ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL UNIQUE, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL, entryId TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK(requestedById <> approvedById) )"
   ],
   [
     "f077fe2b2c32059687e09d14f26909d20370e4a75aeb5b2a2b9e7a6bece80f8a",
@@ -623,6 +975,30 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS legal_cases ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT NOT NULL, stage TEXT DEFAULT 'interpellated', priority TEXT DEFAULT 'normal', assignedLawyer TEXT, notes TEXT, history TEXT DEFAULT '[]', lastActionDate TEXT, debtAmount REAL, lastAction TEXT, updatedAt TEXT, closedAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )"
   ],
   [
+    "53f6edb7f1c885bb3e3c1b3b3b56b9f0c17b7dfdf6161bdf7ad241da41db8d42",
+    "CREATE TABLE IF NOT EXISTS limit_escalation_approvals ( id TEXT PRIMARY KEY, escalationId TEXT NOT NULL, approverId TEXT NOT NULL, approverName TEXT NOT NULL, approverRole TEXT, decision TEXT NOT NULL CHECK(decision IN ('approved','rejected')), notes TEXT, decidedAt TEXT NOT NULL, UNIQUE(escalationId, approverId) )"
+  ],
+  [
+    "a8d56f3147da1315494f59574c0e1577e5caad993a91cd552a29a53b581b2cab",
+    "CREATE TABLE IF NOT EXISTS limit_escalations ( id TEXT PRIMARY KEY, operationType TEXT NOT NULL, entityType TEXT NOT NULL, entityId TEXT NOT NULL, amountMinor INTEGER NOT NULL, requestedById TEXT, requestedByName TEXT, requestedRole TEXT, reason TEXT NOT NULL, details TEXT, requiredLevelId TEXT NOT NULL, requiredLevelIndex INTEGER NOT NULL, requiredLevelName TEXT NOT NULL, dual INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','approved','rejected','cancelled')), createdAt TEXT NOT NULL, levelSince TEXT NOT NULL, escalationCount INTEGER NOT NULL DEFAULT 0, lastReminderAt TEXT, decidedAt TEXT, decidedBy TEXT, decidedByName TEXT )"
+  ],
+  [
+    "982f83bd521b9424471348461072ab09baa4b37a8afca1bf81a9f22dfbd5b1af",
+    "CREATE TABLE IF NOT EXISTS limit_exceptions ( id TEXT PRIMARY KEY, userId TEXT NOT NULL, userName TEXT NOT NULL, operationType TEXT NOT NULL, perOperationMinor INTEGER, dailyMinor INTEGER, monthlyMinor INTEGER, dailyCount INTEGER, startsAt TEXT NOT NULL, endsAt TEXT NOT NULL, reason TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','revoked')), requestedBy TEXT NOT NULL, requestedByName TEXT NOT NULL, requestedAt TEXT NOT NULL, decidedBy TEXT, decidedByName TEXT, decidedAt TEXT, decisionReason TEXT, expiryNotifiedAt TEXT )"
+  ],
+  [
+    "b0c88b99c6f86b60447e2e921219415f3e9a0b728b30fcb40d29360ed754135a",
+    "CREATE TABLE IF NOT EXISTS limit_ledger ( id TEXT PRIMARY KEY, operationType TEXT NOT NULL, userId TEXT NOT NULL, userName TEXT, profileId TEXT, branchId TEXT DEFAULT '', amountMinor INTEGER NOT NULL DEFAULT 0, count INTEGER NOT NULL DEFAULT 1, dayKey TEXT NOT NULL, monthKey TEXT NOT NULL, entityType TEXT, entityId TEXT, createdAt TEXT NOT NULL )"
+  ],
+  [
+    "66d2506ea343cf91fcaa812992c9f048a477031c23c6b13738b9a62cdd8ddb75",
+    "CREATE TABLE IF NOT EXISTS limit_locks ( id TEXT PRIMARY KEY, ledgerId TEXT NOT NULL, scope TEXT NOT NULL, scopeId TEXT NOT NULL, period TEXT NOT NULL, periodKey TEXT NOT NULL, createdAt TEXT NOT NULL )"
+  ],
+  [
+    "3082194ebe47894c5ba4f9de527a730cdcfa31eaf32721464500336fa7c48acf",
+    "CREATE TABLE IF NOT EXISTS limit_policy_versions ( id TEXT PRIMARY KEY, version INTEGER NOT NULL, policy TEXT NOT NULL, summary TEXT, reason TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','cancelled')), effectiveFrom TEXT NOT NULL, requiresSecondApproval INTEGER NOT NULL DEFAULT 0, secondApprovalReasons TEXT, createdBy TEXT NOT NULL, createdByName TEXT NOT NULL, createdAt TEXT NOT NULL, decidedBy TEXT, decidedByName TEXT, decidedAt TEXT, decisionReason TEXT, restoredFrom TEXT )"
+  ],
+  [
     "cf98d4653f26a023cfcdc553f8a75cd38e43b0b28b1a4e88083a5cd91951a4a3",
     "CREATE TABLE IF NOT EXISTS message_templates ( id TEXT PRIMARY KEY, name TEXT NOT NULL, type TEXT NOT NULL, content TEXT NOT NULL, isDefault INTEGER DEFAULT 0 )"
   ],
@@ -639,12 +1015,28 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS payment_gateways ( id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, type TEXT NOT NULL, status TEXT DEFAULT 'inactive', environment TEXT DEFAULT 'sandbox', apiKey TEXT, apiSecret TEXT, merchantId TEXT, webhookUrl TEXT, webhookSecret TEXT, config TEXT, transactionFee REAL DEFAULT 0, feeType TEXT DEFAULT 'percentage', logo TEXT, description TEXT, supportedMethods TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, lastTestedAt TEXT, lastTestResult TEXT )"
   ],
   [
+    "5108ebdcc23e5a5449650abb9a2bfbacf8af13d2e1f0c87c4c1b62c30033e382",
+    "CREATE TABLE IF NOT EXISTS payment_import_batches ( id TEXT PRIMARY KEY, number TEXT NOT NULL, fileName TEXT, createdAt TEXT NOT NULL, createdBy TEXT NOT NULL, createdById TEXT, rowsCount INTEGER NOT NULL DEFAULT 0, totalMinor INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'cancelled')), cancelledAt TEXT, cancelledBy TEXT, cancelReason TEXT )"
+  ],
+  [
+    "c51216e7f4c6f41bfeabd14e2d591cd309fc17964dce3e0801e770dedad4dedb",
+    "CREATE TABLE IF NOT EXISTS payment_proofs ( paymentId TEXT PRIMARY KEY, fileName TEXT NOT NULL, mimeType TEXT NOT NULL, dataUrl TEXT NOT NULL, uploadedAt TEXT NOT NULL, uploadedBy TEXT )"
+  ],
+  [
     "b938ecda825283e5aac03ae15c6f8ff12be7e50cba9c8c3b4278e8371826a771",
     "CREATE TABLE IF NOT EXISTS payment_references ( id TEXT PRIMARY KEY, creditId TEXT, gatewayId TEXT, reference TEXT, entity TEXT, amount REAL, status TEXT DEFAULT 'pending', proofImage TEXT, expiresAt TEXT, paidAt TEXT, submittedAt TEXT, createdAt TEXT NOT NULL, usuario_id TEXT )"
   ],
   [
     "f5d48944cd7efe796ed04f97be656d997e64d45edd6da640e4093361ccdcd4c4",
     "CREATE TABLE IF NOT EXISTS payments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientName TEXT NOT NULL, amount REAL NOT NULL, amountMinor INTEGER, paymentDate TEXT NOT NULL, method TEXT NOT NULL, reference TEXT, allocatedToPrincipal REAL DEFAULT 0, allocatedToPrincipalMinor INTEGER, allocatedToInterest REAL DEFAULT 0, allocatedToInterestMinor INTEGER, allocatedToLateInterest REAL DEFAULT 0, allocatedToLateInterestMinor INTEGER, idempotencyKey TEXT, processedBy TEXT NOT NULL, status TEXT DEFAULT 'confirmed' CHECK(status IN ('pending', 'confirmed', 'cancelled')), deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )"
+  ],
+  [
+    "1a34788bb53f152ff0131ce3f2ad90e4bb747b445154387317f82ac9bf3e1849",
+    "CREATE TABLE IF NOT EXISTS report_history ( id TEXT PRIMARY KEY, reportType TEXT NOT NULL, title TEXT NOT NULL, format TEXT NOT NULL CHECK(format IN ('pdf', 'xlsx')), filters TEXT, fileName TEXT NOT NULL, fileData TEXT, generatedAt TEXT NOT NULL, generatedBy TEXT NOT NULL, generatedById TEXT )"
+  ],
+  [
+    "e0e0f3d88e357df8f22975d47255192263b892c9f1b5456eacde2b9fe83be7ad",
+    "CREATE TABLE IF NOT EXISTS report_schedules ( id TEXT PRIMARY KEY, reportType TEXT NOT NULL, recipients TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, lastRunMonth TEXT, lastRunAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, createdBy TEXT )"
   ],
   [
     "ffe8b85a1bc705f71927a344605fdd12cb57cded74e477fdf8e4840468405c78",
@@ -671,8 +1063,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS user_limits ( id TEXT PRIMARY KEY, userId TEXT, role TEXT CHECK(role IN ('admin', 'manager')), maxTransaction REAL NOT NULL, dailyLimit REAL NOT NULL, monthlyLimit REAL NOT NULL, restrictionsEnabled INTEGER DEFAULT 1, updatedAt TEXT NOT NULL )"
   ],
   [
-    "2ab5d2eb67e3e8cc72c051a6a9b5b9813defd1ed33a8ca97ec9262ba99d62d13",
-    "CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('super_admin', 'admin', 'manager')), avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT, permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT )"
+    "815c67b228927bae516cea2d35c32871351e606acdbdfac23ba883605792adc8",
+    "CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT, permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT )"
   ],
   [
     "eef7f5875b59714a33c7ed793ae5d543500dc9209df111bb04b6d8d2b532027d",
@@ -691,6 +1083,26 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE payments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientName TEXT NOT NULL, amount REAL NOT NULL, paymentDate TEXT NOT NULL, method TEXT NOT NULL, reference TEXT, allocatedToPrincipal REAL DEFAULT 0, allocatedToInterest REAL DEFAULT 0, allocatedToLateInterest REAL DEFAULT 0, processedBy TEXT NOT NULL, status TEXT DEFAULT 'confirmed' CHECK(status IN ('pending', 'confirmed', 'cancelled')), deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )"
   ],
   [
+    "eb769e4b5b3628a073d0a35ae790449a2cb5638e774028be4b6f7e7e85b6e08d",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_delete BEFORE DELETE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')"
+  ],
+  [
+    "acb7a9da4b60852c3079c717cf02573f91ec635d25437c2bac84d742d36cf7a3",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_update BEFORE UPDATE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')"
+  ],
+  [
+    "b6df90ca87031a2803a33cfdd969cb06d81f4e4ca69aacf0f8ca408559b1fe43",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')"
+  ],
+  [
+    "87c9807850fd739106f771d516096e7ec8df4c42535b810503b7a64091de8f41",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_daily_closes_immutable_delete BEFORE DELETE ON accounting_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários são imutáveis')"
+  ],
+  [
+    "18096b5c1770a5f3359f4da1854f0b989d4eb0da9607c9bf10bc2bd039d5f6eb",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_daily_closes_immutable_update BEFORE UPDATE ON accounting_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários são imutáveis')"
+  ],
+  [
     "0ed27f19fb3b962399d2df25b5c94ffba5d1c4c49c705dde6451ef8c76b5e2e8",
     "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_delete BEFORE DELETE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis"
   ],
@@ -701,6 +1113,110 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "b60134d5f108909e150202f69308450822503e53f187db23da3c5d0ab20ddcd9",
     "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')"
+  ],
+  [
+    "1b608049247978e2dbe06f7477ba9e50083eeaf30f9d752889cb6bb099014f2a",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_entry_seals_delete BEFORE DELETE ON accounting_entry_seals BEGIN SELECT RAISE(ABORT, 'Os selos contabilísticos são imutáveis')"
+  ],
+  [
+    "8e67cccbc7a61efa19973e14b617de92834081aa99051308724123356a4b458c",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_entry_seals_update BEFORE UPDATE ON accounting_entry_seals BEGIN SELECT RAISE(ABORT, 'Os selos contabilísticos são imutáveis')"
+  ],
+  [
+    "f6cee5cfe401c1578f42e7a1a7b36b8c007fabc30a99b96f077ca12d6720af94",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_decided BEFORE UPDATE ON accounting_requests WHEN OLD.status <> 'pending' BEGIN SELECT RAISE(ABORT, 'Pedido já decidido: não pode ser alterado')"
+  ],
+  [
+    "68e201de569ad2ed75f127e3a9797c5ba5dab2445b5ac2060161c814eacf14a6",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_delete BEFORE DELETE ON accounting_requests BEGIN SELECT RAISE(ABORT, 'O histórico de pedidos é imutável')"
+  ],
+  [
+    "2eb9c8ad0cfa7ae8bc1e1f9f42ea45c1879e50f20f6669ecee31638247597dad",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_segregation BEFORE UPDATE ON accounting_requests WHEN NEW.decidedById IS NOT NULL AND NEW.decidedById = OLD.requestedById BEGIN SELECT RAISE(ABORT, 'O pedido tem de ser decidido por outro administrador')"
+  ],
+  [
+    "950dbab48a1c5ad96ea59f8a7442b9d2461458f3c5b66d245eb6ab42fa5dd002",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_alert_comments_delete BEFORE DELETE ON audit_alert_comments BEGIN SELECT RAISE(ABORT, 'Os comentários dos alertas são imutáveis')"
+  ],
+  [
+    "9ae0e50d6b6fa3d352b95f4baeb3d45aedabe24daf55abe8a778e2fe69a00eca",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_alert_comments_update BEFORE UPDATE ON audit_alert_comments BEGIN SELECT RAISE(ABORT, 'Os comentários dos alertas são imutáveis')"
+  ],
+  [
+    "10b74138803ba4756394898e181521ad35f57d4247bf4890d13c3f770b49b9da",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_alerts_delete BEFORE DELETE ON audit_alerts BEGIN SELECT RAISE(ABORT, 'Os alertas de auditoria não podem ser apagados')"
+  ],
+  [
+    "31ddb2b7f180689da6b4bb583f82a3d7820d96080ea5274f6db32daef2d87e21",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_alerts_self_close BEFORE UPDATE ON audit_alerts WHEN NEW.status IN ('justified','false_positive','resolved') AND NEW.closedBy IS NOT NULL AND NEW.closedBy = OLD.originUserId BEGIN SELECT RAISE(ABORT, 'Quem originou o alerta não o pode fechar')"
+  ],
+  [
+    "16647ffe4552119fe6921658f914a1eb85fac485b82911b8d1cba1b1aaee45a9",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_chain_delete BEFORE DELETE ON audit_log_chain BEGIN SELECT RAISE(ABORT,'A cadeia de auditoria é imutável')"
+  ],
+  [
+    "c0caf694d29f0c2400f11d7146ee96ffc7ccd1030eb9627043b6bcc22b59f364",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_chain_insert AFTER INSERT ON audit_logs BEGIN INSERT INTO audit_log_chain (auditId, previousHash, integrityHash, origin) VALUES (NEW.id, COALESCE((SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1), '0000000000000000000000000000000000000000000000000000000000000000'), tango_audit_hash(NEW.id,NEW.timestamp,NEW.userId,NEW.userName,NEW.action,NEW.entity,NEW.details,NEW.previousState,NEW.newState,NEW.metadata, COALESCE((SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1), '0000000000000000000000000000000000000000000000000000000000000000')),'live')"
+  ],
+  [
+    "91ebf5470ad78ffbe83a7a3d1065b17aa352665fb7a55a66f861d422c452bf2c",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_chain_update BEFORE UPDATE ON audit_log_chain BEGIN SELECT RAISE(ABORT,'A cadeia de auditoria é imutável')"
+  ],
+  [
+    "ee30028c7283221f997157247a3c3653443ee7243d368bc76d85be94d868f3ce",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_daily_closes_delete BEFORE DELETE ON audit_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários da auditoria são imutáveis')"
+  ],
+  [
+    "78bbb6af7a3bb75860ef737ef9eeac3ab05eb6da2643c478a8bf86438f3dcea3",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_daily_closes_update BEFORE UPDATE ON audit_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários da auditoria são imutáveis')"
+  ],
+  [
+    "37dcbfb4f387b22c2d5a00ba10d2833fecb89754a8a722ca170255986f52abd3",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_logs_immutable_delete BEFORE DELETE ON audit_logs BEGIN SELECT RAISE(ABORT, 'Os registos de auditoria são imutáveis')"
+  ],
+  [
+    "e7d4e3b804a01f3262838b321a12d0ab6daf4b058d1cfdc031818f5c878359e0",
+    "CREATE TRIGGER IF NOT EXISTS trg_audit_logs_immutable_update BEFORE UPDATE ON audit_logs BEGIN SELECT RAISE(ABORT, 'Os registos de auditoria são imutáveis')"
+  ],
+  [
+    "adf8eae22807b8c229808b7d44d262602da5969f0b62d3123f2a91d4b2ed39a2",
+    "CREATE TRIGGER IF NOT EXISTS trg_bank_import_delete BEFORE DELETE ON accounting_bank_imports BEGIN SELECT RAISE(ABORT, 'O extrato importado é imutável')"
+  ],
+  [
+    "ea386f7ee2fde2324162466f729547192f5da80735740324118b02b2451103bb",
+    "CREATE TRIGGER IF NOT EXISTS trg_bank_import_update BEFORE UPDATE ON accounting_bank_imports BEGIN SELECT RAISE(ABORT, 'O extrato importado é imutável')"
+  ],
+  [
+    "2902ce5e73b73947db2b6f9e5c0e907d545857f4e56a72308527733f6c4e815c",
+    "CREATE TRIGGER IF NOT EXISTS trg_cash_session_closed_update BEFORE UPDATE ON accounting_cash_sessions WHEN OLD.status = 'closed' BEGIN SELECT RAISE(ABORT, 'Fecho de caixa imutável')"
+  ],
+  [
+    "1f96d776650cf4858485218dda9c47c11d6774938f44a64c4583edf3c70b9ddf",
+    "CREATE TRIGGER IF NOT EXISTS trg_cash_session_delete BEFORE DELETE ON accounting_cash_sessions BEGIN SELECT RAISE(ABORT, 'O histórico de caixa é imutável')"
+  ],
+  [
+    "df8fd22f7447a9e673333b4543638285c24e24bc5ac3443938db7fe3e2cf2c57",
+    "CREATE TRIGGER IF NOT EXISTS trg_collection_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')"
+  ],
+  [
+    "676134166855a8983159bd9ca52f58bd40bf144cff6fad8d3d035eb54dd2f863",
+    "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')"
+  ],
+  [
+    "644c6e40201686e991b0fbbea08c072e021c3459659afc68c6b3d573583a4fa7",
+    "CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_delete BEFORE DELETE ON credit_writeoffs BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis')"
+  ],
+  [
+    "7ea63e53b926620e4786420ceb6e19f184f17678c0bcb25b8ee50548b15fc61a",
+    "CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_update BEFORE UPDATE ON credit_writeoffs BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis')"
+  ],
+  [
+    "cd752202ce710fff5ac0ac0e490885492064e74ae5a61db7a816a1780d266c63",
+    "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_delete BEFORE DELETE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')"
+  ],
+  [
+    "8543aac3ec3557b02bfa7691d38946b3cf6f038aec82144c91353d46b200bff2",
+    "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_update BEFORE UPDATE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')"
   ],
   [
     "c2c721f2f30495f9ec562c1fe57797d7287d68e3f93f08729552bfdeecd1a1f2",
@@ -719,12 +1235,76 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_ledger_transactions_immutable_update BEFORE UPDATE ON ledger_transactions BEGIN SELECT RAISE(ABORT, 'As transações do ledger são imutáveis')"
   ],
   [
+    "ef5057c7ffd65291e23f27ec8c0fe0536058b4b9e7c5a72bd248f2a77b71db27",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_escalation_approvals_delete BEFORE DELETE ON limit_escalation_approvals BEGIN SELECT RAISE(ABORT, 'As decisões dos aprovadores são imutáveis')"
+  ],
+  [
+    "c46b0e2aa2488d7bfdfdc25e2bdf103d916e215da5ae4fd68aa58defe4c0c592",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_escalation_approvals_update BEFORE UPDATE ON limit_escalation_approvals BEGIN SELECT RAISE(ABORT, 'As decisões dos aprovadores são imutáveis')"
+  ],
+  [
+    "7bc1f92d86aca95f4bcaa72799c58427b9b00b93a3fbab854acb0d90bb88a3cc",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_escalation_self BEFORE INSERT ON limit_escalation_approvals WHEN NEW.approverId = (SELECT requestedById FROM limit_escalations WHERE id = NEW.escalationId) BEGIN SELECT RAISE(ABORT, 'Quem pediu a operação não a pode aprovar')"
+  ],
+  [
+    "88d6f4d31c00efff0588cdb711f2b732c355046617d6c94b897a808cb93fdc2f",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_escalations_delete BEFORE DELETE ON limit_escalations BEGIN SELECT RAISE(ABORT, 'Os pedidos escalados não podem ser apagados')"
+  ],
+  [
+    "4296862474e2668e025378cf67d54c91c91b365418dab8b8d7b5bd0e05a7c23d",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_delete BEFORE DELETE ON limit_exceptions BEGIN SELECT RAISE(ABORT, 'As exceções de limites não podem ser apagadas')"
+  ],
+  [
+    "7588df862f263447245990af5012a3f2c41c034ad87f8ed9279bd406fbc14ba0",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_four_eyes BEFORE UPDATE ON limit_exceptions WHEN NEW.status = 'approved' AND OLD.status = 'pending' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.requestedBy OR NEW.decidedBy = OLD.userId) BEGIN SELECT RAISE(ABORT, 'A exceção tem de ser aprovada por outro administrador')"
+  ],
+  [
+    "0f1bd3358dcd02fcbc6d3ee10b3e9f95d2bd063016e401a0ee8a1deb84306ee9",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_immutable BEFORE UPDATE ON limit_exceptions WHEN NEW.userId <> OLD.userId OR NEW.operationType <> OLD.operationType OR NEW.startsAt <> OLD.startsAt OR NEW.endsAt <> OLD.endsAt OR COALESCE(NEW.perOperationMinor, -1) <> COALESCE(OLD.perOperationMinor, -1) OR COALESCE(NEW.dailyMinor, -1) <> COALESCE(OLD.dailyMinor, -1) OR COALESCE(NEW.monthlyMinor, -1) <> COALESCE(OLD.monthlyMinor, -1) OR NEW.reason <> OLD.reason OR (OLD.status IN ('rejected','revoked') AND NEW.status <> OLD.status) BEGIN SELECT RAISE(ABORT, 'Os valores de uma exceção não podem ser alterados')"
+  ],
+  [
+    "0f36e892760a35848fc726b790fbce7ea9b69f4bf315a28ec81df358eb3e24d5",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_ledger_delete BEFORE DELETE ON limit_ledger BEGIN SELECT RAISE(ABORT, 'O registo de consumo dos limites é imutável')"
+  ],
+  [
+    "9a99bd6ee70fdaec50fc2792ab5899b66b6ed5650137d1b8864cbc67d33e3f5a",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_ledger_update BEFORE UPDATE ON limit_ledger BEGIN SELECT RAISE(ABORT, 'O registo de consumo dos limites é imutável')"
+  ],
+  [
+    "ab46bcc5905b591ab23a38d5d02de3bbc7b11bd2abc9e429e5b80a188228abf0",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_versions_delete BEFORE DELETE ON limit_policy_versions BEGIN SELECT RAISE(ABORT, 'As versões dos limites não podem ser apagadas')"
+  ],
+  [
+    "3c77a17f0944c4c952dd53749cf9f39674646616e7fecc572d87f20493964c4f",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_versions_four_eyes BEFORE UPDATE ON limit_policy_versions WHEN NEW.status = 'approved' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.createdBy) BEGIN SELECT RAISE(ABORT, 'A alteração tem de ser aprovada por um segundo administrador')"
+  ],
+  [
+    "ef39268f4407010814b06e6a920d5dc07bd3c870da7db8ef5c21b44d4fa1a3bf",
+    "CREATE TRIGGER IF NOT EXISTS trg_limit_versions_immutable BEFORE UPDATE ON limit_policy_versions WHEN OLD.status <> 'pending' OR NEW.policy <> OLD.policy OR NEW.version <> OLD.version OR NEW.createdBy <> OLD.createdBy OR NEW.effectiveFrom <> OLD.effectiveFrom OR NEW.reason <> OLD.reason OR NEW.requiresSecondApproval <> OLD.requiresSecondApproval BEGIN SELECT RAISE(ABORT, 'Uma versão dos limites já decidida não pode ser alterada')"
+  ],
+  [
+    "864228c4f7ebee39ebe9907cc196a93187c8f2229e01f1fe8f455bf9d689dc22",
+    "CREATE TRIGGER IF NOT EXISTS trg_receipt_delete BEFORE DELETE ON accounting_receipts BEGIN SELECT RAISE(ABORT,'O comprovativo contabilístico é imutável')"
+  ],
+  [
+    "9f5145429efcb21c57040aba04eb9296095a21fba7d28b42ce19c9cb70958696",
+    "CREATE TRIGGER IF NOT EXISTS trg_receipt_update BEFORE UPDATE ON accounting_receipts BEGIN SELECT RAISE(ABORT,'O comprovativo contabilístico é imutável')"
+  ],
+  [
+    "00c65d93dda94eb83eda257732f00f67282057891b8ebffa72b960efeaabcfa2",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_requests_pending ON accounting_requests(kind, targetId) WHERE status = 'pending'"
+  ],
+  [
     "33729af6d1e203ba1f48414b43bd63b24ba95038d224d5d5f8521d77f65dd7b8",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'"
   ],
   [
     "a7a28bc6b5aa5857ac463a89666e101ffb03bc9a5733a4064f49c4aaf5d8dff2",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL"
+  ],
+  [
+    "98ef793ae9c9e227203aa1ea7c9b62ba503858622b98230fb7a106c3e90761ab",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_promise_decision ON collection_events(relatedId) WHERE kind IN ('promise_kept','promise_broken')"
   ],
   [
     "3a8ac9f4561aceaf89a2c4ead64e9436dda30e4baded6fe80a21d49e2688da10",
@@ -735,20 +1315,12 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(idempotencyKey) WHERE idempotencyKey IS NOT NULL"
   ],
   [
+    "aacd5dba909ecc648fe5c71e66824cf44de5e567d87d971760cb0836a67dda05",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receipt ON payments(receiptYear, receiptSeq) WHERE receiptSeq IS NOT NULL"
+  ],
+  [
     "6e24d14ca6dcded02bb514886eb93e9251f6562cedba4dab7e8e339d7f850281",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)"
-  ],
-  [
-    "79067a2c7f55f8a1211a46b70384691fa7a547e2d9fe3d66794aeb808f1ccedc",
-    "DELETE FROM audit_logs"
-  ],
-  [
-    "f3e7f18912088e994e11ae592705fc5858e8289a9860e1947e53f8449fb72ce0",
-    "DELETE FROM audit_logs WHERE id = ?"
-  ],
-  [
-    "10a7df98f13784b3a5d41140ce7cd979a36e6e07d6e08c699096cb2a8ec2afba",
-    "DELETE FROM audit_logs WHERE userId = ?"
   ],
   [
     "9e6ff70ada1baa1ec671ce763f01e9edfb39f77350c29406d33f764ea66f85fc",
@@ -839,12 +1411,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DELETE FROM payments WHERE id = ?"
   ],
   [
+    "470788ce3fc62225bdab6d7295469c5d1ad9b0052e6a4f5511a95b6c790dc892",
+    "DELETE FROM report_schedules WHERE id = ?"
+  ],
+  [
     "14e1c6026d649c5bb9f60be32061a2474a599ca20827c988fff9a9bb6d1f948a",
     "DELETE FROM simulations WHERE id = ?"
   ],
   [
-    "6c3f9e335b0c132f6fa56e01149528f020ee8225ac2b458b41df52a498b9369f",
-    "DELETE FROM sqlite_sequence WHERE name IN ('clients', 'credits', 'payments', 'contracts', 'notifications', 'audit_logs', 'chat_messages', 'payment_gateways', 'payment_references')"
+    "2c10a79ffb49e94655e805f2bb8610873474544c4c0f64be0becaefeab20f4ab",
+    "DELETE FROM sqlite_sequence WHERE name IN ('clients', 'credits', 'payments', 'contracts', 'notifications', 'chat_messages', 'payment_gateways', 'payment_references')"
   ],
   [
     "73ffdf5be39aa5c4c160c2f77d6634a6970eeb4e1d3395f045ded747f0ce9d2a",
@@ -871,8 +1447,40 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DROP TABLE payments_old"
   ],
   [
+    "e6446a01c84187f0cd4f5cdde815542b51f8e5b9fde02bff99949aa94292cbe6",
+    "INSERT INTO accounting_audit_runs (id, kind, startedAt, finishedAt, userId, userName, status, criticalCount, highCount, mediumCount, lowCount, headEntryId, headHash, sealStatus, summary, findings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "75d5ba5010e0a0e84a8d8a456a8aa193e08f884fe772592fb02416a1ed8f22e1",
+    "INSERT INTO accounting_cash_sessions (id, operatorId, operatorName, sessionDate, openedAt, openingMinor, status) VALUES (?,?,?,?,?,?,?)"
+  ],
+  [
+    "084c7ec283bdb1708378830b309862bf4f484174c7d96ee4c85220493d73ee7b",
+    "INSERT INTO accounting_daily_closes (day, headEntryId, headHash, entryCount, debitMinor, creditMinor, liquidMinor, portfolioMinor, auditRunId, sealStatus, closedAt, closedBy, closedById) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "403ffa5960b210b4a4c3ed0ea648b63aa031e550cfb039ad029b6dd3a0be2ed7",
+    "INSERT INTO accounting_divergence_events (id, issueKey, previousId, source, description, state, reason, actorId, actorName, createdAt) SELECT ?,?,?,?,?,?,?,?,?,? WHERE ? = COALESCE((SELECT id FROM accounting_divergence_events WHERE issueKey = ? ORDER BY createdAt DESC, rowid DESC LIMIT 1),'')"
+  ],
+  [
     "84f2cb5ccc7bf692aab97c699abe6de38e3ac6d75af14dfb7a384d106a569f60",
     "INSERT INTO accounting_entries (id, timestamp, type, description, clientId, creditId, paymentId, debit, credit, amountPrincipal, amountInterest, amountLateInterest, amountTotal, amountPrincipalMinor, amountInterestMinor, amountLateInterestMinor, amountTotalMinor, processedBy, justification, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+    "db335bb161c2add9966bc000a1ef588f049b370fc4d1db256e58a0d658cab6dc",
+    "INSERT INTO accounting_receipts (id,entryId,fileName,mime,data,digest,createdAt) VALUES (?,?,?,?,?,?,?)"
+  ],
+  [
+    "66e47b56ae4db519e6666e27c5c054e84aca9762cbff77e444beae7bd326063b",
+    "INSERT INTO accounting_requests (id, kind, targetId, amountMinor, description, reason, requestedBy, requestedById, requestedAt, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')"
+  ],
+  [
+    "24bd6ac4e240c3c4c6d0dbef34e1ddb73087664f11cec9ba499c2ed971da8630",
+    "INSERT INTO audit_alert_comments (id, alertId, userId, userName, status, comment, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "b2f536d42cc05445738fc7a1005f8d8b9f64be94fd5fe49f46dc091cc86ea503",
+    "INSERT INTO audit_log_chain (auditId,previousHash,integrityHash,origin) SELECT ?,?,?,'legacy' WHERE ? = COALESCE((SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1), ?)"
   ],
   [
     "4a15b0901a56594a4692c10e87941cfef1bf94e2f238397453ca24da58e30680",
@@ -883,28 +1491,72 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'credit', ?, ?)"
   ],
   [
-    "48b7bb792006efb10144fcf3be2092fdfe6a95cb5230e261e856bcd5ff1dc3a2",
-    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'payment', ?, ?)"
+    "5e0a1cb67ce56bf080e7ae056a5866d998a7265c0cb085fa18181e58cd6cd1d9",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'system', ?, ?)"
   ],
   [
-    "1f89382e7c06a19ae4b013cb5da15ce9e387635ae5321e9b10d726bc311828f8",
-    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'delete', 'payment', ?, ?)"
+    "094309a73589f62a76e2135db0c68ee8ff7bcf6b218903c0c3e6504d3a44786c",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'delete', 'system', ?, ?)"
+  ],
+  [
+    "dd13a8fb9ff93013624df66c869cfbd36e4ddf23be1cc218989ded59dc10dab2",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'export', 'client', ?, ?)"
+  ],
+  [
+    "14be03014f13ed43d913c97f7b523ecf153622ca6f46fed140b9523931d01269",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'export', 'report', ?, ?)"
   ],
   [
     "86be2cdb587d3a3ad5221c135d5ce98b9abaa3986c02d82c24b6d88fe1c6219b",
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'restore', 'payment', ?, ?)"
   ],
   [
+    "882129e9db6037aa0466270a5f59c192c57eef15d710324c07cc738550274927",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'accounting_entry', ?, ?)"
+  ],
+  [
     "7131ff53b8bafaf78006b4db5ded9d8de8003c23f8731d2c2d20e4e8dc16bfba",
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?)"
+  ],
+  [
+    "44fb63489649b7e34f4128087a5037b62bdf4e0e6470027f4fb1a16b9af4ad39",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'system', ?, ?)"
+  ],
+  [
+    "12c31a3627c43562e51cf7f6c8d9dec7c3b16c53b6e1f7e8eab64943c01ed42c",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, 'payment', ?, ?)"
+  ],
+  [
+    "4f96f6cc256773f60b2adcad2783a9ac01907bf75a0c819c8da1a3885f8905aa",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "e80727e27c8fe551ae0d0d8eede24a7efd68460f9357c0fc93a8d5d6c583b4c6",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, NULL, 'Sistema', 'update', 'system', ?, ?)"
+  ],
+  [
+    "0bf296b289bb4cba74c09cb6b5188dae44db1de513c8fdf05704c9c75df94aca",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'create', 'payment', ?, ?, ?, ?)"
+  ],
+  [
+    "303e20ca55203c3005c620763b2fc078096704c4c1ea8784b2e1919ef203b550",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'delete', 'payment', ?, ?, ?, ?)"
   ],
   [
     "b8d24506a4c3fc055349812ec4c14471b8b9dc00ba084dd501638f9584d8280a",
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?, ?, ?)"
   ],
   [
+    "304ca2bec839506567eca520caa25d5d95c8aa4ab528ba67ed4a461ed0e05403",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, 'update', 'system', ?, ?, ?, ?)"
+  ],
+  [
     "b03c862b340923a9e9585ec991b5664c0d7c5b25aca7870e276a30caf851a14f",
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "4ad8b402e3434eca295b2bb0a9afe54af5dce88d3b5b7815d5f77ba06c1e0b57",
+    "INSERT INTO audit_logs (id,timestamp,userId,userName,action,entity,details,metadata) VALUES (?,?,?,?,?,?,?,?)"
   ],
   [
     "e437a0878a60cc70d9fd96a08af63aa9f35804da180c80da457cafba322f5f44",
@@ -915,6 +1567,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "91d2d82b3e73e1db642a1f04e9e04604dfde45206bf6c5e24abb531f3752c4e3",
+    "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
     "3638b91193dd13588d45729d26ac146b099ae663265ef201038b28e8247ea227",
     "INSERT INTO collection_messages (id, clientId, clientName, creditIds, channel, message, attemptNumber, totalDue, sentAt, sentBy, legalTriggered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -923,12 +1579,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, terms, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "a979478225583dbcb8c82ccf2efc1c95ecf9fd1b8867e1dc5c6bc90a0697e6e4",
+    "INSERT INTO credit_approvals (id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "bd5dcf81d2137e6e1e41a5a8d5154fd54c13a09d1c8a38b7015dc483a88ed33f",
     "INSERT INTO credit_installments (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor) VALUES (?, ?, ?, ?, ?, ?)"
   ],
   [
     "25bf964c0c238c2ccf2d5e5b646246e3d69e39f309c692e8383e0cf85b5d15f7",
     "INSERT INTO credit_reinforcements (id, creditId, amountMinor, interestMinor, idempotencyKey, notes, createdBy, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "49cf0dbc1f6dbf40fe928eff02140e56d35670737033ae6baf6679d485425d3c",
+    "INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "0f4edfc6e8bbf188b8d77495851bf29a84fe58e2e998b9e8e8a8d6339af2963b",
@@ -949,6 +1613,34 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d5dd78b5757ab0c140a5d443653a6487dfe1c094da7a264f8df68b92de3bc4b9",
     "INSERT INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "4a126ac7858cc54f138bf70626cb0cd97d4764deec76adf006bde860473e8076",
+    "INSERT INTO limit_escalation_approvals (id, escalationId, approverId, approverName, approverRole, decision, notes, decidedAt) VALUES (?, ?, ?, ?, ?, 'approved', ?, ?)"
+  ],
+  [
+    "5525b57de3b50031f1b3b89e01abbc09cc85f825ad9ddb6e115ea40b555b5f37",
+    "INSERT INTO limit_escalation_approvals (id, escalationId, approverId, approverName, approverRole, decision, notes, decidedAt) VALUES (?, ?, ?, ?, ?, 'rejected', ?, ?)"
+  ],
+  [
+    "f5d82be361b4b0b1bb2f62b53d3e4e351651eb4b7e76bc27943ac313cdb45d5d",
+    "INSERT INTO limit_escalations (id, operationType, entityType, entityId, amountMinor, requestedById, requestedByName, requestedRole, reason, details, requiredLevelId, requiredLevelIndex, requiredLevelName, dual, status, createdAt, levelSince) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)"
+  ],
+  [
+    "0040e084970becb56b571fc19d37994a074bb8eb564de6ba07d9b085eba82fff",
+    "INSERT INTO limit_exceptions (id, userId, userName, operationType, perOperationMinor, dailyMinor, monthlyMinor, dailyCount, startsAt, endsAt, reason, status, requestedBy, requestedByName, requestedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)"
+  ],
+  [
+    "6c57dabb34b406fd631d693e710db90639a1250fb701449964f68837f2fba403",
+    "INSERT INTO limit_ledger (id, operationType, userId, userName, profileId, branchId, amountMinor, count, dayKey, monthKey, entityType, entityId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "2f94bf630ef74e630c481c57633d206357da82a2047d9efac22a828c27c2d824",
+    "INSERT INTO limit_locks (id, ledgerId, scope, scopeId, period, periodKey, createdAt) SELECT ?, ?, ?, ?, ?, ?, ? WHERE COALESCE((SELECT SUM(amountMinor) FROM limit_ledger WHERE operationType = ? AND (CASE ? WHEN 'user' THEN userId WHEN 'branch' THEN COALESCE(profileId, '') || '|' || COALESCE(branchId, '') WHEN 'profile' THEN profileId ELSE 'all' END) = ? AND (CASE ? WHEN 'day' THEN dayKey ELSE monthKey END) = ?), 0) + ? <= ? AND COALESCE((SELECT SUM(count) FROM limit_ledger WHERE operationType = ? AND (CASE ? WHEN 'user' THEN userId WHEN 'branch' THEN COALESCE(profileId, '') || '|' || COALESCE(branchId, '') WHEN 'profile' THEN profileId ELSE 'all' END) = ? AND (CASE ? WHEN 'day' THEN dayKey ELSE monthKey END) = ?), 0) + ? <= ?"
+  ],
+  [
+    "e4742b46ff7a26f6ea5cf7d7f31b0f9149a23f23ab9bfbc17ef57f4392a842ab",
+    "INSERT INTO limit_policy_versions (id, version, policy, summary, reason, status, effectiveFrom, requiresSecondApproval, secondApprovalReasons, createdBy, createdByName, createdAt, restoredFrom) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "dcb12cb4046ce4da3baea318d3d4cdedec47c9b9dd609021ac8801eb7e4806fd",
@@ -979,6 +1671,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO payment_gateways ( id, name, provider, type, status, environment, apiKey, apiSecret, merchantId, webhookUrl, webhookSecret, transactionFee, feeType, logo, description, supportedMethods, config, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "7e5124d774d8759701bb01f350828446892ed37e899427ea640464fba6c022c2",
+    "INSERT INTO payment_import_batches (id, number, fileName, createdAt, createdBy, createdById, rowsCount, totalMinor, status) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active')"
+  ],
+  [
     "bdb019d78f7a55010f783c8219ad6bbda9951bf705586f863e4cd2536bce014f",
     "INSERT INTO payment_references ( id, creditId, gatewayId, reference, entity, amount, status, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -991,6 +1687,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO payments (id, creditId, clientName, amount, amountMinor, paymentDate, method, reference, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor, idempotencyKey, processedBy, status, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
+    "da2ca8b7bc104b1746d10bc88ea5a5d069e7890f9f9abfc8de434fa38d3a459c",
+    "INSERT INTO payments (id, creditId, clientName, amount, amountMinor, paymentDate, method, reference, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor, idempotencyKey, processedBy, status, usuario_id, registeredAt, batchId, hasProof) VALUES (?,?,?,?,?,?,?,?,0,0,0,0,0,0,?,?,'pending',?,?,?,?)"
+  ],
+  [
+    "3366e44964e62a72aac0b0ea9a80d0b1815a43d0fff39ecef9e81cb03e0260b3",
+    "INSERT INTO payments (id, creditId, clientName, amount, amountMinor, paymentDate, method, reference, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor, idempotencyKey, processedBy, status, usuario_id, registeredAt, receiptYear, receiptSeq, allocationDetail, balanceAfterMinor, batchId, hasProof) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+    "ded18942273c326529f228c40e12db983efd042e5b7b25554cd842f945ce3eff",
+    "INSERT INTO report_history (id, reportType, title, format, filters, fileName, fileData, generatedAt, generatedBy, generatedById) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "099217f363ae7ca19916536fd5bade71dfb7fb98f9d73f5862e86b3342d81e49",
+    "INSERT INTO report_schedules (id, reportType, recipients, enabled, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET reportType = excluded.reportType, recipients = excluded.recipients, enabled = excluded.enabled"
+  ],
+  [
     "f2995b6d402befe778f7c32e5550922de27dbb73ddc8b5db9d5bb0f94424df23",
     "INSERT INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)"
   ],
@@ -999,8 +1711,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO shared_settings (key, value, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy WHERE excluded.updatedAt >= shared_settings.updatedAt"
   ],
   [
-    "bc0f875159af9da57c225dad6469d12b54e5ef1d68759b465e01c0aa6af00844",
-    "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "1cc95977dbda37ed2b218ce82baba8ae52b1a3d0cb698284554782aec3293919",
+    "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "a3b0262e0fd986fe6ec56443ecafbb0f3eae271ebd46a44e97e4cafa1709a294",
@@ -1013,6 +1725,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "c637cc14941e8f03adf41ddff99d5fc771ff8c1048acdc83e269e7e2a4b13b2c",
     "INSERT INTO warranties (id, clientId, creditId, type, description, marketValue, status, location, photos, documents, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "f1a837bff3a4b87f4fe7b7192e1a9e1cedc6e284daf95fbfbcccf3036d9adaef",
+    "INSERT OR IGNORE INTO accounting_bank_imports (id, fileName, movements, actorId, actorName, importedAt) VALUES (?,?,?,?,?,?)"
+  ],
+  [
+    "924ddc834dffb8a5d1d57cae9ebb9287c31d022cc5003d81b02d1a06271df763",
+    "INSERT OR IGNORE INTO audit_alerts (id, alertKey, ruleId, severity, title, description, eventIds, originUserId, originUserName, occurredAt, status, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)"
+  ],
+  [
+    "245c3b80918541bb6730309e1635bcdd0b510eb99de1a50599c80d1e5f99a76b",
+    "INSERT OR IGNORE INTO audit_daily_closes (day, lastAuditId, headHash, eventCount, status, brokenSeq, verifiedAt, verifiedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "fd742f8d6d18960338ee772bf38085682e3ded58dc6a8b129e27fa60c7e84978",
+    "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)"
   ],
   [
     "ccbfe4cd2cec3330b9649b5f5a78bf4da5abcbcee69a46dae6aa481061af3ff0",
@@ -1039,6 +1767,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR IGNORE INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, 1)"
   ],
   [
+    "571cadffb5762a85eb3a30adbb2a8bddae421a0bdbe3fd9f2a63ccc63bf4320a",
+    "INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, ?, 0, ?)"
+  ],
+  [
     "4ef80fff9ffd59097084f8874318a8bafadb834e59947ced18ebc6cd1517773b",
     "INSERT OR IGNORE INTO sync_conflicts (id, entityType, entityId, operation, status, createdAt) VALUES (?, ?, ?, ?, 'pending', ?)"
   ],
@@ -1057,6 +1789,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "b7ce77dce7c3ab66f20123d2d29a707992458bd1c1244879228a078787b10d71",
     "INSERT OR REPLACE INTO company_settings ( id, name, nif, currency, sessionTimeout, installDate ) VALUES (1, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "9ff8cf04f515e992614730dd0e25f5e4c79c18c1f73a607ef44b4b11e06a4591",
+    "INSERT OR REPLACE INTO payment_proofs (paymentId, fileName, mimeType, dataUrl, uploadedAt, uploadedBy) VALUES (?, ?, ?, ?, ?, ?)"
   ],
   [
     "07403a51635e8b9cabb8c005ce8c8a2750749b724b376b5419007c929bf9a1a7",
@@ -1083,6 +1819,42 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "PRAGMA table_info(payments_old)"
   ],
   [
+    "4ac78eab30d56ef2d21a18041fefdeb49d2b39691e4a5a7516d2f7944c1f2aaf",
+    "SELECT * FROM accounting_audit_runs ORDER BY finishedAt DESC LIMIT ?"
+  ],
+  [
+    "f791230631dc387f032ce33a84f6d07a48899873c700170c7804e0fbeacf2589",
+    "SELECT * FROM accounting_bank_imports ORDER BY importedAt DESC, rowid DESC"
+  ],
+  [
+    "33e9ee6e0d98ab704fc0b6f0a72a0c4f0ac4396a6b52a4c61b93f151a54b66d4",
+    "SELECT * FROM accounting_cash_sessions WHERE operatorId = ? AND sessionDate = ?"
+  ],
+  [
+    "da4998118fd73e91af1125c1181288fca5c537c945b40dfe82cffe08f0dae641",
+    "SELECT * FROM accounting_cash_sessions WHERE operatorId = ? ORDER BY sessionDate DESC LIMIT 90"
+  ],
+  [
+    "0aa532f9990cceada369582585cc47cc6608cecc9a5e2a259596ed13c05e8219",
+    "SELECT * FROM accounting_cash_sessions WHERE status = 'closed'"
+  ],
+  [
+    "efdfc66974d9086f8194c067f8526799092066fbec9864388cf53823fc047eb2",
+    "SELECT * FROM accounting_cash_sessions WHERE status = 'closed' AND expectedMinor <> countedMinor"
+  ],
+  [
+    "3a284a6ffb91f253c3a4f4eb66293fe5e3cf51b2c727c8f2b4df2ffb0a0d4163",
+    "SELECT * FROM accounting_daily_closes ORDER BY day DESC"
+  ],
+  [
+    "32562a211b8e108416bbd37699c9a92f506626549a54a2d72cdbaceb43d5272a",
+    "SELECT * FROM accounting_divergence_events ORDER BY createdAt DESC, rowid DESC"
+  ],
+  [
+    "644ae5e30760b7885519623d36a8903de28dd98978caabfdeef5194f31fc4bfa",
+    "SELECT * FROM accounting_entries ORDER BY rowid"
+  ],
+  [
     "9d709421058bad5667f01ced945c9703b47b53837f52aaf3e5ec1985879aac46",
     "SELECT * FROM accounting_entries ORDER BY timestamp DESC, id DESC LIMIT ?"
   ],
@@ -1091,12 +1863,44 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM accounting_entries WHERE timestamp < ? OR (timestamp = ? AND id < ?) ORDER BY timestamp DESC, id DESC LIMIT ?"
   ],
   [
+    "be2e95dae17b4448a06620e3b1acb6f85f5539e7a69bb43e4fe5047a3b9c6264",
+    "SELECT * FROM accounting_requests ORDER BY requestedAt DESC"
+  ],
+  [
+    "b7b6282bac6d45888f8f97187b878142ea489e92d33f4d9a815b35271eab3585",
+    "SELECT * FROM accounting_requests WHERE id = ?"
+  ],
+  [
+    "c6c83a7d10c90a73d29d6416d64c647da3c62861cb92e7e8f604914fc648b8c9",
+    "SELECT * FROM audit_alert_comments WHERE alertId = ? ORDER BY createdAt"
+  ],
+  [
+    "c1653fa06e8ad6103b220df6a667f176b38ec87d7c908960d521dd6e75f3378a",
+    "SELECT * FROM audit_alerts ORDER BY occurredAt DESC LIMIT 1000"
+  ],
+  [
+    "3471bbcbb6f9ef1878d957401e56955ca8478b3e94fed6cca9b84a4b21a75525",
+    "SELECT * FROM audit_log_chain ORDER BY seq"
+  ],
+  [
+    "a0c62aaa643ebc1b3a3a63692bfc7cee3003be21a99e3c8f523482f1bc77be24",
+    "SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT ?"
+  ],
+  [
     "67c943e1cbc0633a8371206c293d5ec84e3acfe66c98113cf8a86358a1df764e",
     "SELECT * FROM audit_logs ORDER BY timestamp DESC, id DESC LIMIT ?"
   ],
   [
+    "afc37b489f3bde55ade15137fab84f9d341f8f005854835344a7294a90f14476",
+    "SELECT * FROM audit_logs ORDER BY timestamp DESC, rowid DESC"
+  ],
+  [
     "3308ed2cce08112c7629a48b63c3670b2c68137e48d9f7a97af159a67445909b",
     "SELECT * FROM audit_logs WHERE timestamp < ? OR (timestamp = ? AND id < ?) ORDER BY timestamp DESC, id DESC LIMIT ?"
+  ],
+  [
+    "d69e56f45c41d440442e2d32ff7fa9f46050550b4172c512a92ee817ef602de1",
+    "SELECT * FROM audit_logs WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT ?"
   ],
   [
     "01aef533fd55b5c01dab2bc7603cf03e5798a7deeb4cc0d5e354ee524cc369b6",
@@ -1119,6 +1923,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM closed_months"
   ],
   [
+    "cdf2a72cc97bea161bd897b97056e04c894f4f5afd8cf0f087650aad4147897b",
+    "SELECT * FROM collection_events ORDER BY createdAt DESC, rowid DESC"
+  ],
+  [
+    "750219de86b49a3572f7163c84fa6e5f2ba1abc7337a5f9fba43ded8d9e49e7e",
+    "SELECT * FROM collection_events WHERE id = ? AND kind = ?"
+  ],
+  [
     "6297e5025eaa64ce232d0296cdb76aa7eb8a335cda4b1a289bbbb2ac585cf996",
     "SELECT * FROM collection_messages ORDER BY sentAt DESC"
   ],
@@ -1139,12 +1951,40 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM contracts WHERE deletedAt IS NULL ORDER BY createdAt DESC"
   ],
   [
+    "59c1a7f72df5eacf043d5d0b7fee519983da359bee31a0a1a0faf5f8ae50919b",
+    "SELECT * FROM credit_installments"
+  ],
+  [
+    "b2b70e3f3aac019a93e71e6a11b40b1917211c40bc33e8c6db2a62b9ae6bfda5",
+    "SELECT * FROM credit_writeoffs"
+  ],
+  [
+    "0ec54f56b9e9bd44bb53fd49690562c5d5a97edb0ae0f225109f33f55dd89b52",
+    "SELECT * FROM credits"
+  ],
+  [
     "3b07cccc6f86e317f4d41cb323c6b4458a0d7b1480d7baf430c4ffc48523c664",
     "SELECT * FROM credits WHERE id = ?"
   ],
   [
     "42597f4fe4167298886486ecbbafd7d8c62f12964e527109a63d7723d92a8d19",
     "SELECT * FROM internal_messages ORDER BY timestamp ASC"
+  ],
+  [
+    "b5e7f65b917935be8fe694775b454cc9f27b504c7e26bca0fb3ec2df72c941ed",
+    "SELECT * FROM ledger_lines ORDER BY rowid"
+  ],
+  [
+    "d5d92b32c748f00fcc4d31901866ba971e79321d50eb821e366307032756a5a2",
+    "SELECT * FROM ledger_lines WHERE transactionId = ? ORDER BY id"
+  ],
+  [
+    "6a547d7b5b6ac0c9d2090471ab4e637b950259428bdf41b030866502cbc2a7d2",
+    "SELECT * FROM ledger_transactions ORDER BY rowid"
+  ],
+  [
+    "4c034f28daf872d064f108e2a8edd9e2c51232d0552997fdaffe83c99f3bc39c",
+    "SELECT * FROM ledger_transactions WHERE id = ?"
   ],
   [
     "2418fc9caaededba768005ccb1df59df7fbe7147771ee871f4ae7deb6adbaa63",
@@ -1167,6 +2007,42 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM legal_cases WHERE id = ?"
   ],
   [
+    "f35e6b2bde98eaf1b33cc14523d1011180ec5ffa67868208b35b4287e8bc582a",
+    "SELECT * FROM limit_escalation_approvals ORDER BY decidedAt DESC LIMIT 5000"
+  ],
+  [
+    "01ff551c0866a305dd11dec9713add4d1e93fa2f9535351bf4ea80fa46012d49",
+    "SELECT * FROM limit_escalation_approvals WHERE escalationId = ? ORDER BY decidedAt"
+  ],
+  [
+    "abc7896421e168793b1f17d51b23a37d59f435dec29d5cab7219342ab6a6c963",
+    "SELECT * FROM limit_escalations ORDER BY createdAt DESC LIMIT 2000"
+  ],
+  [
+    "04b4bbb72588cd987e381993800f416ab62d931dede2ce712e87989e8cf731c4",
+    "SELECT * FROM limit_escalations WHERE createdAt >= ? ORDER BY createdAt DESC"
+  ],
+  [
+    "8eb74788dc490da52a2715a1e5ef159aa4fc2dae6f9044d462593f1b4b100e4b",
+    "SELECT * FROM limit_escalations WHERE entityType = ? AND entityId = ? ORDER BY createdAt DESC LIMIT 1"
+  ],
+  [
+    "3cf34937ad8fb21e53554e19c060bc6facb00cfed6e418e596136f0f12c940dd",
+    "SELECT * FROM limit_exceptions ORDER BY requestedAt DESC"
+  ],
+  [
+    "62fb7d34146c875b868d8c0dc85482bdb731784dd1da6bf7cd259e66e1f07ccd",
+    "SELECT * FROM limit_ledger WHERE createdAt >= ? AND operationType NOT IN ('credit_approval','disbursement')"
+  ],
+  [
+    "dacc5a99e6d92511a12d355d1e2d816f7b485f1e35c30e2ff000a9596fc48d9e",
+    "SELECT * FROM limit_ledger WHERE dayKey >= ? ORDER BY createdAt DESC"
+  ],
+  [
+    "1d91db7b563e1a90757900ca8395f66ae76a452f43c9741b67e681993b53a388",
+    "SELECT * FROM limit_policy_versions ORDER BY version DESC"
+  ],
+  [
     "3faae75bbde79b44a777358766f2761a9c4c07785adaba1d701347edefabc713",
     "SELECT * FROM message_templates"
   ],
@@ -1187,16 +2063,36 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM payment_gateways ORDER BY createdAt DESC"
   ],
   [
+    "b017c3a8bfe0ed516d40763e6022d206fa3efe968ff9b66b4eba531f3380dc7c",
+    "SELECT * FROM payment_import_batches ORDER BY createdAt DESC"
+  ],
+  [
+    "d795e991ce0e17a55ac47b6352746553d2241ed7eb8f9c23a1390e6405a23d7e",
+    "SELECT * FROM payment_import_batches WHERE id = ?"
+  ],
+  [
     "ab38326ada4c32fb201663a718f74a7e7bc8fe4c2526cd21df18041d1b1bd292",
     "SELECT * FROM payment_references ORDER BY createdAt DESC"
+  ],
+  [
+    "b0346484d86b9a469ec4c9c60c7fa0db52814dfb801569a6da2ddba66f46f69b",
+    "SELECT * FROM payments"
   ],
   [
     "09a525d768a966420c5aeecc1ed98262be07a58a4c1f10025cd8a786f0b55fc4",
     "SELECT * FROM payments WHERE deletedAt IS NOT NULL"
   ],
   [
-    "8f320ec8d2a204340d471df164d058eefef82df95656f28a79bdec059013bf44",
-    "SELECT * FROM payments WHERE deletedAt IS NULL"
+    "21883d4b0bc8e8fa557758881f0b65f1d8e28589ef8ec59eef6d36e5da234903",
+    "SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed'"
+  ],
+  [
+    "d7fc402bdcfebcd36ada870fe7a3ca7f102699864b24475dfc60a3b8657bb3c1",
+    "SELECT * FROM payments WHERE deletedAt IS NULL ORDER BY paymentDate DESC"
+  ],
+  [
+    "c5bdc0851c9ca0f7b0a51545055d09e854ce4e15b49353d4dee4c8ab81f55ba2",
+    "SELECT * FROM report_schedules ORDER BY createdAt"
   ],
   [
     "e4c57be0f0c3a3009fffe5f3bfe5c983a98b9701c36e2805a03e031f7cf89660",
@@ -1251,12 +2147,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM warranties WHERE id = ?"
   ],
   [
+    "8fafd3252528dcf4b3de48c0950f9aa311b68993504c067749d6f9ec186f82ec",
+    "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?"
+  ],
+  [
     "e5a42ef884eebe05b3a6108a251c953eface73ad6c2e61447bfb114bbcdb355f",
     "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?"
   ],
   [
     "1bfab959c14d5d0ff7d8e535a99439ee09672d473c2773905e1394e8de92c32d",
     "SELECT COUNT(*) AS n FROM users"
+  ],
+  [
+    "c8ddff8281e56ce8629e49973eb25d32b0dc191dbe28998bb0b98dd69958c5c5",
+    "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?"
   ],
   [
     "f79650132f97dcf74034e11a22d56104bfc339f16b82608add7e6747abb811b4",
@@ -1275,6 +2179,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COUNT(*) as count FROM warranties WHERE status = ?"
   ],
   [
+    "6384bfb684344aa5866977bd1f431dd92e26afa1f282d68c33b9834fa4a9e835",
+    "SELECT MAX(receiptSeq) AS last FROM payments WHERE receiptYear = ?"
+  ],
+  [
     "ee65254651850f48772b53ce1f86d00d4a79d7d436d030a4d49adc35a84287f1",
     "SELECT SUM(debtAmount) as total FROM legal_cases WHERE stage != ?"
   ],
@@ -1283,16 +2191,132 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT SUM(marketValue) as total FROM warranties WHERE status = ?"
   ],
   [
+    "5be5e42d4861817b0d2ad2fbf5257980cc2c240442da19110b41dbf641d36432",
+    "SELECT a.* FROM accounting_entries a LEFT JOIN ledger_transactions t ON t.id = a.id WHERE t.id IS NULL ORDER BY a.rowid"
+  ],
+  [
+    "4f1c18ac3cdc9455750bede72e14992781c4f0d4b8adbec89a8455bcd2cc9c4c",
+    "SELECT a.* FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE c.auditId IS NULL ORDER BY a.rowid LIMIT 200"
+  ],
+  [
+    "404858670e967bc7ae6a78b65257d96f7f9b60424e45128b3db063c3ffcb2559",
+    "SELECT a.id, a.timestamp, a.userId, a.userName, a.action, a.entity, a.details, a.previousState, a.newState, a.metadata, c.seq, c.integrityHash, c.previousHash FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE a.userId = ? ORDER BY a.timestamp DESC LIMIT ?"
+  ],
+  [
+    "db7cfc87fea8c3db687860b0a65a94575a56a338c0fd10950c26fc696f86bb5e",
+    "SELECT account, component, amountMinor FROM ledger_lines WHERE transactionId = ? AND side = 'credit'"
+  ],
+  [
+    "33b09ba788601a4e57c67f4f152467b8efc33195247faa90d5023b37c8d282b6",
+    "SELECT account, side, SUM(amountMinor) AS total FROM ledger_lines WHERE account IN ('cash', 'bank') GROUP BY account, side"
+  ],
+  [
+    "93b44992fae09c07597bdccfb6526e1e8fead71048ddb05ee6a8cbe4cab89ef7",
+    "SELECT alertKey FROM audit_alerts"
+  ],
+  [
     "2be9d11947fb8f64bca8ffc7b0df929a352ecc19aa825353b8f835cbe6d3dbce",
     "SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE id = ?"
+  ],
+  [
+    "e7063397d1756aca147a353a1d010dcdde988d06eb88cff546be75b1c0e8f9ef",
+    "SELECT auditId, previousHash, integrityHash, seq FROM audit_log_chain ORDER BY seq"
+  ],
+  [
+    "c9ebf60c9fe43c0665579afed41fd2cc88b4a3b34649a3a8b099dffbd4ed8cef",
+    "SELECT c.id, c.principalAmount, c.principalAmountMinor, c.createdAt, c.requestedBy, c.usuario_id, cl.riskLevel FROM credits c LEFT JOIN clients cl ON cl.id = c.clientId WHERE c.deletedAt IS NULL AND c.createdAt >= ?"
   ],
   [
     "b4f72dd297c35a038b6c282db24dab3febda6b37e57afcadc5c2434e59183236",
     "SELECT c.id, c.startDate, c.installments, COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER)) AS principalMinor, MAX(0, COALESCE(c.totalDueMinor, CAST(ROUND(c.totalDue * 100) AS INTEGER)) - COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER))) AS interestMinor FROM credits c WHERE NOT EXISTS (SELECT 1 FROM credit_installments i WHERE i.creditId = c.id)"
   ],
   [
+    "e6bbc82aea82e9c75b6018331b02d286b714ddc116784e6e50ca335e40ad2410",
+    "SELECT clientId, SUM(COALESCE(currentBalanceMinor, ROUND(currentBalance * 100))) AS balance FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue','defaulted','renegotiated','pending_approval') GROUP BY clientId"
+  ],
+  [
+    "48f1643d9a06ac51d21e2a2a22b5ae6e2c6ae020961ce14441e9157c6f5c6271",
+    "SELECT clientId, version FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "598ee0b5e91f5b81590cb7d54a4dda2e1860dcf9e32ea15a424f72ae174517c6",
+    "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments"
+  ],
+  [
+    "334b930b20fc3fc58abc4d884acadd381eed16ea34f6e2473d13718997c8acb1",
+    "SELECT day FROM accounting_daily_closes WHERE day = ?"
+  ],
+  [
+    "7b387880f7572680cc4befa0423e949136816a914a078a68bf9d01fb726fa3c8",
+    "SELECT day, status, brokenSeq, verifiedAt FROM audit_daily_closes ORDER BY day DESC LIMIT 1"
+  ],
+  [
+    "f40de797fae008ebe5d1c22db3e9a727c84bda052317d39540a86e57fa98dd19",
+    "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500"
+  ],
+  [
+    "52559f037a89b243c5b564e1925c6c6723d3255909f7105ec971ba7033ebe6c4",
+    "SELECT fileName, fileData, format FROM report_history WHERE id = ?"
+  ],
+  [
+    "7fb792ad149775b62d9ad5deb5847ae27f60e63e00a94d7d12f4c288e4980761",
+    "SELECT fileName, mimeType, dataUrl, uploadedAt, uploadedBy FROM payment_proofs WHERE paymentId = ?"
+  ],
+  [
+    "4629ad582104b26009bd7f5a5e9a6c7d5353ba93dd6d1f6fb2f5d99d93b5a60a",
+    "SELECT fileName, movements FROM accounting_bank_imports"
+  ],
+  [
+    "4bd4bd0a9d5d1caf21761f9d617217f012a9b8995c0f6777f07bec985e660537",
+    "SELECT fileName,mime,data,digest FROM accounting_receipts WHERE entryId = ?"
+  ],
+  [
+    "1b125175cc9de0b5d4ef63056dd9b014e79b7eae3d739262b8465cee8f64f49a",
+    "SELECT i.creditId, c.clientId, c.clientName, i.installmentNumber, i.dueDate, i.principalMinor, i.interestMinor, i.lateInterestMinor, i.paidPrincipalMinor, i.paidInterestMinor, i.paidLateInterestMinor FROM credit_installments i JOIN credits c ON c.id = i.creditId WHERE c.deletedAt IS NULL AND c.status IN ('active', 'overdue', 'defaulted', 'renegotiated', 'paid')"
+  ],
+  [
+    "74b346ceef61ef08f04db6abe00e0b246a7104c525244a255fcf1ad90f626166",
+    "SELECT id FROM accounting_entries ORDER BY rowid DESC LIMIT 1"
+  ],
+  [
+    "861cbdc76ebee5398bdb7a21f231dc19a5f63647c59c53736e665dfdfbe93508",
+    "SELECT id FROM accounting_requests WHERE kind = ? AND targetId = ? AND status = 'pending'"
+  ],
+  [
+    "494ba46c8daee18c0d0106d44c28a8c55bd17672eaef907659da8c3ff03ad986",
+    "SELECT id FROM closed_months"
+  ],
+  [
+    "f5f0ec7d5ecbffd1ee24ed583ae821bb963d52a397de48307c4d4f101e6dd594",
+    "SELECT id FROM credit_writeoffs WHERE creditId = ?"
+  ],
+  [
+    "b43dd7cf7201c629b2b44ba6f0b7039cb28d235f81edfbffe429f0e94ac1b79f",
+    "SELECT id FROM credit_writeoffs WHERE creditId = ? LIMIT 1"
+  ],
+  [
+    "b5befaec6669db56b9448e74a7297c063dcc7deced9469b1360d89a6eadceb08",
+    "SELECT id FROM credits WHERE id = ?"
+  ],
+  [
+    "f9314fa06ffd6f372f2256224610c2ad4e0f60c46a3399e28a28f3198153b73d",
+    "SELECT id FROM ledger_transactions WHERE id = ?"
+  ],
+  [
+    "5202cc4abdce53a37ab39a6b28071d6d20df0455b0b050c5fdf30cd5e9c0ff48",
+    "SELECT id FROM notifications WHERE id = ?"
+  ],
+  [
+    "d011454a1268548328b77b091e5b7b2396eddf0dd66e096f466fef1d423dd8e9",
+    "SELECT id FROM payments WHERE idempotencyKey = ?"
+  ],
+  [
     "a4821a27a4f2a9662ba6234e4ab77093378c0235e7dc51960e0315ae94766d15",
     "SELECT id FROM users WHERE email = ?"
+  ],
+  [
+    "538d1e9bdb1e5f96afaaf280bac40cf79ec9f8b42dfe671d2b2f54c9c787973f",
+    "SELECT id FROM users WHERE role IN ('super_admin', 'internal_auditor') AND (status IS NULL OR status <> 'blocked')"
   ],
   [
     "403bfe52c974d3146335e9226c73cde87702573780bdacba1150b5ef35100196",
@@ -1307,8 +2331,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL"
   ],
   [
-    "51c71b145d0c547697cb99799ff68fd1b7c748fecd5e94654786750f12522ad9",
-    "SELECT id, dueDate, principalMinor, interestMinor, lateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
+    "68a37b8e9bab8c64d19dc673d86ee67997224e261d646b12e0a13b94806dacc1",
+    "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "9fe1ad80771f8332841f845fe08310d7006658e343c05dae63d48bc6f1b6dfd8",
+    "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "2700cbcf81526b02bff254c2148f19906658bb7180c0b753ff42aad7e9012c78",
+    "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC"
   ],
   [
     "a7770ae43efe294accb7439f93d4deb0dbfef90fd94fa5ba13c32b6a83e142a7",
@@ -1319,8 +2351,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
   ],
   [
-    "bd8fcf661f6908aed0c135313077d289f5259a5d23f36d708ffcc54bc4250711",
-    "SELECT id, name, email, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature FROM users"
+    "9bbbd93e37c26b451259878b471d4319fce4670c9b8b5f00d43e7bfafbf6c338",
+    "SELECT id, lateInterestMinor, version FROM credit_installments WHERE creditId = ?"
   ],
   [
     "84648311040c3868247a3dbb7e0fedf9833ce7230d6a9ef888cd72506e3df9e8",
@@ -1331,40 +2363,152 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, name, email, username, role, avatar, status, permissions FROM users"
   ],
   [
+    "d2da1485c8d4a6589f17bbadd07b9d727156775e5b5a2201620195bb87746a3d",
+    "SELECT id, name, nif, phone, riskLevel, fatherName, motherName FROM clients WHERE deletedAt IS NULL"
+  ],
+  [
     "dd72910f6a5a6c1ec60024f1db4062da2f19123c0f06fca75f39cfd80e36261a",
     "SELECT id, name, role FROM users WHERE LOWER(email) = ?"
+  ],
+  [
+    "26982f30dbd6f126b861c3a8a2ea6da2e5416443b34c249f0e5a15bfc4ff2abb",
+    "SELECT id, name, role, branchId FROM users WHERE id = ?"
+  ],
+  [
+    "bad640298ec792ac9d37a3a6726214b02f5ba61e260a28806dded3c988cebee3",
+    "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'"
   ],
   [
     "013f69d21f2481982cae2f0924904102580bd89319865f28ad733692f0285d48",
     "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000"
   ],
   [
+    "7b32ef771c56302234aae2c40b39a0be2cb247e6a7f1d269334a70014da865d9",
+    "SELECT id, paymentDate FROM payments WHERE receiptSeq IS NULL AND status = 'confirmed' AND deletedAt IS NULL ORDER BY paymentDate, id"
+  ],
+  [
     "ff79c9fe765a9c8223eb41a6e341f679d79f3751c335563a77eb214c64008bec",
     "SELECT id, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
+  ],
+  [
+    "7d82c09cf7fcfd91a78bbe1333d745d418c4e947b095df63f38e4961b529defa",
+    "SELECT id, reportType, title, format, filters, fileName, generatedAt, generatedBy, generatedById FROM report_history ORDER BY generatedAt DESC LIMIT 200"
+  ],
+  [
+    "e9ba9af405ebfbaf85a5b4244008807a3dbacd8475165ffa0eddbb19d704df82",
+    "SELECT id, requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?"
+  ],
+  [
+    "ce731292039fe7bdae2d087e06d596dee308ee5f3ab8b981fd827c01f21d31e2",
+    "SELECT id, status FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
     "a6b9c39cd353d4f69f3ff8d4a67af48cd8a238abb6750cb27f79ca71b63974a1",
     "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
   ],
   [
+    "1c6cd7487d8c304c871361e6c8caf23a6cf43f6eca836c431a34caafd22bdb0a",
+    "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp"
+  ],
+  [
+    "32395461387ddf8df5d5819422a58f230ae70df0193344be202147b2c2c5c8de",
+    "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs"
+  ],
+  [
+    "4c603e933bf26c91ba8819985b723329ba01977ff95541ac85776f7622f1bda8",
+    "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp"
+  ],
+  [
+    "14fee47bb181f867e0e0738dbbeef2b087656dcd28b049f1b862bac69d87da45",
+    "SELECT id, totalDueMinor, totalDue, deletedAt FROM credits WHERE id = ?"
+  ],
+  [
     "fcf26680ca3225940c6e6728d753e6488bc5509c1769ca756a54f6a354a6b56f",
     "SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1"
+  ],
+  [
+    "616bf8791a2f2529aa51161fbfd9872836228090993ec87eeb3ae9923dbaaca3",
+    "SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1"
+  ],
+  [
+    "35c324fe10a164aac86d1d390a6ec914682ead540b30f4824739a3e08de3b69a",
+    "SELECT l.*, t.timestamp, t.sourceId, t.description FROM ledger_lines l LEFT JOIN ledger_transactions t ON t.id = l.transactionId ORDER BY t.timestamp, l.id"
+  ],
+  [
+    "5558fd1c526ae8992497c24e2af82739e380ff079dc39e59e0687c1732642342",
+    "SELECT l.account, l.side, l.amountMinor FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId WHERE a.creditId = ? AND l.account IN ('receivable_interest', 'receivable_late_interest')"
   ],
   [
     "2af771c4bb52f94dbcd351b2146a5f2ba4672ccb6217850beb59d92354ebdd72",
     "SELECT last_insert_rowid() as id"
   ],
   [
+    "09cf62af1af1f956cab85182ff520870d326746e8673b1b86554ee1f2b8db809",
+    "SELECT lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
     "6a707e8fd2fbe3b8dd9ffc84cbf26503d5a00c4b788d58991c23e20252d00e10",
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+  ],
+  [
+    "87154d352aba922e5478ffd6c3bbd39dc54e18b2a0a2cc568af9b33788aec220",
+    "SELECT name FROM users WHERE id = ?"
+  ],
+  [
+    "cd7425ad37f05c39d77544341e93a100b38f87d46cbfa2509baa808deca16090",
+    "SELECT password FROM users WHERE id = ?"
+  ],
+  [
+    "cf0969e483e5e118460d08c565c706515caba2fdc24c09233c2e3266567c7aaa",
+    "SELECT paymentDate, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'"
+  ],
+  [
+    "459f4f20e07f4541b02443d4f186443ea6c6a9ee38a3b954d97811d11caccc93",
+    "SELECT paymentDate, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'"
   ],
   [
     "d97d7ae68294c41233c982840721ac90ca3447c1b22adcb80b583cdbceab48d0",
     "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "5aefd1f4403a34db82d4c69deb106e17884480f35ca6c9e2db7672b5f5da0cae",
+    "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "2b56645d01d39156e37dccdbafd885e2f64a74c4f4786c09d0359fc9f48f9b79",
+    "SELECT principalAmountMinor, principalAmount FROM credits WHERE id = ?"
+  ],
+  [
+    "80b923cccce89f645cf1de26a8b39ef94afa07c0541f5df197186e2eb74e0935",
+    "SELECT receiptYear, MAX(receiptSeq) AS last FROM payments WHERE receiptSeq IS NOT NULL GROUP BY receiptYear"
+  ],
+  [
+    "5f31058fd763edc86ec62ff3a08eba55f0ad2a50eb603cca235d4ff28a0df9e4",
+    "SELECT receiveMethod FROM clients WHERE id = ?"
+  ],
+  [
+    "4a26b62b13326bfb72bba39780bdbc7931da14e4596dd4fc986a0ba278cb7eb5",
+    "SELECT requestedBy FROM accounting_requests WHERE id = ?"
+  ],
+  [
+    "c4e63154d1097670f6ff4d0221f073973eb6ed0f0159aeab91b43b75f70ff423",
+    "SELECT requestedById FROM accounting_requests WHERE id = ?"
+  ],
+  [
+    "7d227189f18e58981191f712c39703459a0c213c7bfd95ee424e545a9523cc49",
+    "SELECT requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?"
+  ],
+  [
     "9473539eeb7a03ef9d6914014c204b7932b9772dff258edebd8d8039222886ea",
     "SELECT rescueKey FROM company_settings WHERE id = 1"
+  ],
+  [
+    "af4bcfb2ef9840c9e12ca475261d887997db040c5d35eb799b7206bfb331ffad",
+    "SELECT role, name FROM users WHERE id = ?"
+  ],
+  [
+    "d3f84b59aef39baa1e43685a9dcc4e2ca5af15486dcc5729250377a9c8212d54",
+    "SELECT role, name, branchId FROM users WHERE id = ?"
   ],
   [
     "be96f977f4c6c5ccde3e8d8a555a7e0eeebc5197084882551764119cec4c22c8",
@@ -1375,12 +2519,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT sessionTimeout FROM company_settings WHERE id = 1"
   ],
   [
+    "bc893cce743ea9a64865969ed2a16882761aa56b6e104c5f4def9604c5c1b6a0",
+    "SELECT side, SUM(amountMinor) AS total FROM ledger_lines WHERE account = ? GROUP BY side"
+  ],
+  [
     "0f1034728e764db2c7bd7fc946ff58b74138167d03d94763582849c2a6eedef1",
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='credits'"
   ],
   [
     "19261afbd729c66b5e95de1074770aad95d9339b047daa916c53378c712f6c7f",
     "SELECT sql FROM sqlite_master WHERE type='table' AND name='payments'"
+  ],
+  [
+    "2c021af901521ae886e7c709b75389748fd9507d289e11f2094bf5216b51781f",
+    "SELECT status FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
     "040fabfc5eb548980196062f6ae67c221224f67b07c1844848e9689ed54f97c0",
@@ -1403,8 +2555,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT value FROM shared_settings WHERE key = ?"
   ],
   [
+    "ab9e6a70582e6f9918807e03b1d05a18fa6e0f978db576813b166079c5b32cdd",
+    "UPDATE accounting_cash_sessions SET expectedMinor = openingMinor + (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = accounting_cash_sessions.operatorId AND t.timestamp >= accounting_cash_sessions.openedAt AND t.timestamp <= ?), countedMinor = ?, reason = ?, closedAt = ?, status = 'closed' WHERE id = ? AND operatorId = ? AND status = 'open'"
+  ],
+  [
     "977ed6d8f8d5e0aed3c03e10d1d018308a1d944f6d4066d9b17090072ec11df5",
     "UPDATE accounting_entries SET amountPrincipalMinor = CAST(ROUND(amountPrincipal * 100) AS INTEGER), amountInterestMinor = CAST(ROUND(amountInterest * 100) AS INTEGER), amountLateInterestMinor = CAST(ROUND(amountLateInterest * 100) AS INTEGER), amountTotalMinor = CAST(ROUND(amountTotal * 100) AS INTEGER) WHERE amountTotalMinor IS NULL"
+  ],
+  [
+    "2572a962a8e29a719e2277004c259a82b6929c2c37e1f905a5fb5e9039c93e9e",
+    "UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ? WHERE id = ? AND status = 'pending'"
+  ],
+  [
+    "22e691c6d5870e0f4f842e8bdd254456c3d9457c660640203470abf3cfb8d105",
+    "UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ? WHERE id = ? AND status = 'pending' AND requestedById <> ?"
+  ],
+  [
+    "6476ddbcb998b9ac4acf1b52780e347d43c27eacd71f4b6c1b15c7c258b6fac8",
+    "UPDATE audit_alerts SET status = ?, assignedTo = ?, assignedToName = ?, dueAt = ?, updatedAt = ?, closedBy = ?, closedByName = ?, closedAt = ? WHERE id = ?"
   ],
   [
     "cc56e1bbcaa83b9aa4a6a4c3b3a8630e9c084935453c1c62425ac2929ab65c46",
@@ -1463,6 +2631,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credit_installments SET interestMinor = ?, lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?"
   ],
   [
+    "bc66207f0d584e23ebcd7e05cbfc7d35d6143256b9bf065ae440d629b93ae32d",
+    "UPDATE credit_installments SET lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?"
+  ],
+  [
     "87f6588e0de7466e3660eecd5c0622a6a4776a8f83bde3fe7176ccffaf383a79",
     "UPDATE credit_installments SET paidPrincipalMinor = ?, paidInterestMinor = ?, paidLateInterestMinor = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND version = ?"
   ],
@@ -1487,12 +2659,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
   ],
   [
+    "fe1a161f6325e819fde15144917bf75aa8e7538614876bcd4e6b2ab5aa46b31e",
+    "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
+  ],
+  [
     "bc84effd45338cd5120c3b25b32c3c1da40976c0754c9feaa3d0162666fdaa8b",
     "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
     "b86f7da2b2e29ca8fe7fc59f5ec8731615f21023afef2ca9fc342220e2fd8c30",
     "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL"
+  ],
+  [
+    "c63bc0f11a1d37062e060fa3269964df161dad5b8830c4d63eb4ce9487f666e5",
+    "UPDATE credits SET status = 'defaulted', version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
     "6f3d67c740d21a4982b43cb0344f5f5def0c6c412935e1592514b888c5900e43",
@@ -1513,6 +2693,30 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "876622fb4a1421ad66827c6b445e604eb1cfd068f5a55ee08151d4b65deb9083",
     "UPDATE legal_cases SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
+  ],
+  [
+    "44f26ae4719052b151c2d738b9d9a6d3c5946585083eeae1ceb728fb5fdfab1a",
+    "UPDATE limit_escalations SET requiredLevelIndex = ?, requiredLevelId = ?, requiredLevelName = ?, levelSince = ?, escalationCount = escalationCount + 1, lastReminderAt = ? WHERE id = ? AND status = 'pending' AND levelSince = ?"
+  ],
+  [
+    "f1bcddbcb8b5f17e23120d2aabf58caef94503757047066405ac4e54f3e91148",
+    "UPDATE limit_escalations SET status = 'approved', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE id = ? AND status = 'pending'"
+  ],
+  [
+    "18c9b78d78a9fd9783d8699fc57e9b2db73591a1c73422cb7c722b4ce5cd42de",
+    "UPDATE limit_escalations SET status = 'rejected', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE id = ? AND status = 'pending'"
+  ],
+  [
+    "eb7b9e2be6eed43969a563f0c0f939cc99f32f29981b9eec41162ca069d9e0f3",
+    "UPDATE limit_exceptions SET status = 'revoked', decidedBy = COALESCE(decidedBy, ?), decidedByName = COALESCE(decidedByName, ?), decidedAt = COALESCE(decidedAt, ?), decisionReason = ? WHERE id = ? AND status IN ('approved','pending')"
+  ],
+  [
+    "b3fe25d0f603e2935f420bb6b167744437317f72c743a7e55ec88b1f5ed291da",
+    "UPDATE limit_exceptions SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'"
+  ],
+  [
+    "013fbbca9b2291d5c598a48f8c71564fbeddbc4a52d99a145f0ec99f0080a59f",
+    "UPDATE limit_policy_versions SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'"
   ],
   [
     "5688efa3e8bb0b8c8450fee6f901c447bc00259352a429bb233c7acbd164c667",
@@ -1543,6 +2747,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE payment_gateways SET name = ?, provider = ?, type = ?, status = ?, environment = ?, apiKey = ?, apiSecret = ?, merchantId = ?, webhookUrl = ?, webhookSecret = ?, transactionFee = ?, feeType = ?, description = ?, config = ?, updatedAt = ? WHERE id = ?"
   ],
   [
+    "fbd2a8cbcc785f162f6fcf0080d35a5a1344007822efe0336665deac53edf29b",
+    "UPDATE payment_import_batches SET rowsCount = ?, totalMinor = ? WHERE id = ?"
+  ],
+  [
+    "1f089585b7fb3c2c695a196fbab98354d0591690044c8e5cf460b2a4710fda13",
+    "UPDATE payment_import_batches SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ? WHERE id = ? AND status = 'active'"
+  ],
+  [
     "b4dc07a218ae01b2c56bc4850a950ad07ce12af339a0af93ee2eae14fea16402",
     "UPDATE payment_references SET proofImage = ?, status = ?, submittedAt = ? WHERE id = ?"
   ],
@@ -1559,16 +2771,44 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?"
   ],
   [
-    "9091f3e8264d2ba183704a8eb7c40258aa76e992ec9e92298db103596c067d5d",
-    "UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ? AND deletedAt IS NULL"
-  ],
-  [
     "b3e1cd0d1db81f4c1b5a6d8538e723fd054c57218812f215ba85591712f405ee",
     "UPDATE payments SET deletedAt = NULL, deletedBy = NULL, restoredAt = ? WHERE id = ? AND deletedAt IS NOT NULL"
   ],
   [
     "91c846e2bdd43ba84ec52d7bfecb78a3207856cd97559bebf672199240ceabde",
     "UPDATE payments SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
+  ],
+  [
+    "f4017e2cd1f7faa5b040eeaa86ce7a356702851f68b32cc2e1c98160c03f0f42",
+    "UPDATE payments SET hasProof = 1 WHERE id = ?"
+  ],
+  [
+    "7d33f4544d6af2e42d1166b35822646b25a92c49ef58b38fd9c278b5a01f45e7",
+    "UPDATE payments SET receiptYear = ?, receiptSeq = ? WHERE id = ? AND receiptSeq IS NULL"
+  ],
+  [
+    "bc57c8a48d861240ac8564e35f4347073dec217b5e015a9046b56869869188d1",
+    "UPDATE payments SET registeredAt = paymentDate WHERE registeredAt IS NULL"
+  ],
+  [
+    "eaf087d75ac305713b3ec5336c741d7d4e0eb769935ed472ad0bf420b2318dd7",
+    "UPDATE payments SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ? WHERE id = ? AND status = 'pending' AND deletedAt IS NULL"
+  ],
+  [
+    "9b96a3ed8d8018fc133f3cd8d8a28adc65fca08638e806f56f0c7c2ba8165e2b",
+    "UPDATE payments SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ?, cancelApprovedBy = ?, originalState = ? WHERE id = ? AND deletedAt IS NULL AND status = 'confirmed'"
+  ],
+  [
+    "1ee3ac7607a6ddce504d9b8e7bac92e26a3f73a62cfd94782666ccbc8ed2b467",
+    "UPDATE payments SET status = 'confirmed', paymentDate = ?, allocatedToPrincipal = ?, allocatedToPrincipalMinor = ?, allocatedToInterest = ?, allocatedToInterestMinor = ?, allocatedToLateInterest = ?, allocatedToLateInterestMinor = ?, receiptYear = ?, receiptSeq = ?, allocationDetail = ?, balanceAfterMinor = ?, validatedAt = ?, validatedBy = ? WHERE id = ? AND status = 'pending' AND deletedAt IS NULL"
+  ],
+  [
+    "6715ac7164f5bd86d051e1441708959c31580c69349e9025d9588baef5b1a9fc",
+    "UPDATE report_schedules SET lastRunMonth = ?, lastRunAt = ?, lastError = ? WHERE id = ?"
+  ],
+  [
+    "f10327fdeff9b931d3d425a969d8addf50641449157d526ae2fa1c81ee86f4e0",
+    "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?"
   ],
   [
     "412a0e76763ac238db35ac2f06609d2e94d98cedf78f9e00df73d1332762ef83",
@@ -1599,12 +2839,12 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE users SET failedAttempts = ?, status = ?, blockedAt = ?, ip = ? WHERE id = ?"
   ],
   [
-    "c9c9c03dd5baf3787e144e614694e145f98b0f380be6ca078745e8909a01fc72",
-    "UPDATE users SET lastLogin = ?, status = ?, ip = ? WHERE id = ?"
+    "71afed51b7d3de3684d3fa807de4f93f642a1192c1387b32a1688ca8218a10a4",
+    "UPDATE users SET lastLogin = ?, lastSeen = ?, status = ?, ip = ? WHERE id = ?"
   ],
   [
-    "4699bceb8b6aaac9b7cad1b3d17680a8331b2dbae79e662e80ff75fc459bdab2",
-    "UPDATE users SET lastSeen = ? WHERE id = ?"
+    "6ce21c1166690b2cb8f836a5d0fdfac0450fe514ee0f60c847c390b00bdca0c1",
+    "UPDATE users SET lastSeen = ?, status = \"active\", ip = COALESCE(NULLIF(ip, \"\"), ?) WHERE id = ?"
   ],
   [
     "33a01fd1fd065b0e2f00a7d19b82f90b4aae9c461803db1ce895515dbf35cfc7",

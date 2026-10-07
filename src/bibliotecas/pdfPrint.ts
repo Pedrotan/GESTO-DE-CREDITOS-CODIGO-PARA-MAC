@@ -48,6 +48,7 @@ export const printPdfFromUrl = async (
   pdfUrl: string,
   onError?: (message?: string) => void,
   onSuccess?: (printerName?: string, printersCount?: number) => void,
+  fileName = 'documento.pdf',
 ) => {
   if (!pdfUrl) {
     onError?.('PDF indisponivel para impressao.');
@@ -67,7 +68,7 @@ export const printPdfFromUrl = async (
     const printers = window.electronAPI.getPrinters ? await window.electronAPI.getPrinters() : [];
     const result = await window.electronAPI.printPdf({
       pdfData: pdfBytes,
-      fileName: 'contrato.pdf',
+      fileName,
       printerName: printers.find((printer) => printer.isDefault)?.name || printers[0]?.name,
       silent: true,
     });

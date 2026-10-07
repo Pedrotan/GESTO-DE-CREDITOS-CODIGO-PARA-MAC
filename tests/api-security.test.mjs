@@ -57,7 +57,9 @@ test('limitador distribuído partilha a contagem e falha fechado', async () => {
 });
 
 test('API de empresas só aceita a chave mestra configurada e falha fechada sem ela', async () => {
-    const tenants = await loadHandlerWithoutNeon('tenants.js');
+    // O limite de pedidos e o bloqueio por tentativas são verificados ANTES da chave (contra força bruta);
+    // a base de dados de teste só responde a essas tabelas.
+    const tenants = await loadHandlerWithoutNeon('tenants.js', true);
     const previous = { db: process.env.DATABASE_URL, master: process.env.TANGO_MASTER_SECRET };
     process.env.DATABASE_URL = 'postgres://test';
     const call = async secret => {
@@ -90,9 +92,17 @@ test('API de empresas só aceita a chave mestra configurada e falha fechada sem 
     }
 });
 
+// Base de dados de teste que só responde ao limitador de pedidos, aos bloqueios e ao registo de alertas.
+const SECURITY_ONLY_NEON = `export const neon = () => ({ query: async (text) => {
+    if (/^s*CREATE/i.test(text)) return [];
+    if (/api_rate_limits/.test(text)) return [{ request_count: 1, reset_epoch: Math.floor(Date.now() / 1000) + 60 }];
+    if (/security_lockouts|security_events/.test(text)) return [];
+    throw new Error('Base de dados de teste: só tabelas de segurança.');
+} });`;
+
 // Os handlers importam o cliente Neon, só instalado no deploy; nos testes a autenticação
 // tem de responder antes de qualquer acesso à base de dados.
-async function loadHandlerWithoutNeon(file) {
+async function loadHandlerWithoutNeon(file, securityTablesOnly = false) {
     const outdir = mkdtempSync(path.join(tmpdir(), 'api-handler-'));
     const outfile = path.join(outdir, 'handler.mjs');
     await build({
@@ -101,7 +111,7 @@ async function loadHandlerWithoutNeon(file) {
         plugins: [{ name: 'neon-stub', setup(builder) {
             builder.onResolve({ filter: /^@neondatabase\/serverless$/ }, () => ({ path: 'neon', namespace: 'neon-stub' }));
             builder.onLoad({ filter: /.*/, namespace: 'neon-stub' }, () => ({
-                contents: 'export const neon = () => { throw new Error("Base de dados não deve ser acedida."); };', loader: 'js'
+                contents: securityTablesOnly ? SECURITY_ONLY_NEON : 'export const neon = () => { throw new Error("Base de dados não deve ser acedida."); };', loader: 'js'
             }));
         } }]
     });

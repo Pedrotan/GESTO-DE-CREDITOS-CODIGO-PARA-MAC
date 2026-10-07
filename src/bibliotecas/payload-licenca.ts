@@ -36,3 +36,23 @@ export function licenseAppliesToDevice(data: { mid?: unknown; nif?: unknown }, c
     const licenseNif = cleanNif(data.nif);
     return licenseNif.length >= 9 && licenseNif !== GENERIC_NIF && licenseNif === cleanNif(companyNif);
 }
+
+/** Base64 de texto UTF-8 (btoa sozinho trata o texto como Latin-1 e estraga os acentos). */
+export function encodeLicensePayload(json: string): string {
+    const bytes = new TextEncoder().encode(json);
+    let binary = '';
+    bytes.forEach(byte => { binary += String.fromCharCode(byte); });
+    return btoa(binary);
+}
+
+/** Lê o conteúdo base64 da licença como UTF-8 (o processo principal assina sempre em UTF-8). */
+export function decodeLicensePayload(base64: string): string {
+    const binary = atob(base64.replace(/\s+/g, ''));
+    return new TextDecoder().decode(Uint8Array.from(binary, char => char.charCodeAt(0)));
+}
+
+/** Chave colada de um PDF ou email: remove espaços e quebras de linha (não existem numa chave base64). */
+export const normalizeLicenseKey = (key: unknown) => String(key ?? '').replace(/\s+/g, '');
+
+/** Servidor Master da rede local (http, não a nuvem), o único que regista a activação de cada licença. */
+export const isLanLicenseServer = (url?: string | null) => /^http:\/\//i.test(String(url || '').trim());

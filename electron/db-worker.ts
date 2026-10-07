@@ -1,3 +1,4 @@
+import { auditSqlHash } from '../src/bibliotecas/cadeia-auditoria';
 import { parentPort, workerData } from 'worker_threads';
 import Database from 'better-sqlite3-multiple-ciphers';
 import path from 'path';
@@ -329,6 +330,7 @@ function openDatabaseWithOptions(key?: string, profile?: EncryptionProfile) {
     });
 
     const candidate = new Database(dbPath);
+    candidate.function('tango_audit_hash',{varargs:true},auditSqlHash);
 
     try {
         if (key) {
