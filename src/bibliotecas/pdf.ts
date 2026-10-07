@@ -1325,134 +1325,428 @@ export const generateAuditLogPDF = (logs: any[], settings?: any, userInfo?: { na
     doc.save(`Auditoria-${Date.now()}.pdf`);
 };
 
-export const generateClientProfilePDF = (
+/**
+ * Constrói a Ficha Cadastral e Financeira do Cliente (jsPDF) dividida em secções claras:
+ * 1. Dados de Identificação e Contacto do Cliente
+ * 2. Enquadramento e Condições de Crédito
+ * 3. Resumo Financeiro & Posição Global de Valores (KPIs e contratos)
+ * 4. Informações Bancárias do Cliente
+ * 5. Coordenadas Bancárias da Instituição (para liquidação)
+ * 6. Documentos Anexados ao Dossiê
+ * 7. Termo de Responsabilidade & Assinaturas
+ */
+export const buildClientProfileDoc = (
     client: any,
-    credits: any[],
-    payments: any[],
+    credits: any[] = [],
+    payments: any[] = [],
     settings?: any,
     userName?: string,
     options: { includeInterest?: boolean } = { includeInterest: true }
-) => {
+): jsPDF => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
     const orange = resolveBrandPrimary(config.primaryColor);
+    const charcoal = BRAND_CHARCOAL;
 
     applyBranding(doc, config, userName);
 
-    doc.setTextColor(0, 0, 0);
+    // Título Principal e Subtítulo Executivo
+    doc.setTextColor(charcoal[0], charcoal[1], charcoal[2]);
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(20);
-    const title = 'FICHA DO CLIENTE';
-    const splitTitle = doc.splitTextToSize(title, 170);
-    doc.text(splitTitle, 105, 45, { align: 'center' });
+    doc.setFontSize(18);
+    doc.text('FICHA CADASTRAL DO CLIENTE', 105, 44, { align: 'center' });
 
-    doc.setTextColor(60, 60, 60); // Texto meta mais escuro
-    doc.setFontSize(10);
+    doc.setFontSize(8.5);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Emissão em Angola: ${new Date().toLocaleString('pt-AO', { timeZone: 'Africa/Luanda' })}`, 105, 52, { align: 'center' });
+    doc.setTextColor(100, 116, 139);
+    const emissionDate = new Date().toLocaleString('pt-AO', { timeZone: 'Africa/Luanda' });
+    doc.text(`Dossiê Individual & Posição Global de Crédito  |  Emissão em Angola: ${emissionDate}`, 105, 50, { align: 'center' });
 
-    const infoRows = [
-        ['Nome:', client.name, 'NIF:', client.nif || 'N/A'],
-        ['Telefone:', client.phone, 'Risco:', translateRiskLevel(client.riskLevel || 'medium')],
-        ['Estado:', client.status === 'active' ? 'ATIVO' : 'INATIVO', 'Limite:', formatCurrency(client.creditLimit)],
+    // Função auxiliar para desenhar cabeçalhos de secção consistentes e estilizados
+    const drawSectionHeader = (title: string, startY: number): number => {
+        const y = ensurePdfSpace(doc, startY, 14, config, userName);
+
+        // Barra vertical de destaque na cor primária da marca
+        doc.setFillColor(orange[0], orange[1], orange[2]);
+        doc.roundedRect(20, y, 3.2, 6.5, 0.6, 0.6, 'F');
+
+        // Fundo subtil com contorno
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(24.5, y, 165.5, 6.5, 0.8, 0.8, 'F');
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.2);
+        doc.roundedRect(24.5, y, 165.5, 6.5, 0.8, 0.8, 'S');
+
+        // Título da secção
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(8.5);
+        doc.setTextColor(charcoal[0], charcoal[1], charcoal[2]);
+        doc.text(title.toUpperCase(), 29, y + 4.5);
+
+        return y + 8.5;
+    };
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SECÇÃO 1: DADOS DO CLIENTE (Identificação e Contactos)
+    // ─────────────────────────────────────────────────────────────────────────────
+    let currentY = drawSectionHeader("1. Dados do Cliente e Identificação", 55);
+
+    const clientTypeLabel = client.clientType === 'EMPRESA'
+        ? 'Pessoa Coletiva (Empresa)'
+        : `Pessoa Singular (Particular)${client.clientCategory && client.clientCategory !== 'COMUM' ? ` • ${toTitleCase(client.clientCategory)}` : ''}`;
+
+    const maritalGender = [
+        client.maritalStatus ? toTitleCase(client.maritalStatus) : null,
+        client.gender ? toTitleCase(client.gender) : null
+    ].filter(Boolean).join(' • ') || '—';
+
+    const birthAge = client.birthDate
+        ? `${formatDate(client.birthDate)}${client.age ? ` (${client.age} anos)` : ''}`
+        : (client.age ? `${client.age} anos` : '—');
+
+    const identificationRows: Array<[string, string, string, string]> = [
+        ['Nome Completo:', client.name || '—', 'NIF / Documento:', client.nif || 'N/A'],
+        ['Telefone:', client.phone || '—', 'Email:', client.email || '—'],
+        ['Morada / Residência:', client.address || '—', 'Tipo de Titular:', clientTypeLabel],
+        ['Estado Civil / Género:', maritalGender, 'Data Nasc. / Idade:', birthAge],
+    ];
+
+    // Filiação
+    if (client.fatherName || client.motherName) {
+        const parents = `Pai: ${client.fatherName || '—'}  |  Mãe: ${client.motherName || '—'}`;
+        identificationRows.push(['Filiação:', parents, 'Data de Registo:', formatDate(client.createdAt)]);
+    } else {
+        identificationRows.push(['Data de Registo:', formatDate(client.createdAt), 'Método de Recebto:', client.receiveMethod === 'cash' ? 'Em Mão (Assinatura)' : 'Transferência Bancária']);
+    }
+
+    // Cônjuge (relevante para o regime de bens e risco familiar em Angola)
+    if (client.spouseName) {
+        const spouseDoc = [client.spouseNif, client.spouseBi].filter(Boolean).join(' / ');
+        const spouseText = `${client.spouseName}${spouseDoc ? ` (NIF/BI: ${spouseDoc})` : ''}${client.spousePhone ? ` - Tel: ${client.spousePhone}` : ''}`;
+        identificationRows.push(['Cônjuge:', spouseText, 'Regime:', 'Comunhão de Bens']);
+    }
+
+    // Dados Profissionais / Entidade Empregadora / Representante
+    if (client.workInstitution || client.socialSecurityNumber || client.legalRepresentative) {
+        const workInfo = client.workInstitution
+            ? `${client.workInstitution}${client.socialSecurityNumber ? ` (INSS: ${client.socialSecurityNumber})` : ''}`
+            : (client.legalRepresentative ? `${client.legalRepresentative} (${client.legalRepRole || 'Representante'})` : '—');
+        identificationRows.push(['Entidade / Cargo:', workInfo, 'Rendimento Mensal:', client.monthlyIncome ? formatCurrency(client.monthlyIncome, config.currency) : '—']);
+    }
+
+    autoTable(doc, {
+        startY: currentY,
+        margin: { left: 20, right: 20 },
+        body: identificationRows,
+        theme: 'plain',
+        styles: {
+            fontSize: 8,
+            cellPadding: 2,
+            textColor: [15, 23, 42],
+            overflow: 'linebreak',
+        },
+        columnStyles: {
+            0: { fontStyle: 'bold', textColor: [71, 85, 105], cellWidth: 32 },
+            1: { cellWidth: 53 },
+            2: { fontStyle: 'bold', textColor: [71, 85, 105], cellWidth: 32 },
+            3: { cellWidth: 53 },
+        },
+        didDrawPage: () => applyBranding(doc, config, userName, true),
+    });
+
+    currentY = ((doc as any).lastAutoTable?.finalY || 100) + 6;
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SECÇÃO 2: ENQUADRAMENTO E CONDIÇÕES DE CRÉDITO
+    // ─────────────────────────────────────────────────────────────────────────────
+    currentY = drawSectionHeader("2. Enquadramento e Condições de Crédito", currentY);
+
+    const statusLabel = client.status === 'active' ? 'ATIVO' : client.status === 'blocked' ? 'BLOQUEADO' : 'INATIVO';
+    const riskLabel = translateRiskLevel(client.riskLevel || 'medium');
+    const creditScoreText = client.creditScore ? `${client.creditScore} pts` : 'Padrão';
+    const creditLimitVal = client.creditLimit || 0;
+    const usedCreditVal = client.usedCredit || 0;
+    const availableCreditVal = Math.max(0, creditLimitVal - usedCreditVal);
+
+    const creditTermsRows: Array<[string, string, string, string]> = [
+        ['Estado da Conta:', statusLabel, 'Nível de Risco:', `${riskLabel} (Score: ${creditScoreText})`],
+        ['Limite Aprovado:', formatCurrency(creditLimitVal, config.currency), 'Crédito Disponível:', formatCurrency(availableCreditVal, config.currency)],
     ];
 
     if (options.includeInterest) {
-        infoRows.push(['Juro Padrão:', `${client.defaultInterestRate || 0}%`, 'Juro Mora:', `${client.lateInterestRate || 0}%`]);
+        creditTermsRows.push([
+            'Taxa Juro Padrão:', `${client.defaultInterestRate || 0}%`,
+            'Taxa Juro de Mora:', `${client.lateInterestRate || 0}%`
+        ]);
     }
 
-    infoRows.push(['Tolerância:', `${client.toleranceDays || 0} Dias`, 'Data Registo:', formatDate(client.createdAt)]);
-    infoRows.push(['Método Recebto:', client.receiveMethod === 'cash' ? 'EM MÃO (ASSINATURA)' : 'TRANSFERÊNCIA', '', '']);
+    creditTermsRows.push([
+        'Prazo Tolerância:', `${client.toleranceDays || 0} Dias`,
+        'Canal Preferencial:', client.receiveMethod === 'cash' ? 'Em Mão / Numerário' : 'Transferência Bancária'
+    ]);
 
     autoTable(doc, {
-        startY: 60,
-        body: infoRows,
+        startY: currentY,
+        margin: { left: 20, right: 20 },
+        body: creditTermsRows,
         theme: 'plain',
-        styles: { fontSize: 10, cellPadding: 2 },
-        didDrawPage: () => applyBranding(doc, config, userName, true)
+        styles: {
+            fontSize: 8,
+            cellPadding: 2,
+            textColor: [15, 23, 42],
+        },
+        columnStyles: {
+            0: { fontStyle: 'bold', textColor: [71, 85, 105], cellWidth: 32 },
+            1: { cellWidth: 53 },
+            2: { fontStyle: 'bold', textColor: [71, 85, 105], cellWidth: 32 },
+            3: { cellWidth: 53 },
+        },
+        didDrawPage: () => applyBranding(doc, config, userName, true),
     });
 
-    const totalDebt = credits.reduce((acc, c) => acc + c.currentBalance, 0);
-    const totalPaid = payments.reduce((acc, p) => acc + p.amount, 0);
+    currentY = ((doc as any).lastAutoTable?.finalY || 140) + 6;
 
-    doc.setFontSize(14);
-    doc.text("Resumo Financeiro", 20, (doc as any).lastAutoTable.finalY + 15);
-    autoTable(doc, {
-        startY: (doc as any).lastAutoTable.finalY + 20,
-        head: [['Total Emprestado', 'Total Pago', 'Saldo Devedor']],
-        body: [[formatCurrency(credits.reduce((a, c) => a + c.principalAmount, 0)), formatCurrency(totalPaid), formatCurrency(totalDebt)]],
-        headStyles: { fillColor: orange as [number, number, number] },
-        didDrawPage: () => applyBranding(doc, config, userName, true)
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SECÇÃO 3: RESUMO FINANCEIRO (Posição Global de Valores)
+    // ─────────────────────────────────────────────────────────────────────────────
+    const totalPrincipalLoaned = credits.reduce((acc, c) => acc + (c.principalAmount || 0), 0);
+    const totalDebt = credits.reduce((acc, c) => acc + (c.currentBalance || 0), 0);
+    const totalPaid = payments.reduce((acc, p) => acc + (p.amount || 0), 0);
+    const liquidationRate = totalPrincipalLoaned > 0 ? Math.min(100, (totalPaid / totalPrincipalLoaned) * 100) : 0;
+
+    currentY = drawSectionHeader("3. Resumo Financeiro & Posição Global de Valores", currentY);
+
+    // 4 Caixas KPI lado a lado
+    const cardWidth = 39.5;
+    const cardHeight = 16.5;
+    const gap = 2.6;
+    const startX = 20;
+
+    const kpiCards = [
+        { label: 'TOTAL EMPRESTADO', value: formatCurrency(totalPrincipalLoaned, config.currency), color: charcoal },
+        { label: 'TOTAL AMORTIZADO', value: formatCurrency(totalPaid, config.currency), color: [22, 163, 74] as [number, number, number] },
+        { label: 'SALDO DEVEDOR ATUAL', value: formatCurrency(totalDebt, config.currency), color: (totalDebt > 0 ? orange : [22, 163, 74]) as [number, number, number] },
+        { label: 'LIQUIDAÇÃO GLOBAL', value: `${liquidationRate.toFixed(1)}%`, color: [37, 99, 235] as [number, number, number] }
+    ];
+
+    kpiCards.forEach((card, idx) => {
+        const x = startX + idx * (cardWidth + gap);
+        doc.setFillColor(248, 250, 252);
+        doc.roundedRect(x, currentY, cardWidth, cardHeight, 1.2, 1.2, 'F');
+        doc.setDrawColor(226, 232, 240);
+        doc.setLineWidth(0.2);
+        doc.roundedRect(x, currentY, cardWidth, cardHeight, 1.2, 1.2, 'S');
+
+        // Borda superior colorida
+        doc.setFillColor(card.color[0], card.color[1], card.color[2]);
+        doc.rect(x, currentY, cardWidth, 1.3, 'F');
+
+        doc.setFontSize(6.8);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(100, 116, 139);
+        doc.text(card.label, x + cardWidth / 2, currentY + 5.5, { align: 'center' });
+
+        doc.setFontSize(8.8);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(card.color[0], card.color[1], card.color[2]);
+        doc.text(card.value, x + cardWidth / 2, currentY + 12.2, { align: 'center' });
     });
 
-    // Secção de Coordenadas Bancárias
+    currentY += cardHeight + 4;
+
+    // Tabela detalhada de contratos de crédito (se existirem)
+    if (credits && credits.length > 0) {
+        autoTable(doc, {
+            startY: currentY,
+            margin: { left: 20, right: 20 },
+            head: [['Ref. Crédito', 'Data Início', 'Vencimento', 'Capital Concedido', 'Total Pago', 'Saldo Atual', 'Estado']],
+            body: credits.slice(0, 6).map(c => [
+                c.id || `CR-${c.creditNumber || 1}`,
+                formatDate(c.startDate || c.createdAt),
+                formatDate(c.dueDate),
+                formatCurrency(c.principalAmount || 0, config.currency),
+                formatCurrency(Math.max(0, (c.principalAmount || 0) - (c.currentBalance || 0)), config.currency),
+                formatCurrency(c.currentBalance || 0, config.currency),
+                statusLabelPt(c.status)
+            ]),
+            headStyles: {
+                fillColor: orange as [number, number, number],
+                textColor: [255, 255, 255],
+                fontSize: 7.5,
+                fontStyle: 'bold',
+                halign: 'left',
+                cellPadding: 2,
+            },
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            styles: { fontSize: 7.5, cellPadding: 2 },
+            didDrawPage: () => applyBranding(doc, config, userName, true),
+        });
+        currentY = ((doc as any).lastAutoTable?.finalY || currentY + 20) + 6;
+    } else {
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(148, 163, 184);
+        doc.text("Sem contratos de crédito registados até à presente data.", 25, currentY + 3);
+        currentY += 8;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SECÇÃO 4: INFORMAÇÕES BANCÁRIAS DO CLIENTE
+    // ─────────────────────────────────────────────────────────────────────────────
+    currentY = drawSectionHeader("4. Informações Bancárias do Cliente", currentY);
+
     if (client.bankCoordinates && client.bankCoordinates.length > 0) {
-        doc.setFontSize(14);
-        doc.text("Coordenadas Bancárias", 20, (doc as any).lastAutoTable.finalY + 15);
-
         autoTable(doc, {
-            startY: (doc as any).lastAutoTable.finalY + 20,
-            head: [['Banco', 'IBAN', 'Titular']],
+            startY: currentY,
+            margin: { left: 20, right: 20 },
+            head: [['Banco Comercial', 'IBAN (Número de Conta Internacional)', 'Titular da Conta']],
             body: client.bankCoordinates.map((b: any) => [
-                b.bankName,
-                b.iban,
-                b.holder
+                b.bankName || (b.iban ? identifyBankFromIBAN(b.iban) : 'Banco Comercial'),
+                b.iban || '—',
+                b.holder || client.name
             ]),
-            headStyles: { fillColor: BRAND_CHARCOAL },
+            headStyles: {
+                fillColor: charcoal,
+                textColor: [255, 255, 255],
+                fontSize: 7.5,
+                fontStyle: 'bold',
+                cellPadding: 2.2,
+            },
             theme: 'grid',
-            didDrawPage: () => applyBranding(doc, config, userName, true)
+            alternateRowStyles: { fillColor: [248, 250, 252] },
+            styles: { fontSize: 7.5, cellPadding: 2.2 },
+            didDrawPage: () => applyBranding(doc, config, userName, true),
         });
+        currentY = ((doc as any).lastAutoTable?.finalY || currentY + 20) + 6;
+    } else {
+        doc.setFontSize(7.5);
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(148, 163, 184);
+        doc.text("Nenhuma coordenada bancária associada a este cliente.", 25, currentY + 3);
+        currentY += 8;
     }
 
-    // Secção de Documentos
-    if (client.documents && client.documents.length > 0) {
-        doc.setFontSize(14);
-        doc.text("Documentos Anexados", 20, (doc as any).lastAutoTable.finalY + 15);
-
-        autoTable(doc, {
-            startY: (doc as any).lastAutoTable.finalY + 20,
-            head: [['Nome do Documento', 'Tipo', 'Data de Envio']],
-            body: client.documents.map((d: any) => [
-                d.title,
-                d.type.toUpperCase(),
-                new Date(d.createdAt).toLocaleDateString('pt-AO', { timeZone: 'Africa/Luanda' })
-            ]),
-            headStyles: { fillColor: BRAND_CHARCOAL },
-            theme: 'striped',
-            didDrawPage: () => applyBranding(doc, config, userName, true)
-        });
-    }
-
-    // Secção de Coordenadas Bancárias da Empresa
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SECÇÃO 5: DADOS PARA PAGAMENTO (CONTAS BANCÁRIAS DA INSTITUIÇÃO)
+    // ─────────────────────────────────────────────────────────────────────────────
     const safeParse = (val: any) => {
         if (!val) return [];
         if (Array.isArray(val) || typeof val === 'object') return val;
         try { return JSON.parse(val); } catch (e) { return []; }
     };
     const companyBanks = safeParse(config.bankingInfo);
+
     if (companyBanks && companyBanks.length > 0) {
-        doc.setFontSize(14);
-        doc.setTextColor(orange[0], orange[1], orange[2]);
-        doc.text("Dados para Pagamento (Empresa)", 20, (doc as any).lastAutoTable.finalY + 15);
+        currentY = drawSectionHeader("5. Contas Bancárias para Liquidação (Instituição)", currentY);
 
         autoTable(doc, {
-            startY: (doc as any).lastAutoTable.finalY + 20,
-            head: [['Banco', 'IBAN', 'Titular']],
+            startY: currentY,
+            margin: { left: 20, right: 20 },
+            head: [['Instituição Bancária', 'IBAN para Transferência / Depósito', 'Beneficiário / Titular']],
             body: companyBanks.map((b: any) => [
-                b.bankName,
-                b.iban,
-                b.holder
+                b.bankName || 'Banco Comercial',
+                b.iban || '—',
+                b.holder || config.name
             ]),
-            headStyles: { fillColor: orange as [number, number, number] },
+            headStyles: {
+                fillColor: orange as [number, number, number],
+                textColor: [255, 255, 255],
+                fontSize: 7.5,
+                fontStyle: 'bold',
+                cellPadding: 2,
+            },
             theme: 'grid',
-            styles: { fontSize: 8 },
-            didDrawPage: () => applyBranding(doc, config, userName, true)
+            styles: { fontSize: 7.5, cellPadding: 2 },
+            didDrawPage: () => applyBranding(doc, config, userName, true),
         });
+        currentY = ((doc as any).lastAutoTable?.finalY || currentY + 20) + 6;
     }
 
-    doc.save(`Ficha_${client.name.replace(/\s/g, '_')}.pdf`);
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SECÇÃO 6: DOCUMENTOS ANEXADOS & ARQUIVO
+    // ─────────────────────────────────────────────────────────────────────────────
+    if (client.documents && client.documents.length > 0) {
+        currentY = drawSectionHeader("6. Documentos Anexados ao Dossiê", currentY);
+
+        autoTable(doc, {
+            startY: currentY,
+            margin: { left: 20, right: 20 },
+            head: [['Título do Documento', 'Tipo de Registo', 'Data de Upload']],
+            body: client.documents.map((d: any) => [
+                d.title || 'Documento',
+                (d.type || 'Ficheiro').toUpperCase(),
+                d.createdAt ? formatDate(d.createdAt) : '—'
+            ]),
+            headStyles: {
+                fillColor: charcoal,
+                textColor: [255, 255, 255],
+                fontSize: 7.5,
+                fontStyle: 'bold',
+                cellPadding: 2,
+            },
+            theme: 'striped',
+            styles: { fontSize: 7.5, cellPadding: 2 },
+            didDrawPage: () => applyBranding(doc, config, userName, true),
+        });
+        currentY = ((doc as any).lastAutoTable?.finalY || currentY + 20) + 6;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // SECÇÃO 7: TERMO DE RESPONSABILIDADE & ASSINATURAS
+    // ─────────────────────────────────────────────────────────────────────────────
+    currentY = ensurePdfSpace(doc, currentY, 34, config, userName);
+
+    doc.setFontSize(7.2);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+        "Declaro para os devidos efeitos que os dados cadastrais e financeiros constantes desta ficha correspondem à verdade e encontram-se devidamente conferidos e validados pela instituição.",
+        105, currentY + 2, { align: 'center', maxWidth: 170 }
+    );
+
+    const signLineY = currentY + 16;
+
+    // Assinatura Gestor
+    doc.setDrawColor(148, 163, 184);
+    doc.setLineWidth(0.3);
+    doc.line(30, signLineY, 90, signLineY);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(charcoal[0], charcoal[1], charcoal[2]);
+    doc.text("Pela Instituição (Gestor de Crédito)", 60, signLineY + 4, { align: 'center' });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(userName || "Gestor de Operações", 60, signLineY + 8, { align: 'center' });
+
+    // Assinatura Cliente
+    doc.setDrawColor(148, 163, 184);
+    doc.line(120, signLineY, 180, signLineY);
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(charcoal[0], charcoal[1], charcoal[2]);
+    doc.text("O Titular / Cliente", 150, signLineY + 4, { align: 'center' });
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(client.name, 150, signLineY + 8, { align: 'center' });
+
+    return doc;
 };
+
+export const generateClientProfilePDF = (
+    client: any,
+    credits: any[] = [],
+    payments: any[] = [],
+    settings?: any,
+    userName?: string,
+    options: { includeInterest?: boolean } = { includeInterest: true }
+) => {
+    const doc = buildClientProfileDoc(client, credits, payments, settings, userName, options);
+    doc.save(`Ficha_${(client.name || 'Cliente').replace(/\s+/g, '_')}.pdf`);
+    return doc;
+};
+
 
 export const generateFinancialAuditPDF = (
     findings: any[],
@@ -2569,140 +2863,23 @@ export const generateBlockedClientsReport = (
 };
 
 /**
- * Gera uma ficha informativa do cliente em PDF para envio por email
+ * Gera uma ficha informativa e cadastral completa do cliente em PDF para envio por email ou arquivo
  */
 export const generateClientInfoSheetPDF = (
     client: any,
     settings?: any,
     userName?: string
-) => {
-    const doc = new jsPDF();
-    const config = getCompanySettings(settings);
-    const orange = resolveBrandPrimary(config.primaryColor);
-    const black = BRAND_CHARCOAL;
-
-    applyBranding(doc, config, userName);
-
-    // Título
-    doc.setTextColor(black[0], black[1], black[2]);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(20);
-    doc.text("FICHA DE CLIENTE", 105, 45, { align: 'center' });
-
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(100, 100, 100);
-    doc.text(`Gerado em: ${formatDateTime(new Date())}`, 105, 52, { align: 'center' });
-
-    let currentY = 65;
-
-    // Dados Pessoais
-    doc.setFillColor(245, 245, 245);
-    doc.rect(20, currentY, 170, 8, 'F');
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(black[0], black[1], black[2]);
-    doc.text("DADOS DE IDENTIFICAÇÃO", 25, currentY + 5.5);
-    currentY += 15;
-
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("Nome Completo:", 25, currentY);
-    doc.setFont("helvetica", "normal");
-    doc.text(client.name, 70, currentY);
-    currentY += 7;
-
-    doc.setFont("helvetica", "bold");
-    doc.text("NIF / BI:", 25, currentY);
-    doc.setFont("helvetica", "normal");
-    doc.text(client.nif || 'N/A', 70, currentY);
-    currentY += 7;
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Telefone:", 25, currentY);
-    doc.setFont("helvetica", "normal");
-    doc.text(client.phone || 'N/A', 70, currentY);
-    currentY += 7;
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Email:", 25, currentY);
-    doc.setFont("helvetica", "normal");
-    doc.text(client.email || 'N/A', 70, currentY);
-    currentY += 7;
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Endereço:", 25, currentY);
-    doc.setFont("helvetica", "normal");
-    doc.text(client.address || 'N/A', 70, currentY);
-    currentY += 15;
-
-    // Condições Comerciais
-    doc.setFillColor(245, 245, 245);
-    doc.rect(20, currentY, 170, 8, 'F');
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(11);
-    doc.setTextColor(black[0], black[1], black[2]);
-    doc.text("CONDIÇÕES COMERCIAIS", 25, currentY + 5.5);
-    currentY += 15;
-
-    doc.setFontSize(10);
-    doc.setFont("helvetica", "bold");
-    doc.text("Estado da Conta:", 25, currentY);
-
-    // Status color
-    if (client.status === 'active') doc.setTextColor(0, 128, 0);
-    else if (client.status === 'blocked') doc.setTextColor(200, 0, 0);
-    else doc.setTextColor(100, 100, 100);
-
-    doc.setFont("helvetica", "bold");
-    doc.text(client.status === 'active' ? 'ATIVO' : client.status === 'blocked' ? 'BLOQUEADO' : 'INATIVO', 70, currentY);
-
-    doc.setTextColor(black[0], black[1], black[2]);
-    currentY += 7;
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Limite de Crédito:", 25, currentY);
-    doc.setFont("helvetica", "normal");
-    doc.text(formatCurrency(client.creditLimit || 0, config.currency), 70, currentY);
-    currentY += 7;
-
-    doc.setFont("helvetica", "bold");
-    doc.text("Método de Pagamento:", 25, currentY);
-    doc.setFont("helvetica", "normal");
-    doc.text(client.receiveMethod === 'transfer' ? 'Transferência Bancária' : 'Numerário', 70, currentY);
-    currentY += 15;
-
-    // Coordenadas Bancárias (Se houver)
-    if (client.bankCoordinates && client.bankCoordinates.length > 0) {
-        doc.setFillColor(245, 245, 245);
-        doc.rect(20, currentY, 170, 8, 'F');
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(11);
-        doc.setTextColor(black[0], black[1], black[2]);
-        doc.text("COORDENADAS BANCÁRIAS REGISTADAS", 25, currentY + 5.5);
-        currentY += 12;
-
-        autoTable(doc, {
-            startY: currentY,
-            head: [['Banco', 'IBAN', 'Titular']],
-            body: client.bankCoordinates.map((b: any) => [b.bankName, b.iban, b.holder]),
-            headStyles: { fillColor: orange },
-            styles: { fontSize: 9 },
-            theme: 'striped'
-        });
-
-        currentY = (doc as any).lastAutoTable.finalY + 15;
-    }
-
-    // Rodapé Legal
-    const footerY = 270;
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.text("Documento processado por Tango Gestão de Créditos.", 105, footerY, { align: 'center' });
-
-    // Retornar como Blob para anexo ou Salvar se for download direto
-    return doc;
+): jsPDF => {
+    return buildClientProfileDoc(
+        client,
+        client?.credits || [],
+        client?.payments || [],
+        settings,
+        userName,
+        { includeInterest: true }
+    );
 };
+
 
 /**
  * Gera uma proposta de simulação de crédito em PDF

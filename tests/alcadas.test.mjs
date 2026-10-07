@@ -27,6 +27,7 @@ async function loadModules() {
             contents: `
                 export { ServicoAlcadas } from '@/servicos/ServicoAlcadas';
                 export { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
+                export { ServicoLimitesAprovacao } from '@/servicos/ServicoLimitesAprovacao';
                 export { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
                 export { auditSqlHash } from '@/bibliotecas/cadeia-auditoria';
                 export * as L from '@/bibliotecas/alcadas';
@@ -58,6 +59,7 @@ const USERS = {
     admin2: { id: 'u-admin2', name: 'Carla Administradora', role: 'admin' },
     diretor: { id: 'u-diretor', name: 'Diogo Diretor', role: 'credit_director' },
     superAdmin: { id: 'u-super', name: 'Eva Super Administradora', role: 'super_admin' },
+    analista: { id: 'u-analista', name: 'Rui Analista', role: 'risk_analyst' },
 };
 
 async function createDatabase(M) {
@@ -94,6 +96,7 @@ async function createDatabase(M) {
     }
     database.prepare(`INSERT INTO clients (id, name, riskLevel, status, createdAt) VALUES ('c-baixo', 'Cliente Risco Baixo', 'low', 'active', ?)`).run(now);
     database.prepare(`INSERT INTO clients (id, name, riskLevel, status, createdAt) VALUES ('c-alto', 'Cliente Risco Alto', 'high', 'active', ?)`).run(now);
+    database.prepare(`INSERT INTO clients (id, name, riskLevel, status, createdAt) VALUES ('c-baixo-2', 'Segundo Cliente Risco Baixo', 'low', 'active', ?)`).run(now);
     database.prepare(`INSERT INTO shared_settings (key, value, updatedAt) VALUES ('accounting_config', '{"cashGuard":false}', ?)`).run(now);
     return database;
 }
@@ -125,7 +128,7 @@ test('J1 · Gestor com 500 000 Kz restantes submete dois créditos de 300 000 Kz
         assert.equal(before.remaining.dailyMinor, 50_000_000);
         const [first, second] = await Promise.all([
             M.ServicoFinanceiro.addCredit(credit('CR-J1-A', 'c-baixo', 300_000), USERS.gestor),
-            M.ServicoFinanceiro.addCredit(credit('CR-J1-B', 'c-baixo', 300_000), USERS.gestor),
+            M.ServicoFinanceiro.addCredit(credit('CR-J1-B', 'c-baixo-2', 300_000), USERS.gestor),
         ]);
         const statuses = [first.status, second.status].sort();
         assert.deepEqual(statuses, ['active', 'pending_approval'], 'um passa e o outro sobe na cadeia');
@@ -282,3 +285,102 @@ test('J7 · Cliente de risco Alto com crédito de 100 000 Kz vai para o Diretor 
         console.log(`    J7: 100 000 Kz, risco Alto → "${escalation.reason}" · Administrador recusado · Diretor aprovou · mesmo valor, risco Baixo → ${low.status}`);
     } finally { database.close(); }
 });
+
+test('J8 · Grupos relacionados por cônjuge e representante legal agregam exposição corretamente', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const now = new Date().toISOString();
+        // Clientes que são cônjuges entre si (partilham NIF/BI do cônjuge)
+        database.prepare(`INSERT INTO clients (id, name, nif, spouseName, spouseNif, riskLevel, status, createdAt)
+            VALUES ('c-esposo', 'João Silva', 'NIF-111', 'Maria Costa', 'NIF-222', 'low', 'active', ?)`).run(now);
+        database.prepare(`INSERT INTO clients (id, name, nif, spouseName, spouseNif, riskLevel, status, createdAt)
+            VALUES ('c-esposa', 'Maria Costa', 'NIF-222', 'João Silva', 'NIF-111', 'low', 'active', ?)`).run(now);
+        // Empresas com o mesmo representante legal
+        database.prepare(`INSERT INTO clients (id, name, legalRepresentative, riskLevel, status, createdAt)
+            VALUES ('c-emp-1', 'Comércio Alpha Lda', 'Dr. António Bento', 'low', 'active', ?)`).run(now);
+        database.prepare(`INSERT INTO clients (id, name, legalRepresentative, riskLevel, status, createdAt)
+            VALUES ('c-emp-2', 'Logística Beta Lda', 'Dr. António Bento', 'low', 'active', ?)`).run(now);
+
+        // Créditos ativos para cada cônjuge
+        database.prepare(`INSERT INTO credits (id, clientId, clientName, principalAmount, currentBalance, currentBalanceMinor, interestRate, lateInterestRate, installments, dueDate, totalDue, status, createdAt)
+            VALUES ('cr-esposo', 'c-esposo', 'João Silva', 1000000, 1000000, 100000000, 10, 1, 1, '2026-11-01', 1100000, 'active', ?)`).run(now);
+        database.prepare(`INSERT INTO credits (id, clientId, clientName, principalAmount, currentBalance, currentBalanceMinor, interestRate, lateInterestRate, installments, dueDate, totalDue, status, createdAt)
+            VALUES ('cr-esposa', 'c-esposa', 'Maria Costa', 500000, 500000, 50000000, 10, 1, 1, '2026-11-01', 550000, 'active', ?)`).run(now);
+
+        const expEsposo = await M.ServicoAlcadas.clientExposure('c-esposo');
+        assert.equal(expEsposo.exposureMinor, 100_000_000, 'exposição individual do esposo 1 000 000 Kz');
+        assert.equal(expEsposo.groupExposureMinor, 150_000_000, 'exposição do grupo com cônjuge 1 500 000 Kz');
+
+        // Testar agrupamento por representante legal
+        const clients = [
+            { id: 'c-emp-1', name: 'Alpha', legalRepresentative: 'Dr. António Bento' },
+            { id: 'c-emp-2', name: 'Beta', legalRepresentative: 'Dr. António Bento' },
+        ];
+        const groups = M.L.relatedGroups(clients);
+        assert.equal(groups.get('c-emp-1'), groups.get('c-emp-2'), 'empresas com o mesmo representante legal ficam no mesmo grupo');
+        console.log(`    J8: Cônjuges agregados (${M.L.formatKz(expEsposo.groupExposureMinor)}) e empresas com mesmo representante legal agrupadas`);
+    } finally { database.close(); }
+});
+
+test('J9 · Volume mensal por produto é guardado e persistido diretamente no crédito', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const c = credit('CR-PROD-1', 'c-baixo', 250_000);
+        c.productId = 'prod-agro-facil';
+        const saved = await M.ServicoFinanceiro.addCredit(c, USERS.gestor);
+        assert.equal(saved.productId, 'prod-agro-facil', 'productId foi guardado no crédito retornado');
+
+        const row = database.prepare(`SELECT id, productId FROM credits WHERE id = 'CR-PROD-1'`).get();
+        assert.equal(row.productId, 'prod-agro-facil', 'productId gravado na base de dados SQLite');
+
+        const loadedCredits = await M.ServicoFinanceiro.getAllCredits();
+        const loaded = loadedCredits.find(item => item.id === 'CR-PROD-1');
+        assert.equal(loaded?.productId, 'prod-agro-facil', 'productId recuperado pelo repositório');
+        console.log(`    J9: Crédito persistido com productId: ${row.productId}`);
+    } finally { database.close(); }
+});
+
+test('J10 · Perfis sem configuração expressa (como Analista de Risco) não ficam bloqueados por defeito', async () => {
+    const M = await loadModules();
+    const { policy } = await M.ServicoAlcadas.current();
+    const usage = { scope: M.L.EMPTY_USAGE, company: M.L.EMPTY_USAGE };
+
+    // Analista de Risco a registar numerário dentro do limite base (500 000 Kz)
+    const result = M.L.evaluateOperation({
+        policy,
+        actor: USERS.analista,
+        operationType: 'cash_receipt',
+        amountMinor: 300_000_00,
+        usage,
+    });
+    assert.notEqual(result.decision, 'block', 'Analista de Risco não deve ser bloqueado por defeito');
+    assert.equal(result.decision, 'allow', 'Operação dentro do limite base é permitida');
+
+    // Perfil personalizado não configurado
+    const customUser = { id: 'u-custom', name: 'Operador Especial', role: 'custom_operator' };
+    const customResult = M.L.evaluateOperation({
+        policy,
+        actor: customUser,
+        operationType: 'cash_receipt',
+        amountMinor: 200_000_00,
+        usage,
+    });
+    assert.notEqual(customResult.decision, 'block', 'Perfil personalizado não fica bloqueado por defeito');
+    assert.equal(customResult.decision, 'allow');
+    console.log(`    J10: Analista de Risco e perfis personalizados autorizados sob limite base em vez de bloqueio cego`);
+});
+
+test('J11 · ServicoLimitesAprovacao lê ativamente a política de alçadas em vigor', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const limits = await M.ServicoLimitesAprovacao.load();
+        assert.equal(limits.enabled, true);
+        assert.equal(limits.managerMinor, 50_000_000, '500 000 Kz para gestor');
+        assert.equal(limits.adminMinor, 100_000_000, '1 000 000 Kz para admin');
+        console.log(`    J11: ServicoLimitesAprovacao integrado: Gestor ${M.L.formatKz(limits.managerMinor)}, Admin ${M.L.formatKz(limits.adminMinor)}`);
+    } finally { database.close(); }
+});
+

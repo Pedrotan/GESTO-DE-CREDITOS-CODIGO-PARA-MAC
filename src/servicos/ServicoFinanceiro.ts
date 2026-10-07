@@ -2,6 +2,7 @@ import { formatCurrency } from '@/bibliotecas/formatters';
 import type { LimitActor } from '@/bibliotecas/alcadas';
 import { ServicoAlcadas } from '@/servicos/ServicoAlcadas';
 import { assertFinancialConnection } from '@/bibliotecas/ligacao-financeira';
+import { clientCreditStanding, newCreditBlockReason } from '@/bibliotecas/regras-credito';
 import { RepositorioCredito } from '@/repositorios/RepositorioCredito';
 import { RepositorioPagamento } from '@/repositorios/RepositorioPagamento';
 import { db } from '@/bibliotecas/bd';
@@ -409,11 +410,19 @@ export class ServicoFinanceiro {
      */
     static async addCredit(credit: Credit, actor?: LimitActor | null, context: { productId?: string | null; effortRate?: number | null } = {}): Promise<Credit & { escalationReason?: string }> {
         await assertFinancialConnection('registar o crédito');
+        if (actor) {
+            // Regra já definida: só há novo crédito depois de liquidado o anterior (e sem pedido pendente).
+            const existing = await db.all<any>(`SELECT clientId, status, principalAmount, currentBalance, totalDue, createdAt, startDate, deletedAt
+                FROM credits WHERE clientId = ? AND deletedAt IS NULL`, [credit.clientId]).catch(() => []);
+            const blocked = newCreditBlockReason(clientCreditStanding(credit.clientId, existing), value => formatCurrency(value));
+            if (blocked) throw new Error(`Não é possível registar um novo crédito para ${credit.clientName}: ${blocked}`);
+        }
         if (!actor || !['active', 'pending_approval'].includes(credit.status)) return this.persistCredit(credit, []);
         const principalMinor = toMinorUnits(credit.principalAmount, 'Capital do crédito');
+        const productId = context.productId || credit.productId || null;
         const plan = async (forceEscalation: string | null) => ServicoAlcadas.plan({
             actor, operationType: 'credit_approval', extraConsumption: ['disbursement'], amountMinor: principalMinor,
-            entityType: 'credit', entityId: credit.id, clientId: credit.clientId, productId: context.productId, effortRate: context.effortRate,
+            entityType: 'credit', entityId: credit.id, clientId: credit.clientId, productId, effortRate: context.effortRate,
             cashAvailableMinor: credit.status === 'active' && (await this.getAccountingConfig()).cashGuard ? await this.cashAvailableMinor().catch(() => null) : null, forceEscalation,
         });
         const decide = async (forceEscalation: string | null) => {
@@ -424,7 +433,7 @@ export class ServicoFinanceiro {
         };
         const first = await decide(credit.status === 'pending_approval' ? 'Pedido sujeito a aprovação pela regra de crédito do cliente (limite disponível, estado ou permissão)' : null);
         try {
-            const saved = await this.persistCredit({ ...credit, status: first.status as Credit['status'] }, first.statements);
+            const saved = await this.persistCredit({ ...credit, productId, status: first.status as Credit['status'] }, first.statements);
             return { ...saved, escalationReason: first.reason };
         } catch (error: any) {
             // Guarda do limite: outra operação em simultâneo consumiu o volume. O crédito sobe na cadeia.
@@ -457,7 +466,8 @@ export class ServicoFinanceiro {
         const normalizedCredit: Credit = {
             ...credit, currentBalance: principalMinor / 100, accruedInterest: interestMinor / 100,
             lateInterest: 0, totalDue: (principalMinor + interestMinor) / 100,
-            paidInstallments: 0, version: 0
+            paidInstallments: 0, version: 0,
+            productId: credit.productId || null
         };
         const timestamp = new Date();
         const disbursed = !['pending_approval', 'rejected', 'cancelled'].includes(normalizedCredit.status);
@@ -966,7 +976,11 @@ export class ServicoFinanceiro {
                     accountingEntry.timestampIso]
             },
             ...cashLimitStatements
-        ]);
+        ]).catch(error => {
+            if (/conflito de concorr/i.test(String(error?.message)) && cashLimitStatements.some(statement => /limit_locks/.test(statement.sql)))
+                throw new Error('O limite de numerário foi consumido entretanto por outra operação em simultâneo. O recebimento deve ser feito por transferência ou com outro operador.');
+            throw error;
+        });
         return Object.assign(accountingEntry as AccountingEntry, {
             paidInstallments: reconciliation.paidInstallments, payment,
             creditState: this.creditStateResult(after, reconciliation.paidInstallments, current.version + 1, paidAt)

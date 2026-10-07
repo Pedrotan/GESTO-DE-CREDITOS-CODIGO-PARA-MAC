@@ -350,7 +350,14 @@ const createTables = async () => {
             deletedBy TEXT,
             restoredAt TEXT,
             originalState TEXT,
-            usuario_id TEXT
+            usuario_id TEXT,
+            spouseName TEXT,
+            spouseBi TEXT,
+            spouseNif TEXT,
+            spousePhone TEXT,
+            spouseEmail TEXT,
+            legalRepresentative TEXT,
+            legalRepRole TEXT
         );
 
         CREATE TABLE IF NOT EXISTS credits (
@@ -385,6 +392,7 @@ const createTables = async () => {
             originalState TEXT,
             usuario_id TEXT,
             targetMonthId TEXT,
+            productId TEXT,
             FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT
         );
 
@@ -1293,6 +1301,16 @@ const createTables = async () => {
 
     await safeAddColumn("credits", "supplierId", "TEXT");
     await safeAddColumn("credits", "supplierProfitRate", "REAL");
+    await safeAddColumn("credits", "productId", "TEXT");
+
+    // Clientes: cônjuge e representante legal para agregação em grupos de clientes relacionados
+    await safeAddColumn("clients", "spouseName", "TEXT");
+    await safeAddColumn("clients", "spouseBi", "TEXT");
+    await safeAddColumn("clients", "spouseNif", "TEXT");
+    await safeAddColumn("clients", "spousePhone", "TEXT");
+    await safeAddColumn("clients", "spouseEmail", "TEXT");
+    await safeAddColumn("clients", "legalRepresentative", "TEXT");
+    await safeAddColumn("clients", "legalRepRole", "TEXT");
 
     const multiTenancyTables = ["clients", "credits", "payments", "contracts", "warranties", "legal_cases", "payment_references", "accounting_entries"];
     for (const table of multiTenancyTables) {

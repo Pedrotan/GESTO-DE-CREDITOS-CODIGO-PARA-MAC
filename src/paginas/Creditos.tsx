@@ -112,6 +112,15 @@ import { PromessaDetailsModal } from '@/componentes/modals/PromessaDetailsModal'
 import { CreditSummaryDetailsModal } from '@/componentes/modals/CreditSummaryDetailsModal';
 import { PeriodMetricDetailsModal } from '@/componentes/modals/PeriodMetricDetailsModal';
 import { AnnualReportModal } from '@/componentes/modals/AnnualReportModal';
+import { useCarteira } from '@/componentes/creditos/useCarteira';
+import { CabecalhoCarteira } from '@/componentes/creditos/CabecalhoCarteira';
+import { CartoesCarteira } from '@/componentes/creditos/CartoesCarteira';
+import { TabelaCarteira } from '@/componentes/creditos/TabelaCarteira';
+import { VisaoAnualCreditos } from '@/componentes/creditos/VisaoAnualCreditos';
+import { AlertasCarteira } from '@/componentes/creditos/AlertasCarteira';
+import { ImportacaoCreditos } from '@/componentes/creditos/ImportacaoCreditos';
+import { RelatoriosCreditos } from '@/componentes/creditos/RelatoriosCreditos';
+import type { PortfolioRow } from '@/bibliotecas/carteira-credito';
 import { DailyCashFlowModal } from '@/componentes/modals/DailyCashFlowModal';
 import { CalendarTasksModal } from '@/componentes/modals/CalendarTasksModal';
 import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
@@ -136,7 +145,7 @@ const toNumber = (value: number | undefined | null) => Number(value || 0);
 export default function Credits() {
   const [reinforcementCredit, setReinforcementCredit] = useState<any>(null);
   const { user } = useAuth();
-  const { credits, clients, addCredit, adjustCreditCharges, deleteCredit, addPayment, companySettings, payments, closedMonths, closeMonth, reopenMonth, suppliers, calendarTasks, addCalendarTask, deleteCalendarTask } = useData();
+  const { credits, clients, addCredit, adjustCreditCharges, deleteCredit, addPayment, companySettings, payments, closedMonths, closeMonth, reopenMonth, suppliers, calendarTasks, addCalendarTask, deleteCalendarTask, dataLoadIssues } = useData();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState(searchParams.get('search') || '');
@@ -156,6 +165,15 @@ export default function Credits() {
   // Estado do Regime de Competência Mensal
   const [selectedMonth, setSelectedMonth] = useState(() => new Date().getMonth());
   const [selectedYear, setSelectedYear] = useState(() => new Date().getFullYear());
+
+  // Carteira (vistas, cards, tabela e alertas) calculada com a biblioteca partilhada; o mês escolhido alimenta
+  // também as funções existentes (fecho, relatório de fecho e detalhe dos cards).
+  const carteira = useCarteira({ search: searchParams.get('search') || '' });
+  useEffect(() => { setSelectedMonth(carteira.month); setSelectedYear(carteira.year); }, [carteira.month, carteira.year]);
+  const [importOpen, setImportOpen] = useState(false);
+  const [reportsOpen, setReportsOpen] = useState(false);
+  const taskMonths = useMemo(() => new Set((calendarTasks || []).map(task => String(task.date).slice(0, 7))), [calendarTasks]);
+  const openCreditFile = (row: PortfolioRow) => navigate(`/creditos/${encodeURIComponent(row.id)}`);
 
   // Determinar o intervalo de anos disponíveis (desde o primeiro crédito)
   const availableYears = useMemo(() => {
@@ -1095,476 +1113,169 @@ export default function Credits() {
   };
 
 
+  // Menu de ações de cada crédito (o mesmo de sempre), usado pela nova tabela.
+  const renderRowActions = (credit: Credit) => (
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" size="icon" className="h-8 w-8">
+            <MoreVertical className="h-4 w-4" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuItem className="gap-2" onClick={() => handleViewDetails(credit)}>
+            <Eye className="h-4 w-4" />
+            Ver Detalhes
+          </DropdownMenuItem>
+          <DropdownMenuItem className="gap-2" onClick={() => setAuditTarget({ mode: 'entity', key: credit.id, label: `Crédito de ${credit.clientName}` })}>
+            <FileClock className="h-4 w-4" />
+            Histórico de auditoria
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="gap-2"
+            onClick={() => handleRegisterPayment(credit)}
+            disabled={!['active', 'overdue', 'defaulted', 'renegotiated'].includes(credit.status) || credit.currentBalance <= 0}
+          >
+            <Receipt className="h-4 w-4" />
+            Registar Pagamento
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="gap-2"
+            onClick={() => setMoraCredit(credit)}
+            disabled={['pending_approval', 'rejected', 'cancelled'].includes(credit.status)}
+          >
+            <AlarmClock className="h-4 w-4 text-destructive" />
+            Juros de Mora
+          </DropdownMenuItem>
+          {credit.status === 'paid' && (() => {
+            const standing = clientCreditStanding(credit.clientId, credits);
+            const blocked = newCreditBlockReason(standing, (value) => formatCurrency(value));
+            return (
+              <DropdownMenuItem
+                className="flex-col items-start gap-0.5"
+                disabled={!!blocked}
+                title={blocked || undefined}
+                onClick={() => {
+                  setRenewalRequest({
+                    clientId: credit.clientId, clientName: credit.clientName,
+                    minAmount: standing.lastPaidPrincipal || Number(credit.principalAmount) || 0,
+                  });
+                  handleAddNew();
+                }}
+              >
+                <span className="flex items-center gap-2 font-semibold text-emerald-700 dark:text-emerald-400">
+                  <PlusCircle className="h-4 w-4" /> Solicitar Novo Crédito
+                </span>
+                {blocked && <span className="max-w-[230px] pl-6 text-[11px] leading-snug text-muted-foreground">{blocked}</span>}
+              </DropdownMenuItem>
+            );
+          })()}
+          <DropdownMenuItem className="gap-2" onClick={() => handleViewHistory(credit.id)}>
+            <History className="h-4 w-4" />
+            Ver Histórico
+          </DropdownMenuItem>
+          <DropdownMenuItem className="gap-2" onClick={() => handleViewContract(credit)}>
+            <FileText className="h-4 w-4" />
+            Ver Contrato
+          </DropdownMenuItem>
+          <DropdownMenuItem className="gap-2" onClick={() => handleViewPromessaContract(credit)}>
+            <PenTool className="h-4 w-4 text-primary" />
+            Ver Contrato-Promessa
+          </DropdownMenuItem>
+          <DropdownMenuItem className="gap-2" onClick={() => handleAdjustmentClick(credit)}>
+            <Calculator className="h-4 w-4" />
+            Ajustar Valores
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="gap-2"
+            onClick={() => setReinforcementCredit(credit)}
+            disabled={!['active', 'overdue'].includes(credit.status)}
+          >
+            <PlusCircle className="h-4 w-4 text-emerald-600" />
+            Reforço de Capital
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            className="gap-2 text-destructive focus:text-destructive"
+            onClick={() => handleDeleteClick(credit)}
+          >
+            <Trash2 className="h-4 w-4" />
+            Excluir
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+  );
+
   return (
     <MainLayout title="Créditos" subtitle="Gestão de operações de crédito">
-      {/* === REGIME DE COMPETÊNCIA MENSAL === */}
-
-      {/* Seletor de Ano e Filtros */}
-      <div className="mb-4 flex flex-col gap-3 md:flex-row md:items-center md:justify-between bg-muted/20 p-3 rounded-lg border border-border/40">
-        <div className="flex items-center gap-3">
-          <div className="relative">
-            <Calendar className="h-5 w-5 text-primary" />
-            {calendarTasks.some(t => {
-              const [y, m] = t.date.split('-').map(Number);
-              return y === selectedYear && (m - 1) === selectedMonth;
-            }) && (
-              <span className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-amber-500 border border-background" />
-            )}
-          </div>
-          <h2 className="text-base md:text-lg font-bold text-foreground">
-            {periodType === 'monthly' ? `Folha de ${MONTH_FULL_NAMES[selectedMonth]} de ${selectedYear}` : `Operações: ${activePeriodRange.label}`}
-          </h2>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          {/* Seletor de Tipo de Período */}
-          <Select value={periodType} onValueChange={(val: any) => setPeriodType(val)}>
-            <SelectTrigger className="h-9 w-[140px] bg-background">
-              <SelectValue placeholder="Tipo de Período" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="monthly">Mensal</SelectItem>
-              <SelectItem value="weekly">Semanal</SelectItem>
-              <SelectItem value="daily">Hoje</SelectItem>
-              <SelectItem value="custom">Personalizado</SelectItem>
-            </SelectContent>
-          </Select>
-
-          {periodType === 'custom' && (
-            <div className="flex items-center gap-2">
-              <Input
-                type="date"
-                value={startDateFilter}
-                onChange={(e) => setStartDateFilter(e.target.value)}
-                className="h-9 w-[130px] bg-background py-1 px-2 text-xs"
-              />
-              <span className="text-xs text-muted-foreground">a</span>
-              <Input
-                type="date"
-                value={endDateFilter}
-                onChange={(e) => setEndDateFilter(e.target.value)}
-                className="h-9 w-[130px] bg-background py-1 px-2 text-xs"
-              />
-            </div>
-          )}
-
-          {periodType === 'monthly' && (
-            <div className="flex items-center gap-1 bg-background rounded-lg p-0.5 border">
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => {
-                  const idx = availableYears.indexOf(selectedYear);
-                  if (idx > 0) setSelectedYear(availableYears[idx - 1]);
-                }}
-                disabled={availableYears.indexOf(selectedYear) === 0}
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              <span className="px-2 text-xs font-bold text-foreground min-w-[40px] text-center">{selectedYear}</span>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 w-8 p-0"
-                onClick={() => {
-                  const idx = availableYears.indexOf(selectedYear);
-                  if (idx < availableYears.length - 1) setSelectedYear(availableYears[idx + 1]);
-                }}
-                disabled={availableYears.indexOf(selectedYear) === availableYears.length - 1}
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-            </div>
-          )}
-
-          <Button
-            onClick={() => setAnnualReportOpen(true)}
-            variant="outline"
-            size="sm"
-            className="h-9 gap-1 text-xs border-primary/20 hover:bg-primary/5 text-primary"
-          >
-            <Calendar className="h-4 w-4" />
-            Visão Anual
-          </Button>
-
-          {/* Download Period Report Button */}
-          {periodType !== 'monthly' && (
-            <Button
-              onClick={() => generatePeriodReportPDF(activePeriodRange.label, periodCredits, monthlyPayments, companySettings, user?.name)}
-              disabled={periodType === 'custom' && (!startDateFilter || !endDateFilter)}
-              size="sm"
-              className="h-9 gap-1 text-xs"
-            >
-              <Download className="h-4 w-4" />
-              Baixar Relatório
-            </Button>
-          )}
-        </div>
-      </div>
-
-      {/* Abas dos 12 Meses */}
-      {periodType === 'monthly' && (
-        <div className="mb-5 flex gap-2.5 overflow-x-auto rounded-2xl border border-primary/15 bg-primary/10 p-2 shadow-sm scrollbar-thin" style={{ scrollbarWidth: 'thin' }}>
-          {MONTH_NAMES.map((name, index) => {
-            const isActive = index === selectedMonth;
-            const currentDate = new Date();
-            const isCurrent = index === currentDate.getMonth() && selectedYear === currentDate.getFullYear();
-            const loopMonthId = `${selectedYear}-${(index + 1).toString().padStart(2, '0')}`;
-            const loopIsMonthClosed = closedMonths.some(m => m.id === loopMonthId);
-            const loopHasTasks = calendarTasks.some(t => {
-              const [y, m] = t.date.split('-').map(Number);
-              return y === selectedYear && (m - 1) === index;
-            });
-
-            let tabStyle = "";
-            if (isActive) {
-              if (loopIsMonthClosed) {
-                tabStyle = "bg-slate-700 dark:bg-slate-700 text-white shadow-md scale-[1.03] font-bold";
-              } else {
-                tabStyle = "bg-sidebar-primary text-sidebar-primary-foreground shadow-gold scale-[1.03] font-bold";
-              }
-            } else {
-              if (loopIsMonthClosed) {
-                tabStyle = "bg-background/70 text-muted-foreground/60 shadow-sm hover:bg-muted/60 hover:text-foreground";
-              } else {
-                tabStyle = "bg-background text-foreground/80 shadow-sm hover:shadow-md hover:-translate-y-0.5 dark:bg-white/10 dark:hover:bg-white/15";
-              }
-            }
-
-            return (
-              <button
-                key={index}
-                onClick={() => isActive ? setIsTaskCalendarOpen(true) : setSelectedMonth(index)}
-                title={isActive ? "Abrir agenda de tarefas do mês" : undefined}
-                className={`
-                  relative px-3.5 py-2.5 text-xs rounded-xl transition-all duration-200 whitespace-nowrap min-w-[64px] flex flex-col items-center gap-1
-                  ${tabStyle}
-                `}
-              >
-                {loopHasTasks && (
-                  <span
-                    className={`absolute -top-1 -right-1 h-2.5 w-2.5 rounded-full bg-amber-400 ring-2 ${isActive ? 'ring-primary' : 'ring-background'}`}
-                    title="Há tarefas agendadas neste mês"
-                  />
-                )}
-                <span className="font-semibold tracking-wide">{name}</span>
-                {loopIsMonthClosed ? (
-                  <Lock className="h-3 w-3 opacity-70" />
-                ) : (
-                  <span className={`inline-block h-1.5 w-1.5 rounded-full ${isActive ? 'bg-white/80' : 'bg-green-500'} ${isCurrent ? 'animate-pulse' : ''}`} />
-                )}
-              </button>
-            );
-          })}
+      {/* Dados que não foi possível carregar: o resto continua disponível (antes, uma falha deixava tudo vazio). */}
+      {dataLoadIssues.length > 0 && (
+        <div role="alert" className="mb-4 flex items-start gap-2 rounded-lg border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>Não foi possível carregar: <strong>{dataLoadIssues.join(', ')}</strong>. Os restantes dados estão visíveis. Atualize a página; se continuar, contacte o suporte.</span>
         </div>
       )}
+      {carteira.contextError && <p className="mb-4 rounded-lg bg-destructive/10 p-3 text-sm text-destructive">{carteira.contextError}</p>}
 
-      {/* Ações do Cabeçalho */}
-      <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between p-4 bg-muted/20 rounded-lg border border-border/50">
-        <div className="flex flex-1 items-center gap-4">
-          <div className="relative w-full sm:w-80">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              placeholder="Pesquisar por referência ou cliente..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[180px]">
-              <SelectValue placeholder="Status" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos</SelectItem>
-              <SelectItem value="active">Activos</SelectItem>
-              <SelectItem value="pending_approval">Pendentes</SelectItem>
-              <SelectItem value="overdue">Em Atraso</SelectItem>
-              <SelectItem value="paid">Liquidados</SelectItem>
-              <SelectItem value="rejected">Rejeitados</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" className="gap-2" onClick={handleDownloadTemplate}>
-            <Download className="h-4 w-4" />
-            Modelo
-          </Button>
-          <Button variant="outline" className="gap-2 border-primary/30 text-primary hover:bg-primary/5" onClick={() => setIsPaymentPlanOpen(true)}>
-            <ListOrdered className="h-4 w-4" />
-            Plano de Pagamento
-          </Button>
-          {canManageInterestTiers(user?.role) && (
-            <Button variant="outline" className="gap-2 border-primary/30 text-primary hover:bg-primary/5" onClick={() => setIsRatesDialogOpen(true)}>
-              <Percent className="h-4 w-4" />
-              Cadastrar Taxas de Juro
+      <CabecalhoCarteira
+        state={carteira}
+        years={availableYears}
+        closedMonths={closedMonths.map(m => m.id)}
+        taskMonths={taskMonths}
+        onOpenTasks={() => setIsTaskCalendarOpen(true)}
+      />
+
+      <AlertasCarteira
+        alerts={carteira.alerts}
+        phoneOf={clientId => clients.find(c => c.id === clientId)?.phone || ''}
+        onPay={row => handleRegisterPayment(row.credit)}
+        onOpen={openCreditFile}
+        actor={user ? { id: user.id, name: user.name, role: user.role, permissions: user.permissions } : null}
+      />
+
+      {/* Barra: Importação, Relatórios e Novo Crédito (taxas de juro em Configurações; fecho do mês na Contabilidade) */}
+      <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+        {carteira.view === 'producao' && isMonthClosed && (
+          <>
+            <Badge variant="success" className="gap-1.5 border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600">
+              <Lock className="h-3.5 w-3.5" /> Mês fechado
+            </Badge>
+            <Button variant="outline" className="gap-2" onClick={handleDownloadCloseReport}>
+              <FileText className="h-4 w-4" /> Relatório de Fecho (PDF)
             </Button>
-          )}
-          {isMonthClosed ? (
-            <>
-              <Badge variant="success" className="gap-1.5 px-3 py-2 text-xs bg-emerald-500/10 text-emerald-500 border border-emerald-500/20 shadow-sm">
-                <Lock className="h-3.5 w-3.5" />
-                Mês Consolidado
-              </Badge>
-              <Button variant="outline" className="gap-2 border-emerald-500/30 hover:bg-emerald-500/5 text-emerald-600 dark:text-emerald-400" onClick={handleDownloadCloseReport}>
-                <FileText className="h-4 w-4" />
-                Relatório de Fecho (PDF)
-              </Button>
-              {(user?.role === 'super_admin' || user?.role === 'admin') && (
-                <Button variant="ghost" className="gap-2 text-red-500 hover:text-red-600 hover:bg-red-500/5" onClick={handleReopenMonth}>
-                  <Unlock className="h-4 w-4" />
-                  Reabrir Mês
-                </Button>
-              )}
-            </>
-          ) : (
-            <>
-              {(user?.role === 'super_admin' || user?.role === 'admin') && (
-                <Button variant="outline" className="gap-2 border-indigo-500/30 hover:bg-indigo-500/5 text-indigo-600 dark:text-indigo-400" onClick={() => setIsCloseModalOpen(true)}>
-                  <Calculator className="h-4 w-4" />
-                  Fechar Mês
-                </Button>
-              )}
-              <div className="relative">
-                <Button variant="outline" className="gap-2 pointer-events-none">
-                  <Upload className="h-4 w-4" />
-                  Importar
-                </Button>
-                <Input
-                  type="file"
-                  accept=".xlsx, .xls"
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                  onChange={handleImportExcel}
-                />
-              </div>
-              <Button className="gap-2" onClick={handleAddNew}>
-                <Plus className="h-4 w-4" />
-                Novo Crédito
-              </Button>
-            </>
-          )}
-        </div>
+          </>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="gap-2"><Upload className="h-4 w-4" /> Importação</Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="gap-2" onClick={handleDownloadTemplate}><Download className="h-4 w-4" /> Descarregar modelo</DropdownMenuItem>
+            <DropdownMenuItem className="gap-2" onClick={() => setImportOpen(true)}><Upload className="h-4 w-4" /> Importar créditos (com pré-visualização)</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="gap-2"><FileText className="h-4 w-4" /> Exportar / Relatórios</Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem className="gap-2" onClick={() => setReportsOpen(true)}><FileText className="h-4 w-4" /> Relatórios da carteira (PDF e Excel)</DropdownMenuItem>
+            <DropdownMenuItem className="gap-2" onClick={() => setAnnualReportOpen(true)}><Calendar className="h-4 w-4" /> Relatório anual (PDF)</DropdownMenuItem>
+            <DropdownMenuItem className="gap-2" onClick={() => setIsPaymentPlanOpen(true)}><ListOrdered className="h-4 w-4" /> Plano de pagamento</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button className="gap-2" onClick={handleAddNew} disabled={carteira.view === 'producao' && isMonthClosed} title={carteira.view === 'producao' && isMonthClosed ? 'Este mês está fechado' : undefined}>
+          <Plus className="h-4 w-4" /> Novo Crédito
+        </Button>
       </div>
 
-      {/* Resumo de Desempenho Mensal - 6 Indicadores com Estilo e Paleta de Login */}
-      <div className="mb-6 grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        {/* 1. Clientes (Azul Primário / Login Style) */}
-        <div 
-          onClick={() => setPeriodMetricModal({ isOpen: true, type: 'clients' })}
-          className="card-kpi-sky cursor-pointer hover:scale-[1.02] active:scale-[0.99] group"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0 group-hover:scale-105 transition-transform">
-                <Users className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">
-                  Carteira
-                </p>
-                <p className="text-sm sm:text-base font-bold text-slate-950 dark:text-white truncate tracking-tight">
-                  Clientes {periodType === 'monthly' ? 'do Mês' : 'do Período'}
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setPeriodMetricModal({ isOpen: true, type: 'clients' });
-              }}
-              title="Auditar Clientes"
-              className="w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 flex items-center justify-center text-slate-950 dark:text-white transition-all hover:scale-110 active:scale-90 cursor-pointer shadow-2xs shrink-0"
-            >
-              <Eye className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <div className="my-2">
-            <p className="font-display text-3xl sm:text-4xl font-black tracking-tight text-slate-950 dark:text-white truncate">
-              {monthlySummary.uniqueClients}
-            </p>
-          </div>
-
-          <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-            {periodCredits.length} créditos registados
-          </p>
-        </div>
-
-        {/* 2. Capital Aplicado (Coral / Rosa / Login Style) */}
-        <div 
-          onClick={() => setPeriodMetricModal({ isOpen: true, type: 'capital' })}
-          className="card-kpi-coral cursor-pointer hover:scale-[1.02] active:scale-[0.99] group"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0 group-hover:scale-105 transition-transform">
-                <ArrowUpRight className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">
-                  Desembolso
-                </p>
-                <p className="text-sm sm:text-base font-bold text-slate-950 dark:text-white truncate tracking-tight">
-                  Capital Aplicado
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setPeriodMetricModal({ isOpen: true, type: 'capital' });
-              }}
-              title="Auditar Capital Aplicado"
-              className="w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 flex items-center justify-center text-slate-950 dark:text-white transition-all hover:scale-110 active:scale-90 cursor-pointer shadow-2xs shrink-0"
-            >
-              <Eye className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <div className="my-2">
-            <p className="font-display text-3xl sm:text-4xl font-black tracking-tight text-slate-950 dark:text-white truncate" title={formatCurrency(monthlySummary.capitalApplied)}>
-              {formatCurrency(monthlySummary.capitalApplied)}
-            </p>
-          </div>
-
-          <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-            Total de saídas desembolsadas
-          </p>
-        </div>
-
-        {/* 3. Lucro Projetado (Índigo / Púrpura / Login Style) */}
-        <div 
-          onClick={() => setPeriodMetricModal({ isOpen: true, type: 'projected' })}
-          className="card-kpi-purple cursor-pointer hover:scale-[1.02] active:scale-[0.99] group"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0 group-hover:scale-105 transition-transform">
-                <TrendingUp className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">
-                  Expectativa
-                </p>
-                <p className="text-sm sm:text-base font-bold text-slate-950 dark:text-white truncate tracking-tight">
-                  Lucro Projetado
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setPeriodMetricModal({ isOpen: true, type: 'projected' });
-              }}
-              title="Auditar Lucro Projetado"
-              className="w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 flex items-center justify-center text-slate-950 dark:text-white transition-all hover:scale-110 active:scale-90 cursor-pointer shadow-2xs shrink-0"
-            >
-              <Eye className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <div className="my-2">
-            <p className="font-display text-3xl sm:text-4xl font-black tracking-tight text-slate-950 dark:text-white truncate" title={formatCurrency(monthlySummary.projectedProfit)}>
-              {formatCurrency(monthlySummary.projectedProfit)}
-            </p>
-          </div>
-
-          <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-            Juros totais contratados
-          </p>
-        </div>
-
-        {/* 4. Saldo em Aberto (Dourado / Âmbar / Login Style) */}
-        <div 
-          onClick={() => setPeriodMetricModal({ isOpen: true, type: 'outstanding' })}
-          className="card-kpi-amber cursor-pointer hover:scale-[1.02] active:scale-[0.99] group"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0 group-hover:scale-105 transition-transform">
-                <TrendingDown className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">
-                  A Receber
-                </p>
-                <p className="text-sm sm:text-base font-bold text-slate-950 dark:text-white truncate tracking-tight">
-                  Saldo em Aberto
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setPeriodMetricModal({ isOpen: true, type: 'outstanding' });
-              }}
-              title="Auditar Saldo em Aberto"
-              className="w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 flex items-center justify-center text-slate-950 dark:text-white transition-all hover:scale-110 active:scale-90 cursor-pointer shadow-2xs shrink-0"
-            >
-              <Eye className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <div className="my-2">
-            <p className="font-display text-3xl sm:text-4xl font-black tracking-tight text-slate-950 dark:text-white truncate" title={formatCurrency(monthlySummary.outstandingCapital)}>
-              {formatCurrency(monthlySummary.outstandingCapital)}
-            </p>
-          </div>
-
-          <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-            Principal em cobrança ativa
-          </p>
-        </div>
-
-        {/* 5. Lucro Recebido (Verde Esmeralda / Login Style) */}
-        <div 
-          onClick={() => setPeriodMetricModal({ isOpen: true, type: 'realized' })}
-          className="card-kpi-mint cursor-pointer hover:scale-[1.02] active:scale-[0.99] group"
-        >
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5 min-w-0">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0 group-hover:scale-105 transition-transform">
-                <ArrowDownLeft className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">
-                  Realizado
-                </p>
-                <p className="text-sm sm:text-base font-bold text-slate-950 dark:text-white truncate tracking-tight">
-                  Lucro Recebido
-                </p>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                setPeriodMetricModal({ isOpen: true, type: 'realized' });
-              }}
-              title="Auditar Lucro Recebido"
-              className="w-8 h-8 rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 flex items-center justify-center text-slate-950 dark:text-white transition-all hover:scale-110 active:scale-90 cursor-pointer shadow-2xs shrink-0"
-            >
-              <Eye className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
-          <div className="my-2">
-            <p className="font-display text-3xl sm:text-4xl font-black tracking-tight text-slate-950 dark:text-white truncate" title={formatCurrency(monthlySummary.realizedProfit)}>
-              {formatCurrency(monthlySummary.realizedProfit)}
-            </p>
-          </div>
-
-          <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-            {monthlyPayments.length} pagamentos realizados
-          </p>
-        </div>
-
-        {/* 6. Saídas vs Entradas (Hoje - Pega do Calendário) */}
+      {carteira.view === 'anual' ? (
+        <VisaoAnualCreditos state={carteira} />
+      ) : (
+        <>
+          <CartoesCarteira
+            state={carteira}
+            onDetails={type => setPeriodMetricModal({ isOpen: true, type })}
+            cashFlowCard={(
         <div 
           onClick={() => setIsDailyCashFlowOpen(true)}
           className="card-kpi-flow cursor-pointer hover:scale-[1.02] active:scale-[0.99] group"
@@ -1616,227 +1327,28 @@ export default function Credits() {
             {todayCashFlowSummary.outCount} saídas / {todayCashFlowSummary.inCount} entradas hoje
           </p>
         </div>
-      </div>
+            )}
+          />
+          <TabelaCarteira
+            state={carteira}
+            onOpen={openCreditFile}
+            clientsById={new Map(clients.map(c => [c.id, { phone: c.phone }]))}
+            currentUser={user ? { id: user.id, name: user.name, role: user.role, permissions: user.permissions } : null}
+            renderActions={row => renderRowActions(row.credit)}
+          />
+        </>
+      )}
 
-      {/* Tabela */}
-      <div className="card-elevated overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow className="bg-muted/50">
-              <TableHead>Referência</TableHead>
-              <TableHead>Cliente</TableHead>
-              <TableHead className="text-right">Principal</TableHead>
-              <TableHead className="text-right">Saldo Actual</TableHead>
-              <TableHead>Taxa</TableHead>
-              <TableHead>Progresso</TableHead>
-              <TableHead>Vencimento</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead className="w-12"></TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {filteredCredits.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={9} className="text-center py-12 text-muted-foreground">
-                  <div className="flex flex-col items-center gap-2">
-                    <Calendar className="h-10 w-10 text-muted-foreground/40" />
-                    <p className="text-base font-medium">Nenhuma operação registada</p>
-                    <p className="text-sm">em {MONTH_FULL_NAMES[selectedMonth]} de {selectedYear}</p>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : paginatedCredits.map((credit, index) => (
-              <TableRow
-                key={credit.id}
-                className="animate-fade-in"
-                style={{ animationDelay: `${index * 50}ms` }}
-              >
-                <TableCell>
-                  <span className="font-mono font-medium text-foreground">{credit.id}</span>
-                </TableCell>
-                <TableCell>
-                  <p className="font-medium text-foreground">{credit.clientName}</p>
-                </TableCell>
-                <TableCell className="text-right font-medium">
-                  {formatCurrency(credit.principalAmount)}
-                </TableCell>
-                <TableCell className="text-right">
-                  <div>
-                    <p className="font-medium text-foreground">{formatCurrency(credit.currentBalance)}</p>
-                    {credit.lateInterest > 0 && (
-                      <p className="flex items-center justify-end gap-1 text-sm text-danger">
-                        <AlertCircle className="h-3 w-3" />
-                        +{formatCurrency(credit.lateInterest)} mora
-                      </p>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="text-sm">
-                    <p className="font-medium">{formatPercentage(credit.interestRate)}</p>
-                    <p className="text-muted-foreground">Mora: {formatPercentage(credit.lateInterestRate)}/dia</p>
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="w-32">
-                    {(() => {
-                      // Pago = pagamentos confirmados; o total é o que já foi pago mais o que ainda está em dívida.
-                      const paidAmount = payments
-                        .filter(payment => payment.creditId === credit.id && payment.status === 'confirmed' && !payment.deletedAt)
-                        .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-                      const outstanding = Math.max(0, Number(credit.totalDue) || 0);
-                      const progress = credit.status === 'paid' ? 100
-                        : paidAmount + outstanding > 0 ? Math.min(100, Math.round((paidAmount / (paidAmount + outstanding)) * 100)) : 0;
-                      return (
-                        <>
-                          <div className="mb-1 flex justify-between text-[10px] font-bold">
-                            <span className="text-muted-foreground">PAGO</span>
-                            <span className={progress >= 100 ? "text-success" : "text-primary"}>{progress}%</span>
-                          </div>
-                          <Progress value={progress} className="h-1.5" />
-                        </>
-                      );
-                    })()}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <div className="text-sm">
-                    <p className="font-medium">{formatDate(credit.dueDate)}</p>
-                    {credit.daysOverdue > 0 && (
-                      <p className="text-danger">{credit.daysOverdue} dias em atraso</p>
-                    )}
-                  </div>
-                </TableCell>
-                <TableCell>
-                  <Badge variant={statusConfig[credit.status]?.variant || 'default'}>
-                    {credit.status === 'active' && credit.paidInstallments > 0 ? 'Em Liquidação' : (statusConfig[credit.status]?.label || credit.status)}
-                  </Badge>
-                </TableCell>
-                <TableCell>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="ghost" size="icon" className="h-8 w-8">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem className="gap-2" onClick={() => handleViewDetails(credit)}>
-                        <Eye className="h-4 w-4" />
-                        Ver Detalhes
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="gap-2" onClick={() => setAuditTarget({ mode: 'entity', key: credit.id, label: `Crédito de ${credit.clientName}` })}>
-                        <FileClock className="h-4 w-4" />
-                        Histórico de auditoria
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="gap-2"
-                        onClick={() => handleRegisterPayment(credit)}
-                        disabled={!['active', 'overdue', 'defaulted', 'renegotiated'].includes(credit.status) || credit.currentBalance <= 0}
-                      >
-                        <Receipt className="h-4 w-4" />
-                        Registar Pagamento
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="gap-2"
-                        onClick={() => setMoraCredit(credit)}
-                        disabled={['pending_approval', 'rejected', 'cancelled'].includes(credit.status)}
-                      >
-                        <AlarmClock className="h-4 w-4 text-destructive" />
-                        Juros de Mora
-                      </DropdownMenuItem>
-                      {credit.status === 'paid' && (() => {
-                        const standing = clientCreditStanding(credit.clientId, credits);
-                        const blocked = newCreditBlockReason(standing, (value) => formatCurrency(value));
-                        return (
-                          <DropdownMenuItem
-                            className="flex-col items-start gap-0.5"
-                            disabled={!!blocked}
-                            title={blocked || undefined}
-                            onClick={() => {
-                              setRenewalRequest({
-                                clientId: credit.clientId, clientName: credit.clientName,
-                                minAmount: standing.lastPaidPrincipal || Number(credit.principalAmount) || 0,
-                              });
-                              handleAddNew();
-                            }}
-                          >
-                            <span className="flex items-center gap-2 font-semibold text-emerald-700 dark:text-emerald-400">
-                              <PlusCircle className="h-4 w-4" /> Solicitar Novo Crédito
-                            </span>
-                            {blocked && <span className="max-w-[230px] pl-6 text-[11px] leading-snug text-muted-foreground">{blocked}</span>}
-                          </DropdownMenuItem>
-                        );
-                      })()}
-                      <DropdownMenuItem className="gap-2" onClick={() => handleViewHistory(credit.id)}>
-                        <History className="h-4 w-4" />
-                        Ver Histórico
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="gap-2" onClick={() => handleViewContract(credit)}>
-                        <FileText className="h-4 w-4" />
-                        Ver Contrato
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="gap-2" onClick={() => handleViewPromessaContract(credit)}>
-                        <PenTool className="h-4 w-4 text-primary" />
-                        Ver Contrato-Promessa
-                      </DropdownMenuItem>
-                      <DropdownMenuItem className="gap-2" onClick={() => handleAdjustmentClick(credit)}>
-                        <Calculator className="h-4 w-4" />
-                        Ajustar Valores
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        className="gap-2"
-                        onClick={() => setReinforcementCredit(credit)}
-                        disabled={!['active', 'overdue'].includes(credit.status)}
-                      >
-                        <PlusCircle className="h-4 w-4 text-emerald-600" />
-                        Reforço de Capital
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="gap-2 text-destructive focus:text-destructive"
-                        onClick={() => handleDeleteClick(credit)}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                        Excluir
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-
-        {/* Controles de Paginação */}
-        <div className="flex items-center justify-between border-t border-muted px-4 py-4 bg-muted/20">
-          <div className="text-sm text-muted-foreground">
-            Mostrando <span className="font-medium">{filteredCredits.length === 0 ? 0 : (currentPage - 1) * itemsPerPage + 1}</span> a <span className="font-medium">{Math.min(filteredCredits.length, currentPage * itemsPerPage)}</span> de <span className="font-medium">{filteredCredits.length}</span> créditos
-          </div>
-          <div className="flex items-center space-x-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
-              disabled={currentPage === 1}
-              className="h-8 w-8 p-0"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            <span className="text-sm font-medium">
-              Página {currentPage} de {totalPages}
-            </span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
-              disabled={currentPage === totalPages}
-              className="h-8 w-8 p-0"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
+      <ImportacaoCreditos
+        open={importOpen}
+        onClose={() => setImportOpen(false)}
+        clients={clients}
+        credits={credits}
+        actor={user ? { id: user.id, name: user.name, role: user.role, permissions: user.permissions } : null}
+        addCredit={addCredit}
+        onImported={message => setAlertConfig({ isOpen: true, title: 'Importação de créditos', description: message, type: 'success' })}
+      />
+      <RelatoriosCreditos state={carteira} open={reportsOpen} onClose={() => setReportsOpen(false)} actor={user ? { id: user.id, name: user.name, role: user.role } : null} />
 
       {/* Create Dialog */}
       <Dialog open={isCreateDialogOpen} onOpenChange={(open) => { setIsCreateDialogOpen(open); if (!open) setRenewalRequest(null); }}>

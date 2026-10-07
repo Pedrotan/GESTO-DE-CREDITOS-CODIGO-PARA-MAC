@@ -56,7 +56,7 @@ export class ServicoCarteira {
             legalCreditIds: new Set(legal.map(item => item.creditId)),
             escalatedIds: new Set(escalations.map(item => item.entityId)),
             brokenPromises,
-            productOf: new Map(simulations.map(item => [item.convertedCreditId, item.productId])),
+            productOf: new Map<string, string>(simulations.map(item => [item.convertedCreditId, item.productId] as [string, string])),
             restructurings: restructurings.map(row => this.mapRestructuring(row)),
         };
     }

@@ -15,7 +15,7 @@ export class RepositorioCliente extends RepositorioBase {
     }
 
     static async insert(client: Client): Promise<void> {
-        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         const params = [
             client.id, client.name, client.nif, client.phone, client.email, client.address,
             client.creditLimit, client.usedCredit, client.availableCredit, client.monthlyIncome || 0,
@@ -34,7 +34,14 @@ export class RepositorioCliente extends RepositorioBase {
             client.fatherName || null,
             client.motherName || null,
             client.workInstitution || null,
-            client.socialSecurityNumber || null
+            client.socialSecurityNumber || null,
+            client.spouseName || null,
+            client.spouseBi || null,
+            client.spouseNif || null,
+            client.spousePhone || null,
+            client.spouseEmail || null,
+            client.legalRepresentative || null,
+            client.legalRepRole || null
         ];
         await this.execute(sql, params);
     }
@@ -71,7 +78,14 @@ export class RepositorioCliente extends RepositorioBase {
             fatherName = COALESCE(?, fatherName),
             motherName = COALESCE(?, motherName),
             workInstitution = COALESCE(?, workInstitution),
-            socialSecurityNumber = COALESCE(?, socialSecurityNumber)
+            socialSecurityNumber = COALESCE(?, socialSecurityNumber),
+            spouseName = COALESCE(?, spouseName),
+            spouseBi = COALESCE(?, spouseBi),
+            spouseNif = COALESCE(?, spouseNif),
+            spousePhone = COALESCE(?, spousePhone),
+            spouseEmail = COALESCE(?, spouseEmail),
+            legalRepresentative = COALESCE(?, legalRepresentative),
+            legalRepRole = COALESCE(?, legalRepRole)
             WHERE id = ?`;
         const params = [
             updates.name, updates.nif, updates.phone, updates.email, updates.address,
@@ -91,6 +105,13 @@ export class RepositorioCliente extends RepositorioBase {
             updates.motherName ?? null,
             updates.workInstitution ?? null,
             updates.socialSecurityNumber ?? null,
+            updates.spouseName ?? null,
+            updates.spouseBi ?? null,
+            updates.spouseNif ?? null,
+            updates.spousePhone ?? null,
+            updates.spouseEmail ?? null,
+            updates.legalRepresentative ?? null,
+            updates.legalRepRole ?? null,
             id
         ];
         await this.execute(sql, params);

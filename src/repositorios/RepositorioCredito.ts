@@ -12,7 +12,7 @@ export class RepositorioCredito extends RepositorioBase {
                    requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt,
                    usuario_id, targetMonthId, supplierId, supplierProfitRate,
                    principalAmountMinor, currentBalanceMinor, accruedInterestMinor,
-                   lateInterestMinor, totalDueMinor, version, amortizationMethod
+                   lateInterestMinor, totalDueMinor, version, amortizationMethod, productId
             FROM credits 
             WHERE deletedAt IS NULL
         `);
@@ -33,7 +33,7 @@ export class RepositorioCredito extends RepositorioBase {
     }
 
     static buildInsertStatement(credit: Credit) {
-        const sql = `INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+        const sql = `INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate, productId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
         const params = [
             credit.id, credit.clientId, credit.clientName, credit.principalAmount, toMinorUnits(credit.principalAmount), credit.interestRate,
             credit.lateInterestRate, credit.installments, credit.paidInstallments, credit.currentBalance, toMinorUnits(credit.currentBalance),
@@ -51,7 +51,8 @@ export class RepositorioCredito extends RepositorioBase {
             credit.usuario_id,
             credit.targetMonthId || null,
             credit.supplierId || null,
-            credit.supplierProfitRate ?? null
+            credit.supplierProfitRate ?? null,
+            credit.productId || null
         ];
         return { sql, params };
     }

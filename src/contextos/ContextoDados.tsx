@@ -61,6 +61,7 @@ import { ServicoTaxasJuro } from '@/servicos/ServicoTaxasJuro';
 import { SHARED_SETTING_KEYS, ServicoDefinicoesPartilhadas } from '@/servicos/ServicoDefinicoesPartilhadas';
 import { DEFAULT_ACCESS_SCHEDULE, normalizeAccessSchedule, validateAccessSchedule, type AccessSchedule } from '@/bibliotecas/horario-acesso';
 import { isCloudSyncUrl, startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { LegalCase, Warranty } from '@/tipos/contencioso';
 import { getScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from '@/bibliotecas/contas';
 

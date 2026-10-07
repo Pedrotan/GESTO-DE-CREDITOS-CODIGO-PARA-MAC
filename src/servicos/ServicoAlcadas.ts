@@ -243,7 +243,7 @@ export class ServicoAlcadas {
     /** Exposição actual a um cliente e ao seu grupo de clientes relacionados (capital em dívida). */
     static async clientExposure(clientId?: string | null): Promise<{ riskLevel: string | null; exposureMinor: number; groupExposureMinor: number }> {
         if (!clientId) return { riskLevel: null, exposureMinor: 0, groupExposureMinor: 0 };
-        const clients: any[] = await db.all<any>('SELECT id, name, nif, phone, riskLevel, fatherName, motherName FROM clients WHERE deletedAt IS NULL').catch(() => []);
+        const clients: any[] = await db.all<any>('SELECT id, name, nif, phone, riskLevel, fatherName, motherName, spouseName, spouseBi, spouseNif, spousePhone, legalRepresentative FROM clients WHERE deletedAt IS NULL').catch(() => []);
         const balances: Array<{ clientId: string; balance: number }> = await db.all<{ clientId: string; balance: number }>(`SELECT clientId, SUM(COALESCE(currentBalanceMinor, ROUND(currentBalance * 100))) AS balance FROM credits
             WHERE deletedAt IS NULL AND status IN ('active','overdue','defaulted','renegotiated','pending_approval') GROUP BY clientId`).catch(() => []);
         const byClient = new Map<string, number>(balances.map(row => [row.clientId, Number(row.balance) || 0] as [string, number]));

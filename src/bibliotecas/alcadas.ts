@@ -199,6 +199,26 @@ export function defaultPolicy(seed?: { manager?: { maxTransaction: number; daily
                 client_export: { allowed: true, perOperationCount: 500, dailyCount: 5 },
             }),
             collection_officer: profile('collection_officer', 'user', { interest_waiver: allow(20_000, null, 200_000, { maxPercent: 5 }) }),
+            risk_analyst: profile('risk_analyst', 'user', {
+                cash_receipt: allow(500_000, 3_000_000, 30_000_000),
+                client_export: { allowed: true, perOperationCount: 500, dailyCount: 5 },
+            }),
+            system_admin: profile('system_admin', 'user', {
+                ...credit(adm.maxTransaction, adm.dailyLimit, adm.monthlyLimit),
+                cash_receipt: allow(1_000_000, 10_000_000, 60_000_000),
+                payment_reversal: allow(500_000, 2_000_000, 10_000_000, { dailyCount: 10 }),
+                interest_waiver: allow(250_000, null, 3_000_000, { maxPercent: 30 }),
+                accounting_reversal: allow(1_000_000, 5_000_000, 20_000_000),
+                write_off: allow(1_000_000, null, null),
+                client_export: { allowed: true, perOperationCount: 1_000, dailyCount: 10 },
+            }),
+            legal: profile('legal', 'user', {
+                cash_receipt: allow(500_000, 3_000_000, 30_000_000),
+                client_export: { allowed: true, perOperationCount: 500, dailyCount: 5 },
+            }),
+            internal_auditor: profile('internal_auditor', 'user', {
+                client_export: { allowed: true, perOperationCount: 1_000, dailyCount: 10 },
+            }),
         },
         chain: { levels: DEFAULT_LEVELS.map(level => ({ ...level, profileIds: [...level.profileIds] })), escalationHours: 24 },
         userOverrides: [],
@@ -336,13 +356,24 @@ const maxOf = (a: number | null | undefined, b: number | null | undefined) => (a
 export const activeExceptions = (exceptions: LimitException[], now: Date = new Date()) =>
     exceptions.filter(item => item.status === 'approved' && new Date(item.startsAt).getTime() <= now.getTime() && now.getTime() < new Date(item.endsAt).getTime());
 
+/** Limites padrão para perfis sem definição explícita (para não bloquear numerário nem exportações básicas). */
+export const DEFAULT_OPERATOR_LIMITS: Partial<Record<OperationType, LimitValues>> = {
+    cash_receipt: { allowed: true, perOperationMinor: kz(500_000), dailyMinor: kz(3_000_000), monthlyMinor: kz(30_000_000) },
+    client_export: { allowed: true, perOperationCount: 500, dailyCount: 5 },
+};
+
 /** Limite que se aplica a um utilizador: perfil → limite individual → exceção temporária activa. */
 export function effectiveLimit(policy: LimitPolicy, actor: LimitActor, operationType: OperationType, exceptions: LimitException[] = [], now: Date = new Date()): EffectiveLimit {
     const profile = policy.profiles[actor.role];
     const scope = profile?.scope || 'user';
     const base = profile?.ops[operationType];
+    const fallback = DEFAULT_OPERATOR_LIMITS[operationType];
     let result: EffectiveLimit = base?.allowed
         ? { ...base, source: 'perfil', scope, profileEnabled: profile?.enabled !== false }
+        : base && base.allowed === false
+        ? { allowed: false, source: 'sem-limite', scope, profileEnabled: profile?.enabled !== false }
+        : fallback
+        ? { ...fallback, source: 'perfil', scope, profileEnabled: profile?.enabled !== false }
         : { allowed: false, source: 'sem-limite', scope, profileEnabled: profile?.enabled !== false };
     const override = policy.userOverrides.find(item => item.userId === actor.id)?.ops[operationType];
     if (override) {
@@ -848,7 +879,19 @@ export const DECISION_LABELS: Record<Evaluation['decision'], string> = { allow: 
 
 // ── Grupos de clientes relacionados ──────────────────────────────────────────────
 
-type RelatedClient = { id: string; name?: string; nif?: string; phone?: string; spouseNif?: string; spouseBi?: string; spouseName?: string; legalRepresentative?: string; fatherName?: string; motherName?: string };
+type RelatedClient = {
+    id: string;
+    name?: string;
+    nif?: string;
+    phone?: string;
+    spouseNif?: string;
+    spouseBi?: string;
+    spouseName?: string;
+    spousePhone?: string;
+    legalRepresentative?: string;
+    fatherName?: string;
+    motherName?: string;
+};
 
 /**
  * Grupos de clientes relacionados (família, empresa e sócios): irmãos (mesmos pais), pai/mãe que também é
@@ -868,12 +911,46 @@ export function relatedGroups(clients: RelatedClient[]): Map<string, string> {
     }
     const parents = new Map<string, string>();
     const phones = new Map<string, string>();
+    const spouseDocs = new Map<string, string>();
+    const spouseNames = new Map<string, string>();
+    const legalReps = new Map<string, string>();
+
     for (const client of clients) {
         for (const name of [client.fatherName, client.motherName]) { const other = byName.get(norm(name)); if (other && other !== client.id) union(client.id, other); }
         const phone = String(client.phone || '').replace(/[^0-9]/g, '').slice(-9);
         if (phone.length === 9) { const other = phones.get(phone); if (other) union(client.id, other); else phones.set(phone, client.id); }
-        for (const doc of [client.spouseNif, client.spouseBi]) { const other = byDoc.get(norm(doc)); if (other && other !== client.id) union(client.id, other); }
-        for (const name of [client.spouseName, client.legalRepresentative]) { const other = byName.get(norm(name)); if (other && other !== client.id) union(client.id, other); }
+
+        // Cônjuge: por documento (NIF / BI) quer o cônjuge seja cliente quer ambos partilhem o mesmo documento de cônjuge
+        for (const doc of [client.spouseNif, client.spouseBi]) {
+            const clean = norm(doc);
+            if (clean) {
+                const other = byDoc.get(clean);
+                if (other && other !== client.id) union(client.id, other);
+                const shared = spouseDocs.get(clean);
+                if (shared) union(client.id, shared);
+                else spouseDocs.set(clean, client.id);
+            }
+        }
+        // Cônjuge: por nome (se for cliente registado ou se ambos indicarem o mesmo cônjuge)
+        const sName = norm(client.spouseName);
+        if (sName) {
+            const other = byName.get(sName);
+            if (other && other !== client.id) union(client.id, other);
+            const shared = spouseNames.get(sName);
+            if (shared) union(client.id, shared);
+            else spouseNames.set(sName, client.id);
+        }
+
+        // Representante legal: empresa e sócios (o representante é cliente ou duas empresas partilham o representante)
+        const repName = norm(client.legalRepresentative);
+        if (repName) {
+            const other = byName.get(repName);
+            if (other && other !== client.id) union(client.id, other);
+            const shared = legalReps.get(repName);
+            if (shared) union(client.id, shared);
+            else legalReps.set(repName, client.id);
+        }
+
         const family = norm(client.fatherName) && norm(client.motherName) ? `${norm(client.fatherName)}|${norm(client.motherName)}` : '';
         if (family) { const other = parents.get(family); if (other) union(client.id, other); else parents.set(family, client.id); }
     }

@@ -130,6 +130,8 @@ export interface Credit {
   supplierProfitRate?: number;
   /** Total de capital acrescentado por reforços. */
   reinforcedAmount?: number;
+  /** Produto associado ao crédito (para limites de volume mensal por produto e relatórios). */
+  productId?: string | null;
 }
 
 /**

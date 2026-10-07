@@ -104,7 +104,9 @@ export function simulateEarlySettlement(input: {
     const flatInterest = Math.round(remainingInterest * (remaining / futureCapital) * (count / future.length));
     const first = new Date(dates[0]);
     const start = new Date(Date.UTC(first.getUTCFullYear(), first.getUTCMonth() - 1, first.getUTCDate()));
-    const built = buildInstallmentSchedule({ principalMinor: remaining, installments: count, startDate: start, method, annualRatePercent: rate, flatInterestMinor: method === 'FLAT' ? flatInterest : undefined });
+    const built = mode === 'reduce_term'
+        ? keepInstallmentPlan({ method, remaining, count, monthly: rate / 1200, installmentMinor: oldInstallment, principalPart: current ? num(current.principalMinor) : Math.round(futureCapital / future.length), flatInterest })
+        : buildInstallmentSchedule({ principalMinor: remaining, installments: count, startDate: start, method, annualRatePercent: rate, flatInterestMinor: method === 'FLAT' ? flatInterest : undefined });
     const newPlan: PlanItem[] = built.map((item, index) => {
         // A primeira prestação já pagou hoje os juros decorridos: só cobra a parte restante do período.
         const interest = method !== 'FLAT' && index === 0 ? Math.round(item.interestMinor * (1 - fraction)) : item.interestMinor;
@@ -116,6 +118,36 @@ export function simulateEarlySettlement(input: {
         interestSavedMinor: Math.max(0, futureInterest - accruedInterest - newInterest), remainingCapitalMinor: remaining,
         newCount: newPlan.length, newInstallmentMinor: newPlan[0]?.totalMinor || 0, newPlan, replacedIds: future.map(item => item.id),
     };
+}
+
+/**
+ * Reduzir o prazo mantendo a prestação: as prestações têm o valor actual (PRICE) ou a mesma parte de capital
+ * (SAC e taxa fixa) e só a última é menor. Os juros seguem o método do contrato.
+ */
+function keepInstallmentPlan(input: { method: 'PRICE' | 'SAC' | 'FLAT'; remaining: number; count: number; monthly: number; installmentMinor: number; principalPart: number; flatInterest: number }) {
+    const items: Array<{ principalMinor: number; interestMinor: number; dueDate: string }> = [];
+    let outstanding = input.remaining;
+    for (let index = 0; index < input.count && outstanding > 0; index++) {
+        const last = index === input.count - 1;
+        let principal: number;
+        let interest = input.method === 'FLAT' ? 0 : Math.round(outstanding * input.monthly);
+        if (input.method === 'PRICE') principal = last ? outstanding : Math.min(outstanding, Math.max(1, input.installmentMinor - interest));
+        else principal = last ? outstanding : Math.min(outstanding, Math.max(1, input.principalPart));
+        outstanding -= principal;
+        if (input.method === 'FLAT') interest = 0;
+        items.push({ principalMinor: principal, interestMinor: interest, dueDate: '' });
+    }
+    if (outstanding > 0 && items.length) items[items.length - 1].principalMinor += outstanding;
+    if (input.method === 'FLAT') {
+        // Taxa fixa: os juros restantes repartidos na proporção do capital de cada prestação.
+        let left = input.flatInterest;
+        items.forEach((item, index) => {
+            const share = index === items.length - 1 ? left : Math.round(input.flatInterest * item.principalMinor / input.remaining);
+            item.interestMinor = Math.max(0, share);
+            left -= item.interestMinor;
+        });
+    }
+    return items;
 }
 
 /** Novo plano para uma reestruturação: o capital em dívida reescalonado num novo prazo e taxa. */

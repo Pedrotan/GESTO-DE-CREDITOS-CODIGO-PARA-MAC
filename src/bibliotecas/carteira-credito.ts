@@ -171,7 +171,7 @@ export function portfolioRow(credit: Credit, context: PortfolioContext, numbers?
     const client = context.clients?.find(item => item.id === credit.clientId);
     const managerId = String(credit.usuario_id || client?.usuario_id || '');
     const manager = context.users?.find(user => user.id === managerId);
-    const productId = context.productOf?.get(credit.id);
+    const productId = (credit as any).productId || context.productOf?.get(credit.id);
     const lastPayment = payments.map(payment => luandaDateKey(payment.paymentDate)).sort().at(-1) || null;
     return {
         credit, id: credit.id, reference: numbers?.get(credit.id) || credit.id.slice(0, 11).toUpperCase(),

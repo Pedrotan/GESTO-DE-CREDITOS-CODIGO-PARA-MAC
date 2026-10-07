@@ -30,7 +30,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_contracts_usuario ON contracts(usuario_id)",
   "CREATE INDEX IF NOT EXISTS idx_credit_approvals_creditId ON credit_approvals(creditId)",
   "CREATE INDEX IF NOT EXISTS idx_credit_approvals_decidedAt ON credit_approvals(decidedAt)",
+  "CREATE INDEX IF NOT EXISTS idx_credit_documents_credit ON credit_documents(creditId)",
   "CREATE INDEX IF NOT EXISTS idx_credit_installments_due ON credit_installments(creditId, status, dueDate)",
+  "CREATE INDEX IF NOT EXISTS idx_credit_restructurings_credit ON credit_restructurings(creditId, requestedAt)",
   "CREATE INDEX IF NOT EXISTS idx_credits_clientId ON credits(clientId)",
   "CREATE INDEX IF NOT EXISTS idx_credits_createdAt ON credits(createdAt)",
   "CREATE INDEX IF NOT EXISTS idx_credits_dueDate ON credits(dueDate)",
@@ -81,18 +83,23 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS audit_logs ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, userId TEXT, userName TEXT, action TEXT NOT NULL, entity TEXT NOT NULL, details TEXT, previousState TEXT, newState TEXT, metadata TEXT )",
   "CREATE TABLE IF NOT EXISTS calendar_tasks ( id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, date TEXT NOT NULL, done INTEGER DEFAULT 0, createdAt TEXT DEFAULT (datetime('now')), usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS chat_messages ( id TEXT PRIMARY KEY, role TEXT, content TEXT, timestamp TEXT, userId TEXT )",
-  "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
+  "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, legalRepresentative TEXT, legalRepRole TEXT )",
   "CREATE TABLE IF NOT EXISTS closed_months ( id TEXT PRIMARY KEY, month INTEGER NOT NULL, year INTEGER NOT NULL, capitalApplied REAL NOT NULL, projectedProfit REAL NOT NULL, realizedProfit REAL NOT NULL, overdueAmount REAL NOT NULL, liquidationRate REAL NOT NULL, closedAt TEXT NOT NULL, closedBy TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS collection_events ( id TEXT PRIMARY KEY, creditId TEXT, kind TEXT NOT NULL CHECK(kind IN ('contact','promise','promise_kept','promise_broken','assignment','target')), agentId TEXT, agentName TEXT, monthKey TEXT, amountMinor INTEGER CHECK(amountMinor IS NULL OR (typeof(amountMinor) = 'integer' AND amountMinor >= 0)), promisedDate TEXT, relatedId TEXT, notes TEXT NOT NULL CHECK(length(trim(notes)) >= 5), actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK((kind NOT IN ('contact','promise','promise_kept','promise_broken','assignment')) OR creditId IS NOT NULL), CHECK(kind <> 'promise' OR (amountMinor > 0 AND promisedDate IS NOT NULL)), CHECK(kind <> 'target' OR (agentId IS NOT NULL AND monthKey IS NOT NULL AND amountMinor IS NOT NULL)), CHECK(kind <> 'assignment' OR agentId IS NOT NULL), CHECK(kind NOT IN ('promise_kept','promise_broken') OR relatedId IS NOT NULL) )",
   "CREATE TABLE IF NOT EXISTS collection_messages ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, creditIds TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, attemptNumber INTEGER DEFAULT 1, totalDue REAL DEFAULT 0, sentAt TEXT NOT NULL, sentBy TEXT, legalTriggered INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS company_settings ( id INTEGER PRIMARY KEY CHECK(id = 1), name TEXT NOT NULL, nif TEXT, address TEXT, logo TEXT, reportLogo TEXT, licenseKey TEXT, currency TEXT DEFAULT 'AOA', customClauses TEXT, rescueKey TEXT, phone TEXT, primaryColor TEXT, secondaryColor TEXT, watermarkLogo TEXT, sessionTimeout INTEGER DEFAULT 5, email TEXT, whatsapp TEXT, whatsappAutoNotify INTEGER DEFAULT 0, whatsappVerified INTEGER DEFAULT 0, syncEnabled INTEGER DEFAULT 0, syncUrl TEXT, syncApiKey TEXT, syncPasskey TEXT, lastSync TEXT, maintenanceMode INTEGER DEFAULT 0, allowedModulesDuringMaintenance TEXT DEFAULT '[]', enableGatewaysModule INTEGER DEFAULT 1, enableGatewaysModuleAdminOnly INTEGER DEFAULT 0, enableProfileActivity INTEGER DEFAULT 1, enableProfileActivityAdminOnly INTEGER DEFAULT 0, lastBackupDate TEXT, digitalSignatureEnabled INTEGER DEFAULT 1, authorizedSigners TEXT DEFAULT '[]', bankingInfo TEXT DEFAULT '[]', contractTemplates TEXT DEFAULT '[]', installDate TEXT, financialLock INTEGER DEFAULT 0, enableWarrantiesModule INTEGER DEFAULT 1, enableWarrantiesModuleAdminOnly INTEGER DEFAULT 0, enableLegalModule INTEGER DEFAULT 1, enableLegalModuleAdminOnly INTEGER DEFAULT 0, enableScoringModule INTEGER DEFAULT 1, enableScoringModuleAdminOnly INTEGER DEFAULT 0, defaultSimulationInterestRate REAL, defaultSimulationAdminFee REAL, defaultSimulationIof REAL, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPassword TEXT, smtpSecure INTEGER DEFAULT 0, smtpFromName TEXT, location TEXT, enableSuppliersModule INTEGER DEFAULT 0, enableSuppliersModuleAdminOnly INTEGER DEFAULT 0, enableMultiTenant INTEGER DEFAULT 1, website TEXT, segment TEXT, slogan TEXT )",
   "CREATE TABLE IF NOT EXISTS contracts ( id TEXT PRIMARY KEY, clientId TEXT, clientName TEXT, title TEXT, value REAL, startDate TEXT, endDate TEXT, status TEXT, terms TEXT, createdAt TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS credit_approvals (id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT, clientName TEXT, principalAmount REAL, interestRate REAL, installments INTEGER, decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')), reason TEXT, requestedBy TEXT, requestedAt TEXT, decidedBy TEXT NOT NULL, decidedById TEXT, decidedAt TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS credit_documents ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL, fileName TEXT NOT NULL, mimeType TEXT NOT NULL, dataUrl TEXT NOT NULL, uploadedAt TEXT NOT NULL, uploadedBy TEXT, uploadedByName TEXT, deletedAt TEXT, deletedBy TEXT )",
+  "CREATE TABLE IF NOT EXISTS credit_import_batches ( id TEXT PRIMARY KEY, number TEXT NOT NULL, fileName TEXT, createdAt TEXT NOT NULL, createdBy TEXT NOT NULL, createdById TEXT, rowsCount INTEGER NOT NULL DEFAULT 0, totalMinor INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','cancelled')), cancelledAt TEXT, cancelledBy TEXT, cancelReason TEXT )",
+  "CREATE TABLE IF NOT EXISTS credit_import_items ( batchId TEXT NOT NULL, creditId TEXT NOT NULL, PRIMARY KEY(batchId, creditId) )",
   "CREATE TABLE IF NOT EXISTS credit_installments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, installmentNumber INTEGER NOT NULL CHECK(installmentNumber > 0), dueDate TEXT NOT NULL, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL CHECK(interestMinor >= 0), lateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(lateInterestMinor >= 0), paidPrincipalMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidPrincipalMinor >= 0), paidInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidInterestMinor >= 0), paidLateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidLateInterestMinor >= 0), status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','partial','paid','overdue','cancelled')), paidAt TEXT, version INTEGER NOT NULL DEFAULT 0, UNIQUE(creditId, installmentNumber), FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
+  "CREATE TABLE IF NOT EXISTS credit_manager_transfers ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, fromUserId TEXT, toUserId TEXT NOT NULL, toUserName TEXT, reason TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS credit_reinforcements ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), idempotencyKey TEXT NOT NULL UNIQUE, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS credit_reinforcements ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), idempotencyKey TEXT NOT NULL UNIQUE, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT)",
+  "CREATE TABLE IF NOT EXISTS credit_restructurings ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('restructure','early_settlement')), mode TEXT, reason TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')), originalPlan TEXT NOT NULL, newPlan TEXT NOT NULL, params TEXT, payNowMinor INTEGER, requestedBy TEXT NOT NULL, requestedByName TEXT NOT NULL, requestedAt TEXT NOT NULL, decidedBy TEXT, decidedByName TEXT, decidedAt TEXT, decisionReason TEXT )",
   "CREATE TABLE IF NOT EXISTS credit_writeoffs ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL UNIQUE, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL, entryId TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK(requestedById <> approvedById) )",
-  "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
+  "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, productId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )",
   "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS ledger_lines ( id TEXT PRIMARY KEY, transactionId TEXT NOT NULL, account TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('debit', 'credit')), component TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), FOREIGN KEY(transactionId) REFERENCES ledger_transactions(id) ON DELETE RESTRICT )",
@@ -155,6 +162,12 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_cash_session_delete BEFORE DELETE ON accounting_cash_sessions BEGIN SELECT RAISE(ABORT, 'O histórico de caixa é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_collection_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_credit_documents_delete BEFORE DELETE ON credit_documents BEGIN SELECT RAISE(ABORT, 'Os documentos do crédito não podem ser apagados (só arquivados)')",
+  "CREATE TRIGGER IF NOT EXISTS trg_credit_manager_transfers_delete BEFORE DELETE ON credit_manager_transfers BEGIN SELECT RAISE(ABORT, 'O histórico de transferências é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_credit_manager_transfers_update BEFORE UPDATE ON credit_manager_transfers BEGIN SELECT RAISE(ABORT, 'O histórico de transferências é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_delete BEFORE DELETE ON credit_restructurings BEGIN SELECT RAISE(ABORT, 'O histórico de reestruturações não pode ser apagado')",
+  "CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_four_eyes BEFORE UPDATE ON credit_restructurings WHEN NEW.status = 'approved' AND OLD.kind = 'restructure' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.requestedBy) BEGIN SELECT RAISE(ABORT, 'A reestruturação tem de ser aprovada por outra pessoa')",
+  "CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_immutable BEFORE UPDATE ON credit_restructurings WHEN OLD.status <> 'pending' OR NEW.originalPlan <> OLD.originalPlan OR NEW.newPlan <> OLD.newPlan OR NEW.creditId <> OLD.creditId BEGIN SELECT RAISE(ABORT, 'Uma reestruturação já decidida não pode ser alterada')",
   "CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_delete BEFORE DELETE ON credit_writeoffs BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_update BEFORE UPDATE ON credit_writeoffs BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_delete BEFORE DELETE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')",
@@ -235,6 +248,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'accounting_entry', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'system', ?, ?)",
+  "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, 'credit', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, 'payment', ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, NULL, 'Sistema', 'update', 'system', ?, ?)",
@@ -245,15 +259,20 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO audit_logs (id,timestamp,userId,userName,action,entity,details,metadata) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO calendar_tasks (id, title, description, date, done, createdAt, usuario_id) VALUES (?,?,?,?,?,?,?)",
-  "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO collection_messages (id, clientId, clientName, creditIds, channel, message, attemptNumber, totalDue, sentAt, sentBy, legalTriggered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, terms, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_approvals (id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO credit_documents (id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedBy, uploadedByName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO credit_import_batches (id, number, fileName, createdAt, createdBy, createdById, rowsCount, totalMinor, status) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active')",
   "INSERT INTO credit_installments (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor) VALUES (?, ?, ?, ?, ?, ?)",
+  "INSERT INTO credit_manager_transfers (id, creditId, fromUserId, toUserId, toUserName, reason, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_reinforcements (id, creditId, amountMinor, interestMinor, idempotencyKey, notes, createdBy, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO credit_restructurings (id, creditId, kind, mode, reason, status, originalPlan, newPlan, params, payNowMinor, requestedBy, requestedByName, requestedAt) VALUES (?, ?, 'restructure', NULL, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?)",
+  "INSERT INTO credit_restructurings (id, creditId, kind, mode, reason, status, originalPlan, newPlan, params, payNowMinor, requestedBy, requestedByName, requestedAt, decidedBy, decidedByName, decidedAt) VALUES (?, ?, 'early_settlement', ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate, productId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO ledger_lines (id, transactionId, account, side, component, amountMinor) VALUES (?,?,?,?,?,?)",
   "INSERT INTO ledger_transactions (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor, totalCreditMinor, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -292,6 +311,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)",
   "INSERT OR IGNORE INTO company_settings (id, name, nif) VALUES (1, 'Tango Gestão de Créditos', '000000000')",
   "INSERT OR IGNORE INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
+  "INSERT OR IGNORE INTO credit_import_items (batchId, creditId) VALUES (?, ?)",
   "INSERT OR IGNORE INTO credit_installments (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor) VALUES (?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO dictionary (word, language) SELECT word, CASE WHEN language = 'ao' THEN 'pt-AO' WHEN language = 'pt' THEN 'pt-PT' WHEN language IN ('pt-AO', 'pt-PT', 'both') THEN language ELSE 'both' END FROM dictionary_old",
   "INSERT OR IGNORE INTO dictionary (word, language) VALUES (?, ?)",
@@ -337,12 +357,17 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM closed_months",
   "SELECT * FROM collection_events ORDER BY createdAt DESC, rowid DESC",
   "SELECT * FROM collection_events WHERE id = ? AND kind = ?",
+  "SELECT * FROM collection_events WHERE kind IN ('promise','promise_kept','promise_broken') ORDER BY createdAt",
   "SELECT * FROM collection_messages ORDER BY sentAt DESC",
   "SELECT * FROM company_settings WHERE id = 1",
   "SELECT * FROM company_settings WHERE id = ?",
   "SELECT * FROM contracts WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM contracts WHERE deletedAt IS NULL ORDER BY createdAt DESC",
+  "SELECT * FROM credit_import_batches ORDER BY createdAt DESC",
   "SELECT * FROM credit_installments",
+  "SELECT * FROM credit_manager_transfers WHERE creditId = ? ORDER BY createdAt DESC",
+  "SELECT * FROM credit_restructurings ORDER BY requestedAt DESC",
+  "SELECT * FROM credit_restructurings WHERE creditId = ? ORDER BY requestedAt DESC",
   "SELECT * FROM credit_writeoffs",
   "SELECT * FROM credits",
   "SELECT * FROM credits WHERE id = ?",
@@ -394,6 +419,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?",
   "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?",
   "SELECT COUNT(*) AS n FROM users",
+  "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?",
   "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?",
   "SELECT COUNT(*) as count FROM dictionary",
   "SELECT COUNT(*) as count FROM legal_cases WHERE priority = ?",
@@ -413,11 +439,18 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT c.id, c.principalAmount, c.principalAmountMinor, c.createdAt, c.requestedBy, c.usuario_id, cl.riskLevel FROM credits c LEFT JOIN clients cl ON cl.id = c.clientId WHERE c.deletedAt IS NULL AND c.createdAt >= ?",
   "SELECT c.id, c.startDate, c.installments, COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER)) AS principalMinor, MAX(0, COALESCE(c.totalDueMinor, CAST(ROUND(c.totalDue * 100) AS INTEGER)) - COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER))) AS interestMinor FROM credits c WHERE NOT EXISTS (SELECT 1 FROM credit_installments i WHERE i.creditId = c.id)",
   "SELECT clientId, SUM(COALESCE(currentBalanceMinor, ROUND(currentBalance * 100))) AS balance FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue','defaulted','renegotiated','pending_approval') GROUP BY clientId",
+  "SELECT clientId, status, principalAmount, currentBalance, totalDue, createdAt, startDate, deletedAt FROM credits WHERE clientId = ? AND deletedAt IS NULL",
   "SELECT clientId, version FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT convertedCreditId, productId FROM simulations WHERE convertedCreditId IS NOT NULL AND productId IS NOT NULL",
+  "SELECT creditId FROM credit_import_items WHERE batchId = ?",
+  "SELECT creditId FROM credit_writeoffs",
+  "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status FROM credit_installments WHERE status <> 'cancelled'",
+  "SELECT creditId, stage FROM legal_cases WHERE deletedAt IS NULL AND stage <> 'closed'",
   "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments",
   "SELECT day FROM accounting_daily_closes WHERE day = ?",
   "SELECT day, status, brokenSeq, verifiedAt FROM audit_daily_closes ORDER BY day DESC LIMIT 1",
   "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500",
+  "SELECT entityId FROM limit_escalations WHERE entityType = 'credit' AND status = 'pending'",
   "SELECT fileName, fileData, format FROM report_history WHERE id = ?",
   "SELECT fileName, mimeType, dataUrl, uploadedAt, uploadedBy FROM payment_proofs WHERE paymentId = ?",
   "SELECT fileName, movements FROM accounting_bank_imports",
@@ -433,19 +466,23 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id FROM notifications WHERE id = ?",
   "SELECT id FROM payments WHERE idempotencyKey = ?",
   "SELECT id FROM users WHERE email = ?",
+  "SELECT id FROM users WHERE role IN ('admin','super_admin','credit_director') AND (status IS NULL OR status <> 'blocked')",
   "SELECT id FROM users WHERE role IN ('super_admin', 'internal_auditor') AND (status IS NULL OR status <> 'blocked')",
   "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?",
-  "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod FROM credits WHERE deletedAt IS NULL",
+  "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod, productId FROM credits WHERE deletedAt IS NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL",
   "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, clientId, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC",
+  "SELECT id, creditId, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt FROM credit_installments",
+  "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC",
   "SELECT id, entityType, entityId, createdAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 100",
   "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, lateInterestMinor, version FROM credit_installments WHERE creditId = ?",
   "SELECT id, name, email, username, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature, ip FROM users",
   "SELECT id, name, email, username, role, avatar, status, permissions FROM users",
-  "SELECT id, name, nif, phone, riskLevel, fatherName, motherName FROM clients WHERE deletedAt IS NULL",
+  "SELECT id, name, nif, phone, riskLevel, fatherName, motherName, spouseName, spouseBi, spouseNif, spousePhone, legalRepresentative FROM clients WHERE deletedAt IS NULL",
   "SELECT id, name, role FROM users WHERE LOWER(email) = ?",
   "SELECT id, name, role, branchId FROM users WHERE id = ?",
   "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'",
@@ -454,12 +491,15 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, reportType, title, format, filters, fileName, generatedAt, generatedBy, generatedById FROM report_history ORDER BY generatedAt DESC LIMIT 200",
   "SELECT id, requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?",
+  "SELECT id, status FROM credits WHERE deletedAt IS NULL",
   "SELECT id, status FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, status, daysOverdue, clientName FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue')",
   "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp",
   "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs",
   "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp",
   "SELECT id, totalDueMinor, totalDue, deletedAt FROM credits WHERE id = ?",
+  "SELECT id, usuario_id, clientName FROM credits WHERE deletedAt IS NULL",
   "SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
   "SELECT integrityHash FROM audit_log_chain ORDER BY seq DESC LIMIT 1",
   "SELECT l.*, t.timestamp, t.sourceId, t.description FROM ledger_lines l LEFT JOIN ledger_transactions t ON t.id = l.transactionId ORDER BY t.timestamp, l.id",
@@ -500,7 +540,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE audit_alerts SET status = ?, assignedTo = ?, assignedToName = ?, dueAt = ?, updatedAt = ?, closedBy = ?, closedByName = ?, closedAt = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
-  "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber) WHERE id = ?",
+  "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole) WHERE id = ?",
   "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'",
   "UPDATE company_settings SET installDate = ? WHERE installDate IS NULL",
   "UPDATE company_settings SET name = 'Tango Gestão de Créditos' WHERE name = 'Provisório' OR name = 'Empresa' OR name IS NULL OR name = ''",
@@ -511,25 +551,36 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE contracts SET status = 'active' WHERE id = ? AND status = 'paid'",
   "UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'",
   "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?",
+  "UPDATE credit_documents SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL",
+  "UPDATE credit_import_batches SET rowsCount = ?, totalMinor = ? WHERE id = ?",
+  "UPDATE credit_import_batches SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ? WHERE id = ? AND status = 'active'",
+  "UPDATE credit_installments SET dueDate = ?, principalMinor = ?, interestMinor = ?, status = 'pending', version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credit_installments SET interestMinor = ?, lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credit_installments SET lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credit_installments SET paidPrincipalMinor = ?, paidInterestMinor = ?, paidLateInterestMinor = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND version = ?",
+  "UPDATE credit_installments SET principalMinor = 0, interestMinor = 0, status = 'cancelled', version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credit_installments SET principalMinor = ?, interestMinor = ?, version = version + 1 WHERE id = ? AND version = ?",
+  "UPDATE credit_restructurings SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'",
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
+  "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, dueDate = ?, status = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL",
+  "UPDATE credits SET status = 'cancelled' WHERE id = ? AND status = 'pending_approval'",
   "UPDATE credits SET status = 'defaulted', version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET status = ?, approvedBy = ?, approvalNotes = ?, version = version + 1 WHERE id = ? AND status = 'pending_approval' AND version = ?",
+  "UPDATE credits SET status = ?, daysOverdue = ? WHERE id = ? AND status = ? AND deletedAt IS NULL",
   "UPDATE credits SET targetMonthId = ?, version = version + 1 WHERE id = ? AND version = ?",
+  "UPDATE credits SET usuario_id = ? WHERE id = ? AND deletedAt IS NULL",
   "UPDATE internal_messages SET read = 1 WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE limit_escalations SET requiredLevelIndex = ?, requiredLevelId = ?, requiredLevelName = ?, levelSince = ?, escalationCount = escalationCount + 1, lastReminderAt = ? WHERE id = ? AND status = 'pending' AND levelSince = ?",
   "UPDATE limit_escalations SET status = 'approved', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE id = ? AND status = 'pending'",
+  "UPDATE limit_escalations SET status = 'cancelled', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE entityType = 'credit' AND entityId = ? AND status = 'pending'",
   "UPDATE limit_escalations SET status = 'rejected', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE id = ? AND status = 'pending'",
   "UPDATE limit_exceptions SET status = 'revoked', decidedBy = COALESCE(decidedBy, ?), decidedByName = COALESCE(decidedByName, ?), decidedAt = COALESCE(decidedAt, ?), decisionReason = ? WHERE id = ? AND status IN ('approved','pending')",
   "UPDATE limit_exceptions SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'",
@@ -703,8 +754,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_credit_approvals_decidedAt ON credit_approvals(decidedAt)"
   ],
   [
+    "2249dda7b48c2784529d4f206e04bf8ce0a77a0b8099f2a7c7856cc4f84963df",
+    "CREATE INDEX IF NOT EXISTS idx_credit_documents_credit ON credit_documents(creditId)"
+  ],
+  [
     "2bbc6ebd4e6ec4f0ae4998607f449d7cc3ae7df164952b3f8d38c63746f3e2db",
     "CREATE INDEX IF NOT EXISTS idx_credit_installments_due ON credit_installments(creditId, status, dueDate)"
+  ],
+  [
+    "edadd213697d0b2f5c777d3cbf253e6f403e3c4d592e763cbc6589f8008065b5",
+    "CREATE INDEX IF NOT EXISTS idx_credit_restructurings_credit ON credit_restructurings(creditId, requestedAt)"
   ],
   [
     "48bb89b45a47810f63e4c402ccd422b57a785a63c6bfbaae5289f5d6b65bbe9b",
@@ -907,8 +966,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS chat_messages ( id TEXT PRIMARY KEY, role TEXT, content TEXT, timestamp TEXT, userId TEXT )"
   ],
   [
-    "c7f06e7360e6573b022a0e565d9988d6348af92fc4774fe492ffd3bd6d2980d2",
-    "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )"
+    "6cea738d3e8d18cdd5d290d69e49d13cafcb966efe67a65a49a23109d8c226dd",
+    "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, legalRepresentative TEXT, legalRepRole TEXT )"
   ],
   [
     "e8f579d0595debb4ef76ec98c407eccb4609897a3aefa6deb24943df1ebd1f07",
@@ -935,8 +994,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS credit_approvals (id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT, clientName TEXT, principalAmount REAL, interestRate REAL, installments INTEGER, decision TEXT NOT NULL CHECK (decision IN ('approved', 'rejected')), reason TEXT, requestedBy TEXT, requestedAt TEXT, decidedBy TEXT NOT NULL, decidedById TEXT, decidedAt TEXT NOT NULL)"
   ],
   [
+    "7bdabfa7383ebd762d7d579a57da96aa2173eb294c28573229a79f6fb43dca8c",
+    "CREATE TABLE IF NOT EXISTS credit_documents ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL, fileName TEXT NOT NULL, mimeType TEXT NOT NULL, dataUrl TEXT NOT NULL, uploadedAt TEXT NOT NULL, uploadedBy TEXT, uploadedByName TEXT, deletedAt TEXT, deletedBy TEXT )"
+  ],
+  [
+    "390527bb5292a95383dac2ddac301dd6f3da45306f7b3fbdc0a673bbb0363090",
+    "CREATE TABLE IF NOT EXISTS credit_import_batches ( id TEXT PRIMARY KEY, number TEXT NOT NULL, fileName TEXT, createdAt TEXT NOT NULL, createdBy TEXT NOT NULL, createdById TEXT, rowsCount INTEGER NOT NULL DEFAULT 0, totalMinor INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','cancelled')), cancelledAt TEXT, cancelledBy TEXT, cancelReason TEXT )"
+  ],
+  [
+    "e3ebe20568cddaa2487423e860484f326442967eff1bc3ef348d14ba39dc6f4a",
+    "CREATE TABLE IF NOT EXISTS credit_import_items ( batchId TEXT NOT NULL, creditId TEXT NOT NULL, PRIMARY KEY(batchId, creditId) )"
+  ],
+  [
     "8c08344cc6cde3ff2f4f340a5e20147b8ec5efb9f1d9daff49a3a76fcf9c1e32",
     "CREATE TABLE IF NOT EXISTS credit_installments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, installmentNumber INTEGER NOT NULL CHECK(installmentNumber > 0), dueDate TEXT NOT NULL, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL CHECK(interestMinor >= 0), lateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(lateInterestMinor >= 0), paidPrincipalMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidPrincipalMinor >= 0), paidInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidInterestMinor >= 0), paidLateInterestMinor INTEGER NOT NULL DEFAULT 0 CHECK(paidLateInterestMinor >= 0), status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending','partial','paid','overdue','cancelled')), paidAt TEXT, version INTEGER NOT NULL DEFAULT 0, UNIQUE(creditId, installmentNumber), FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )"
+  ],
+  [
+    "137f314d92ebe1020c108b5ee956021ccefe9f8530d4d067d31b0100e01d81e3",
+    "CREATE TABLE IF NOT EXISTS credit_manager_transfers ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, fromUserId TEXT, toUserId TEXT NOT NULL, toUserName TEXT, reason TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL )"
   ],
   [
     "9f8ad5b58f948c33647a1a837a673557646d18aa756d5804cec05d0f4c52c834",
@@ -947,12 +1022,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS credit_reinforcements ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), idempotencyKey TEXT NOT NULL UNIQUE, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT)"
   ],
   [
+    "538391deb0adc90b42af95a21bb3a24a0ea1ae485c0835163d5c8c446e5b40f3",
+    "CREATE TABLE IF NOT EXISTS credit_restructurings ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('restructure','early_settlement')), mode TEXT, reason TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')), originalPlan TEXT NOT NULL, newPlan TEXT NOT NULL, params TEXT, payNowMinor INTEGER, requestedBy TEXT NOT NULL, requestedByName TEXT NOT NULL, requestedAt TEXT NOT NULL, decidedBy TEXT, decidedByName TEXT, decidedAt TEXT, decisionReason TEXT )"
+  ],
+  [
     "2bc2de045392367e0d1c88214291acfff3feae2dca9340f295272763c93c280f",
     "CREATE TABLE IF NOT EXISTS credit_writeoffs ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL UNIQUE, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL, entryId TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK(requestedById <> approvedById) )"
   ],
   [
-    "f077fe2b2c32059687e09d14f26909d20370e4a75aeb5b2a2b9e7a6bece80f8a",
-    "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )"
+    "ea1217863348361b78d2b40d925f555e8a3bd12e843254fd4175c890df829e2e",
+    "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, productId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )"
   ],
   [
     "2777cdd03e0ebd2be15beeacf0f37a3b504220a8a3655a76018f7da6a6038cf2",
@@ -1201,6 +1280,30 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "676134166855a8983159bd9ca52f58bd40bf144cff6fad8d3d035eb54dd2f863",
     "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')"
+  ],
+  [
+    "5b3f2214e4d93976a1fd63e628b80d3c1230f1fa681459808e5bddf35995c372",
+    "CREATE TRIGGER IF NOT EXISTS trg_credit_documents_delete BEFORE DELETE ON credit_documents BEGIN SELECT RAISE(ABORT, 'Os documentos do crédito não podem ser apagados (só arquivados)')"
+  ],
+  [
+    "2c1ee71efe46d022ed6d05c5708d6a2ee63d81ee3683c4ffe03bda0fd43817bf",
+    "CREATE TRIGGER IF NOT EXISTS trg_credit_manager_transfers_delete BEFORE DELETE ON credit_manager_transfers BEGIN SELECT RAISE(ABORT, 'O histórico de transferências é imutável')"
+  ],
+  [
+    "3a2ec5834690275ed751e4e3eb0ea828cdb124b6c3a787d6b0e1fb5d073a04ff",
+    "CREATE TRIGGER IF NOT EXISTS trg_credit_manager_transfers_update BEFORE UPDATE ON credit_manager_transfers BEGIN SELECT RAISE(ABORT, 'O histórico de transferências é imutável')"
+  ],
+  [
+    "d02405a19a8698d968ccece75eda847f300fbec9466ab87aee7f45fd02789264",
+    "CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_delete BEFORE DELETE ON credit_restructurings BEGIN SELECT RAISE(ABORT, 'O histórico de reestruturações não pode ser apagado')"
+  ],
+  [
+    "beae9c33fb29a654d83c7510a36c91bffb60b496317c9e20593198561ce6d31b",
+    "CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_four_eyes BEFORE UPDATE ON credit_restructurings WHEN NEW.status = 'approved' AND OLD.kind = 'restructure' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.requestedBy) BEGIN SELECT RAISE(ABORT, 'A reestruturação tem de ser aprovada por outra pessoa')"
+  ],
+  [
+    "30567399cd2be3a53b19389876cc73d3b2b98afe6104974d8dcb49bbd682c2dd",
+    "CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_immutable BEFORE UPDATE ON credit_restructurings WHEN OLD.status <> 'pending' OR NEW.originalPlan <> OLD.originalPlan OR NEW.newPlan <> OLD.newPlan OR NEW.creditId <> OLD.creditId BEGIN SELECT RAISE(ABORT, 'Uma reestruturação já decidida não pode ser alterada')"
   ],
   [
     "644c6e40201686e991b0fbbea08c072e021c3459659afc68c6b3d573583a4fa7",
@@ -1523,6 +1626,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'update', 'system', ?, ?)"
   ],
   [
+    "493a9e09ad61a529c2114196288db8cbf68f55b335902aae056a691956d15e45",
+    "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, 'credit', ?, ?)"
+  ],
+  [
     "12c31a3627c43562e51cf7f6c8d9dec7c3b16c53b6e1f7e8eab64943c01ed42c",
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, ?, 'payment', ?, ?)"
   ],
@@ -1563,8 +1670,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO calendar_tasks (id, title, description, date, done, createdAt, usuario_id) VALUES (?,?,?,?,?,?,?)"
   ],
   [
-    "f8c588d48b3e85d2b8a7cf5ea55e72bb70d7cdbd73d7c41d7605ec9527b75277",
-    "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "506a72a37a37a2dbef0bf60c0ad8ee93a3e200067f4e095a674d755b38b3aba0",
+    "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "91d2d82b3e73e1db642a1f04e9e04604dfde45206bf6c5e24abb531f3752c4e3",
@@ -1583,20 +1690,40 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO credit_approvals (id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "0ae8a6176fce759b0b410a97e84953252c8cd78d4485f5debd709b995df8b3bd",
+    "INSERT INTO credit_documents (id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedBy, uploadedByName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "2892cddc7cdfc23454ee3275b829b226cbfff65cd180cdbbb4aa1a9d88eee6e3",
+    "INSERT INTO credit_import_batches (id, number, fileName, createdAt, createdBy, createdById, rowsCount, totalMinor, status) VALUES (?, ?, ?, ?, ?, ?, 0, 0, 'active')"
+  ],
+  [
     "bd5dcf81d2137e6e1e41a5a8d5154fd54c13a09d1c8a38b7015dc483a88ed33f",
     "INSERT INTO credit_installments (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor) VALUES (?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "3e744c46123d49fc5047642deec0b0af842c39b4569aa5b0440f98446b79d595",
+    "INSERT INTO credit_manager_transfers (id, creditId, fromUserId, toUserId, toUserName, reason, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "25bf964c0c238c2ccf2d5e5b646246e3d69e39f309c692e8383e0cf85b5d15f7",
     "INSERT INTO credit_reinforcements (id, creditId, amountMinor, interestMinor, idempotencyKey, notes, createdBy, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "f96329309fa70f5099a1c7bca0a385422ba6120aecf70d323eb314bd83726daa",
+    "INSERT INTO credit_restructurings (id, creditId, kind, mode, reason, status, originalPlan, newPlan, params, payNowMinor, requestedBy, requestedByName, requestedAt) VALUES (?, ?, 'restructure', NULL, ?, 'pending', ?, ?, ?, NULL, ?, ?, ?)"
+  ],
+  [
+    "fb6ec72350363b0da774664b680db9e82dfa76358ca085b6138d69483bfadbd8",
+    "INSERT INTO credit_restructurings (id, creditId, kind, mode, reason, status, originalPlan, newPlan, params, payNowMinor, requestedBy, requestedByName, requestedAt, decidedBy, decidedByName, decidedAt) VALUES (?, ?, 'early_settlement', ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "49cf0dbc1f6dbf40fe928eff02140e56d35670737033ae6baf6679d485425d3c",
     "INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
-    "0f4edfc6e8bbf188b8d77495851bf29a84fe58e2e998b9e8e8a8d6339af2963b",
-    "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+    "1554539be5261997025e02344b1afdfdee3c3ff4eef5334f56b630ab3e021357",
+    "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate, productId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
     "354403cb3fbc65e11a3acb6f2ed18990fe20472096e214c9192ca4884b2e5c20",
@@ -1749,6 +1876,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d032f54f7459051d29a705cda4a56ba297b4c15ffc036a799bfa9d2c954ccd80",
     "INSERT OR IGNORE INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)"
+  ],
+  [
+    "e64404d01bf43919846dd317e0fb27f13ca17c47a2b90584672269fd50bcb880",
+    "INSERT OR IGNORE INTO credit_import_items (batchId, creditId) VALUES (?, ?)"
   ],
   [
     "6ae13246fc143102f8e19cfe722a2b6bdac37ba29fd1f3c5eaab10c014646895",
@@ -1931,6 +2062,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM collection_events WHERE id = ? AND kind = ?"
   ],
   [
+    "3151401e5c7b9baf8fc1b46b1e4822a9614cd02252629b1bdd6a448779210d41",
+    "SELECT * FROM collection_events WHERE kind IN ('promise','promise_kept','promise_broken') ORDER BY createdAt"
+  ],
+  [
     "6297e5025eaa64ce232d0296cdb76aa7eb8a335cda4b1a289bbbb2ac585cf996",
     "SELECT * FROM collection_messages ORDER BY sentAt DESC"
   ],
@@ -1951,8 +2086,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM contracts WHERE deletedAt IS NULL ORDER BY createdAt DESC"
   ],
   [
+    "d5e5bfee542e75f424579150ccbb664b85f879244de474ef060fc5aa8c092737",
+    "SELECT * FROM credit_import_batches ORDER BY createdAt DESC"
+  ],
+  [
     "59c1a7f72df5eacf043d5d0b7fee519983da359bee31a0a1a0faf5f8ae50919b",
     "SELECT * FROM credit_installments"
+  ],
+  [
+    "b105d3648c37ee2db7b63316e78f1c0fc938959434bddb6d2c6ede050dc8222e",
+    "SELECT * FROM credit_manager_transfers WHERE creditId = ? ORDER BY createdAt DESC"
+  ],
+  [
+    "6592775787d53b5476073f9ef2e1d4c9f0f877f84e284adab5b10fd232915dda",
+    "SELECT * FROM credit_restructurings ORDER BY requestedAt DESC"
+  ],
+  [
+    "5384fa9326c3519e1aa5550c74ad7e95aeec5041d7bff7e27a8bc515e4cf0ef4",
+    "SELECT * FROM credit_restructurings WHERE creditId = ? ORDER BY requestedAt DESC"
   ],
   [
     "b2b70e3f3aac019a93e71e6a11b40b1917211c40bc33e8c6db2a62b9ae6bfda5",
@@ -2159,6 +2310,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COUNT(*) AS n FROM users"
   ],
   [
+    "771579d0a55575f2aefd9dcad891f906a9ad82833692c76e404ded412695038c",
+    "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?"
+  ],
+  [
     "c8ddff8281e56ce8629e49973eb25d32b0dc191dbe28998bb0b98dd69958c5c5",
     "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?"
   ],
@@ -2235,8 +2390,32 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT clientId, SUM(COALESCE(currentBalanceMinor, ROUND(currentBalance * 100))) AS balance FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue','defaulted','renegotiated','pending_approval') GROUP BY clientId"
   ],
   [
+    "a3e8d7fb9fe8e7516af9b6e6eaec79e2c65467719d0679a09f098d4e51563faa",
+    "SELECT clientId, status, principalAmount, currentBalance, totalDue, createdAt, startDate, deletedAt FROM credits WHERE clientId = ? AND deletedAt IS NULL"
+  ],
+  [
     "48f1643d9a06ac51d21e2a2a22b5ae6e2c6ae020961ce14441e9157c6f5c6271",
     "SELECT clientId, version FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "00f13408432a1eda6723a565bfc26cfab8b493452a0e3fc7fd1d5b39fd561da4",
+    "SELECT convertedCreditId, productId FROM simulations WHERE convertedCreditId IS NOT NULL AND productId IS NOT NULL"
+  ],
+  [
+    "b6e27e23d8113b62ac108b7aab6cbc5591b01966cbeced5f4670a91b0f1145e3",
+    "SELECT creditId FROM credit_import_items WHERE batchId = ?"
+  ],
+  [
+    "cf94a5c2e80c6e741bae017809cf2660b6822f9a2cbb749f48eec6d6aeaebaed",
+    "SELECT creditId FROM credit_writeoffs"
+  ],
+  [
+    "d2d20e166d0c2a1a51b3af51f46196317daac73b5daebf1833afb7c83ee8b7b3",
+    "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status FROM credit_installments WHERE status <> 'cancelled'"
+  ],
+  [
+    "cc45ae6a81a4b79953483f522a09f975265209d485f42d594fa120ae41a65c61",
+    "SELECT creditId, stage FROM legal_cases WHERE deletedAt IS NULL AND stage <> 'closed'"
   ],
   [
     "598ee0b5e91f5b81590cb7d54a4dda2e1860dcf9e32ea15a424f72ae174517c6",
@@ -2253,6 +2432,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "f40de797fae008ebe5d1c22db3e9a727c84bda052317d39540a86e57fa98dd19",
     "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500"
+  ],
+  [
+    "23fa4168af434358e45f29067d31a3e2c8d7105ca30066445be3f164fdb2c491",
+    "SELECT entityId FROM limit_escalations WHERE entityType = 'credit' AND status = 'pending'"
   ],
   [
     "52559f037a89b243c5b564e1925c6c6723d3255909f7105ec971ba7033ebe6c4",
@@ -2315,6 +2498,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id FROM users WHERE email = ?"
   ],
   [
+    "a0c2a7f0d5cd98b706cb5be27130f5073bf7c22a5e00a9f883341133491e2c67",
+    "SELECT id FROM users WHERE role IN ('admin','super_admin','credit_director') AND (status IS NULL OR status <> 'blocked')"
+  ],
+  [
     "538d1e9bdb1e5f96afaaf280bac40cf79ec9f8b42dfe671d2b2f54c9c787973f",
     "SELECT id FROM users WHERE role IN ('super_admin', 'internal_auditor') AND (status IS NULL OR status <> 'blocked')"
   ],
@@ -2323,8 +2510,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?"
   ],
   [
-    "b5062e4958bfe822842c3247a764085441bc96b6c9edfabc215f34f0db9d1e93",
-    "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod FROM credits WHERE deletedAt IS NULL"
+    "33c7348b49294ad9b1ccf1e756b16b31fc61650d4b51ad4d561ddb5971f812fc",
+    "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod, productId FROM credits WHERE deletedAt IS NULL"
   ],
   [
     "ccafb7c269b7a7d7c159d6b9702b60ad64802276a7ab5057cd0668cec8c00822",
@@ -2335,12 +2522,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "e06ca25b0bb0abedd534653b8d3205c2b69a7511bb1058860feb30f3507c03b9",
+    "SELECT id, clientId, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
     "9fe1ad80771f8332841f845fe08310d7006658e343c05dae63d48bc6f1b6dfd8",
     "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
     "2700cbcf81526b02bff254c2148f19906658bb7180c0b753ff42aad7e9012c78",
     "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC"
+  ],
+  [
+    "363e9c081ff01a62e89b553e613e142a89a67fb240317ebc1b1bc361a186a0f7",
+    "SELECT id, creditId, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt FROM credit_installments"
+  ],
+  [
+    "18f872abec7e51e7606df6b21240f8ff974534d61d3b776750842d243e6af040",
+    "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC"
   ],
   [
     "a7770ae43efe294accb7439f93d4deb0dbfef90fd94fa5ba13c32b6a83e142a7",
@@ -2363,8 +2562,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, name, email, username, role, avatar, status, permissions FROM users"
   ],
   [
-    "d2da1485c8d4a6589f17bbadd07b9d727156775e5b5a2201620195bb87746a3d",
-    "SELECT id, name, nif, phone, riskLevel, fatherName, motherName FROM clients WHERE deletedAt IS NULL"
+    "1bf291dd03e794dd9959b0e30f29d28f6f513dbcd99545ebd467cbb619dfbd09",
+    "SELECT id, name, nif, phone, riskLevel, fatherName, motherName, spouseName, spouseBi, spouseNif, spousePhone, legalRepresentative FROM clients WHERE deletedAt IS NULL"
   ],
   [
     "dd72910f6a5a6c1ec60024f1db4062da2f19123c0f06fca75f39cfd80e36261a",
@@ -2399,8 +2598,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?"
   ],
   [
+    "03ec4c4f0303a0b06ecaeb83c7d8435576d3042233d0d49c9ac9d51870ea70ab",
+    "SELECT id, status FROM credits WHERE deletedAt IS NULL"
+  ],
+  [
     "ce731292039fe7bdae2d087e06d596dee308ee5f3ab8b981fd827c01f21d31e2",
     "SELECT id, status FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "c7e5bd1234545cfaba828d45c19b1a923cccc13a357a457400d9ff8d686d7ad0",
+    "SELECT id, status, daysOverdue, clientName FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue')"
   ],
   [
     "a6b9c39cd353d4f69f3ff8d4a67af48cd8a238abb6750cb27f79ca71b63974a1",
@@ -2421,6 +2628,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "14fee47bb181f867e0e0738dbbeef2b087656dcd28b049f1b862bac69d87da45",
     "SELECT id, totalDueMinor, totalDue, deletedAt FROM credits WHERE id = ?"
+  ],
+  [
+    "ba04f742187e969abe3df4ebc393e5fbb97b5a24820cfe2fb6ecfe6362f6b400",
+    "SELECT id, usuario_id, clientName FROM credits WHERE deletedAt IS NULL"
   ],
   [
     "fcf26680ca3225940c6e6728d753e6488bc5509c1769ca756a54f6a354a6b56f",
@@ -2583,8 +2794,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
   ],
   [
-    "8de17c2ce2fe717a10fff4708d6a6460a59536f37d5cfe7fc2e6aea082bf1be4",
-    "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber) WHERE id = ?"
+    "89e248af07953f429bab8293993fab7ecb56ad62352e7b6e710bedec3759c3c9",
+    "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole) WHERE id = ?"
   ],
   [
     "2f7925dfbdf6d1a23a6e49b58530e1a21aeb956df25dfba73b9630f5833ef9e4",
@@ -2627,6 +2838,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?"
   ],
   [
+    "8aad810ee85a2d79fcbb22a23e2bbf03a7cd6cede00098829920fd3d50529b77",
+    "UPDATE credit_documents SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "ccbacb901a7738379ca7b1317d80fa26b2b3dc0e9e4b26b55eb2a56814835dd6",
+    "UPDATE credit_import_batches SET rowsCount = ?, totalMinor = ? WHERE id = ?"
+  ],
+  [
+    "33e4dbd33d03d4aa4cf61b3090c167c73acfa843f2ea8051031c261fe776f1eb",
+    "UPDATE credit_import_batches SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ? WHERE id = ? AND status = 'active'"
+  ],
+  [
+    "9d83675ce459909422a72a81f96f046657517d586ec96c5ad34e377085f346dd",
+    "UPDATE credit_installments SET dueDate = ?, principalMinor = ?, interestMinor = ?, status = 'pending', version = version + 1 WHERE id = ? AND version = ?"
+  ],
+  [
     "1b017e8f100ee7127f60e6f32138eca6d0fd3f185dd36363fdf341ba73f5c7ce",
     "UPDATE credit_installments SET interestMinor = ?, lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?"
   ],
@@ -2639,12 +2866,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credit_installments SET paidPrincipalMinor = ?, paidInterestMinor = ?, paidLateInterestMinor = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND version = ?"
   ],
   [
+    "0b801ec2a638430bea0e053c86a9428ddf8334761c7c8e0bf095a14d1394b4ba",
+    "UPDATE credit_installments SET principalMinor = 0, interestMinor = 0, status = 'cancelled', version = version + 1 WHERE id = ? AND version = ?"
+  ],
+  [
     "7bf64bcbafd625bb2afafac8f8ea96c34f73f140773f75f47ed9157e896a6c63",
     "UPDATE credit_installments SET principalMinor = ?, interestMinor = ?, version = version + 1 WHERE id = ? AND version = ?"
   ],
   [
+    "04e23e3b9071ddebc12fb6c3376e226c153a8aed8aa3c37fbcc0f0681fd98d40",
+    "UPDATE credit_restructurings SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'"
+  ],
+  [
     "01f65c5d21eace6ca464ea03e2e89f9357e164edc3f4f6d2420a8115f06e6ffb",
     "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
+  ],
+  [
+    "f69867e4afcb45c93c007faba8e3422dcab19098b32e3772f8c9ae75d2ebb8f5",
+    "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, dueDate = ?, status = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
     "a725143990d6d068b5042e81ee952a0bef767210d8e5e6ac633b401000cf06c5",
@@ -2671,6 +2910,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL"
   ],
   [
+    "37114f51d3fdd55f6a09060b8fba13ae1cb3b20e6f57261a5f80551092afe49d",
+    "UPDATE credits SET status = 'cancelled' WHERE id = ? AND status = 'pending_approval'"
+  ],
+  [
     "c63bc0f11a1d37062e060fa3269964df161dad5b8830c4d63eb4ce9487f666e5",
     "UPDATE credits SET status = 'defaulted', version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
@@ -2679,8 +2922,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET status = ?, approvedBy = ?, approvalNotes = ?, version = version + 1 WHERE id = ? AND status = 'pending_approval' AND version = ?"
   ],
   [
+    "d9bc4b3a9223a1700eb366684680e712cc2f01517bba03a09efe2e930b2879ce",
+    "UPDATE credits SET status = ?, daysOverdue = ? WHERE id = ? AND status = ? AND deletedAt IS NULL"
+  ],
+  [
     "ca9419bff35cfb1376fbbfd1e9374befcdb2f33bba4e38fdf91727df9da47072",
     "UPDATE credits SET targetMonthId = ?, version = version + 1 WHERE id = ? AND version = ?"
+  ],
+  [
+    "3318a33f79c6f7deabcd665a679e1ee65c099db75c73e875ea91243967e1bd94",
+    "UPDATE credits SET usuario_id = ? WHERE id = ? AND deletedAt IS NULL"
   ],
   [
     "9d9336ca8747e039dc5456d53c24237c97b0b67f0a54f71ec4221485798c1e6d",
@@ -2701,6 +2952,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "f1bcddbcb8b5f17e23120d2aabf58caef94503757047066405ac4e54f3e91148",
     "UPDATE limit_escalations SET status = 'approved', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE id = ? AND status = 'pending'"
+  ],
+  [
+    "9dc4292d065a8d278b805be958eabef93a9d7430db554aeadd498f40433d132d",
+    "UPDATE limit_escalations SET status = 'cancelled', decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE entityType = 'credit' AND entityId = ? AND status = 'pending'"
   ],
   [
     "18c9b78d78a9fd9783d8699fc57e9b2db73591a1c73422cb7c722b4ce5cd42de",
