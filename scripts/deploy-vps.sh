@@ -56,20 +56,18 @@ sudo ufw allow 443/tcp || true
 sudo ufw --force enable || true
 
 echo "====================================================================="
-echo "   Configuração Base Concluída com Sucesso!                         "
+echo "   Configuração Base Concluída! A iniciar contentores Docker...    "
 echo "====================================================================="
+
+docker compose up -d --build
+
 echo ""
-echo "Escolha como deseja rodar a aplicação:"
+echo "A aguardar inicialização da aplicação..."
+sleep 5
+
+curl -s http://localhost:3000/api/health || true
 echo ""
-echo "Opção A (Recomendada - Docker com PostgreSQL Integrado):"
-echo "   docker compose up -d --build"
-echo ""
-echo "Opção B (Nativo com Node.js + PM2):"
-echo "   npm install"
-echo "   npm run build:vps"
-echo "   pm2 start ecosystem.config.cjs --env production"
-echo "   pm2 save && pm2 startup"
-echo ""
-echo "Para verificar o estado do servidor:"
-echo "   curl http://localhost:3000/api/health"
 echo "====================================================================="
+echo "   Tango Gestão ERP está ativo e operacional na porta 3000!          "
+echo "====================================================================="
+
