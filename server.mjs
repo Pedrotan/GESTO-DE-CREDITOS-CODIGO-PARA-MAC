@@ -119,6 +119,68 @@ const initDatabaseBridge = async () => {
     };
 
     console.log('[VPS Database] Ponte PostgreSQL ativa (pg.Pool -> Suporta PostgreSQL local e Docker no VPS).');
+
+    // Inicializar tabelas e semear empresas do Tango Master na base de dados
+    try {
+      await pgPool.query(`
+        CREATE TABLE IF NOT EXISTS tango_tenants (
+          tenant_id TEXT PRIMARY KEY,
+          tenant_hash TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          key_hash TEXT NOT NULL,
+          access_code TEXT,
+          status TEXT NOT NULL DEFAULT 'active',
+          expires_at TIMESTAMPTZ,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          last_sync_at TIMESTAMPTZ
+        );
+        CREATE TABLE IF NOT EXISTS tango_registration_requests (
+          id TEXT PRIMARY KEY,
+          nif TEXT NOT NULL,
+          company_name TEXT NOT NULL,
+          contact_name TEXT NOT NULL,
+          phone TEXT NOT NULL,
+          email TEXT,
+          message TEXT,
+          status TEXT NOT NULL DEFAULT 'pending',
+          created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          handled_at TIMESTAMPTZ
+        );
+      `);
+
+      const seedCompanies = [
+        {
+          id: '5417002673',
+          tHash: 'fb14d0c3542ee0136f183c1ffd300102eeda2a76e32990bdcc9b63c5d9918de3',
+          name: 'DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA',
+          kHash: '99eb32203237b3c361d1caa31cb82630d3a24194387900ae7ba27b3ee3f3840a',
+          code: 'TG-AG9E-VTBY'
+        },
+        {
+          id: '5417001439',
+          tHash: '511787b16436e18bf21f42ca118854a49d77e3a5b844f58db680460d1bffe06f',
+          name: 'Erecabde Comércio e Serviços LDA',
+          kHash: 'dddb9f0511251eb895877e8c40a16ac3a56c426a6fee18cd10ac0a827c909b5a',
+          code: 'TG-1357-4F6V'
+        }
+      ];
+
+      for (const sc of seedCompanies) {
+        await pgPool.query(`
+          INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash, access_code, status)
+          VALUES ($1, $2, $3, $4, $5, 'active')
+          ON CONFLICT (tenant_id) DO UPDATE SET
+            name = EXCLUDED.name,
+            key_hash = EXCLUDED.key_hash,
+            access_code = EXCLUDED.access_code,
+            status = 'active'
+        `, [sc.id, sc.tHash, sc.name, sc.kHash, sc.code]);
+      }
+      console.log('[VPS Database] Empresas autorizadas do Tango Master verificadas e ativas na base de dados.');
+    } catch (seedErr) {
+      console.warn('[VPS Database] Aviso ao semear empresas iniciais:', seedErr.message);
+    }
   } catch (err) {
     console.warn('[VPS Database] Aviso ao configurar ponte PostgreSQL local:', err.message);
   }
@@ -178,7 +240,7 @@ const applySecurityHeaders = (res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
-  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=(), interest-cohort=()');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
   res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
   res.setHeader('X-Permitted-Cross-Domain-Policies', 'none');
   res.setHeader('Strict-Transport-Security', 'max-age=63072000; includeSubDomains; preload');
@@ -224,18 +286,42 @@ const server = http.createServer(async (req, res) => {
     });
   }
 
-  // 2. Encaminhamento de Rotas da API
-  let apiMatch = null;
-  const queryParams = Object.fromEntries(parsedUrl.searchParams.entries());
+  // 1.1 Endpoint SSE para eventos e notificações em tempo real (/events)
+  if (pathname === '/events') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'Access-Control-Allow-Origin': req.headers.origin || '*',
+      'X-Accel-Buffering': 'no'
+    });
+    res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
+    const sseKeepAlive = setInterval(() => {
+      if (!res.writableEnded) {
+        res.write(': keepalive\n\n');
+      }
+    }, 20000);
+    req.on('close', () => {
+      clearInterval(sseKeepAlive);
+    });
+    return;
+  }
 
-  // Responder preflight OPTIONS imediatamente para chamadas de API
-  if (pathname.startsWith('/api/') && req.method === 'OPTIONS') {
-    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+  // 2. Encaminhamento de Rotas da API com CORS Universal
+  if (pathname.startsWith('/api/')) {
+    const origin = req.headers.origin || '*';
+    res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret, x-tenant-id');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.setHeader('Vary', 'Origin');
-    return res.status(200).end();
+
+    if (req.method === 'OPTIONS') {
+      return res.status(200).end();
+    }
   }
+
+  let apiMatch = null;
+  const queryParams = Object.fromEntries(parsedUrl.searchParams.entries());
 
   if (pathname.startsWith('/api/v1/companies/status/')) {
     const id = decodeURIComponent(pathname.replace('/api/v1/companies/status/', ''));

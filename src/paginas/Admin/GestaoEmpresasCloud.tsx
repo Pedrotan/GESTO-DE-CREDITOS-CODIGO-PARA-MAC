@@ -170,8 +170,8 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
         }
     };
 
-    const api = async (action: string, payload: Record<string, any> = {}) => {
-        const base = serverUrl.trim().replace(/\/+$/, '');
+    const api = async (action: string, payload: Record<string, any> = {}, targetUrl?: string) => {
+        const base = (targetUrl || serverUrl).trim().replace(/\/+$/, '');
         if (!base.startsWith('http')) throw new Error('Indique o URL do servidor (ex.: https://tango-gestao-creditos.vercel.app).');
         
         const secret = masterSecret.trim();
@@ -192,10 +192,11 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
         return data;
     };
 
-    const loadTenants = async () => {
+    const loadTenants = async (targetUrl?: string) => {
         setIsLoading(true);
+        const currentTarget = targetUrl || serverUrl;
         try {
-            const data = await api('list');
+            const data = await api('list', {}, currentTarget);
             const fetched: CloudTenant[] = data.tenants || [];
             
             // Unir com chaves/códigos armazenados localmente caso o servidor não os tenha
@@ -209,11 +210,50 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
 
             setTenants(merged);
             localStorage.setItem(LOCAL_TENANTS_KEY, JSON.stringify(merged));
-            const requestData = await api('list-requests').catch(() => ({ requests: [] }));
+            const requestData = await api('list-requests', {}, currentTarget).catch(() => ({ requests: [] }));
             setRequests(requestData.requests || []);
-            notify('success', 'Lista de empresas sincronizada com sucesso.');
+            notify('success', `Lista sincronizada com sucesso do servidor: ${currentTarget}`);
         } catch (e: any) {
-            notify('error', e.message || 'Falha ao carregar lista de empresas.');
+            notify('error', e.message || `Falha ao ligar ao servidor ${currentTarget}.`);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleSwitchServer = async (newUrl: string) => {
+        const clean = newUrl.trim().replace(/\/+$/, '');
+        setServerUrl(clean);
+        localStorage.setItem(URL_KEY, clean);
+        await loadTenants(clean);
+    };
+
+    const replicateTenantsToCurrentServer = async () => {
+        if (!tenants.length) {
+            notify('error', 'Não existem empresas na lista para replicar.');
+            return;
+        }
+        setIsLoading(true);
+        let count = 0;
+        try {
+            for (const tenant of tenants) {
+                try {
+                    await api('create', {
+                        tenantId: tenant.tenantId,
+                        name: tenant.name,
+                        accessCode: tenant.accessCode || undefined,
+                        expiresAt: tenant.expiresAt || undefined
+                    });
+                    count++;
+                } catch (err: any) {
+                    if (err?.message?.includes('Já existe')) {
+                        count++;
+                    }
+                }
+            }
+            notify('success', `Replicadas com sucesso ${count} empresas na base de dados do servidor: ${serverUrl}`);
+            await loadTenants();
+        } catch (e: any) {
+            notify('error', e.message || 'Falha ao replicar empresas no servidor.');
         } finally {
             setIsLoading(false);
         }
@@ -538,8 +578,18 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                         Cadastre empresas através do NIF com busca automática, atribua códigos de ativação e emita credenciais para ligação na versão Web.
                     </p>
                 </div>
-                <div className="flex gap-2">
-                    <Button onClick={loadTenants} disabled={isLoading} variant="outline" className="gap-2 font-bold shadow-sm">
+                <div className="flex flex-wrap gap-2">
+                    <Button 
+                        onClick={replicateTenantsToCurrentServer} 
+                        disabled={isLoading || !tenants.length} 
+                        variant="outline" 
+                        className="gap-2 font-bold shadow-sm border-purple-200 text-[#5514d8] hover:bg-purple-50 dark:border-purple-800 dark:hover:bg-purple-950"
+                        title="Replicar todas as empresas cadastradas para o servidor central selecionado"
+                    >
+                        {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-[#5514d8]" /> : <Cloud className="h-4 w-4 text-[#5514d8]" />}
+                        Replicar Empresas no Servidor Atual
+                    </Button>
+                    <Button onClick={() => loadTenants()} disabled={isLoading} variant="outline" className="gap-2 font-bold shadow-sm">
                         {isLoading ? <Loader2 className="h-4 w-4 animate-spin text-[#F37021]" /> : <RefreshCw className="h-4 w-4" />}
                         Sincronizar Lista
                     </Button>
@@ -658,11 +708,8 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                         <div className="flex flex-wrap gap-1.5 pt-1">
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setServerUrl('https://tango-gestao-creditos.vercel.app');
-                                    localStorage.setItem(URL_KEY, 'https://tango-gestao-creditos.vercel.app');
-                                }}
-                                className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all ${
+                                onClick={() => handleSwitchServer('https://tango-gestao-creditos.vercel.app')}
+                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
                                     serverUrl.includes('vercel.app')
                                         ? 'bg-[#5514d8] text-white border-[#5514d8]'
                                         : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
@@ -672,32 +719,28 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                             </button>
                             <button
                                 type="button"
-                                onClick={() => {
-                                    setServerUrl('http://191.215.45.104:3000');
-                                    localStorage.setItem(URL_KEY, 'http://191.215.45.104:3000');
-                                }}
-                                className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all ${
-                                    serverUrl.includes('191.215.45.104')
-                                        ? 'bg-[#5514d8] text-white border-[#5514d8]'
-                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                                }`}
-                            >
-                                🖥️ VPS Hostinger IP (Porta 3000)
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setServerUrl('http://tangogestaoecreditos.tech');
-                                    localStorage.setItem(URL_KEY, 'http://tangogestaoecreditos.tech');
-                                }}
-                                className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all ${
+                                onClick={() => handleSwitchServer('https://tangogestaoecreditos.tech')}
+                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
                                     serverUrl.includes('tangogestaoecreditos.tech')
                                         ? 'bg-[#5514d8] text-white border-[#5514d8]'
                                         : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
                                 }`}
                             >
-                                🌐 Domínio VPS (Nginx)
+                                🌐 Domínio VPS (HTTPS)
                             </button>
+                            {typeof window !== 'undefined' && window.location?.origin && (
+                                <button
+                                    type="button"
+                                    onClick={() => handleSwitchServer(window.location.origin)}
+                                    className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                                        serverUrl === window.location.origin
+                                            ? 'bg-[#5514d8] text-white border-[#5514d8]'
+                                            : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                                    }`}
+                                >
+                                    🖥️ Servidor Atual ({window.location.origin.replace(/^https?:\/\//, '')})
+                                </button>
+                            )}
                         </div>
                     </div>
                     <div className="space-y-1.5">

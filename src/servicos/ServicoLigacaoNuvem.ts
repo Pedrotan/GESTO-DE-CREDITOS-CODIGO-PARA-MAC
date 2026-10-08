@@ -3,8 +3,8 @@
 // pertence a ela (o NIF é público, por isso não basta para ler ou escrever dados da empresa).
 
 export const VERCEL_CLOUD_URL = 'https://tango-gestao-creditos.vercel.app';
-export const VPS_IP_URL = 'http://191.215.45.104';
-export const VPS_DOMAIN_URL = 'http://tangogestaoecreditos.tech';
+export const VPS_IP_URL = 'http://191.215.45.104:3000';
+export const VPS_DOMAIN_URL = 'https://tangogestaoecreditos.tech';
 
 export const getCloudBaseUrl = (): string => {
     if (typeof localStorage !== 'undefined') {
@@ -22,18 +22,23 @@ export const getCloudBaseUrl = (): string => {
         return window.location.origin.replace(/\/+$/, '');
     }
 
-    return VERCEL_CLOUD_URL;
+    return VPS_DOMAIN_URL;
 };
 
 /** Lista de todos os servidores centrais autorizados para consulta em cascata */
 export const getKnownCloudServers = (): string[] => {
+    const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
     const current = getCloudBaseUrl();
     const list = [current];
     const known = [
-        VERCEL_CLOUD_URL,
-        VPS_IP_URL,
-        VPS_DOMAIN_URL
+        VPS_DOMAIN_URL,
+        VERCEL_CLOUD_URL
     ];
+    // Evitar URLs http:// se estiver sob https:// para prevenir Mixed Content e bloqueio CSP
+    if (!isHttps) {
+        known.push(VPS_IP_URL);
+        known.push('http://tangogestaoecreditos.tech');
+    }
     for (const url of known) {
         if (!list.includes(url)) list.push(url);
     }

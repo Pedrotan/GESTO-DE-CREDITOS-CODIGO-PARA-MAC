@@ -27,6 +27,17 @@ CREATE TABLE IF NOT EXISTS tango_tenants (
 CREATE INDEX IF NOT EXISTS idx_tango_tenants_status ON tango_tenants (status);
 CREATE INDEX IF NOT EXISTS idx_tango_tenants_access_code ON tango_tenants (access_code);
 
+-- Empresas oficiais pré-autorizadas do Tango Master Gen
+INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash, access_code, status)
+VALUES 
+  ('5417002673', 'fb14d0c3542ee0136f183c1ffd300102eeda2a76e32990bdcc9b63c5d9918de3', 'DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA', '99eb32203237b3c361d1caa31cb82630d3a24194387900ae7ba27b3ee3f3840a', 'TG-AG9E-VTBY', 'active'),
+  ('5417001439', '511787b16436e18bf21f42ca118854a49d77e3a5b844f58db680460d1bffe06f', 'Erecabde Comércio e Serviços LDA', 'dddb9f0511251eb895877e8c40a16ac3a56c426a6fee18cd10ac0a827c909b5a', 'TG-1357-4F6V', 'active')
+ON CONFLICT (tenant_id) DO UPDATE SET
+  name = EXCLUDED.name,
+  key_hash = EXCLUDED.key_hash,
+  access_code = EXCLUDED.access_code,
+  status = 'active';
+
 -- ---------------------------------------------------------------------
 -- 2. Pedidos de Registo e Onboarding de Empresas
 -- ---------------------------------------------------------------------
