@@ -37,10 +37,13 @@ services:
       - PORT=3000
       - HOST=0.0.0.0
       - DATABASE_URL=postgresql://${DB_USER:-tango_user}:${DB_PASSWORD:-tango_pass_segura_2026}@db:5432/${DB_NAME:-tangodb}
-      - TANGO_SYNC_SECRET=${TANGO_SYNC_SECRET}
-      - TANGO_MASTER_SECRET=${TANGO_MASTER_SECRET}
-      - TANGO_ALLOWED_ORIGINS=${TANGO_ALLOWED_ORIGINS:-http://localhost:3000}
-      - TANGO_MASTERGEN_URL=${TANGO_MASTERGEN_URL:-http://localhost:3000}
+      - TANGO_SYNC_SECRET=${TANGO_SYNC_SECRET:-tango_sync_segredo_mestre_2026_producao}
+      - TANGO_MASTER_SECRET=${TANGO_MASTER_SECRET:-TangoMaster#2026!ChaveForteHostinger}
+      - TANGO_ALLOWED_ORIGINS=${TANGO_ALLOWED_ORIGINS:-https://tango-gestao-creditos.vercel.app,http://191.215.45.104,http://191.215.45.104:3000,http://tangogestaoecreditos.tech,https://tangogestaoecreditos.tech,http://localhost:3000}
+      - TANGO_MASTERGEN_URL=${TANGO_MASTERGEN_URL:-http://tangogestaoecreditos.tech}
+      - VERCEL_CLOUD_URL=${VERCEL_CLOUD_URL:-https://tango-gestao-creditos.vercel.app}
+      - VPS_IP_URL=${VPS_IP_URL:-http://191.215.45.104}
+      - VPS_DOMAIN_URL=${VPS_DOMAIN_URL:-http://tangogestaoecreditos.tech}
     depends_on:
       db:
         condition: service_healthy

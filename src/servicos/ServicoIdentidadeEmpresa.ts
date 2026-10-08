@@ -1,4 +1,4 @@
-import { getCloudBaseUrl } from './ServicoLigacaoNuvem';
+import { getCloudBaseUrl, getKnownCloudServers } from './ServicoLigacaoNuvem';
 import { RepositorioDefinicoesEmpresa } from '@/repositorios/RepositorioDefinicoesEmpresa';
 
 export type CompanyStatus = 'ACTIVE' | 'PENDING' | 'NOT_FOUND' | 'BLOCKED' | 'EXPIRED';
@@ -18,6 +18,7 @@ export interface CompanyStatusResponse {
   companyName?: string;
   message?: string;
   code?: string;
+  serverUrl?: string;
 }
 
 export interface ForgotPasswordResponse {
@@ -55,7 +56,7 @@ export const normalizeIdentifier = (input: string): string => {
 
 /**
  * Passo 1: Verificação Inicial da Empresa no Tango Master Gen.
- * Executa requisição estrita: GET /api/v1/companies/status/{identificador}
+ * Executa requisição com suporte mútuo a VPS Hostinger e Vercel Cloud em cascata.
  */
 export const checkCompanyStatus = async (identificador: string): Promise<CompanyStatusResponse> => {
   const rawId = normalizeIdentifier(identificador);
@@ -64,80 +65,125 @@ export const checkCompanyStatus = async (identificador: string): Promise<Company
   }
 
   const encodedId = encodeURIComponent(rawId);
-  const baseUrl = getCloudBaseUrl();
+  const servers = getKnownCloudServers();
 
-  let response: Response | null = null;
-  let data: any = null;
+  let lastError: Error | null = null;
+  let notFoundResponse: CompanyStatusResponse | null = null;
 
-  try {
+  for (const baseUrl of servers) {
+    let response: Response | null = null;
+    let data: any = null;
+
     // 1. Tentar GET /api/v1/companies/status/{identificador}
-    response = await fetch(`${baseUrl}/api/v1/companies/status/${encodedId}`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
-    data = await response.json().catch(() => ({}));
-  } catch (err: any) {
-    // Fallback gracioso para POST /api/company-status
     try {
-      response = await fetch(`${baseUrl}/api/company-status`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identificador: rawId }),
-        signal: AbortSignal.timeout(15_000),
-      });
-      data = await response.json().catch(() => ({}));
-    } catch (postErr: any) {
-      throw new Error(
-        postErr?.name === 'TimeoutError'
-          ? 'O servidor central demorou muito a responder. Verifique a sua ligação à Internet.'
-          : 'Não foi possível comunicar com o Tango Master Gen. Verifique a sua ligação à Internet.'
-      );
-    }
-  }
-
-  // Se a rota rewrote deu 404, fallback para querystring /api/company-status?id=...
-  if (response && response.status === 404) {
-    try {
-      response = await fetch(`${baseUrl}/api/company-status?id=${encodedId}`, {
+      response = await fetch(`${baseUrl}/api/v1/companies/status/${encodedId}`, {
         method: 'GET',
         headers: { 'Accept': 'application/json' },
-        signal: AbortSignal.timeout(15_000),
+        signal: AbortSignal.timeout(8_000),
       });
-      data = await response.json().catch(() => ({}));
-    } catch {}
-  }
+      if (response.ok || response.status === 403) {
+        data = await response.json().catch(() => ({}));
+      } else {
+        response = null;
+      }
+    } catch {
+      response = null;
+    }
 
-  if (!response) {
-    throw new Error('Sem resposta do servidor central Tango Master Gen.');
-  }
+    // 2. Tentar GET /api/company-status?id={identificador}
+    if (!response) {
+      try {
+        response = await fetch(`${baseUrl}/api/company-status?id=${encodedId}`, {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (response.ok || response.status === 403) {
+          data = await response.json().catch(() => ({}));
+        } else {
+          response = null;
+        }
+      } catch {
+        response = null;
+      }
+    }
 
-  // HTTP 403 (BLOCKED / EXPIRED)
-  if (response.status === 403) {
-    return {
-      success: false,
-      status: (data.status || 'BLOCKED').toUpperCase() as CompanyStatus,
-      message: data.message || 'Acesso suspenso ou expirado no Tango Master Gen.',
+    // 3. Tentar POST /api/company-status
+    if (!response) {
+      try {
+        response = await fetch(`${baseUrl}/api/company-status`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identificador: rawId, nif: rawId }),
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (response.ok || response.status === 403) {
+          data = await response.json().catch(() => ({}));
+        }
+      } catch (postErr: any) {
+        lastError = postErr;
+        continue;
+      }
+    }
+
+    if (!response) continue;
+
+    // HTTP 403 (BLOCKED / EXPIRED)
+    if (response.status === 403) {
+      return {
+        success: false,
+        status: (data.status || 'BLOCKED').toUpperCase() as CompanyStatus,
+        message: data.message || 'Acesso suspenso ou expirado no Tango Master Gen.',
+        code: data.code,
+        serverUrl: baseUrl,
+      };
+    }
+
+    if (!response.ok && response.status !== 400 && response.status !== 409) {
+      lastError = new Error(data.message || `Erro ao validar empresa no servidor central (${response.status})`);
+      continue;
+    }
+
+    const rawStatus = (data.status || (data.code === 'ALREADY_ACTIVE' ? 'ACTIVE' : 'NOT_FOUND')).toUpperCase();
+
+    // Se encontramos a empresa ACTIVE ou PENDING neste servidor, retornamos imediatamente!
+    if (rawStatus === 'ACTIVE' || rawStatus === 'PENDING') {
+      return {
+        success: Boolean(data.success),
+        status: rawStatus as CompanyStatus,
+        company: data.company,
+        companyName: data.companyName || data.company?.name,
+        message: data.message,
+        code: data.code,
+        serverUrl: baseUrl,
+      };
+    }
+
+    // Se foi NOT_FOUND, guardamos como candidato e tentamos o próximo servidor da lista (ex: VPS -> Vercel)
+    notFoundResponse = {
+      success: Boolean(data.success),
+      status: 'NOT_FOUND' as CompanyStatus,
+      company: data.company,
+      companyName: data.companyName || data.company?.name,
+      message: data.message,
       code: data.code,
+      serverUrl: baseUrl,
     };
   }
 
-  if (!response.ok && response.status !== 400 && response.status !== 409) {
-    throw new Error(data.message || `Erro ao validar empresa no servidor central (${response.status})`);
+  if (notFoundResponse) {
+    return notFoundResponse;
   }
 
-  const rawStatus = (data.status || (data.code === 'ALREADY_ACTIVE' ? 'ACTIVE' : 'NOT_FOUND')).toUpperCase();
+  if (lastError) {
+    throw new Error(
+      lastError?.name === 'TimeoutError'
+        ? 'O servidor central demorou muito a responder. Verifique a sua ligação à Internet.'
+        : 'Não foi possível comunicar com o Tango Master Gen nem com o servidor da VPS. Verifique a sua ligação à Internet.'
+    );
+  }
 
-  return {
-    success: Boolean(data.success),
-    status: rawStatus as CompanyStatus,
-    company: data.company,
-    companyName: data.companyName || data.company?.name,
-    message: data.message,
-    code: data.code,
-  };
+  throw new Error('Sem resposta dos servidores centrais Tango Master Gen.');
 };
 
 /**

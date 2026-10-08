@@ -21,12 +21,16 @@ export const allowedOrigins = (req) => {
   const vercelHosts = [process.env.VERCEL_PROJECT_PRODUCTION_URL, process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL]
     .filter(Boolean).map(host => `https://${host}`);
   const host = String(req?.headers?.host || '').trim();
-  const sameHost = host && !/[\s/]/.test(host) ? [`https://${host}`] : [];
+  const sameHost = host && !/[\s/]/.test(host) ? [`https://${host}`, `http://${host}`] : [];
   return new Set([
     ...configured, ...vercelHosts, ...sameHost,
     'https://tango-gestao-creditos.vercel.app',
+    'http://191.215.45.104',
+    'http://191.215.45.104:3000',
+    'http://tangogestaoecreditos.tech',
+    'https://tangogestaoecreditos.tech',
     'null',
-    'http://localhost:8081', 'http://localhost:8082', 'http://localhost:5173', 'http://localhost:4173', 'http://127.0.0.1:8081',
+    'http://localhost:8081', 'http://localhost:8082', 'http://localhost:5173', 'http://localhost:4173', 'http://127.0.0.1:8081', 'http://localhost:3000',
   ]);
 };
 
@@ -45,7 +49,11 @@ export const applySecurityHeaders = (res) => {
 export const applyCors = (req, res) => {
   applySecurityHeaders(res);
   const origin = String(req.headers.origin || '');
-  const allowed = !origin || allowedOrigins(req).has(origin);
+  const allowed = !origin ||
+    allowedOrigins(req).has(origin) ||
+    /^https?:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin) ||
+    /^https?:\/\/(191\.215\.45\.104|tangogestaoecreditos\.tech)(:\d+)?$/i.test(origin);
+
   if (origin && allowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');

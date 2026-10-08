@@ -228,6 +228,15 @@ const server = http.createServer(async (req, res) => {
   let apiMatch = null;
   const queryParams = Object.fromEntries(parsedUrl.searchParams.entries());
 
+  // Responder preflight OPTIONS imediatamente para chamadas de API
+  if (pathname.startsWith('/api/') && req.method === 'OPTIONS') {
+    res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret, x-tenant-id');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Vary', 'Origin');
+    return res.status(200).end();
+  }
+
   if (pathname.startsWith('/api/v1/companies/status/')) {
     const id = decodeURIComponent(pathname.replace('/api/v1/companies/status/', ''));
     queryParams.id = id;

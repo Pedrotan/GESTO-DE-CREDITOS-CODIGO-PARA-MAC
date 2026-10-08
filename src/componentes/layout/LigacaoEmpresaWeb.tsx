@@ -7,6 +7,7 @@ import { useData } from '@/contextos/ContextoDados';
 import { scopedStorageKey } from '@/bibliotecas/contas';
 import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { checkCompanyStatus, markCompanyActive, isCompanyActiveLocally } from '@/servicos/ServicoIdentidadeEmpresa';
+import { getKnownCloudServers } from '@/servicos/ServicoLigacaoNuvem';
 import {
     Building2, KeyRound, Loader2, ShieldCheck, Eye, EyeOff, ArrowLeft, ArrowRight, ShieldAlert,
     Shield, LogIn, ClipboardList, CheckCircle2, Cloud, Send, Lock, Info, CheckCircle,
@@ -32,15 +33,31 @@ const formatNIF = (value: string, type: NifType) => {
     return formatted;
 };
 
-const postJson = async (url: string, body: Record<string, unknown>) => {
-    const res = await fetch(url, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(15_000)
-    });
-    const data = await res.json().catch(() => ({}));
-    return { ok: res.ok && data.success !== false, status: res.status, data };
+const postJson = async (path: string, body: Record<string, unknown>) => {
+    const servers = getKnownCloudServers();
+    let lastResult = { ok: false, status: 0, data: {} as any, serverUrl: '' };
+
+    for (const base of servers) {
+        try {
+            const url = path.startsWith('http') ? path : `${base}${path.startsWith('/') ? path : '/' + path}`;
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+                signal: AbortSignal.timeout(10_000)
+            });
+            const data = await res.json().catch(() => ({}));
+            const isSuccess = res.ok && data.success !== false;
+            lastResult = { ok: isSuccess, status: res.status, data, serverUrl: base };
+            if (isSuccess) return lastResult;
+            if (data.code === 'ALREADY_REGISTERED' || data.code === 'BLOCKED' || data.code === 'EXPIRED') {
+                return lastResult;
+            }
+        } catch {
+            // Continua para o próximo servidor na cascata
+        }
+    }
+    return lastResult;
 };
 
 const networkMessage = (err: any) => err?.name === 'TimeoutError'
@@ -107,7 +124,7 @@ export const LigacaoEmpresaWeb = () => {
                     name: companyData.name,
                     logo: companyData.logo || null,
                     syncEnabled: true,
-                    syncUrl: window.location.origin
+                    syncUrl: res.serverUrl || window.location.origin
                 });
 
                 setIsAuthorized(true);
@@ -171,7 +188,7 @@ export const LigacaoEmpresaWeb = () => {
         setIsBusy(true);
         setErrorMessage('');
         try {
-            const { ok, data } = await postJson('/api/verify-company', { nif: cleanNif, accessCode: cleanCode });
+            const { ok, data, serverUrl } = await postJson('/api/verify-company', { nif: cleanNif, accessCode: cleanCode });
             if (!ok) {
                 if (data.code === 'NOT_REGISTERED') {
                     goTo('activation');
@@ -184,6 +201,7 @@ export const LigacaoEmpresaWeb = () => {
             const verifiedTenantId = data.tenantId || cleanNif;
             const verifiedName = data.companyName || companyName || 'Empresa Licenciada';
             const verifiedPasskey = data.syncPasskey || cleanCode;
+            const effectiveSyncUrl = serverUrl || window.location.origin;
 
             localStorage.setItem('tango_active_tenant_authorized', 'true');
             localStorage.setItem('tango_active_tenant_id', verifiedTenantId);
@@ -195,13 +213,13 @@ export const LigacaoEmpresaWeb = () => {
                 nif: verifiedTenantId,
                 name: verifiedName,
                 syncEnabled: true,
-                syncUrl: window.location.origin,
+                syncUrl: effectiveSyncUrl,
                 syncPasskey: verifiedPasskey
             });
 
             let pulled = 0;
             try {
-                startCloudSync({ url: window.location.origin, apiKey: verifiedPasskey, tenantId: verifiedTenantId });
+                startCloudSync({ url: effectiveSyncUrl, apiKey: verifiedPasskey, tenantId: verifiedTenantId });
                 pulled = (await syncCloudNow()).pulled || 0;
             } catch (syncErr) {
                 console.warn('[LigacaoEmpresaWeb] Sincronização inicial:', syncErr);

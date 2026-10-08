@@ -640,18 +640,65 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
             <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
                 <div className="flex items-center justify-between mb-4">
                     <h3 className="flex items-center gap-2 font-bold text-slate-800 dark:text-slate-200 text-sm">
-                        <Link2 className="h-4 w-4 text-[#F37021]" /> Conexão Central Tango Master Gen ⇄ Servidor Web (Vercel)
+                        <Link2 className="h-4 w-4 text-[#F37021]" /> Conexão Central Tango Master Gen ⇄ Servidor Web (Vercel & VPS Hostinger)
                     </h3>
                 </div>
                 <div className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-1.5">
-                        <Label className="text-xs font-bold text-slate-500">URL do Servidor Web (Vercel)</Label>
+                        <Label className="text-xs font-bold text-slate-500">URL do Servidor Central (Cloud / VPS)</Label>
                         <Input
                             value={serverUrl}
-                            onChange={(e) => setServerUrl(e.target.value)}
+                            onChange={(e) => {
+                                setServerUrl(e.target.value);
+                                localStorage.setItem(URL_KEY, e.target.value);
+                            }}
                             placeholder="https://tango-gestao-creditos.vercel.app"
                             className="h-11 rounded-xl"
                         />
+                        <div className="flex flex-wrap gap-1.5 pt-1">
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setServerUrl('https://tango-gestao-creditos.vercel.app');
+                                    localStorage.setItem(URL_KEY, 'https://tango-gestao-creditos.vercel.app');
+                                }}
+                                className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all ${
+                                    serverUrl.includes('vercel.app')
+                                        ? 'bg-[#5514d8] text-white border-[#5514d8]'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                                }`}
+                            >
+                                ☁️ Vercel Cloud
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setServerUrl('http://191.215.45.104:3000');
+                                    localStorage.setItem(URL_KEY, 'http://191.215.45.104:3000');
+                                }}
+                                className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all ${
+                                    serverUrl.includes('191.215.45.104')
+                                        ? 'bg-[#5514d8] text-white border-[#5514d8]'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                                }`}
+                            >
+                                🖥️ VPS Hostinger IP (Porta 3000)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setServerUrl('http://tangogestaoecreditos.tech');
+                                    localStorage.setItem(URL_KEY, 'http://tangogestaoecreditos.tech');
+                                }}
+                                className={`text-[11px] font-bold px-2 py-0.5 rounded-lg border transition-all ${
+                                    serverUrl.includes('tangogestaoecreditos.tech')
+                                        ? 'bg-[#5514d8] text-white border-[#5514d8]'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                                }`}
+                            >
+                                🌐 Domínio VPS (Nginx)
+                            </button>
+                        </div>
                     </div>
                     <div className="space-y-1.5">
                         <Label className="text-xs font-bold text-slate-500">Chave Mestra do Tango Master</Label>

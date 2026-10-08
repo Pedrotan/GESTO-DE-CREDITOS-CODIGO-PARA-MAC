@@ -58,6 +58,13 @@ const vercelConfig = {
   functions: {
     'api/*.js': { maxDuration: 30 }
   },
+  rewrites: [
+    { source: '/api/v1/companies/status/:id', destination: '/api/company-status?id=:id' },
+    { source: '/api/v1/companies/onboarding', destination: '/api/onboarding' },
+    { source: '/api/v1/auth/forgot-password', destination: '/api/auth-forgot-password' },
+    { source: '/api/v1/auth/reset-password', destination: '/api/auth-reset-password' },
+    { source: '/api/v1/auth/login', destination: '/api/auth-login' }
+  ],
   headers: [
     {
       // Cabeçalhos de segurança em todas as páginas e ficheiros servidos.
