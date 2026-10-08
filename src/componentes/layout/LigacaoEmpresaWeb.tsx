@@ -4,25 +4,20 @@ import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
 import { Textarea } from '@/componentes/ui/textarea';
 import { useData } from '@/contextos/ContextoDados';
-import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import { scopedStorageKey } from '@/bibliotecas/contas';
 import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { checkCompanyStatus, markCompanyActive, isCompanyActiveLocally } from '@/servicos/ServicoIdentidadeEmpresa';
 import {
     Building2, KeyRound, Loader2, ShieldCheck, Eye, EyeOff, ArrowLeft, ArrowRight, ShieldAlert,
-    Shield, LogIn, ClipboardList, CheckCircle2, Cloud, BarChart3, Wallet, Users, Send,
-    Sparkles, Lock, Info, CheckCircle
+    Shield, LogIn, ClipboardList, CheckCircle2, Cloud, Send, Lock, Info, CheckCircle,
+    PhoneCall, X, ExternalLink, Sparkles
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 
-// Entrada obrigatória da versão Web (Vercel). Num navegador ainda não ligado, a pessoa vê uma
-// página inicial e escolhe entre iniciar sessão ou pedir o cadastro da empresa. Ao iniciar sessão
-// o NIF é verificado no Tango Master: empresa registada segue para o Código de Acesso e depois
-// para o login; empresa não registada segue para a ativação (pedido de cadastro).
-
 type Step = 'welcome' | 'identify' | 'access' | 'activation' | 'request' | 'requestSent';
 type NifType = 'COLECTIVO' | 'SINGULAR';
+type InfoModal = 'sobre' | 'seguranca' | 'suporte' | null;
 
 const formatNIF = (value: string, type: NifType) => {
     const clean = value.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
@@ -52,29 +47,6 @@ const networkMessage = (err: any) => err?.name === 'TimeoutError'
     ? 'O servidor demorou muito a responder. Verifique a sua ligação à internet.'
     : 'Não foi possível comunicar com o servidor central. Verifique a sua ligação à internet.';
 
-const FEATURES = [
-    {
-        icon: Wallet,
-        title: 'Créditos e Cobranças',
-        text: 'Simulação ágil, emissão de contratos, plano de prestações e amortizações automatizadas.'
-    },
-    {
-        icon: BarChart3,
-        title: 'Relatórios e Contabilidade',
-        text: 'Extratos, balancetes em tempo real, fluxo de caixa e lançamentos automáticos de dupla entrada.'
-    },
-    {
-        icon: Users,
-        title: 'Clientes e Equipas',
-        text: 'Ficha central de clientes com histórico de crédito, controlo de utilizadores e perfis de acesso.'
-    },
-    {
-        icon: Cloud,
-        title: 'Acesso em Qualquer Lugar',
-        text: 'Sincronização contínua na nuvem com criptografia de ponta a ponta e redundância garantida.'
-    }
-];
-
 export const LigacaoEmpresaWeb = () => {
     const { updateCompanySettings } = useData();
 
@@ -99,11 +71,15 @@ export const LigacaoEmpresaWeb = () => {
     const [showCode, setShowCode] = useState(false);
     const [isBusy, setIsBusy] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
+    const [infoModal, setInfoModal] = useState<InfoModal>(null);
     const [request, setRequest] = useState({ companyName: '', contactName: '', phone: '', email: '', message: '' });
 
     const cleanNif = nif.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
-    const goTo = (next: Step) => { setErrorMessage(''); setStep(next); };
+    const goTo = (next: Step) => {
+        setErrorMessage('');
+        setStep(next);
+    };
 
     // Passo 1 do login: verificar se a empresa está registada no Tango Master Gen.
     const handleIdentify = async (e: React.FormEvent) => {
@@ -125,7 +101,6 @@ export const LigacaoEmpresaWeb = () => {
                     logo: null
                 };
 
-                // Gravar dados básicos não-sensíveis no SQLite e inicializar ambiente multi-tenant
                 await markCompanyActive(companyData);
                 await updateCompanySettings({
                     nif: companyData.tenantId,
@@ -139,10 +114,10 @@ export const LigacaoEmpresaWeb = () => {
 
                 await Swal.fire({
                     title: 'Empresa Ativa Verificada!',
-                    html: `A empresa <strong>${companyData.name.replace(/[<>&"]/g, '')}</strong> está ativa no Tango Master Gen.<br/><br/><span style="color:#64748b;font-size:13px;">O Onboarding foi bloqueado. Redirecionando para o Login...</span>`,
+                    html: `A empresa <strong>${companyData.name.replace(/[<>&"]/g, '')}</strong> está ativa no Tango Master Gen.<br/><br/><span style="color:#64748b;font-size:13px;">Acesso autorizado. Redirecionando para o Login...</span>`,
                     icon: 'success',
                     confirmButtonText: 'Continuar para o Login',
-                    confirmButtonColor: '#2563eb',
+                    confirmButtonColor: '#5b1ee2',
                     timer: 2500,
                     allowOutsideClick: false
                 });
@@ -157,7 +132,7 @@ export const LigacaoEmpresaWeb = () => {
                     text: 'O registo da empresa está pendente de aprovação central. Acesso ao assistente de configuração libertado.',
                     icon: 'info',
                     confirmButtonText: 'Aceder ao Onboarding',
-                    confirmButtonColor: '#2563eb'
+                    confirmButtonColor: '#5b1ee2'
                 });
                 window.location.hash = '#/onboarding';
             } else if (res.status === 'NOT_FOUND') {
@@ -168,7 +143,7 @@ export const LigacaoEmpresaWeb = () => {
                     text: 'Empresa não encontrada no registo central. O acesso ao fluxo de onboarding foi libertado para concluir o registo.',
                     icon: 'question',
                     confirmButtonText: 'Iniciar Registo',
-                    confirmButtonColor: '#2563eb'
+                    confirmButtonColor: '#5b1ee2'
                 });
                 window.location.hash = '#/onboarding';
             } else if (res.status === 'BLOCKED') {
@@ -189,13 +164,19 @@ export const LigacaoEmpresaWeb = () => {
     const handleAccess = async (e: React.FormEvent) => {
         e.preventDefault();
         const cleanCode = accessCode.trim().toUpperCase();
-        if (cleanCode.length < 4) { setErrorMessage('Introduza o Código de Acesso da empresa.'); return; }
+        if (cleanCode.length < 4) {
+            setErrorMessage('Introduza o Código de Acesso da empresa.');
+            return;
+        }
         setIsBusy(true);
         setErrorMessage('');
         try {
             const { ok, data } = await postJson('/api/verify-company', { nif: cleanNif, accessCode: cleanCode });
             if (!ok) {
-                if (data.code === 'NOT_REGISTERED') { goTo('activation'); return; }
+                if (data.code === 'NOT_REGISTERED') {
+                    goTo('activation');
+                    return;
+                }
                 setErrorMessage(data.message || 'Código de Acesso inválido para esta empresa.');
                 return;
             }
@@ -231,14 +212,14 @@ export const LigacaoEmpresaWeb = () => {
             setIsAuthorized(true);
             window.dispatchEvent(new Event('tango_tenant_authorized'));
             await Swal.fire({
-                title: 'Empresa ligada',
-                html: `Este navegador está ligado a <strong>${verifiedName.replace(/[<>&"]/g, '')}</strong>.<br/><br/>` +
+                title: 'Empresa Ligada!',
+                html: `Este computador está agora ligado a <strong>${verifiedName.replace(/[<>&"]/g, '')}</strong>.<br/><br/>` +
                     `<span style="color:#64748b;font-size:13px;">${pulled > 0
-                        ? `Foram recuperadas ${pulled} alterações da cloud.`
-                        : 'Continue para iniciar sessão.'}</span>`,
+                        ? `Foram recuperadas ${pulled} atualizações da cloud.`
+                        : 'Pode agora iniciar sessão com as suas credenciais.'}</span>`,
                 icon: 'success',
-                confirmButtonText: 'Continuar',
-                confirmButtonColor: '#F37021',
+                confirmButtonText: 'Continuar para o Login',
+                confirmButtonColor: '#5b1ee2',
                 allowOutsideClick: false
             });
             window.location.hash = '#/entrar';
@@ -257,7 +238,10 @@ export const LigacaoEmpresaWeb = () => {
         try {
             const { ok, data } = await postJson('/api/registration-request', { nif: cleanNif, ...request });
             if (!ok) {
-                if (data.code === 'ALREADY_REGISTERED') { goTo('access'); return; }
+                if (data.code === 'ALREADY_REGISTERED') {
+                    goTo('access');
+                    return;
+                }
                 setErrorMessage(data.message || 'Não foi possível enviar o pedido.');
                 return;
             }
@@ -278,8 +262,8 @@ export const LigacaoEmpresaWeb = () => {
     )) return null;
 
     const errorBox = errorMessage && (
-        <div role="alert" className="flex items-start gap-3 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-xs font-semibold text-red-300 backdrop-blur-md animate-in fade-in duration-200">
-            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+        <div role="alert" className="flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 p-3 text-xs font-semibold text-red-700 animate-in fade-in duration-200">
+            <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-red-500" />
             <p className="leading-relaxed">{errorMessage}</p>
         </div>
     );
@@ -288,7 +272,7 @@ export const LigacaoEmpresaWeb = () => {
         <button
             type="button"
             onClick={() => goTo(target)}
-            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-400 hover:text-white transition-colors"
+            className="inline-flex items-center gap-1.5 text-xs font-bold text-slate-500 hover:text-[#5514d8] transition-colors"
         >
             <ArrowLeft className="h-3.5 w-3.5" /> {label}
         </button>
@@ -297,10 +281,10 @@ export const LigacaoEmpresaWeb = () => {
     const nifField = (
         <div className="space-y-3">
             <div className="flex items-center justify-between gap-3">
-                <Label className="text-xs font-bold uppercase tracking-wider text-slate-300">
+                <Label className="text-xs font-bold uppercase tracking-wider text-slate-600">
                     Tipo de contribuinte
                 </Label>
-                <div className="flex gap-1 rounded-xl bg-slate-950/70 p-1 border border-white/10">
+                <div className="flex gap-1 rounded-xl bg-slate-100 p-1 border border-slate-200">
                     {(['COLECTIVO', 'SINGULAR'] as const).map(type => (
                         <button
                             key={type}
@@ -308,8 +292,8 @@ export const LigacaoEmpresaWeb = () => {
                             onClick={() => { setNifType(type); setNif(''); }}
                             className={`rounded-lg px-3 py-1 text-xs font-bold transition-all ${
                                 nifType === type
-                                    ? 'bg-[#F37021] text-white shadow-md shadow-orange-500/30'
-                                    : 'text-slate-400 hover:text-white'
+                                    ? 'bg-[#5514d8] text-white shadow-sm'
+                                    : 'text-slate-600 hover:text-slate-900'
                             }`}
                         >
                             {type === 'COLECTIVO' ? 'Empresa (NIF)' : 'Particular (BI)'}
@@ -318,8 +302,8 @@ export const LigacaoEmpresaWeb = () => {
                 </div>
             </div>
             <div className="space-y-1.5">
-                <Label htmlFor="gateway-nif" className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
-                    <Building2 className="h-3.5 w-3.5 text-[#F37021]" />
+                <Label htmlFor="gateway-nif" className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                    <Building2 className="h-3.5 w-3.5 text-[#5514d8]" />
                     Identificador da Empresa (NIF, E-mail ou Código Único)
                 </Label>
                 <div className="relative">
@@ -335,8 +319,8 @@ export const LigacaoEmpresaWeb = () => {
                             }
                             setErrorMessage('');
                         }}
-                        placeholder="Ex.: 5417000000, empresa@tango.ao ou TG-XXXX-YYYY"
-                        className="h-12 rounded-xl bg-slate-950/70 border-white/15 px-4 font-mono text-base font-bold text-white placeholder:text-slate-600 focus-visible:ring-[#F37021] focus-visible:border-[#F37021]"
+                        placeholder="Ex.: 5417000000 ou empresa@tango.ao"
+                        className="h-11 rounded-xl bg-slate-50 border-slate-200 px-3.5 font-mono text-sm font-bold text-slate-900 placeholder:text-slate-400 focus-visible:ring-[#5514d8] focus-visible:border-[#5514d8]"
                         disabled={isBusy}
                         autoFocus
                         required
@@ -347,573 +331,660 @@ export const LigacaoEmpresaWeb = () => {
     );
 
     return (
-        <div className="fixed inset-0 z-[9999] flex flex-col justify-between overflow-y-auto bg-[#060813] text-slate-100 font-sans selection:bg-[#F37021]/30 selection:text-white">
-            {/* Ambient Lighting & Backdrop Elements */}
-            <div className="pointer-events-none fixed inset-0 overflow-hidden">
-                {/* Tech Dot Grid Pattern */}
-                <div className="absolute inset-0 bg-[radial-gradient(rgba(255,255,255,0.06)_1px,transparent_1px)] [background-size:28px_28px] opacity-60" />
-                {/* Luminous Orange Orb */}
-                <div className="absolute -left-32 -top-32 h-[550px] w-[550px] rounded-full bg-gradient-to-br from-[#F37021]/20 via-[#F37021]/5 to-transparent blur-[140px]" />
-                {/* Luminous Deep Blue Orb */}
-                <div className="absolute -bottom-32 -right-32 h-[650px] w-[650px] rounded-full bg-gradient-to-tl from-blue-600/20 via-indigo-600/5 to-transparent blur-[150px]" />
-                {/* Subtle Amber Horizon */}
-                <div className="absolute left-1/2 top-1/4 -translate-x-1/2 -translate-y-1/2 h-[350px] w-[600px] rounded-full bg-amber-500/[0.04] blur-[130px]" />
-            </div>
+        <div className="fixed inset-0 z-[9999] flex flex-col justify-between overflow-y-auto bg-white text-slate-900 font-sans selection:bg-[#5514d8]/20 selection:text-[#5514d8]">
+            {/* HERO SECTION: Rich Royal Violet Gradient (Matching Image 1) */}
+            <div className="relative w-full bg-gradient-to-br from-[#5314d4] via-[#631af0] to-[#450cc7] text-white overflow-hidden pb-12 sm:pb-16 lg:pb-24">
+                
+                {/* Visual Decorative Accent 1: Dot Matrix Grid (Upper Left - Image 1 Style) */}
+                <div className="pointer-events-none absolute top-6 left-6 grid grid-cols-6 gap-2.5 opacity-30 select-none">
+                    {Array.from({ length: 30 }).map((_, i) => (
+                        <span key={i} className="h-1.5 w-1.5 rounded-full bg-white block" />
+                    ))}
+                </div>
 
-            {/* Top Navigation Header */}
-            <header className="relative z-10 w-full border-b border-white/[0.08] bg-slate-950/40 backdrop-blur-xl">
-                <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3.5 sm:px-6 lg:px-8">
-                    {/* Brand */}
-                    <div className="flex items-center gap-3">
-                        <div className="relative flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-orange-500 to-[#F37021] shadow-lg shadow-orange-500/25 ring-1 ring-white/20 overflow-hidden">
-                            {!logoError ? (
-                                <img
-                                    src="logo-app.png"
-                                    alt="Logo Tango"
-                                    className="h-full w-full object-contain p-1"
-                                    onError={() => setLogoError(true)}
-                                />
-                            ) : (
-                                <Building2 className="h-5 w-5 text-white" />
-                            )}
-                            <span className="absolute -bottom-0.5 -right-0.5 flex h-3 w-3">
-                                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75"></span>
-                                <span className="relative inline-flex h-3 w-3 rounded-full bg-emerald-500 border border-slate-950"></span>
-                            </span>
+                {/* Visual Decorative Accent 2: Concentric Circular Rings (Top Right - Image 1 Style) */}
+                <div className="pointer-events-none absolute -top-24 right-10 sm:right-28 opacity-15 select-none">
+                    <div className="flex h-72 w-72 items-center justify-center rounded-full border border-white">
+                        <div className="flex h-52 w-52 items-center justify-center rounded-full border border-white">
+                            <div className="h-32 w-32 rounded-full border border-white" />
                         </div>
-                        <div>
-                            <div className="flex items-center gap-2">
-                                <span className="text-base font-black tracking-tight text-white">Tango</span>
-                                <span className="text-base font-normal text-slate-300">Gestão de Créditos</span>
-                                <span className="hidden sm:inline-flex items-center rounded-md bg-orange-500/15 px-2 py-0.5 text-[10px] font-bold text-orange-400 border border-orange-500/30">
-                                    Enterprise Cloud
+                    </div>
+                </div>
+
+                {/* Visual Decorative Accent 3: Watermark Geometric Accent (Bottom Center) */}
+                <div className="pointer-events-none absolute bottom-4 left-1/2 -translate-x-1/2 opacity-10 select-none">
+                    <div className="h-44 w-44 rounded-full border border-white/60 flex items-center justify-center">
+                        <div className="h-28 w-28 rotate-45 border border-white/60" />
+                    </div>
+                </div>
+
+                {/* Clean Top Navigation Bar */}
+                <header className="relative z-20 w-full px-4 sm:px-8 py-5">
+                    <div className="mx-auto flex max-w-7xl items-center justify-between">
+                        {/* Brand Logo & Name */}
+                        <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/15 backdrop-blur-md border border-white/25 shadow-md overflow-hidden">
+                                {!logoError ? (
+                                    <img
+                                        src="logo-app.png"
+                                        alt="Tango Logo"
+                                        className="h-full w-full object-contain p-1"
+                                        onError={() => setLogoError(true)}
+                                    />
+                                ) : (
+                                    <Building2 className="h-5 w-5 text-white" />
+                                )}
+                            </div>
+                            <div className="flex flex-col">
+                                <span className="text-lg font-black tracking-tight text-white leading-tight">
+                                    Tango ERP
+                                </span>
+                                <span className="text-[11px] font-medium text-purple-200">
+                                    Gestão de Créditos
                                 </span>
                             </div>
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-                                ERP para Instituições de Crédito & Finanças
-                            </p>
                         </div>
+
+                        {/* Top Nav Links (Image 1 Style) */}
+                        <nav className="hidden md:flex items-center gap-7 text-xs font-semibold text-white/90">
+                            <button
+                                type="button"
+                                onClick={() => setInfoModal('sobre')}
+                                className="hover:text-white hover:underline underline-offset-4 transition-colors"
+                            >
+                                Sobre o Sistema
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setInfoModal('seguranca')}
+                                className="hover:text-white hover:underline underline-offset-4 transition-colors"
+                            >
+                                Segurança & Cifra
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setInfoModal('suporte')}
+                                className="hover:text-white hover:underline underline-offset-4 transition-colors"
+                            >
+                                Apoio & Contacto
+                            </button>
+                            <div className="flex items-center gap-2 rounded-full bg-white/10 px-3.5 py-1.5 border border-white/20 text-[11px]">
+                                <ShieldCheck className="h-3.5 w-3.5 text-emerald-300" />
+                                <span>Ambiente Seguro</span>
+                            </div>
+                        </nav>
                     </div>
+                </header>
 
-                    {/* Operational Badges */}
-                    <div className="flex items-center gap-3 sm:gap-4">
-                        <div className="hidden sm:flex items-center gap-2 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400">
-                            <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                            <span>Central Tango Master Conectada</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-slate-300 backdrop-blur-md">
-                            <ShieldCheck className="h-3.5 w-3.5 text-orange-400" />
-                            <span>Cifragem 256-bit</span>
-                        </div>
-                    </div>
-                </div>
-            </header>
-
-            {/* Main Center Content */}
-            <main className="relative z-10 mx-auto flex w-full max-w-7xl flex-1 items-center px-4 py-8 sm:px-6 lg:px-8 lg:py-12">
-                <div className="grid w-full items-center gap-10 lg:grid-cols-12 xl:gap-14">
-                    
-                    {/* Left Column: Brand Showcase & Value Proposition (7 cols) */}
-                    <div className="flex flex-col space-y-6 lg:col-span-7 lg:space-y-8">
-                        {/* Eyebrow Pill */}
-                        <div className="inline-flex items-center gap-2 self-start rounded-full border border-orange-500/30 bg-gradient-to-r from-orange-500/15 via-orange-500/5 to-transparent px-3.5 py-1 text-xs font-bold text-orange-400 backdrop-blur-md shadow-sm">
-                            <Sparkles className="h-3.5 w-3.5 text-orange-400" />
-                            <span>SISTEMA INSTITUIÇÃO DE CRÉDITO & COBRANÇAS</span>
-                        </div>
-
-                        {/* High Impact Headline */}
-                        <div className="space-y-4">
-                            <h1 className="text-3xl font-black leading-tight tracking-tight text-white sm:text-4xl lg:text-5xl">
-                                A gestão da sua carteira de crédito,{' '}
-                                <span className="bg-gradient-to-r from-orange-400 via-amber-300 to-orange-500 bg-clip-text text-transparent">
-                                    segura e acessível
-                                </span>{' '}
-                                em qualquer computador.
-                            </h1>
-                            <p className="max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
-                                O acesso é reservado a empresas cadastradas pelo administrador no Tango Master.
-                                Se a sua empresa já tem acesso, inicie sessão. Se ainda não tem, faça o pedido de cadastro.
-                            </p>
-                        </div>
-
-                        {/* Live Fintech Metrics Strip */}
-                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4">
-                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3.5 backdrop-blur-md transition-all hover:bg-white/[0.06] hover:border-white/20">
-                                <div className="text-xl font-black text-white sm:text-2xl">99.98%</div>
-                                <div className="text-[11px] font-medium text-slate-400">Disponibilidade Cloud</div>
-                            </div>
-                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3.5 backdrop-blur-md transition-all hover:bg-white/[0.06] hover:border-white/20">
-                                <div className="text-xl font-black text-white sm:text-2xl">AES-256</div>
-                                <div className="text-[11px] font-medium text-slate-400">Cifra Bancária</div>
-                            </div>
-                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3.5 backdrop-blur-md transition-all hover:bg-white/[0.06] hover:border-white/20">
-                                <div className="text-xl font-black text-white sm:text-2xl">Tempo Real</div>
-                                <div className="text-[11px] font-medium text-slate-400">Sincronização Contínua</div>
-                            </div>
-                            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-3.5 backdrop-blur-md transition-all hover:bg-white/[0.06] hover:border-white/20">
-                                <div className="text-xl font-black text-white sm:text-2xl">Multi-Posto</div>
-                                <div className="text-[11px] font-medium text-slate-400">Acesso Centralizado</div>
-                            </div>
-                        </div>
-
-                        {/* Feature Cards Grid (2x2) */}
-                        <div className="grid gap-3.5 sm:grid-cols-2">
-                            {FEATURES.map(({ icon: Icon, title, text }) => (
-                                <div
-                                    key={title}
-                                    className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-md transition-all duration-300 hover:border-orange-500/40 hover:bg-white/[0.06] hover:-translate-y-0.5"
-                                >
-                                    <div className="flex items-start gap-3.5">
-                                        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-orange-500/10 border border-orange-500/20 text-[#F37021] transition-transform duration-300 group-hover:scale-110 group-hover:bg-[#F37021] group-hover:text-white">
-                                            <Icon className="h-5 w-5" />
-                                        </div>
-                                        <div className="min-w-0 flex-1">
-                                            <h3 className="text-sm font-bold text-white transition-colors group-hover:text-orange-300">
-                                                {title}
-                                            </h3>
-                                            <p className="mt-1 text-xs leading-relaxed text-slate-400">
-                                                {text}
-                                            </p>
-                                        </div>
-                                    </div>
-                                </div>
-                            ))}
-                        </div>
-
-                        {/* Security Banner */}
-                        <div className="flex items-center gap-3 rounded-2xl border border-white/5 bg-gradient-to-r from-white/[0.04] to-transparent p-3.5 text-xs text-slate-400 backdrop-blur-sm">
-                            <Lock className="h-4 w-4 shrink-0 text-orange-400" />
-                            <span>
-                                Ambiente corporativo com auditoria contínua. As operações respeitam os padrões de integridade e segurança de dados financeiros.
-                            </span>
-                        </div>
-                    </div>
-
-                    {/* Right Column: Interactive Gateway Panel (5 cols) */}
-                    <div className="lg:col-span-5">
-                        <div className="relative overflow-hidden rounded-3xl border border-white/15 bg-slate-900/85 p-6 shadow-[0_25px_70px_-15px_rgba(0,0,0,0.85)] backdrop-blur-2xl ring-1 ring-white/10 sm:p-8">
-                            {/* Glowing orange top accent line */}
-                            <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-[#F37021] to-transparent" />
+                {/* Main Hero Container */}
+                <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-8 pt-6 sm:pt-10 lg:pt-14">
+                    <div className="grid items-center gap-10 lg:grid-cols-12 lg:gap-12">
+                        
+                        {/* Left Column: Human, Elegant Typography & Pill Action Buttons */}
+                        <div className="flex flex-col space-y-6 lg:col-span-7">
                             
-                            {/* Inner subtle glow */}
-                            <div className="pointer-events-none absolute -right-20 -top-20 h-48 w-48 rounded-full bg-[#F37021]/10 blur-3xl" />
+                            {/* Eyebrow Tag */}
+                            <div className="inline-flex items-center gap-2 self-start rounded-full bg-white/10 px-4 py-1.5 text-xs font-semibold text-purple-100 border border-white/20 backdrop-blur-md">
+                                <Sparkles className="h-3.5 w-3.5 text-amber-300" />
+                                <span>Instituições Financeiras & Gestão de Crédito</span>
+                            </div>
 
-                            {/* WELCOME VIEW */}
-                            {step === 'welcome' && (
-                                <div className="space-y-6 animate-in fade-in duration-300">
-                                    <div className="space-y-2">
-                                        <div className="inline-flex items-center gap-1.5 rounded-full bg-white/5 px-3 py-1 text-[11px] font-bold text-orange-400 border border-orange-500/20">
-                                            <Building2 className="h-3 w-3" />
-                                            <span>Portal de Acesso</span>
-                                        </div>
-                                        <h2 className="text-2xl font-black tracking-tight text-white sm:text-3xl">
-                                            Bem-vindo
-                                        </h2>
-                                        <p className="text-sm text-slate-400 leading-relaxed">
-                                            Como pretende continuar com o acesso à sua organização?
-                                        </p>
-                                    </div>
+                            {/* Headline (Direct, human, non-generic) */}
+                            <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-white leading-[1.15] tracking-tight">
+                                A melhor ferramenta para impulsionar a gestão de crédito do seu negócio.
+                            </h1>
 
-                                    {/* Action Options */}
-                                    <div className="space-y-3.5">
-                                        <button
-                                            type="button"
-                                            onClick={() => goTo('identify')}
-                                            className="group relative flex w-full items-center justify-between overflow-hidden rounded-2xl bg-gradient-to-r from-orange-500 via-[#F37021] to-amber-500 p-4 text-left font-black text-white shadow-lg shadow-orange-500/25 transition-all duration-300 hover:scale-[1.01] hover:shadow-orange-500/40 active:scale-[0.99]"
-                                        >
-                                            <div className="flex items-center gap-3.5">
-                                                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 backdrop-blur-md transition-transform group-hover:scale-110">
-                                                    <LogIn className="h-5 w-5 text-white" />
-                                                </div>
-                                                <div>
-                                                    <p className="text-base font-bold leading-tight">Iniciar sessão</p>
-                                                    <p className="text-xs font-normal text-white/80">Aceder com NIF e Código de Acesso</p>
-                                                </div>
-                                            </div>
-                                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/15 transition-transform group-hover:translate-x-1">
-                                                <ArrowRight className="h-4 w-4 text-white" />
-                                            </div>
-                                        </button>
+                            {/* Subtitle */}
+                            <p className="max-w-xl text-sm sm:text-base text-purple-100/90 leading-relaxed font-normal">
+                                Plataforma corporativa para simulação ágil de empréstimos, emissão de contratos, cobranças e contabilidade em tempo real. Aceda à sua organização ou solicite o registo oficial da sua empresa.
+                            </p>
 
-                                        <button
-                                            type="button"
-                                            onClick={() => goTo('request')}
-                                            className="group relative flex w-full items-center justify-between overflow-hidden rounded-2xl border border-white/15 bg-white/[0.04] p-4 text-left font-black text-white backdrop-blur-md transition-all duration-300 hover:border-orange-500/40 hover:bg-white/[0.08] hover:scale-[1.01] active:scale-[0.99]"
-                                        >
-                                            <div className="flex items-center gap-3.5">
-                                                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-orange-500/10 border border-orange-500/20 text-[#F37021] transition-transform group-hover:scale-110">
-                                                    <ClipboardList className="h-5 w-5" />
-                                                </div>
-                                                <div>
-                                                    <p className="text-base font-bold leading-tight text-white group-hover:text-orange-300 transition-colors">
-                                                        Pedir cadastro da empresa
-                                                    </p>
-                                                    <p className="text-xs font-normal text-slate-400">
-                                                        Novo registo ou solicitação de licença
-                                                    </p>
-                                                </div>
-                                            </div>
-                                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-white/5 transition-transform group-hover:translate-x-1">
-                                                <ArrowRight className="h-4 w-4 text-slate-400 group-hover:text-white" />
-                                            </div>
-                                        </button>
-                                    </div>
+                            {/* Two Pill Buttons (Exactly as in Image 1!) */}
+                            <div className="flex flex-wrap items-center gap-4 pt-2">
+                                <button
+                                    type="button"
+                                    onClick={() => goTo('identify')}
+                                    className="rounded-full bg-white text-[#5314d4] font-bold px-7 py-3.5 text-sm shadow-xl shadow-purple-950/20 hover:bg-purple-50 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2"
+                                >
+                                    <LogIn className="h-4 w-4 text-[#5314d4]" />
+                                    <span>Iniciar Sessão</span>
+                                </button>
+                                
+                                <button
+                                    type="button"
+                                    onClick={() => goTo('request')}
+                                    className="rounded-full border-2 border-white/80 text-white font-semibold px-7 py-3.5 text-sm hover:bg-white/15 hover:border-white hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center gap-2"
+                                >
+                                    <ClipboardList className="h-4 w-4 text-white" />
+                                    <span>Pedir Registo</span>
+                                </button>
+                            </div>
 
-                                    {/* Clarifying Reassurance Notice */}
-                                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-xs leading-relaxed text-slate-400 backdrop-blur-sm">
-                                        <div className="flex items-start gap-2.5">
-                                            <Shield className="mt-0.5 h-4 w-4 shrink-0 text-orange-400" />
-                                            <p>
-                                                Neste navegador ainda não há nenhuma empresa ligada. Depois de validar a empresa uma única vez, os próximos acessos abrirão diretamente a página de utilizador.
-                                            </p>
-                                        </div>
-                                    </div>
+                            {/* Human Trust Notes (Replacing all generic 4-stat AI cards) */}
+                            <div className="pt-4 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-purple-200">
+                                <div className="flex items-center gap-1.5">
+                                    <CheckCircle className="h-4 w-4 text-emerald-300" />
+                                    <span>Cifra Bancária de Ponta a Ponta</span>
                                 </div>
-                            )}
+                                <div className="flex items-center gap-1.5">
+                                    <CheckCircle className="h-4 w-4 text-emerald-300" />
+                                    <span>Sincronização Cloud Contínua</span>
+                                </div>
+                                <div className="flex items-center gap-1.5">
+                                    <CheckCircle className="h-4 w-4 text-emerald-300" />
+                                    <span>Auditoria e Conformidade</span>
+                                </div>
+                            </div>
+                        </div>
 
-                            {/* IDENTIFY VIEW (Step 1) */}
-                            {step === 'identify' && (
-                                <form onSubmit={handleIdentify} className="space-y-6 animate-in fade-in duration-300">
-                                    <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                                        {backButton('welcome')}
-                                        <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] font-bold text-orange-400 border border-orange-500/20">
-                                            Passo 1 de 2 · Identificação
-                                        </span>
-                                    </div>
+                        {/* Right Column: Clean White Interactive Portal Card */}
+                        <div className="lg:col-span-5">
+                            <div className="relative overflow-hidden rounded-3xl bg-white p-6 sm:p-8 text-slate-800 shadow-2xl shadow-purple-950/40 border border-white/80 transition-all duration-300">
+                                
+                                {/* Inner Subtle Purple Accent Top Line */}
+                                <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#5314d4] via-[#7c3aed] to-[#631af0]" />
 
-                                    <div className="space-y-1">
-                                        <h2 className="text-2xl font-black tracking-tight text-white">
-                                            Iniciar Sessão
-                                        </h2>
-                                        <p className="text-xs text-slate-400 leading-relaxed">
-                                            Indique o NIF da sua empresa para consultarmos a ativação no Tango Master.
-                                        </p>
-                                    </div>
-
-                                    {errorBox}
-                                    {nifField}
-
-                                    <Button
-                                        type="submit"
-                                        disabled={isBusy || cleanNif.length < 9}
-                                        className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-orange-500 via-[#F37021] to-amber-500 text-sm font-black text-white shadow-lg shadow-orange-500/25 hover:from-orange-600 hover:to-amber-600 hover:shadow-orange-500/40 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:pointer-events-none"
-                                    >
-                                        {isBusy ? (
-                                            <><Loader2 className="h-5 w-5 animate-spin" /> A verificar no Tango Master…</>
-                                        ) : (
-                                            <>Continuar <ArrowRight className="h-5 w-5" /></>
-                                        )}
-                                    </Button>
-                                </form>
-                            )}
-
-                            {/* ACCESS CODE VIEW (Step 2) */}
-                            {step === 'access' && (
-                                <form onSubmit={handleAccess} className="space-y-6 animate-in fade-in duration-300">
-                                    <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                                        {backButton('identify', 'Alterar NIF')}
-                                        <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] font-bold text-orange-400 border border-orange-500/20">
-                                            Passo 2 de 2 · Código de Acesso
-                                        </span>
-                                    </div>
-
-                                    <div className="space-y-1">
-                                        <h2 className="text-2xl font-black tracking-tight text-white">
-                                            {companyName || 'Código de Acesso'}
-                                        </h2>
-                                        <p className="text-xs text-slate-400 leading-relaxed">
-                                            Empresa identificada no Tango Master. Introduza a chave para autorizar este navegador.
-                                        </p>
-                                    </div>
-
-                                    {errorBox}
-
-                                    {/* Company Identified Pill */}
-                                    <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 text-xs text-emerald-300 backdrop-blur-md">
-                                        <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-400" />
-                                        <div>
-                                            <p className="font-bold text-emerald-200">Empresa Registada</p>
-                                            <p className="text-slate-300">
-                                                NIF <span className="font-mono font-bold text-white">{cleanNif}</span>
+                                {/* STEP 1: WELCOME VIEW */}
+                                {step === 'welcome' && (
+                                    <div className="space-y-6 animate-in fade-in duration-300 pt-1">
+                                        <div className="space-y-1.5">
+                                            <div className="inline-flex items-center gap-1.5 rounded-full bg-purple-50 px-3 py-1 text-xs font-bold text-[#5314d4] border border-purple-200">
+                                                <Building2 className="h-3.5 w-3.5" />
+                                                <span>Portal de Acesso</span>
+                                            </div>
+                                            <h2 className="text-2xl font-black tracking-tight text-slate-900">
+                                                Bem-vindo
+                                            </h2>
+                                            <p className="text-xs text-slate-500 leading-relaxed">
+                                                Como pretende continuar com o acesso à sua organização?
                                             </p>
                                         </div>
-                                    </div>
 
-                                    {/* Access Code Input */}
-                                    <div className="space-y-1.5">
-                                        <Label htmlFor="gateway-code" className="flex items-center gap-1.5 text-xs font-bold text-slate-300">
-                                            <KeyRound className="h-3.5 w-3.5 text-[#F37021]" />
-                                            Código de Acesso da empresa
-                                        </Label>
-                                        <div className="relative">
-                                            <Input
-                                                id="gateway-code"
-                                                type={showCode ? 'text' : 'password'}
-                                                value={accessCode}
-                                                onChange={e => { setAccessCode(e.target.value.toUpperCase()); setErrorMessage(''); }}
-                                                placeholder="Ex.: TG-8492-3105"
-                                                autoComplete="off"
-                                                autoFocus
-                                                className="h-12 rounded-xl pr-12 font-mono text-base font-bold tracking-wider text-orange-400 bg-slate-950/70 border-white/15 placeholder:text-slate-600 focus-visible:ring-[#F37021] focus-visible:border-[#F37021]"
-                                                disabled={isBusy}
-                                                required
-                                            />
+                                        <div className="space-y-3.5">
+                                            {/* Primary Option: Iniciar Sessão */}
                                             <button
                                                 type="button"
-                                                onClick={() => setShowCode(v => !v)}
-                                                tabIndex={-1}
-                                                aria-label={showCode ? 'Ocultar código' : 'Mostrar código'}
-                                                className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors"
+                                                onClick={() => goTo('identify')}
+                                                className="group flex w-full items-center justify-between rounded-2xl bg-gradient-to-r from-[#5314d4] to-[#631af0] p-4 text-left font-bold text-white shadow-lg shadow-purple-600/25 transition-all duration-300 hover:scale-[1.01] hover:shadow-purple-600/35 active:scale-[0.99]"
                                             >
-                                                {showCode ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                                                <div className="flex items-center gap-3.5">
+                                                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 backdrop-blur-md">
+                                                        <LogIn className="h-5 w-5 text-white" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-bold leading-tight">Iniciar Sessão</p>
+                                                        <p className="text-xs font-normal text-purple-100">Aceder com NIF e Código de Acesso</p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-white/15 transition-transform group-hover:translate-x-1">
+                                                    <ArrowRight className="h-4 w-4 text-white" />
+                                                </div>
+                                            </button>
+
+                                            {/* Secondary Option: Pedir Registo */}
+                                            <button
+                                                type="button"
+                                                onClick={() => goTo('request')}
+                                                className="group flex w-full items-center justify-between rounded-2xl border-2 border-slate-200 bg-slate-50 p-4 text-left font-bold text-slate-800 transition-all duration-300 hover:border-[#5314d4] hover:bg-purple-50/50 hover:scale-[1.01] active:scale-[0.99]"
+                                            >
+                                                <div className="flex items-center gap-3.5">
+                                                    <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-purple-100 text-[#5314d4]">
+                                                        <ClipboardList className="h-5 w-5" />
+                                                    </div>
+                                                    <div>
+                                                        <p className="text-sm font-bold leading-tight text-slate-900 group-hover:text-[#5314d4] transition-colors">
+                                                            Pedir Registo de Empresa
+                                                        </p>
+                                                        <p className="text-xs font-normal text-slate-500">
+                                                            Nova licença ou adesão corporativa
+                                                        </p>
+                                                    </div>
+                                                </div>
+                                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 transition-transform group-hover:translate-x-1">
+                                                    <ArrowRight className="h-4 w-4 text-slate-600 group-hover:text-[#5314d4]" />
+                                                </div>
                                             </button>
                                         </div>
-                                        <p className="text-[11px] text-slate-400 leading-relaxed">
-                                            Requerido apenas na primeira ligação neste navegador. Nos próximos acessos, entrará diretamente com o utilizador e palavra-passe.
-                                        </p>
-                                    </div>
 
-                                    <Button
-                                        type="submit"
-                                        disabled={isBusy || accessCode.trim().length < 4}
-                                        className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-orange-500 via-[#F37021] to-amber-500 text-sm font-black text-white shadow-lg shadow-orange-500/25 hover:from-orange-600 hover:to-amber-600 hover:shadow-orange-500/40 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:pointer-events-none"
-                                    >
-                                        {isBusy ? (
-                                            <><Loader2 className="h-5 w-5 animate-spin" /> A validar credenciais…</>
-                                        ) : (
-                                            <><ShieldCheck className="h-5 w-5" /> Validar e Ligar Empresa</>
-                                        )}
-                                    </Button>
-                                </form>
-                            )}
-
-                            {/* ACTIVATION VIEW (Step: Not registered yet) */}
-                            {step === 'activation' && (
-                                <div className="space-y-6 animate-in fade-in duration-300">
-                                    <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                                        {backButton('identify')}
-                                        <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] font-bold text-amber-400 border border-amber-500/20">
-                                            Ativação Pendente
-                                        </span>
-                                    </div>
-
-                                    <div className="space-y-1">
-                                        <h2 className="text-2xl font-black tracking-tight text-white">
-                                            Empresa Não Encontrada
-                                        </h2>
-                                        <p className="text-xs text-slate-400 leading-relaxed">
-                                            O NIF <strong className="font-mono text-white">{cleanNif}</strong> ainda não está ativo no Tango Master.
-                                        </p>
-                                    </div>
-
-                                    <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs leading-relaxed text-amber-200 backdrop-blur-md">
-                                        Para ativar o sistema nesta empresa, envie o pedido de cadastro. Após aprovação pelo administrador, receberá a licença e o Código de Acesso.
-                                    </div>
-
-                                    <div className="space-y-3">
-                                        <Button
-                                            onClick={() => goTo('request')}
-                                            className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-orange-500 via-[#F37021] to-amber-500 text-sm font-black text-white shadow-lg shadow-orange-500/25 hover:from-orange-600 hover:to-amber-600 hover:shadow-orange-500/40 hover:scale-[1.01] active:scale-[0.99] transition-all"
-                                        >
-                                            <ClipboardList className="h-5 w-5" /> Pedir cadastro da empresa
-                                        </Button>
-                                        <Button
-                                            variant="outline"
-                                            onClick={() => goTo('access')}
-                                            className="h-11 w-full rounded-xl border-white/15 bg-white/5 text-xs font-bold text-slate-200 hover:bg-white/10 hover:text-white"
-                                        >
-                                            Já recebi o Código de Acesso
-                                        </Button>
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* REQUEST VIEW (Step: Request registration) */}
-                            {step === 'request' && (
-                                <form onSubmit={handleRequest} className="space-y-5 animate-in fade-in duration-300">
-                                    <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                                        {backButton('welcome')}
-                                        <span className="rounded-full bg-white/5 px-3 py-1 text-[11px] font-bold text-orange-400 border border-orange-500/20">
-                                            Novo Registo
-                                        </span>
-                                    </div>
-
-                                    <div className="space-y-1">
-                                        <h2 className="text-2xl font-black tracking-tight text-white">
-                                            Pedido de Cadastro
-                                        </h2>
-                                        <p className="text-xs text-slate-400 leading-relaxed">
-                                            Submeta os dados da sua instituição para emissão da licença corporativa.
-                                        </p>
-                                    </div>
-
-                                    {errorBox}
-                                    {nifField}
-
-                                    <div className="space-y-1.5">
-                                        <Label htmlFor="req-company" className="text-xs font-bold text-slate-300">
-                                            Nome da instituição / empresa
-                                        </Label>
-                                        <Input
-                                            id="req-company"
-                                            value={request.companyName}
-                                            maxLength={200}
-                                            required
-                                            disabled={isBusy}
-                                            placeholder="Ex.: Microcrédito Esperança, Lda"
-                                            onChange={e => setRequest(prev => ({ ...prev, companyName: e.target.value }))}
-                                            className="h-11 rounded-xl bg-slate-950/70 border-white/15 text-white placeholder:text-slate-600 focus-visible:ring-[#F37021] focus-visible:border-[#F37021]"
-                                        />
-                                    </div>
-
-                                    <div className="grid gap-3 sm:grid-cols-2">
-                                        <div className="space-y-1.5">
-                                            <Label htmlFor="req-contact" className="text-xs font-bold text-slate-300">
-                                                Pessoa de contacto
-                                            </Label>
-                                            <Input
-                                                id="req-contact"
-                                                value={request.contactName}
-                                                maxLength={120}
-                                                required
-                                                disabled={isBusy}
-                                                autoComplete="name"
-                                                placeholder="Nome do responsável"
-                                                onChange={e => setRequest(prev => ({ ...prev, contactName: e.target.value }))}
-                                                className="h-11 rounded-xl bg-slate-950/70 border-white/15 text-white placeholder:text-slate-600 focus-visible:ring-[#F37021] focus-visible:border-[#F37021]"
-                                            />
-                                        </div>
-                                        <div className="space-y-1.5">
-                                            <Label htmlFor="req-phone" className="text-xs font-bold text-slate-300">
-                                                Telefone / WhatsApp
-                                            </Label>
-                                            <Input
-                                                id="req-phone"
-                                                type="tel"
-                                                value={request.phone}
-                                                maxLength={30}
-                                                required
-                                                disabled={isBusy}
-                                                autoComplete="tel"
-                                                placeholder="+244 9XX XXX XXX"
-                                                onChange={e => setRequest(prev => ({ ...prev, phone: e.target.value }))}
-                                                className="h-11 rounded-xl bg-slate-950/70 border-white/15 text-white placeholder:text-slate-600 focus-visible:ring-[#F37021] focus-visible:border-[#F37021]"
-                                            />
+                                        <div className="rounded-2xl border border-purple-100 bg-purple-50/60 p-3.5 text-xs text-slate-600 leading-relaxed">
+                                            <div className="flex items-start gap-2.5">
+                                                <Shield className="mt-0.5 h-4 w-4 shrink-0 text-[#5314d4]" />
+                                                <p>
+                                                    Neste computador ainda não existe uma empresa ligada. A validação é realizada uma única vez; os próximos acessos abrirão diretamente a página de login.
+                                                </p>
+                                            </div>
                                         </div>
                                     </div>
+                                )}
 
-                                    <div className="space-y-1.5">
-                                        <Label htmlFor="req-email" className="text-xs font-bold text-slate-300">
-                                            Email corporativo (opcional)
-                                        </Label>
-                                        <Input
-                                            id="req-email"
-                                            type="email"
-                                            value={request.email}
-                                            maxLength={160}
-                                            disabled={isBusy}
-                                            autoComplete="email"
-                                            placeholder="contacto@instituicao.co.ao"
-                                            onChange={e => setRequest(prev => ({ ...prev, email: e.target.value }))}
-                                            className="h-11 rounded-xl bg-slate-950/70 border-white/15 text-white placeholder:text-slate-600 focus-visible:ring-[#F37021] focus-visible:border-[#F37021]"
-                                        />
+                                {/* STEP 2: IDENTIFY (NIF) */}
+                                {step === 'identify' && (
+                                    <form onSubmit={handleIdentify} className="space-y-5 animate-in fade-in duration-300 pt-1">
+                                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                            {backButton('welcome')}
+                                            <span className="rounded-full bg-purple-50 px-3 py-1 text-[11px] font-bold text-[#5314d4] border border-purple-200">
+                                                Passo 1 de 2 · Identificação
+                                            </span>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <h2 className="text-2xl font-black tracking-tight text-slate-900">
+                                                Identificar Empresa
+                                            </h2>
+                                            <p className="text-xs text-slate-500 leading-relaxed">
+                                                Indique o NIF da organização para consultarmos o registo no servidor central.
+                                            </p>
+                                        </div>
+
+                                        {errorBox}
+                                        {nifField}
+
+                                        <Button
+                                            type="submit"
+                                            disabled={isBusy || cleanNif.length < 9}
+                                            className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-[#5314d4] to-[#631af0] text-sm font-bold text-white shadow-lg shadow-purple-600/25 hover:from-[#480ebb] hover:to-[#5514d4] hover:shadow-purple-600/40 transition-all disabled:opacity-50"
+                                        >
+                                            {isBusy ? (
+                                                <><Loader2 className="h-4 w-4 animate-spin" /> A verificar no servidor…</>
+                                            ) : (
+                                                <>Continuar <ArrowRight className="h-4 w-4" /></>
+                                            )}
+                                        </Button>
+                                    </form>
+                                )}
+
+                                {/* STEP 3: ACCESS CODE */}
+                                {step === 'access' && (
+                                    <form onSubmit={handleAccess} className="space-y-5 animate-in fade-in duration-300 pt-1">
+                                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                            {backButton('identify', 'Alterar NIF')}
+                                            <span className="rounded-full bg-purple-50 px-3 py-1 text-[11px] font-bold text-[#5314d4] border border-purple-200">
+                                                Passo 2 de 2 · Autorização
+                                            </span>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <h2 className="text-2xl font-black tracking-tight text-slate-900">
+                                                {companyName || 'Código de Acesso'}
+                                            </h2>
+                                            <p className="text-xs text-slate-500 leading-relaxed">
+                                                Empresa identificada. Introduza o Código de Acesso para autorizar este computador.
+                                            </p>
+                                        </div>
+
+                                        {errorBox}
+
+                                        {/* Company verified pill */}
+                                        <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                                            <CheckCircle2 className="h-5 w-5 shrink-0 text-emerald-600" />
+                                            <div>
+                                                <p className="font-bold text-emerald-900">Empresa Registada</p>
+                                                <p className="text-slate-600">
+                                                    NIF <span className="font-mono font-bold text-slate-900">{cleanNif}</span>
+                                                </p>
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-1.5">
+                                            <Label htmlFor="gateway-code" className="flex items-center gap-1.5 text-xs font-bold text-slate-700">
+                                                <KeyRound className="h-3.5 w-3.5 text-[#5314d4]" />
+                                                Código de Acesso da empresa
+                                            </Label>
+                                            <div className="relative">
+                                                <Input
+                                                    id="gateway-code"
+                                                    type={showCode ? 'text' : 'password'}
+                                                    value={accessCode}
+                                                    onChange={e => { setAccessCode(e.target.value.toUpperCase()); setErrorMessage(''); }}
+                                                    placeholder="Ex.: TG-8492-3105"
+                                                    autoComplete="off"
+                                                    autoFocus
+                                                    className="h-11 rounded-xl pr-11 font-mono text-base font-bold tracking-wider text-[#5314d4] bg-slate-50 border-slate-200 placeholder:text-slate-400 focus-visible:ring-[#5314d4] focus-visible:border-[#5314d4]"
+                                                    disabled={isBusy}
+                                                    required
+                                                />
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setShowCode(v => !v)}
+                                                    tabIndex={-1}
+                                                    aria-label={showCode ? 'Ocultar código' : 'Mostrar código'}
+                                                    className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 transition-colors"
+                                                >
+                                                    {showCode ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                                                </button>
+                                            </div>
+                                            <p className="text-[11px] text-slate-500 leading-relaxed">
+                                                Necessário apenas no primeiro acesso neste computador.
+                                            </p>
+                                        </div>
+
+                                        <Button
+                                            type="submit"
+                                            disabled={isBusy || accessCode.trim().length < 4}
+                                            className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-[#5314d4] to-[#631af0] text-sm font-bold text-white shadow-lg shadow-purple-600/25 hover:from-[#480ebb] hover:to-[#5514d4] hover:shadow-purple-600/40 transition-all disabled:opacity-50"
+                                        >
+                                            {isBusy ? (
+                                                <><Loader2 className="h-4 w-4 animate-spin" /> A validar credenciais…</>
+                                            ) : (
+                                                <><ShieldCheck className="h-4 w-4" /> Validar e Ligar Empresa</>
+                                            )}
+                                        </Button>
+                                    </form>
+                                )}
+
+                                {/* STEP 4: ACTIVATION PENDING */}
+                                {step === 'activation' && (
+                                    <div className="space-y-5 animate-in fade-in duration-300 pt-1">
+                                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                            {backButton('identify')}
+                                            <span className="rounded-full bg-amber-50 px-3 py-1 text-[11px] font-bold text-amber-700 border border-amber-200">
+                                                Ativação Pendente
+                                            </span>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <h2 className="text-2xl font-black tracking-tight text-slate-900">
+                                                Empresa Não Encontrada
+                                            </h2>
+                                            <p className="text-xs text-slate-500 leading-relaxed">
+                                                O NIF <strong className="font-mono text-slate-900">{cleanNif}</strong> ainda não está registado no servidor central.
+                                            </p>
+                                        </div>
+
+                                        <div className="rounded-2xl border border-amber-200 bg-amber-50 p-3.5 text-xs text-amber-800 leading-relaxed">
+                                            Para ativar o sistema nesta empresa, envie o pedido de cadastro. Após aprovação, receberá a licença e o Código de Acesso.
+                                        </div>
+
+                                        <div className="space-y-2.5">
+                                            <Button
+                                                onClick={() => goTo('request')}
+                                                className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-[#5314d4] to-[#631af0] text-sm font-bold text-white shadow-lg shadow-purple-600/25 hover:from-[#480ebb] hover:to-[#5514d4]"
+                                            >
+                                                <ClipboardList className="h-4 w-4" /> Pedir Registo da Empresa
+                                            </Button>
+                                            <Button
+                                                variant="outline"
+                                                onClick={() => goTo('access')}
+                                                className="h-11 w-full rounded-xl border-slate-200 text-xs font-bold text-slate-700 hover:bg-slate-100"
+                                            >
+                                                Já tenho o Código de Acesso
+                                            </Button>
+                                        </div>
                                     </div>
+                                )}
 
-                                    <div className="space-y-1.5">
-                                        <Label htmlFor="req-message" className="text-xs font-bold text-slate-300">
-                                            Mensagem ou notas (opcional)
-                                        </Label>
-                                        <Textarea
-                                            id="req-message"
-                                            value={request.message}
-                                            maxLength={1000}
-                                            rows={2}
-                                            disabled={isBusy}
-                                            placeholder="Indique o número de postos ou detalhes adicionais..."
-                                            onChange={e => setRequest(prev => ({ ...prev, message: e.target.value }))}
-                                            className="rounded-xl bg-slate-950/70 border-white/15 text-white placeholder:text-slate-600 focus-visible:ring-[#F37021] focus-visible:border-[#F37021]"
-                                        />
+                                {/* STEP 5: REGISTRATION REQUEST */}
+                                {step === 'request' && (
+                                    <form onSubmit={handleRequest} className="space-y-4 animate-in fade-in duration-300 pt-1">
+                                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                            {backButton('welcome')}
+                                            <span className="rounded-full bg-purple-50 px-3 py-1 text-[11px] font-bold text-[#5314d4] border border-purple-200">
+                                                Novo Registo
+                                            </span>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <h2 className="text-xl font-black tracking-tight text-slate-900">
+                                                Pedido de Cadastro
+                                            </h2>
+                                            <p className="text-xs text-slate-500 leading-relaxed">
+                                                Submeta os dados da sua instituição para emissão da licença empresarial.
+                                            </p>
+                                        </div>
+
+                                        {errorBox}
+                                        {nifField}
+
+                                        <div className="space-y-1">
+                                            <Label htmlFor="req-company" className="text-xs font-bold text-slate-700">
+                                                Nome da Instituição / Empresa
+                                            </Label>
+                                            <Input
+                                                id="req-company"
+                                                value={request.companyName}
+                                                maxLength={200}
+                                                required
+                                                disabled={isBusy}
+                                                placeholder="Ex.: Microcrédito Esperança, Lda"
+                                                onChange={e => setRequest(prev => ({ ...prev, companyName: e.target.value }))}
+                                                className="h-10 rounded-xl bg-slate-50 border-slate-200 text-slate-900 text-sm focus-visible:ring-[#5314d4]"
+                                            />
+                                        </div>
+
+                                        <div className="grid gap-3 sm:grid-cols-2">
+                                            <div className="space-y-1">
+                                                <Label htmlFor="req-contact" className="text-xs font-bold text-slate-700">
+                                                    Pessoa de Contacto
+                                                </Label>
+                                                <Input
+                                                    id="req-contact"
+                                                    value={request.contactName}
+                                                    maxLength={120}
+                                                    required
+                                                    disabled={isBusy}
+                                                    autoComplete="name"
+                                                    placeholder="Nome do responsável"
+                                                    onChange={e => setRequest(prev => ({ ...prev, contactName: e.target.value }))}
+                                                    className="h-10 rounded-xl bg-slate-50 border-slate-200 text-slate-900 text-sm focus-visible:ring-[#5314d4]"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <Label htmlFor="req-phone" className="text-xs font-bold text-slate-700">
+                                                    Telefone / WhatsApp
+                                                </Label>
+                                                <Input
+                                                    id="req-phone"
+                                                    type="tel"
+                                                    value={request.phone}
+                                                    maxLength={30}
+                                                    required
+                                                    disabled={isBusy}
+                                                    autoComplete="tel"
+                                                    placeholder="+244 9XX XXX XXX"
+                                                    onChange={e => setRequest(prev => ({ ...prev, phone: e.target.value }))}
+                                                    className="h-10 rounded-xl bg-slate-50 border-slate-200 text-slate-900 text-sm focus-visible:ring-[#5314d4]"
+                                                />
+                                            </div>
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <Label htmlFor="req-email" className="text-xs font-bold text-slate-700">
+                                                Email Corporativo (opcional)
+                                            </Label>
+                                            <Input
+                                                id="req-email"
+                                                type="email"
+                                                value={request.email}
+                                                maxLength={160}
+                                                disabled={isBusy}
+                                                autoComplete="email"
+                                                placeholder="contacto@instituicao.ao"
+                                                onChange={e => setRequest(prev => ({ ...prev, email: e.target.value }))}
+                                                className="h-10 rounded-xl bg-slate-50 border-slate-200 text-slate-900 text-sm focus-visible:ring-[#5314d4]"
+                                            />
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <Label htmlFor="req-message" className="text-xs font-bold text-slate-700">
+                                                Notas Adicionais (opcional)
+                                            </Label>
+                                            <Textarea
+                                                id="req-message"
+                                                value={request.message}
+                                                maxLength={1000}
+                                                rows={2}
+                                                disabled={isBusy}
+                                                placeholder="Número de postos ou detalhes pretendidos..."
+                                                onChange={e => setRequest(prev => ({ ...prev, message: e.target.value }))}
+                                                className="rounded-xl bg-slate-50 border-slate-200 text-slate-900 text-sm focus-visible:ring-[#5314d4]"
+                                            />
+                                        </div>
+
+                                        <Button
+                                            type="submit"
+                                            disabled={isBusy || cleanNif.length < 9}
+                                            className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-[#5314d4] to-[#631af0] text-sm font-bold text-white shadow-lg shadow-purple-600/25 hover:from-[#480ebb] hover:to-[#5514d4] transition-all disabled:opacity-50"
+                                        >
+                                            {isBusy ? (
+                                                <><Loader2 className="h-4 w-4 animate-spin" /> A enviar pedido…</>
+                                            ) : (
+                                                <><Send className="h-4 w-4" /> Enviar Pedido de Cadastro</>
+                                            )}
+                                        </Button>
+                                    </form>
+                                )}
+
+                                {/* STEP 6: REQUEST SENT (SUCCESS) */}
+                                {step === 'requestSent' && (
+                                    <div className="space-y-5 text-center animate-in fade-in duration-300 py-3">
+                                        <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-600">
+                                            <CheckCircle2 className="h-8 w-8 text-emerald-600" />
+                                        </div>
+
+                                        <div className="space-y-1">
+                                            <h2 className="text-2xl font-black tracking-tight text-slate-900">
+                                                Pedido Submetido!
+                                            </h2>
+                                            <p className="text-xs leading-relaxed text-slate-600 max-w-sm mx-auto">
+                                                A solicitação para o NIF <strong className="font-mono text-slate-900">{cleanNif}</strong> foi recebida. Entraremos em contacto brevemente com os dados de acesso.
+                                            </p>
+                                        </div>
+
+                                        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 text-xs text-slate-600 text-left space-y-1.5">
+                                            <p className="font-bold text-slate-800 flex items-center gap-1.5">
+                                                <Info className="h-4 w-4 text-[#5314d4]" /> O que fazer a seguir?
+                                            </p>
+                                            <p>
+                                                Assim que receber o seu Código de Acesso por email ou WhatsApp, clique em <strong>Iniciar Sessão</strong> nesta página e insira a chave para autorizar este posto.
+                                            </p>
+                                        </div>
+
+                                        <Button
+                                            onClick={() => goTo('welcome')}
+                                            className="h-11 w-full rounded-xl bg-gradient-to-r from-[#5314d4] to-[#631af0] font-bold text-white shadow-lg shadow-purple-600/25 hover:from-[#480ebb] hover:to-[#5514d4]"
+                                        >
+                                            Voltar ao Início
+                                        </Button>
                                     </div>
-
-                                    <Button
-                                        type="submit"
-                                        disabled={isBusy || cleanNif.length < 9}
-                                        className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-orange-500 via-[#F37021] to-amber-500 text-sm font-black text-white shadow-lg shadow-orange-500/25 hover:from-orange-600 hover:to-amber-600 hover:shadow-orange-500/40 hover:scale-[1.01] active:scale-[0.99] transition-all disabled:opacity-50 disabled:pointer-events-none"
-                                    >
-                                        {isBusy ? (
-                                            <><Loader2 className="h-5 w-5 animate-spin" /> A enviar pedido…</>
-                                        ) : (
-                                            <><Send className="h-5 w-5" /> Enviar Pedido de Cadastro</>
-                                        )}
-                                    </Button>
-                                </form>
-                            )}
-
-                            {/* REQUEST SENT VIEW (Success) */}
-                            {step === 'requestSent' && (
-                                <div className="space-y-6 text-center animate-in fade-in duration-300 py-4">
-                                    <div className="relative mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                                        <CheckCircle2 className="h-8 w-8 text-emerald-400" />
-                                        <span className="absolute -inset-1 animate-ping rounded-2xl bg-emerald-400/20" />
-                                    </div>
-
-                                    <div className="space-y-2">
-                                        <h2 className="text-2xl font-black tracking-tight text-white">
-                                            Pedido Enviado com Sucesso
-                                        </h2>
-                                        <p className="text-xs leading-relaxed text-slate-300 max-w-sm mx-auto">
-                                            O administrador do Tango Master vai analisar a solicitação da empresa com NIF <strong className="font-mono text-white">{cleanNif}</strong> e entrar em contacto com o Código de Acesso.
-                                        </p>
-                                    </div>
-
-                                    <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-4 text-xs text-slate-400 text-left space-y-2">
-                                        <p className="font-bold text-white flex items-center gap-1.5">
-                                            <Info className="h-4 w-4 text-orange-400" /> O que acontece a seguir?
-                                        </p>
-                                        <p>
-                                            Quando receber o seu Código de Acesso por email ou telefone, volte a esta página, clique em <strong>Iniciar sessão</strong> e introduza a chave recebida para ativar o acesso.
-                                        </p>
-                                    </div>
-
-                                    <Button
-                                        onClick={() => goTo('welcome')}
-                                        className="h-12 w-full rounded-xl bg-gradient-to-r from-orange-500 via-[#F37021] to-amber-500 font-bold text-white shadow-lg shadow-orange-500/25 hover:from-orange-600 hover:to-amber-600"
-                                    >
-                                        Voltar ao Início
-                                    </Button>
-                                </div>
-                            )}
+                                )}
+                            </div>
                         </div>
+
                     </div>
                 </div>
-            </main>
+            </div>
 
-            {/* Bottom Footer */}
-            <footer className="relative z-10 w-full border-t border-white/[0.08] bg-slate-950/60 py-5 text-xs text-slate-400 backdrop-blur-xl">
-                <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 px-4 sm:flex-row sm:px-6 lg:px-8">
-                    <div className="flex flex-col items-center gap-0.5 sm:items-start text-center sm:text-left">
-                        <p className="font-semibold text-slate-300">
+            {/* ORGANIC SMOOTH WAVE SVG (Image 1 Signature Style) */}
+            <div className="relative w-full -mt-1 overflow-hidden leading-none z-10 select-none pointer-events-none">
+                <svg
+                    viewBox="0 0 1440 240"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-full h-20 sm:h-32 lg:h-44 block"
+                    preserveAspectRatio="none"
+                >
+                    <path
+                        d="M0,120 C320,240 420,60 760,140 C1080,220 1260,80 1440,150 L1440,240 L0,240 Z"
+                        fill="#ffffff"
+                    />
+                </svg>
+            </div>
+
+            {/* CRISP WHITE FOOTER (Matching Image 1's airy white lower section) */}
+            <footer className="relative z-10 w-full bg-white py-6 px-4 sm:px-8 border-t border-slate-100">
+                <div className="mx-auto flex max-w-7xl flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
+                    <div className="text-center sm:text-left">
+                        <p className="font-semibold text-slate-700">
                             © {new Date().getFullYear()} Tango Gestão de Créditos ERP · Todos os direitos reservados.
                         </p>
                         <p className="text-[11px] text-slate-400">
-                            Desenvolvido por <span className="font-semibold text-slate-200">DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA</span>
+                            Desenvolvido por DIGITAL NORTE (SU), LDA · Linha de Apoio Institucional
                         </p>
                     </div>
-                    <div className="flex flex-wrap items-center justify-center gap-4 text-[11px] text-slate-400">
-                        <span className="flex items-center gap-1.5">
-                            <Shield className="h-3.5 w-3.5 text-orange-400" /> Cifragem AES-256
-                        </span>
-                        <span className="hidden sm:inline">•</span>
-                        <span className="flex items-center gap-1.5">
-                            <Cloud className="h-3.5 w-3.5 text-blue-400" /> Sincronização Cloud
-                        </span>
-                        <span className="hidden sm:inline">•</span>
-                        <span className="flex items-center gap-1.5">
-                            <CheckCircle className="h-3.5 w-3.5 text-emerald-400" /> Auditoria Centralizada
-                        </span>
+
+                    {/* Bottom Right Pill Action (Echoing Image 1's bottom right button) */}
+                    <div className="flex items-center gap-3">
+                        <button
+                            type="button"
+                            onClick={() => setInfoModal('suporte')}
+                            className="inline-flex items-center gap-2 rounded-full bg-[#5314d4] px-5 py-2.5 text-xs font-bold text-white shadow-md shadow-purple-600/20 hover:bg-[#450cc7] transition-all"
+                        >
+                            <PhoneCall className="h-3.5 w-3.5" />
+                            <span>Apoio ao Cliente & Suporte</span>
+                        </button>
                     </div>
                 </div>
             </footer>
+
+            {/* Interactive Info Modals */}
+            {infoModal && (
+                <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200">
+                    <div className="relative w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-100 space-y-4">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                            <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+                                {infoModal === 'sobre' && <Building2 className="h-5 w-5 text-[#5314d4]" />}
+                                {infoModal === 'seguranca' && <Lock className="h-5 w-5 text-[#5314d4]" />}
+                                {infoModal === 'suporte' && <PhoneCall className="h-5 w-5 text-[#5314d4]" />}
+                                <span>
+                                    {infoModal === 'sobre' && 'Sobre o Tango ERP'}
+                                    {infoModal === 'seguranca' && 'Segurança & Proteção de Dados'}
+                                    {infoModal === 'suporte' && 'Contacto & Apoio ao Cliente'}
+                                </span>
+                            </h3>
+                            <button
+                                type="button"
+                                onClick={() => setInfoModal(null)}
+                                className="rounded-full p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition-colors"
+                            >
+                                <X className="h-5 w-5" />
+                            </button>
+                        </div>
+
+                        <div className="text-xs text-slate-600 leading-relaxed space-y-3">
+                            {infoModal === 'sobre' && (
+                                <>
+                                    <p>
+                                        O <strong>Tango Gestão de Créditos ERP</strong> é um software especializado para instituições de microcrédito, cooperativas financeiras e empresas com concessão de crédito em Angola.
+                                    </p>
+                                    <p>
+                                        Inclui gestão integral de mutuários, cálculo automatizado de prestações e amortizações, cálculo do Imposto do Selo, controlo de cobranças e contabilidade com planos de contas e balancetes em tempo real.
+                                    </p>
+                                </>
+                            )}
+                            {infoModal === 'seguranca' && (
+                                <>
+                                    <p>
+                                        Todas as comunicações com o servidor central e a sincronização em nuvem utilizam <strong>cifragem bancária AES-256 e TLS 1.3</strong>.
+                                    </p>
+                                    <p>
+                                        Cada instituição opera em ambiente estritamente isolado (Multi-Tenant). Os dados são auditados e protegidos contra acessos não autorizados.
+                                    </p>
+                                </>
+                            )}
+                            {infoModal === 'suporte' && (
+                                <>
+                                    <p>
+                                        A nossa equipa técnica está disponível para suporte operacional, licenciamento e esclarecimento de dúvidas:
+                                    </p>
+                                    <div className="rounded-2xl bg-purple-50 p-3 space-y-1.5 font-medium text-slate-800">
+                                        <p>📞 <strong>WhatsApp / Telefone:</strong> +244 941 537 486</p>
+                                        <p>🏢 <strong>Empresa:</strong> DIGITAL NORTE (SU), LDA</p>
+                                        <p>🕒 <strong>Horário:</strong> Segunda a Sexta, 08h00 – 18h00</p>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+
+                        <Button
+                            type="button"
+                            onClick={() => setInfoModal(null)}
+                            className="w-full rounded-xl bg-slate-900 text-white font-bold hover:bg-slate-800 text-xs h-10"
+                        >
+                            Fechar
+                        </Button>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
