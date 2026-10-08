@@ -2,27 +2,27 @@
 # Tango Gestão e Créditos ERP - Dockerfile de Produção para VPS
 # =====================================================================
 
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
-# Instalar dependências necessárias para compilação nativa se necessário
+# Instalar ferramentas para compilação caso necessário
 RUN apk add --no-cache python3 make g++
 
 COPY package*.json ./
 
-# Instalar todas as dependências para o build
-RUN npm ci --omit=optional
+# Instalar dependências sem disparar scripts de Electron desktop
+RUN npm ci --ignore-scripts
 
 COPY . .
 
-# Compilar frontend web e preparar pacote vercel-web
+# Compilar frontend web (Vite)
 RUN npm run build:web
 
 # ---------------------------------------------------------------------
 # Estágio de Execução (Imagem Mínima e Segura)
 # ---------------------------------------------------------------------
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 
 WORKDIR /app
 
@@ -30,17 +30,13 @@ ENV NODE_ENV=production
 ENV PORT=3000
 ENV HOST=0.0.0.0
 
-# Copiar apenas os ficheiros necessários para executar o servidor
+# Copiar dependências de produção sem disparar scripts de desktop
 COPY package*.json ./
-RUN npm ci --omit=dev --omit=optional
+RUN npm ci --omit=dev --omit=optional --ignore-scripts
 
 COPY server.mjs ./
 COPY vercel-api/ ./vercel-api/
 COPY --from=builder /app/vercel-web/ ./vercel-web/
-
-# Criar utilizador não-root para segurança ASVS
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-USER appuser
 
 EXPOSE 3000
 
