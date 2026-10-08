@@ -18,6 +18,8 @@
     "rebuild": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
     "build": "node build.js",
     "build:web": "node scripts/build-vercel.mjs",
+    "build:vps": "npm run build:web",
+    "start:vps": "node server.mjs",
     "build:dev": "vite build --mode development",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.app.json --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.strict-domain.json --noEmit",
@@ -55,9 +57,10 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
-    "@noble/hashes": "2.2.0",
     "@djosekispy/nifvalidation": "github:Djosekispy/nifvalidation",
     "@hookform/resolvers": "^3.10.0",
+    "@neondatabase/serverless": "^1.2.0",
+    "@noble/hashes": "2.2.0",
     "@radix-ui/react-accordion": "^1.2.11",
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-aspect-ratio": "^1.1.7",
@@ -106,6 +109,7 @@
     "next-themes": "^0.3.0",
     "nodemailer": "^7.0.13",
     "pdfjs-dist": "^4.10.38",
+    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-day-picker": "^8.10.1",

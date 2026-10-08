@@ -1,106 +1,112 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/componentes/ui/button';
-import {
-    Card,
-    CardContent,
-    CardDescription,
-    CardFooter,
-    CardHeader,
-    CardTitle,
-} from '@/componentes/ui/card';
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/componentes/ui/card';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
-import { Shield, ArrowLeft, Key, AlertCircle, CheckCircle2, Eye, EyeOff } from 'lucide-react';
-import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { ShieldCheck, ArrowLeft, AlertCircle, CheckCircle2, Mail, ExternalLink, Lock } from 'lucide-react';
 import { Alert, AlertDescription } from '@/componentes/ui/alert';
-import { useToast } from '@/ganchos/usar-toast';
+import { requestPasswordReset } from '@/servicos/ServicoIdentidadeEmpresa';
 
 export default function ForgotPassword() {
     const navigate = useNavigate();
-    const { rescueSuperAdmin } = useAuth();
-    const { toast } = useToast();
 
-    const [showRescueForm, setShowRescueForm] = useState(false);
-    const [showNotifyForm, setShowNotifyForm] = useState(false);
-    const [name, setName] = useState('');
     const [email, setEmail] = useState('');
-    const [rescueKey, setRescueKey] = useState('');
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
     const [success, setSuccess] = useState(false);
-    const [notified, setNotified] = useState(false);
-    const [showRescueKey, setShowRescueKey] = useState(false);
-    const [generatedPassword, setGeneratedPassword] = useState('');
+    const [devLink, setDevLink] = useState<string | null>(null);
 
-    const { requestPasswordReset } = useAuth();
-
-    const handleRescue = async (e: React.FormEvent) => {
+    const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
         setError('');
         setLoading(true);
 
         const cleanEmail = email.trim().toLowerCase();
-        const cleanKey = rescueKey.trim();
-        const tempPassword = await rescueSuperAdmin(cleanEmail, cleanKey);
-
-        if (tempPassword) {
-            setGeneratedPassword(tempPassword);
-            setSuccess(true);
-            toast({
-                title: "Acesso Restaurado",
-                description: "A senha do Super Administrador foi redefinida com sucesso.",
-            });
-        } else {
-            setError('Chave de Resgate ou Email inválidos. Verifique os dados ou contacte o suporte.');
+        if (!cleanEmail || !cleanEmail.includes('@')) {
+            setError('Por favor, introduza um endereço de e-mail válido.');
+            setLoading(false);
+            return;
         }
 
-        setLoading(false);
+        try {
+            const res = await requestPasswordReset(cleanEmail);
+            if (res.devLink) {
+                setDevLink(res.devLink);
+            }
+            setSuccess(true);
+        } catch (err: any) {
+            setError(err.message || 'Não foi possível solicitar a recuperação de senha neste momento. Verifique a ligação à internet.');
+        } finally {
+            setLoading(false);
+        }
     };
 
     if (success) {
         return (
-            <div className="relative flex min-h-screen items-center justify-center bg-background overflow-hidden p-4">
-                {/* Animated Background Blobs */}
-                <div className="absolute top-0 -left-4 w-72 h-72 bg-primary/30 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
-                <div className="absolute top-0 -right-4 w-72 h-72 bg-secondary/30 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
-                <div className="absolute -bottom-8 left-20 w-72 h-72 bg-accent/30 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+            <div className="relative flex min-h-screen items-center justify-center bg-slate-950 overflow-hidden p-4 font-sans text-white">
+                {/* Animated Background Glows */}
+                <div className="absolute top-1/4 -left-12 w-80 h-80 bg-blue-600/15 rounded-full blur-[140px] pointer-events-none" />
+                <div className="absolute bottom-1/4 -right-12 w-80 h-80 bg-emerald-600/15 rounded-full blur-[140px] pointer-events-none" />
 
-                <div className="relative w-full max-w-md animate-fade-in">
-                    <Card className="glass border-white/20 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] overflow-hidden">
-                        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-success via-primary to-accent"></div>
-                        <CardHeader className="text-center pb-6">
-                            <CheckCircle2 className="h-16 w-16 text-success mx-auto mb-4 animate-scale-in" />
-                            <CardTitle className="text-3xl font-bold">Sucesso!</CardTitle>
-                            <CardDescription className="text-base">
-                                A sua conta de Super Administrador foi recuperada com sucesso.
+                <div className="relative w-full max-w-md animate-in fade-in zoom-in-95 duration-300">
+                    <Card className="border border-white/10 bg-slate-900/90 backdrop-blur-xl shadow-2xl rounded-3xl overflow-hidden">
+                        <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-teal-400 to-emerald-500" />
+                        <CardHeader className="text-center pb-4 pt-8">
+                            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+                                <CheckCircle2 className="h-9 w-9" />
+                            </div>
+                            <CardTitle className="text-2xl font-black tracking-tight text-white">Pedido Enviado!</CardTitle>
+                            <CardDescription className="text-xs text-slate-400 mt-2">
+                                Se o e-mail <strong>{email}</strong> estiver associado a um utilizador ativo, foi enviado um link de recuperação.
                             </CardDescription>
                         </CardHeader>
-                        <CardContent className="space-y-6 text-center">
-                            <div className="p-6 bg-primary/5 rounded-2xl border border-primary/10 shadow-inner">
-                                <p className="text-sm font-medium text-muted-foreground mb-2">
-                                    {notified ? "Solicitação de Recuperação:" : "Nova Senha Temporária:"}
+
+                        <CardContent className="space-y-4 text-center px-6">
+                            <div className="p-4 bg-white/[0.04] rounded-2xl border border-white/10 text-left space-y-2">
+                                <div className="flex items-center gap-2 text-xs font-bold text-amber-400">
+                                    <ShieldCheck className="h-4 w-4" />
+                                    <span>Segurança Reforçada (Tango Master Gen)</span>
+                                </div>
+                                <p className="text-xs text-slate-300 leading-relaxed">
+                                    Por motivos de conformidade, nunca enviamos senhas em texto limpo. O link de redefinição contém um token criptográfico único e expira em <strong>15 minutos</strong>.
                                 </p>
-                                {notified ? (
-                                    <p className="text-xl font-bold text-primary italic leading-tight">
-                                        Notificação enviada ao Super Administrador com sucesso.
-                                    </p>
-                                ) : (
-                                    <code className="text-3xl font-black text-primary tracking-wider">{generatedPassword}</code>
-                                )}
                             </div>
-                            <p className="text-xs text-muted-foreground leading-relaxed">
-                                {notified
-                                    ? "O seu Administrador recebeu o seu pedido. Por favor, aguarde que ele redefina a sua senha no painel de gestão."
-                                    : "Por favor, entre no sistema e altere esta senha imediatamente no seu perfil para garantir a segurança dos seus dados."}
+
+                            {devLink && (
+                                <div className="p-3 bg-blue-500/10 border border-blue-500/30 rounded-xl text-left space-y-2">
+                                    <p className="text-[11px] font-bold text-blue-300 uppercase tracking-wider">
+                                        Ambiente de Testes / Desenvolvimento:
+                                    </p>
+                                    <a
+                                        href={devLink.replace(/https?:\/\/[^/]+/, '') || devLink}
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            const tokenMatch = devLink.match(/token=([^&]+)/);
+                                            if (tokenMatch) {
+                                                navigate(`/reset-password?token=${tokenMatch[1]}`);
+                                            } else {
+                                                window.location.href = devLink;
+                                            }
+                                        }}
+                                        className="inline-flex items-center gap-1.5 text-xs font-bold text-blue-400 hover:text-blue-300 underline"
+                                    >
+                                        Abrir Link Seguro para Redefinir Senha <ExternalLink className="h-3.5 w-3.5" />
+                                    </a>
+                                </div>
+                            )}
+
+                            <p className="text-[11px] text-slate-400 leading-relaxed">
+                                Abra o link recebido, crie a sua nova senha e, em seguida, volte à aplicação para iniciar sessão normalmente.
                             </p>
                         </CardContent>
-                        <CardFooter>
+
+                        <CardFooter className="pt-2 pb-8 px-6">
                             <Button
-                                className="w-full h-12 text-lg font-bold shadow-gold hover:scale-[1.02] transition-transform"
+                                className="w-full h-12 text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg shadow-blue-500/20 rounded-xl"
                                 onClick={() => navigate('/entrar')}
                             >
-                                Ir para o Login
+                                Voltar para o Login
                             </Button>
                         </CardFooter>
                     </Card>
@@ -110,222 +116,83 @@ export default function ForgotPassword() {
     }
 
     return (
-        <div className="relative flex min-h-screen items-center justify-center bg-background overflow-hidden p-4">
-            {/* Animated Background Blobs */}
-            <div className="absolute top-0 -left-4 w-72 h-72 bg-primary/30 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
-            <div className="absolute top-0 -right-4 w-72 h-72 bg-secondary/30 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-2000"></div>
-            <div className="absolute -bottom-8 left-20 w-72 h-72 bg-accent/30 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob animation-delay-4000"></div>
+        <div className="relative flex min-h-screen items-center justify-center bg-slate-950 p-4 font-sans text-white overflow-hidden">
+            {/* Background Glows */}
+            <div className="absolute -top-32 -left-32 h-[500px] w-[500px] rounded-full bg-blue-600/15 blur-[140px] pointer-events-none" />
+            <div className="absolute -bottom-32 -right-32 h-[500px] w-[500px] rounded-full bg-indigo-600/15 blur-[140px] pointer-events-none" />
 
-            <div className="relative w-full max-w-md animate-fade-in">
-                <Card className="glass border-white/20 shadow-[0_32px_64px_-16px_rgba(0,0,0,0.1)] overflow-hidden">
-                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-primary via-secondary to-accent"></div>
-                    <CardHeader className="pb-6">
-                        <div className="flex items-center gap-3 mb-4">
+            <div className="relative w-full max-w-md animate-in fade-in duration-300">
+                <Card className="border border-white/10 bg-slate-900/90 backdrop-blur-xl shadow-2xl rounded-3xl overflow-hidden">
+                    <div className="h-1.5 w-full bg-gradient-to-r from-blue-500 via-indigo-500 to-cyan-500" />
+                    <CardHeader className="pb-4 pt-7 px-6">
+                        <div className="flex items-center gap-3 mb-2">
                             <Button
                                 variant="ghost"
                                 size="icon"
                                 onClick={() => navigate('/entrar')}
-                                className="h-10 w-10 rounded-full hover:bg-primary/10 hover:text-primary transition-colors"
+                                className="h-9 w-9 rounded-full bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white"
                             >
-                                <ArrowLeft className="h-5 w-5" />
+                                <ArrowLeft className="h-4 w-4" />
                             </Button>
-                            <CardTitle className="text-2xl font-bold tracking-tight">Recuperar Acesso</CardTitle>
+                            <div>
+                                <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[10px] font-bold text-blue-400 border border-blue-500/20">
+                                    <Lock className="h-3 w-3" /> Tango Master Gen
+                                </span>
+                            </div>
                         </div>
-                        <CardDescription className="text-base leading-relaxed">
-                            {showRescueForm
-                                ? "Espaço exclusivo para recuperação da conta mestre (Super Admin)."
-                                : "Instruções para recuperação de credenciais em ambiente local."}
+                        <CardTitle className="text-2xl font-black tracking-tight text-white">Esqueci-me da Senha</CardTitle>
+                        <CardDescription className="text-xs text-slate-400 leading-relaxed mt-1">
+                            Insira o seu endereço de e-mail registado. Enviaremos um link criptográfico exclusivo com validade máxima de 15 minutos para redefinir a sua senha com segurança.
                         </CardDescription>
                     </CardHeader>
-                    <CardContent className="space-y-8">
-                        {showRescueForm ? (
-                            <form onSubmit={handleRescue} className="space-y-6 animate-slide-up">
-                                {error && (
-                                    <Alert variant="destructive" className="animate-scale-in">
-                                        <AlertCircle className="h-4 w-4" />
-                                        <AlertDescription>{error}</AlertDescription>
-                                    </Alert>
-                                )}
 
-                                <div className="space-y-2">
-                                    <Label htmlFor="rescue-email" className="font-bold">Email do Super Admin</Label>
-                                    <Input
-                                        id="rescue-email"
-                                        type="email"
-                                        placeholder="admin@empresa.ao"
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                        className="h-11 rounded-xl border-primary/20 focus-visible:ring-primary shadow-sm"
-                                        required
-                                        disabled={loading}
-                                    />
-                                </div>
-
-                                <div className="space-y-2">
-                                    <Label htmlFor="rescue-key" className="font-bold">Chave de Resgate (Master Key)</Label>
-                                    <div className="relative">
-                                        <Input
-                                            id="rescue-key"
-                                            type={showRescueKey ? "text" : "password"}
-                                            placeholder="••••••••••••"
-                                            value={rescueKey}
-                                            onChange={(e) => setRescueKey(e.target.value)}
-                                            className="h-11 rounded-xl pr-10 border-primary/20 focus-visible:ring-primary shadow-sm"
-                                            required
-                                            disabled={loading}
-                                        />
-                                        <Button
-                                            type="button"
-                                            variant="ghost"
-                                            size="icon"
-                                            className="absolute right-0 top-0 h-full px-3 hover:bg-transparent"
-                                            onClick={() => setShowRescueKey(!showRescueKey)}
-                                            disabled={loading}
-                                        >
-                                            {showRescueKey ? (
-                                                <EyeOff className="h-4 w-4 text-muted-foreground" />
-                                            ) : (
-                                                <Eye className="h-4 w-4 text-muted-foreground" />
-                                            )}
-                                        </Button>
-                                    </div>
-                                    <p className="text-[11px] text-muted-foreground/60 italic leading-relaxed">
-                                        Esta chave foi fornecida durante a instalação ou pode ser consultada nas definições do sistema.
-                                    </p>
-                                </div>
-
-                                <Button
-                                    type="submit"
-                                    className="w-full h-12 text-lg font-bold shadow-gold hover:scale-[1.02] transition-transform"
-                                    disabled={loading}
-                                >
-                                    {loading ? "A validar credenciais..." : "Restaurar Acesso Master"}
-                                </Button>
-
-                                <Button
-                                    variant="ghost"
-                                    className="w-full text-xs font-bold uppercase tracking-wider text-muted-foreground hover:text-primary transition-colors"
-                                    onClick={() => setShowRescueForm(false)}
-                                    disabled={loading}
-                                >
-                                    Voltar às instruções gerais
-                                </Button>
-                            </form>
-                        ) : showNotifyForm ? (
-                            <form onSubmit={async (e) => {
-                                e.preventDefault();
-                                setLoading(true);
-                                await requestPasswordReset(email, name);
-                                setNotified(true);
-                                setSuccess(true);
-                                setLoading(false);
-                            }} className="space-y-6 animate-slide-up">
-                                <div className="space-y-2">
-                                    <Label htmlFor="notify-name" className="font-bold">O seu Nome</Label>
-                                    <Input
-                                        id="notify-name"
-                                        placeholder="Digite o seu nome completo"
-                                        value={name}
-                                        onChange={(e) => setName(e.target.value)}
-                                        className="h-11 rounded-xl border-primary/20 shadow-sm"
-                                        required
-                                        disabled={loading}
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label htmlFor="notify-email" className="font-bold">O seu Email</Label>
-                                    <Input
-                                        id="notify-email"
-                                        type="email"
-                                        placeholder="exemplo@empresa.ao"
-                                        value={email}
-                                        onChange={(e) => setEmail(e.target.value)}
-                                        className="h-11 rounded-xl border-primary/20 shadow-sm"
-                                        required
-                                        disabled={loading}
-                                    />
-                                </div>
-                                <Button
-                                    type="submit"
-                                    className="w-full h-12 text-lg font-bold shadow-gold hover:scale-[1.02] transition-transform"
-                                    disabled={loading}
-                                >
-                                    {loading ? "A processar..." : "Notificar Administrador Principal"}
-                                </Button>
-                                <Button
-                                    variant="ghost"
-                                    className="w-full text-xs font-bold uppercase"
-                                    onClick={() => setShowNotifyForm(false)}
-                                    disabled={loading}
-                                >
-                                    Voltar
-                                </Button>
-                            </form>
-                        ) : (
-                            <div className="space-y-8 animate-slide-up">
-                                <div className="p-5 glass border-primary/10 rounded-2xl flex items-start gap-4 shadow-sm">
-                                    <div className="bg-primary/10 p-2 rounded-xl">
-                                        <Shield className="h-6 w-6 text-primary shrink-0" />
-                                    </div>
-                                    <div className="text-sm">
-                                        <p className="font-bold text-primary mb-1 text-base">Sistema 100% Local</p>
-                                        <p className="text-muted-foreground leading-relaxed">
-                                            Por motivos de segurança e privacidade, os dados são processados apenas neste computador. O sistema não envia comunicações externas.
-                                        </p>
-                                    </div>
-                                </div>
-
-                                <div className="space-y-5">
-                                    <h4 className="font-bold text-xs uppercase tracking-[0.2em] text-muted-foreground/70">Utilizadores e Admins:</h4>
-                                    <div className="space-y-4">
-                                        <div className="flex items-start gap-4 p-3 rounded-xl transition-colors hover:bg-primary/5">
-                                            <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center text-sm font-bold text-primary shrink-0">1</div>
-                                            <p className="text-sm text-foreground/80 leading-relaxed font-medium">Contacte o seu <strong>Super Administrador</strong> responsável pelo sistema.</p>
-                                        </div>
-                                        <div className="flex items-start gap-4 p-3 rounded-xl transition-colors hover:bg-primary/5">
-                                            <div className="h-8 w-8 rounded-xl bg-primary/10 flex items-center justify-center text-sm font-bold text-primary shrink-0">2</div>
-                                            <p className="text-sm text-foreground/80 leading-relaxed font-medium">Ele poderá redefinir a sua palavra-passe no menu de gestão de <strong>Utilizadores</strong>.</p>
-                                        </div>
-                                    </div>
-                                </div>
-
-                                <Button
-                                    type="button"
-                                    variant="link"
-                                    className="w-full text-xs text-muted-foreground/60 hover:text-primary h-auto p-0 font-medium transition-colors mb-4"
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        setShowNotifyForm(true);
-                                    }}
-                                >
-                                    Esqueci a minha senha (Administrador/Gestor)
-                                </Button>
-
-                                <Button
-                                    type="button"
-                                    variant="link"
-                                    className="w-full text-xs text-muted-foreground/40 hover:text-primary h-auto p-0 font-medium transition-colors"
-                                    onClick={(e) => {
-                                        e.preventDefault();
-                                        setShowRescueForm(true);
-                                    }}
-                                >
-                                    Sou o Super Administrador e perdi o meu acesso mestre
-                                </Button>
-                            </div>
+                    <CardContent className="space-y-5 px-6">
+                        {error && (
+                            <Alert variant="destructive" className="border-red-500/30 bg-red-500/10 text-red-200">
+                                <AlertCircle className="h-4 w-4 text-red-400" />
+                                <AlertDescription className="text-xs font-semibold">{error}</AlertDescription>
+                            </Alert>
                         )}
+
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="space-y-1.5">
+                                <Label htmlFor="user-email" className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                                    <Mail className="h-3.5 w-3.5 text-blue-400" /> E-mail do Utilizador
+                                </Label>
+                                <Input
+                                    id="user-email"
+                                    type="email"
+                                    placeholder="exemplo@empresa.ao"
+                                    value={email}
+                                    onChange={(e) => setEmail(e.target.value)}
+                                    className="h-11 rounded-xl bg-slate-950/70 border-white/10 text-sm text-white focus-visible:ring-blue-500"
+                                    required
+                                    disabled={loading}
+                                    autoFocus
+                                />
+                            </div>
+
+                            <Button
+                                type="submit"
+                                disabled={loading}
+                                className="w-full h-12 mt-2 text-sm font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white shadow-lg shadow-blue-500/20 rounded-xl"
+                            >
+                                {loading ? 'A enviar pedido seguro...' : 'Enviar Link de Recuperação'}
+                            </Button>
+
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                className="w-full text-xs font-semibold text-slate-400 hover:text-white"
+                                onClick={() => navigate('/entrar')}
+                                disabled={loading}
+                            >
+                                Voltar para o Início de Sessão
+                            </Button>
+                        </form>
                     </CardContent>
-                    <CardFooter className="flex flex-col gap-2 border-t border-white/10 pt-6">
-                        <p className="text-[10px] text-center text-muted-foreground uppercase tracking-[0.25em] font-black opacity-40">
-                            Segurança Local • {new Date().getFullYear()}
-                        </p>
-                    </CardFooter>
                 </Card>
             </div>
         </div>
     );
 }
-
-
-
-

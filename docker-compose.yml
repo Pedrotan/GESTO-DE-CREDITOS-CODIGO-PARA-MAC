@@ -1,0 +1,56 @@
+services:
+  # -------------------------------------------------------------------
+  # 1. Base de Dados PostgreSQL Local no VPS (com persistência de dados)
+  # -------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: tango_postgres
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER:-tango_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-tango_pass_segura_2026}
+      POSTGRES_DB: ${DB_NAME:-tangodb}
+    volumes:
+      - tango_pgdata:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init-vps.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-tango_user} -d ${DB_NAME:-tangodb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - tango_network
+
+  # -------------------------------------------------------------------
+  # 2. Servidor Web & API Central Tango ERP
+  # -------------------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tango_erp_app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - HOST=0.0.0.0
+      - DATABASE_URL=postgresql://${DB_USER:-tango_user}:${DB_PASSWORD:-tango_pass_segura_2026}@db:5432/${DB_NAME:-tangodb}
+      - TANGO_SYNC_SECRET=${TANGO_SYNC_SECRET}
+      - TANGO_MASTER_SECRET=${TANGO_MASTER_SECRET}
+      - TANGO_ALLOWED_ORIGINS=${TANGO_ALLOWED_ORIGINS:-http://localhost:3000}
+      - TANGO_MASTERGEN_URL=${TANGO_MASTERGEN_URL:-http://localhost:3000}
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - tango_network
+
+volumes:
+  tango_pgdata:
+    name: tango_pgdata
+
+networks:
+  tango_network:
+    name: tango_network

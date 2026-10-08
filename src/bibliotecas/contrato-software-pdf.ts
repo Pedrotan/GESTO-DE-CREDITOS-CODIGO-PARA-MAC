@@ -1,53 +1,65 @@
-import jsPDF from './pdf-documento';
+import jsPDF, { setPdfWatermark, getMasterPdfWatermark } from './pdf-documento';
 import { contractDesign, contractText, type SoftwareContract } from './contrato-software';
-import { CREATO_DISPLAY_REGULAR_B64, CREATO_DISPLAY_BOLD_B64 } from './fonte-creato-display';
-import { getMasterPdfWatermark } from './pdf-documento';
 
-export function contractParagraphs(body: string) {
+export function contractParagraphs(body: string): string[] {
     const out: string[] = [];
-    for (const line of body.split('\n')) {
-        const value = line.trim();
+    const lines = (body || '').split('\n');
+    for (const rawLine of lines) {
+        const value = rawLine.trim();
         const previous = out[out.length - 1];
         const boundary = /^(?:\d+[.)]|\d+\.\d+\.|[a-z]\)|[•\-–—*]|(?:Anexo|Cláusula|Artigo|AUTO|TERMO)\b|[A-ZÀ-Ý][\wÀ-ÿ /.-]{0,35}:|Nome:|Cargo:|Data:|B\.I\.:|NIF:|Pelo |Assinatura|Carimbo)/i.test(value);
         if (value && previous && previous.length >= 48 && !/[.;:!?_]$/.test(previous) && !boundary && !previous.endsWith(':')) {
             out[out.length - 1] = previous + ' ' + value;
         } else {
+            if (!value && previous === '') continue;
             out.push(value);
         }
     }
     return out;
 }
 
-export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
-    const doc = new jsPDF();
-    const design = contractDesign(contract);
-    const left = 24, width = 162, bottom = 252;
-    const clean = (text: string) => (text || '')
+export function sanitizeForPdf(text: string): string {
+    if (!text) return '';
+    const cleaned = String(text)
         .replace(/\*\*(.*?)\*\*/g, '$1')
         .replace(/==(.*?)==/g, '$1')
         .replace(/__(.*?)__/g, '$1')
-        .replace(/[—–]/g, '-')
-        .replace(/●/g, '.')
-        .replace(/×/g, 'x')
+        .replace(/`([^`]+)`/g, '$1')
+        // Travessões, hífens especiais e traços tipográficos
+        .replace(/[\u2014\u2013\u2015\u2212]/g, '-')
+        // Aspas curvas tipográficas e guillemets
+        .replace(/[\u201C\u201D\u00AB\u00BB]/g, '"')
+        .replace(/[\u2018\u2019]/g, "'")
+        // Marcadores de lista e símbolos
+        .replace(/[\u2022\u25CF\u25AA\u25AB]/g, '-')
+        .replace(/\u2026/g, '...')
+        .replace(/\u00D7/g, 'x')
+        // Espaços protegidos, estreitos e especiais
+        .replace(/[\u00A0\u202F\u2007]/g, ' ')
+        .replace(/[\u200B\uFEFF]/g, '')
         .replace(/\t/g, '    ');
+
+    // Mapeamento seguro para tabela WinAnsi (Latin-1) padrão do jsPDF
+    return Array.from(cleaned, char => {
+        const code = char.codePointAt(0) ?? 0;
+        if (code === 0x20AC) return 'EUR';
+        if (code > 0xFF) return ' ';
+        return char;
+    }).join('');
+}
+
+export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
+    const doc = new jsPDF();
+    setPdfWatermark(doc, null); // Evita duplicar a marca de água já desenhada pelo decorate()
+    const design = contractDesign(contract);
+    const left = 24, width = 162, bottom = 252;
+    const FONT_NAME = 'helvetica';
 
     const rgb = (hex: string): [number, number, number] => [
         parseInt(hex.slice(1, 3), 16),
         parseInt(hex.slice(3, 5), 16),
         parseInt(hex.slice(5, 7), 16),
     ];
-
-    // Registar a fonte oficial Creato Display (Regular e Bold)
-    try {
-        doc.addFileToVFS('CreatoDisplay-Regular.otf', CREATO_DISPLAY_REGULAR_B64);
-        doc.addFont('CreatoDisplay-Regular.otf', 'CreatoDisplay', 'normal');
-        doc.addFileToVFS('CreatoDisplay-Bold.otf', CREATO_DISPLAY_BOLD_B64);
-        doc.addFont('CreatoDisplay-Bold.otf', 'CreatoDisplay', 'bold');
-    } catch {
-        /* Fallback silencioso caso já esteja em VFS */
-    }
-
-    const FONT_NAME = 'CreatoDisplay';
 
     const polygon = (points: number[][], color: string) => {
         doc.setFillColor(...rgb(color));
@@ -84,7 +96,7 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
         doc.line(0, 286, 44, 286);
         doc.line(65, 287, 210, 287);
 
-        // Marca de água de alta definição e proporção harmoniosa (em todas as páginas)
+        // Marca de água de alta definição e proporção harmoniosa
         const watermarkImg = getMasterPdfWatermark() || design.logo || logo;
         if (watermarkImg && watermarkImg.startsWith('data:image/')) {
             try {
@@ -118,22 +130,24 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
             } catch {}
         }
 
-        // Nome da Empresa no cabeçalho com Creato Display Bold
+        // Nome da Empresa no cabeçalho em Helvetica Bold
         doc.setTextColor(...rgb(design.accent));
         doc.setFont(FONT_NAME, 'bold');
         let size = 18;
         doc.setFontSize(size);
-        while (doc.getTextWidth(clean(design.company)) > 190 - headingLeft && size > 9) {
+        const compName = sanitizeForPdf(design.company);
+        while (doc.getTextWidth(compName) > 190 - headingLeft && size > 9) {
             doc.setFontSize(--size);
         }
-        const heading: string[] = doc.splitTextToSize(clean(design.company), 190 - headingLeft);
+        const heading: string[] = doc.splitTextToSize(compName, 190 - headingLeft);
         doc.text(heading, headingLeft, 44);
 
         // Subtítulo institucional
         doc.setFont(FONT_NAME, 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor(...rgb(design.primary));
-        doc.text(doc.splitTextToSize(clean(design.tagline), 190 - headingLeft).slice(0, 2), headingLeft, 44 + heading.length * 5.2);
+        const tagLine = sanitizeForPdf(design.tagline);
+        doc.text(doc.splitTextToSize(tagLine, 190 - headingLeft).slice(0, 2), headingLeft, 44 + heading.length * 5.2);
     };
 
     let y = 68;
@@ -149,37 +163,42 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
             y += 2.5;
             return;
         }
-        const cleanText = clean(contractText(text, contract));
+        const cleanText = sanitizeForPdf(contractText(text, contract));
         const isHeading = bold || isTitle;
-        doc.setFont(FONT_NAME, isHeading ? 'bold' : 'normal');
-        doc.setFontSize(isHeading ? (isTitle ? 11.5 : 10.5) : 9.5);
+        const fontStyle = isHeading ? 'bold' : 'normal';
+        const fontSize = isHeading ? (isTitle ? 11 : 10) : 9.5;
+        doc.setFont(FONT_NAME, fontStyle);
+        doc.setFontSize(fontSize);
 
         const lines: string[] = doc.splitTextToSize(cleanText, width);
-        if (isHeading && y + Math.min(lines.length + 2, 6) * 5 > bottom) {
+        if (isHeading && y + Math.min(lines.length + 3, 6) * 5 > bottom) {
             page();
         }
 
         for (let i = 0; i < lines.length; i++) {
             if (y + 5 > bottom) page();
             doc.setTextColor(...rgb(isHeading ? design.primary : design.text));
-            doc.setFont(FONT_NAME, isHeading ? 'bold' : 'normal');
-            doc.setFontSize(isHeading ? (isTitle ? 11.5 : 10.5) : 9.5);
+            doc.setFont(FONT_NAME, fontStyle);
+            doc.setFontSize(fontSize);
 
             const line = lines[i];
             const trimmed = line.trim();
-            const words = trimmed.split(/\s+/);
+            const words = trimmed.split(/\s+/).filter(Boolean);
 
             if (center) {
                 doc.text(trimmed, 105, y, { align: 'center' });
-            } else if (!isHeading && i < lines.length - 1 && words.length > 1) {
-                // Justificação completa de alta qualidade
+            } else if (!isHeading && i < lines.length - 1 && words.length > 2) {
+                // Justificação harmónica de texto corrido
                 const wordsWidth = words.reduce((sum, word) => sum + doc.getTextWidth(word), 0);
-                const gap = (width - wordsWidth) / (words.length - 1);
-                if (gap > 0 && gap < 7) {
+                const normalSpaceWidth = doc.getTextWidth(' ');
+                const targetGap = (width - wordsWidth) / (words.length - 1);
+
+                // Aplica justificação apenas se o espaçamento for natural e legível
+                if (targetGap >= normalSpaceWidth * 0.7 && targetGap <= normalSpaceWidth * 2.0) {
                     let curX = left;
                     for (const word of words) {
                         doc.text(word, curX, y);
-                        curX += doc.getTextWidth(word) + gap;
+                        curX += doc.getTextWidth(word) + targetGap;
                     }
                 } else {
                     doc.text(trimmed, left, y);
@@ -192,7 +211,7 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
         y += isHeading ? 2.5 : 1.5;
     };
 
-    // Card Nobre e Destacado do Título Principal (conforme Imagem 1)
+    // Card Nobre e Destacado do Título Principal
     const titleBoxY = y;
     const titleBoxH = 26;
     doc.setFillColor(...rgb(design.paper === '#ffffff' ? '#f8fafc' : design.paper));
@@ -205,25 +224,28 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
     doc.roundedRect(left, titleBoxY, width, 2, 1, 1, 'F');
 
     doc.setFont(FONT_NAME, 'bold');
-    doc.setFontSize(15);
+    doc.setFontSize(14);
     doc.setTextColor(...rgb(design.primary));
-    doc.text(clean(contract.title || 'Contrato de Licenciamento e Venda de Software'), 105, titleBoxY + 11, { align: 'center' });
+    const titleStr = sanitizeForPdf(contract.title || 'Contrato de Licenciamento e Venda de Software');
+    doc.text(titleStr, 105, titleBoxY + 11, { align: 'center' });
 
     doc.setFontSize(10.5);
     doc.setFont(FONT_NAME, 'bold');
     doc.setTextColor(...rgb(design.accent));
-    doc.text('CONTRATO N.º ' + (contract.number || '0015'), 105, titleBoxY + 19, { align: 'center' });
+    const contractNumStr = 'CONTRATO N.º ' + sanitizeForPdf(contract.number || '0015');
+    doc.text(contractNumStr, 105, titleBoxY + 19, { align: 'center' });
 
     y = titleBoxY + titleBoxH + 6;
     if (contract.client) {
         doc.setFont(FONT_NAME, 'normal');
         doc.setFontSize(9.5);
         doc.setTextColor(...rgb(design.text));
-        doc.text('Cliente: ' + clean(contract.client) + (contract.nif ? ' · NIF: ' + clean(contract.nif) : ''), 105, y, { align: 'center' });
+        const clientLine = 'Cliente: ' + sanitizeForPdf(contract.client) + (contract.nif ? ' · NIF: ' + sanitizeForPdf(contract.nif) : '');
+        doc.text(clientLine, 105, y, { align: 'center' });
         y += 6;
     }
 
-    // Processamento de todas as Cláusulas e Anexos (Assinaturas são reservadas para a página 30)
+    // Processamento de todas as Cláusulas e Anexos (Assinaturas na página de encerramento)
     for (const section of contract.sections) {
         if (section.title === 'Assinaturas') continue;
 
@@ -240,11 +262,8 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
         }
     }
 
-    // PÁGINA 30: Página Dedicada e Oficial de Fecho e Assinaturas
-    while (doc.getNumberOfPages() < 29) {
-        page();
-    }
-    page(); // Força início oficial na Página 30
+    // Página Dedicada Oficial de Termo de Encerramento e Assinaturas
+    page();
 
     // Título de Encerramento
     doc.setFont(FONT_NAME, 'bold');
@@ -257,7 +276,7 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
     doc.line(70, y, 140, y);
     y += 7;
 
-    const closureText = 'E, por estarem plenamente ajustadas e acordadas com o teor integral de todas as trinta cláusulas e respetivos cinco anexos que antecedem, as Partes outorgam o presente Contrato de Licenciamento e Venda de Software, redigido em língua portuguesa, em 2 (dois) exemplares originais de igual teor, forma e valor jurídico, destinando-se um exemplar a cada uma das Partes outorgantes.';
+    const closureText = 'E, por estarem plenamente ajustadas e acordadas com o teor integral de todas as cláusulas e respetivos anexos que antecedem, as Partes outorgam o presente Contrato de Licenciamento e Venda de Software, redigido em língua portuguesa, em 2 (dois) exemplares originais de igual teor, forma e valor jurídico, destinando-se um exemplar a cada uma das Partes outorgantes.';
     write(closureText, false, false);
     y += 2;
 
@@ -332,7 +351,7 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
     doc.setFont(FONT_NAME, 'bold');
     doc.setFontSize(8.5);
     doc.setTextColor(...rgb(design.primary));
-    const clientTitle = clean(contract.client || '[DENOMINAÇÃO DO CLIENTE]');
+    const clientTitle = sanitizeForPdf(contract.client || '[DENOMINAÇÃO DO CLIENTE]');
     doc.text(doc.splitTextToSize(clientTitle, colW - 10).slice(0, 1), col2X + colW / 2, inY2, { align: 'center' });
 
     inY2 += 18;
@@ -348,7 +367,7 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
     inY2 += 4;
     doc.text('Nome: _______________________________', col2X + colW / 2, inY2, { align: 'center' });
     inY2 += 4;
-    doc.text('NIF: ' + clean(contract.nif || '[NIF DO CLIENTE]'), col2X + colW / 2, inY2, { align: 'center' });
+    doc.text('NIF: ' + sanitizeForPdf(contract.nif || '[NIF DO CLIENTE]'), col2X + colW / 2, inY2, { align: 'center' });
 
     inY2 += 7;
     doc.setDrawColor(203, 213, 225);
@@ -372,7 +391,7 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
     doc.text('1.ª ___________________________________ (B.I. n.º ____________________)', left, y);
     doc.text('2.ª ___________________________________ (B.I. n.º ____________________)', col2X, y);
 
-    // Rodapé Oficial em todas as páginas do contrato (com dados da Digital Norte e numeração ajustada)
+    // Rodapé Oficial em todas as páginas do contrato
     const totalPages = doc.getNumberOfPages();
     for (let p = 1; p <= totalPages; p++) {
         doc.setPage(p);
@@ -392,13 +411,13 @@ export function softwareContractPdf(contract: SoftwareContract, logo?: string) {
         doc.text('Página ' + p + ' de ' + totalPages, left + width, 280, { align: 'right' });
         doc.setFont(FONT_NAME, 'normal');
         doc.setFontSize(6.5);
-        doc.text('Contrato n.º ' + clean(contract.number || '0015') + ' · ' + clean(contract.software), left + width, 283.5, { align: 'right' });
+        doc.text('Contrato n.º ' + sanitizeForPdf(contract.number || '0015') + ' · ' + sanitizeForPdf(contract.software), left + width, 283.5, { align: 'right' });
     }
 
     doc.setProperties({
-        title: contract.title,
-        subject: 'Licenciamento e venda - ' + contract.software,
-        author: design.company,
+        title: sanitizeForPdf(contract.title),
+        subject: 'Licenciamento e venda - ' + sanitizeForPdf(contract.software),
+        author: sanitizeForPdf(design.company),
     });
 
     return doc;

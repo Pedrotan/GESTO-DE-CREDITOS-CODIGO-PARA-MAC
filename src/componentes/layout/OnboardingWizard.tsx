@@ -18,6 +18,7 @@ import { ServicoAngolaAPI } from '@/servicos/ServicoAngolaAPI';
 import { getActiveAccountIdFromStorage, removeScopedLocalStorageItem, scopedStorageKey, deleteAppAccount, listAppAccounts, switchAppAccount } from '@/bibliotecas/contas';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { isCompanyActiveLocally, submitOnboardingCentral } from '@/servicos/ServicoIdentidadeEmpresa';
 export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } = {}) => {
     const activeAccountId = getActiveAccountIdFromStorage();
     const isSecondaryAccount = activeAccountId !== 'default';
@@ -403,6 +404,12 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
         companySettings.name.trim() !== ''
     );
 
+    // Se a empresa já se encontra registada e com status ACTIVE no servidor central, bloquear onboarding
+    const isCompanyActive = isCompanyActiveLocally();
+    if (isCompanyActive) {
+        return null;
+    }
+
     const isFullySetup = Boolean(localStorage.getItem(ONBOARDING_KEY) || (hasUsers && hasConfiguredCompany));
 
     const isTangoMaster = typeof window !== 'undefined' && window.location.hash.includes('tango-master');
@@ -410,6 +417,10 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
     const isWebTenantAuthorized = !isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true';
     const showOnboarding = !dismissed && isWebTenantAuthorized && (isFinishing || forceShow || (!isFullySetup && !isTangoMaster) || (isOnboardingRoute && !localStorage.getItem(ONBOARDING_KEY)));
     const visibleSteps = isSecondaryAccount ? [4, 6, 7] : (isPublicWebBuild ? [2, 3, 4, 5, 6, 7] : [1, 2, 3, 4, 5, 6, 7]);
+
+    if (!showOnboarding) {
+        return null;
+    }
 
     const handleNext = async () => {
         if (step === 1) {
@@ -469,6 +480,37 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
         try {
             setIsFinishing(true);
             setIsLoading(true);
+
+            // Validação estrita no servidor central Tango Master Gen antes de persistir
+            try {
+                await submitOnboardingCentral({
+                    nif: nif || companySettings.nif,
+                    companyName,
+                    contactName: adminName || adminUsername || 'Administrador',
+                    phone: companySettings.phone || '',
+                    email: adminEmail,
+                    message: 'Submissão de onboarding ERP'
+                });
+            } catch (centralErr: any) {
+                if (centralErr.code === 'EMPRESA_JA_ATIVA' || centralErr.status === 409) {
+                    setIsLoading(false);
+                    setIsFinishing(false);
+                    await Swal.fire({
+                        title: "Empresa Já Ativa",
+                        html: `Esta empresa já se encontra registada e com estado ACTIVE no Tango Master Gen.<br/><br/><span style="color:#64748b;font-size:13px;">O registo inicial está bloqueado. Redirecionando para o Login...</span>`,
+                        icon: "warning",
+                        confirmButtonText: "Ir para o Login",
+                        confirmButtonColor: "#2563eb",
+                        allowOutsideClick: false
+                    });
+                    localStorage.setItem('tango_company_status', 'ACTIVE');
+                    setDismissed(true);
+                    window.location.hash = '#/entrar';
+                    window.location.reload();
+                    return;
+                }
+                console.warn('[OnboardingWizard] Submissão central:', centralErr);
+            }
 
             // Licenças, incluindo demonstrações, são sempre emitidas e assinadas pelo Tango Master.
             const finalLicenseKey = companySettings.licenseKey;

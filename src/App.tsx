@@ -35,6 +35,8 @@ const CentroSeguranca = lazyWithReload(() => import("./paginas/CentroSeguranca")
 const Guia = lazyWithReload(() => import("./paginas/Guia"));
 const PortaisPagamento = lazyWithReload(() => import("./paginas/PortaisPagamento"));
 const EsqueciSenha = lazyWithReload(() => import("./paginas/EsqueciSenha"));
+const RedefinirSenha = lazyWithReload(() => import("./paginas/RedefinirSenha"));
+import { isCompanyActiveLocally } from "@/servicos/ServicoIdentidadeEmpresa";
 const Aprovacoes = lazyWithReload(() => import("./paginas/Aprovacoes"));
 const LimitesUtilizador = lazyWithReload(() => import("./paginas/LimitesUtilizador"));
 const RelatoriosAtividadeUtilizador = lazyWithReload(() => import("./paginas/RelatoriosAtividadeUtilizador"));
@@ -94,17 +96,25 @@ const AppContent = () => {
   const { companySettings, isDataLoading } = useData();
   const [forceReady, setForceReady] = useState(false);
   const [tenantAuthorized, setTenantAuthorized] = useState(() => {
-    return !isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true';
+    return localStorage.getItem('tango_company_status') === 'ACTIVE' ||
+           localStorage.getItem('tango_active_tenant_authorized') === 'true' ||
+           (!isPublicWebBuild && isCompanyActiveLocally());
   });
 
   useEffect(() => {
     const handleAuth = () => {
-      setTenantAuthorized(!isPublicWebBuild || localStorage.getItem('tango_active_tenant_authorized') === 'true');
+      setTenantAuthorized(
+        localStorage.getItem('tango_company_status') === 'ACTIVE' ||
+        localStorage.getItem('tango_active_tenant_authorized') === 'true' ||
+        (!isPublicWebBuild && isCompanyActiveLocally())
+      );
     };
     window.addEventListener('tango_tenant_authorized', handleAuth);
+    window.addEventListener('tango_company_status_changed', handleAuth);
     window.addEventListener('storage', handleAuth);
     return () => {
       window.removeEventListener('tango_tenant_authorized', handleAuth);
+      window.removeEventListener('tango_company_status_changed', handleAuth);
       window.removeEventListener('storage', handleAuth);
     };
   }, []);
@@ -175,22 +185,24 @@ const AppContent = () => {
     <TooltipProvider>
       <LigacaoEmpresaWeb />
       {isPublicWebBuild && tenantAuthorized && <GuardaSubscricaoWeb />}
-      {tenantAuthorized && <OnboardingWizard />}
+      {!isCompanyActiveLocally() && tenantAuthorized && <OnboardingWizard />}
       <HashRouter>
         <BackupReminder />
         <AutoBackupManager />
         <Suspense fallback={suspenseFallback}>
           <Routes>
+            <Route path="/login" element={<Navigate to="/entrar" replace />} />
             <Route path="/entrar" element={<Entrar />} />
             <Route
               path="/onboarding"
               element={
-                !tenantAuthorized
+                isCompanyActiveLocally()
                   ? <Navigate to="/entrar" replace />
                   : <OnboardingWizard forceShow={true} />
               }
             />
             <Route path="/esqueci-senha" element={<EsqueciSenha />} />
+            <Route path="/reset-password" element={<RedefinirSenha />} />
             <Route
               path="/ativacao"
               element={

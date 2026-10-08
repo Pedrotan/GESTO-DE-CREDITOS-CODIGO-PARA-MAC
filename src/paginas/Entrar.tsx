@@ -30,6 +30,8 @@ import { scopedStorageKey } from '@/bibliotecas/contas';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import QRCode from 'qrcode';
 import { ModalAvisoHorario } from '@/componentes/modals/ModalAvisoHorario';
+import { isCompanyActiveLocally, authenticateCentralLogin } from '@/servicos/ServicoIdentidadeEmpresa';
+import { startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 
 const systemSlides = [
     {
@@ -137,7 +139,44 @@ export default function Login() {
             const cleanEmail = email.trim();
             const cleanPassword = password.trim();
 
-            const success = await login(cleanEmail, cleanPassword);
+            let success = await login(cleanEmail, cleanPassword);
+
+            // Se o login local não tiver o utilizador (cache limpo numa empresa ativa),
+            // autenticar no endpoint central POST /api/v1/auth/login:
+            if (!success) {
+                try {
+                    const tenantId = localStorage.getItem('tango_active_tenant_id') || undefined;
+                    const centralAuth = await authenticateCentralLogin({
+                        email: cleanEmail,
+                        password: cleanPassword,
+                        tenantId
+                    });
+
+                    if (centralAuth.success && centralAuth.token) {
+                        localStorage.setItem('tango_session_token', centralAuth.token);
+                        try {
+                            if (centralAuth.syncCredentials?.tenantId) {
+                                startCloudSync({
+                                    url: window.location.origin,
+                                    apiKey: centralAuth.token,
+                                    tenantId: centralAuth.syncCredentials.tenantId
+                                });
+                                await syncCloudNow();
+                            }
+                        } catch (syncErr) {
+                            console.warn('[Login] Sincronização offline inicial:', syncErr);
+                        }
+                        // Re-tentar login local após sincronização
+                        success = await login(cleanEmail, cleanPassword);
+                        if (!success) {
+                            handleLoginSuccess();
+                            return;
+                        }
+                    }
+                } catch (centralErr) {
+                    console.warn('[Login] Autenticação central:', centralErr);
+                }
+            }
 
             if (success) {
                 handleLoginSuccess();
@@ -407,12 +446,12 @@ export default function Login() {
                                     </div>
 
                                     <div className="flex items-center justify-end pt-0.5">
-                                        <Link to="/esqueci-senha" className="text-xs font-bold text-[#2563eb] hover:text-blue-700 hover:underline transition-colors">
-                                            Esqueceu a senha?
+                                        <Link to="/esqueci-senha" className="text-xs font-bold text-[#2563eb] hover:text-blue-700 hover:underline transition-colors flex items-center gap-1.5">
+                                            <Lock className="h-3.5 w-3.5" /> Esqueci-me da Senha
                                         </Link>
                                     </div>
 
-                                    {!hasUsers && (
+                                    {!hasUsers && !isCompanyActiveLocally() && (
                                         <div className="p-3.5 bg-amber-50/90 border border-amber-200/80 rounded-2xl text-center space-y-2">
                                             <p className="text-xs text-amber-900 font-semibold">
                                                 Nenhum utilizador encontrado na base de dados.
@@ -425,6 +464,17 @@ export default function Login() {
                                             >
                                                 Iniciar Assistente de Configuração (Onboarding)
                                             </Button>
+                                        </div>
+                                    )}
+
+                                    {!hasUsers && isCompanyActiveLocally() && (
+                                        <div className="p-3.5 bg-blue-50/90 border border-blue-200/80 rounded-2xl text-center space-y-1">
+                                            <p className="text-xs text-blue-900 font-bold">
+                                                Empresa Ativa e Verificada
+                                            </p>
+                                            <p className="text-[11px] text-blue-700 leading-relaxed">
+                                                Inicie sessão com o seu e-mail e senha de administrador para sincronizar os dados da sua organização.
+                                            </p>
                                         </div>
                                     )}
 

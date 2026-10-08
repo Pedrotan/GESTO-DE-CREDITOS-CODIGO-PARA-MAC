@@ -39,6 +39,7 @@ import {
     CaseUpper,
     CaseLower,
     Type,
+    CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/bibliotecas/utils';
 
@@ -908,7 +909,7 @@ export default function ContratosSoftware({ logo }: { logo?: string }) {
                                         <span><strong>{(section.body ? (section.body.split('\n').length) : 0)}</strong> linhas</span>
                                     </div>
                                     <div className="text-[11px] text-muted-foreground">
-                                        Tipografia: <span className="font-semibold text-slate-700 dark:text-slate-300">Creato Display</span> · Justificação integral (páginas 19 a 29) · Assinaturas na pág. 30
+                                        Tipografia: <span className="font-semibold text-slate-700 dark:text-slate-300">Helvetica Executiva</span> · Diagramação e alinhamento oficial · Termo de fecho e assinaturas
                                     </div>
                                 </div>
                             </div>
@@ -919,55 +920,96 @@ export default function ContratosSoftware({ logo }: { logo?: string }) {
 
             {/* Modal de Pré-visualização do PDF Completo */}
             <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
-                <DialogContent className="max-w-6xl w-[95vw] h-[92vh] max-h-[960px] p-0 flex flex-col overflow-hidden rounded-2xl border bg-card shadow-2xl">
-                    <DialogHeader className="p-4 sm:p-5 border-b bg-card flex flex-row items-center justify-between gap-3 shrink-0">
-                        <div className="space-y-1">
-                            <DialogTitle className="text-lg sm:text-xl font-bold flex items-center gap-2">
-                                <FileText className="h-5 w-5 text-blue-600 dark:text-blue-400" />
-                                Pré-visualização do Contrato de Venda
-                            </DialogTitle>
-                            <DialogDescription className="text-xs sm:text-sm text-muted-foreground">
-                                {contract.number ? `N.º ${contract.number}` : 'Contrato em preparação'} · {contract.client || 'Cliente por preencher'} ({contract.sections.length} secções)
-                            </DialogDescription>
+                <DialogContent className="w-[97vw] !max-w-[97vw] xl:!max-w-[1650px] 2xl:!max-w-[1850px] h-[94vh] max-h-[96vh] p-0 gap-0 flex flex-col overflow-hidden rounded-2xl border border-slate-700/60 dark:border-slate-800 bg-card shadow-2xl">
+                    {/* Cabeçalho Executivo em Dark/Navy com Alto Contraste e Separação Segura do Botão X */}
+                    <DialogHeader className="px-5 py-4 sm:px-6 sm:py-4.5 border-b border-slate-800 bg-slate-900 text-white flex flex-row items-center justify-between gap-4 shrink-0 !m-0 !mb-0 !-mt-0 relative overflow-hidden">
+                        <div className="flex items-center gap-3.5 min-w-0">
+                            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20 border border-blue-400/30">
+                                <FileText className="h-5 w-5" />
+                            </div>
+                            <div className="space-y-1 min-w-0">
+                                <DialogTitle className="text-lg sm:text-xl font-bold tracking-tight text-white flex items-center gap-2.5 truncate">
+                                    <span>Pré-visualização do Contrato de Venda</span>
+                                    <span className="hidden sm:inline-flex items-center rounded-md bg-blue-500/20 px-2.5 py-0.5 text-[11px] font-semibold text-blue-300 border border-blue-400/30">
+                                        Alta Fidelidade (300 DPI)
+                                    </span>
+                                </DialogTitle>
+                                <DialogDescription className="text-xs sm:text-sm text-slate-300 flex flex-wrap items-center gap-2">
+                                    <span className="font-semibold text-white">
+                                        {contract.number ? `N.º ${contract.number}` : 'Contrato em preparação'}
+                                    </span>
+                                    <span className="text-slate-500">·</span>
+                                    <span className="truncate max-w-[200px] sm:max-w-none text-slate-200">
+                                        {contract.client || 'Cliente por preencher'}
+                                    </span>
+                                    <span className="text-slate-500">·</span>
+                                    <span className="text-slate-400">
+                                        {contract.sections.length} secções contratuais
+                                    </span>
+                                </DialogDescription>
+                            </div>
                         </div>
-                        <div className="flex items-center gap-2 pr-6">
+
+                        {/* Ações com espaçamento generoso para NUNCA colidir com o botão X de fechar */}
+                        <div className="flex items-center gap-2.5 pr-14 sm:pr-16 shrink-0">
                             <Button
                                 size="sm"
                                 variant="outline"
                                 onClick={generatePreview}
                                 disabled={isGenerating}
-                                className="gap-1.5 text-xs font-medium"
+                                className="gap-2 text-xs font-semibold bg-white/10 hover:bg-white/20 text-white border-white/20 shadow-sm transition-all"
                                 title="Recarregar e atualizar o documento"
                             >
                                 <RefreshCw className={cn('h-3.5 w-3.5', isGenerating && 'animate-spin')} />
-                                Atualizar
+                                <span>Atualizar</span>
                             </Button>
                             <Button
                                 size="sm"
                                 onClick={handleDownloadPdf}
-                                className="gap-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                                className="gap-2 text-xs font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-500/25 border border-blue-400/30 transition-all hover:scale-[1.02] active:scale-[0.98]"
                             >
                                 <Download className="h-3.5 w-3.5" />
-                                Baixar PDF
+                                <span>Baixar PDF</span>
                             </Button>
                         </div>
                     </DialogHeader>
 
-                    <div className="flex-1 overflow-hidden p-3 sm:p-4 bg-muted/20 flex flex-col items-center justify-center">
+                    {/* Área Expandida de Visualização do Documento */}
+                    <div className="flex-1 overflow-hidden p-3 sm:p-5 bg-slate-900/5 dark:bg-slate-950/80 flex flex-col items-center justify-center">
                         {isGenerating ? (
-                            <div className="flex flex-col items-center justify-center gap-3 p-8 text-center animate-in fade-in">
-                                <Loader2 className="h-10 w-10 animate-spin text-blue-600 dark:text-blue-400" />
-                                <p className="text-base font-semibold text-slate-800 dark:text-slate-200">
-                                    A processar pré-visualização em alta resolução...
-                                </p>
-                                <p className="text-xs text-muted-foreground max-w-md">
-                                    A renderizar todas as 30 cláusulas, anexos, papel timbrado e marcas de água com o motor de alta fidelidade.
-                                </p>
+                            <div className="flex flex-col items-center justify-center gap-4 p-8 text-center animate-in fade-in max-w-md w-full rounded-2xl border border-slate-200/80 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 shadow-xl backdrop-blur-md">
+                                <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                                    <Loader2 className="h-8 w-8 animate-spin" />
+                                    <span className="absolute -inset-1 animate-ping rounded-2xl bg-blue-500/15" />
+                                </div>
+                                <div className="space-y-1.5">
+                                    <p className="text-base font-bold text-slate-900 dark:text-white">
+                                        A processar pré-visualização em alta resolução...
+                                    </p>
+                                    <p className="text-xs text-muted-foreground leading-relaxed">
+                                        A renderizar todas as 30 cláusulas, anexos, papel timbrado e marcas de água com o motor de alta fidelidade.
+                                    </p>
+                                </div>
+                                <div className="w-full space-y-2 pt-3 text-left text-[11px] text-muted-foreground border-t border-slate-100 dark:border-slate-800">
+                                    <div className="flex items-center gap-2">
+                                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                        <span>Tipografia executiva de alta fidelidade formatada</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500 shrink-0" />
+                                        <span>Papel timbrado e carimbos oficiais</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <RefreshCw className="h-3.5 w-3.5 text-blue-500 animate-spin shrink-0" />
+                                        <span>Cálculo de quebras de página e layout A4</span>
+                                    </div>
+                                </div>
                             </div>
                         ) : previewError ? (
-                            <div className="p-6 text-center space-y-3">
-                                <p className="text-destructive font-medium">{previewError}</p>
-                                <Button variant="outline" size="sm" onClick={generatePreview}>
+                            <div className="p-8 text-center space-y-3.5 max-w-md rounded-2xl border border-destructive/30 bg-destructive/5 shadow-lg">
+                                <p className="text-destructive font-semibold text-sm">{previewError}</p>
+                                <Button variant="outline" size="sm" onClick={generatePreview} className="gap-2">
+                                    <RefreshCw className="h-3.5 w-3.5" />
                                     Tentar novamente
                                 </Button>
                             </div>
@@ -975,12 +1017,16 @@ export default function ContratosSoftware({ logo }: { logo?: string }) {
                             <div className="w-full h-full overflow-hidden flex flex-col">
                                 <PdfCanvasViewer
                                     source={previewUri}
-                                    className="h-full w-full overflow-auto rounded-xl border bg-slate-950/5 dark:bg-slate-950/40 p-2 shadow-inner"
+                                    className="h-full w-full overflow-auto rounded-xl border border-slate-200/90 dark:border-slate-800 bg-slate-100/70 dark:bg-slate-950/70 p-3 sm:p-5 shadow-inner"
                                 />
                             </div>
                         ) : (
-                            <div className="text-center p-8 text-muted-foreground">
-                                <p>Clique em "Atualizar" para gerar a pré-visualização.</p>
+                            <div className="text-center p-8 text-muted-foreground space-y-3">
+                                <p className="text-sm">Clique em "Atualizar" para gerar a pré-visualização.</p>
+                                <Button size="sm" onClick={generatePreview} className="gap-2">
+                                    <RefreshCw className="h-3.5 w-3.5" />
+                                    Gerar Pré-visualização
+                                </Button>
                             </div>
                         )}
                     </div>
