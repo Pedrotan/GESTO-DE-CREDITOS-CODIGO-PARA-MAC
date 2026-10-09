@@ -68,7 +68,7 @@ export default function LoginAdmin() {
             try {
                 const base = (window.location.origin && window.location.origin.startsWith('http'))
                     ? window.location.origin
-                    : 'https://tango-gestao-creditos.vercel.app';
+                    : 'https://tangogestaoecreditos.tech';
                 const response = await fetch(`${base}/api/tenants`, {
                     method: 'POST',
                     headers: {

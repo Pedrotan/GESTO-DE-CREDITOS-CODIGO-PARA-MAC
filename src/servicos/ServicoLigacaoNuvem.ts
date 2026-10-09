@@ -8,8 +8,12 @@ export const VPS_DOMAIN_URL = 'https://tangogestaoecreditos.tech';
 
 export const getCloudBaseUrl = (): string => {
     if (typeof localStorage !== 'undefined') {
-        const custom = (localStorage.getItem('tango_cloud_url') || localStorage.getItem('tango_dev_cloud_url') || '').trim();
-        if (custom.startsWith('http')) return custom.replace(/\/+$/, '');
+        const custom = (localStorage.getItem('tango_cloud_url') || localStorage.getItem('tango_master_cloud_url') || localStorage.getItem('tango_dev_cloud_url') || '').trim();
+        if (custom.startsWith('http')) {
+            if (!custom.includes('vercel.app')) {
+                return custom.replace(/\/+$/, '');
+            }
+        }
     }
 
     const envUrl = (import.meta.env.VITE_TANGO_MASTER_URL || import.meta.env.VITE_CLOUD_URL || '') as string;

@@ -147,6 +147,12 @@ const initDatabaseBridge = async () => {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           handled_at TIMESTAMPTZ
         );
+
+        ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS contact_name TEXT;
+        ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS message TEXT;
+        ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+        ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS handled_at TIMESTAMPTZ;
+        ALTER TABLE tango_registration_requests ALTER COLUMN email DROP NOT NULL;
       `);
 
       const seedCompanies = [

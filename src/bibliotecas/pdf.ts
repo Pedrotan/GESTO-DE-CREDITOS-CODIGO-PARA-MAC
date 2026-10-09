@@ -3597,7 +3597,7 @@ export const exportCompanyCredentialsPDF = (company: {
         const doc = new jsPDF();
         const primaryColor: [number, number, number] = [243, 112, 33]; // #F37021
         const darkColor: [number, number, number] = [43, 45, 47]; // #2B2D2F
-        const webUrl = company.webUrl || 'https://tango-gestao-creditos.vercel.app';
+        const webUrl = company.webUrl || 'https://tangogestaoecreditos.tech';
 
         // Cabeçalho institucional
         doc.setFillColor(darkColor[0], darkColor[1], darkColor[2]);

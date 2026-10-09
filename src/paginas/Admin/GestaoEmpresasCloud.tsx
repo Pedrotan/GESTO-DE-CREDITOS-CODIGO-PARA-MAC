@@ -44,6 +44,8 @@ export type RegistrationRequest = {
 const URL_KEY = 'tango_master_cloud_url';
 const SECRET_KEY = 'tango_master_cloud_secret';
 const LOCAL_TENANTS_KEY = 'tango_master_registered_tenants';
+export const DEFAULT_CLOUD_URL = 'https://tangogestaoecreditos.tech';
+export const DEFAULT_MASTER_SECRET = 'TangoMaster#2026!ChaveForteHostinger';
 
 const generateFriendlyCode = () => {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -62,8 +64,23 @@ export type SubscriptionPayment = { clientName: string; clientNif: string; plan:
 const periodLabel = (period: RenewalPeriod) => RENEWAL_PERIODS.find(item => item.key === period)?.label || period;
 
 export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubscriptionPayment?: (payment: SubscriptionPayment) => void } = {}) {
-    const [serverUrl, setServerUrl] = useState(() => localStorage.getItem(URL_KEY) || 'https://tango-gestao-creditos.vercel.app');
-    const [masterSecret, setMasterSecret] = useState(() => localStorage.getItem(SECRET_KEY) || '');
+    const [serverUrl, setServerUrl] = useState(() => {
+        const saved = (localStorage.getItem(URL_KEY) || '').trim();
+        // Se o valor guardado for uma URL inexistente/antiga da Vercel, migrar automaticamente para o VPS oficial
+        if (!saved || saved.includes('vercel.app')) {
+            localStorage.setItem(URL_KEY, DEFAULT_CLOUD_URL);
+            return DEFAULT_CLOUD_URL;
+        }
+        return saved;
+    });
+    const [masterSecret, setMasterSecret] = useState(() => {
+        const saved = (localStorage.getItem(SECRET_KEY) || '').trim();
+        if (!saved) {
+            localStorage.setItem(SECRET_KEY, DEFAULT_MASTER_SECRET);
+            return DEFAULT_MASTER_SECRET;
+        }
+        return saved;
+    });
     const [showSecret, setShowSecret] = useState(false);
 
     const [tenants, setTenants] = useState<CloudTenant[]>(() => {
@@ -172,21 +189,31 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
 
     const api = async (action: string, payload: Record<string, any> = {}, targetUrl?: string) => {
         const base = (targetUrl || serverUrl).trim().replace(/\/+$/, '');
-        if (!base.startsWith('http')) throw new Error('Indique o URL do servidor (ex.: https://tango-gestao-creditos.vercel.app).');
+        if (!base.startsWith('http')) throw new Error('Indique o URL do servidor (ex.: https://tangogestaoecreditos.tech).');
         
         const secret = masterSecret.trim();
         if (!secret) throw new Error('Indique a Chave Mestra do Tango Master.');
         // No corpo a chave segue em UTF-8; o cabeçalho só aceita texto latin1 (sem acentos especiais).
         const headerSafe = /^[\x20-\x7e]*$/.test(secret);
-        const response = await fetch(`${base}/api/tenants`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(headerSafe ? { 'Authorization': `Bearer ${secret}` } : {})
-            },
-            body: JSON.stringify({ action, ...payload, masterSecret: secret }),
-            signal: AbortSignal.timeout(20_000)
-        });
+        let response: Response;
+        try {
+            response = await fetch(`${base}/api/tenants`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(headerSafe ? { 'Authorization': `Bearer ${secret}` } : {})
+                },
+                body: JSON.stringify({ action, ...payload, masterSecret: secret }),
+                signal: AbortSignal.timeout(20_000)
+            });
+        } catch (fetchErr: any) {
+            console.error('[GestaoEmpresasCloud] Erro de rede na chamada à API:', fetchErr);
+            const isTimeout = fetchErr?.name === 'TimeoutError';
+            const detail = isTimeout 
+                ? `O servidor (${base}) demorou muito a responder.`
+                : `Falha de conexão com o servidor (${base}).`;
+            throw new Error(`${detail} Verifique a ligação ou mude para o Domínio VPS Oficial (https://tangogestaoecreditos.tech).`);
+        }
         const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
         return data;
@@ -194,9 +221,24 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
 
     const loadTenants = async (targetUrl?: string) => {
         setIsLoading(true);
-        const currentTarget = targetUrl || serverUrl;
+        let currentTarget = targetUrl || serverUrl;
         try {
-            const data = await api('list', {}, currentTarget);
+            let data: any;
+            try {
+                data = await api('list', {}, currentTarget);
+            } catch (err: any) {
+                // Se falhou num URL da Vercel ou inválido, tentar automaticamente o VPS oficial
+                if (currentTarget.includes('vercel.app') && currentTarget !== DEFAULT_CLOUD_URL) {
+                    console.warn(`[GestaoEmpresasCloud] Falha no servidor Vercel (${currentTarget}). A tentar reconectar ao VPS oficial...`);
+                    currentTarget = DEFAULT_CLOUD_URL;
+                    setServerUrl(DEFAULT_CLOUD_URL);
+                    localStorage.setItem(URL_KEY, DEFAULT_CLOUD_URL);
+                    data = await api('list', {}, DEFAULT_CLOUD_URL);
+                } else {
+                    throw err;
+                }
+            }
+
             const fetched: CloudTenant[] = data.tenants || [];
             
             // Unir com chaves/códigos armazenados localmente caso o servidor não os tenha
@@ -212,7 +254,7 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
             localStorage.setItem(LOCAL_TENANTS_KEY, JSON.stringify(merged));
             const requestData = await api('list-requests', {}, currentTarget).catch(() => ({ requests: [] }));
             setRequests(requestData.requests || []);
-            notify('success', `Lista sincronizada com sucesso do servidor: ${currentTarget}`);
+            notify('success', `Lista sincronizada com sucesso do servidor oficial: ${currentTarget}`);
         } catch (e: any) {
             notify('error', e.message || `Falha ao ligar ao servidor ${currentTarget}.`);
         } finally {
@@ -603,7 +645,18 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                         : 'border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300'
                 }`}>
                     {feedback.type === 'success' ? <CheckCircle className="mt-0.5 h-5 w-5 shrink-0 text-emerald-600" /> : <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />}
-                    <span>{feedback.message}</span>
+                    <div className="flex-1 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <span>{feedback.message}</span>
+                        {feedback.type === 'error' && !serverUrl.includes('tangogestaoecreditos.tech') && (
+                            <Button
+                                size="sm"
+                                onClick={() => handleSwitchServer(DEFAULT_CLOUD_URL)}
+                                className="bg-[#5514d8] hover:bg-[#430fb3] text-white text-xs font-bold shrink-0 rounded-xl shadow-sm"
+                            >
+                                Mudar para Servidor Oficial VPS
+                            </Button>
+                        )}
+                    </div>
                 </div>
             )}
 
@@ -702,21 +755,10 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                                 setServerUrl(e.target.value);
                                 localStorage.setItem(URL_KEY, e.target.value);
                             }}
-                            placeholder="https://tango-gestao-creditos.vercel.app"
+                            placeholder="https://tangogestaoecreditos.tech"
                             className="h-11 rounded-xl"
                         />
                         <div className="flex flex-wrap gap-1.5 pt-1">
-                            <button
-                                type="button"
-                                onClick={() => handleSwitchServer('https://tango-gestao-creditos.vercel.app')}
-                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
-                                    serverUrl.includes('vercel.app')
-                                        ? 'bg-[#5514d8] text-white border-[#5514d8]'
-                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                                }`}
-                            >
-                                ☁️ Vercel Cloud
-                            </button>
                             <button
                                 type="button"
                                 onClick={() => handleSwitchServer('https://tangogestaoecreditos.tech')}
@@ -726,7 +768,29 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                                         : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
                                 }`}
                             >
-                                🌐 Domínio VPS (HTTPS)
+                                🌐 Domínio VPS Hostinger (Oficial)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSwitchServer('http://191.215.45.104:3000')}
+                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                                    serverUrl.includes('191.215.45.104')
+                                        ? 'bg-[#5514d8] text-white border-[#5514d8]'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                                }`}
+                            >
+                                ⚡ IP VPS Direto (:3000)
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => handleSwitchServer('https://tango-gestao-creditos.vercel.app')}
+                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
+                                    serverUrl.includes('vercel.app')
+                                        ? 'bg-[#5514d8] text-white border-[#5514d8]'
+                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
+                                }`}
+                            >
+                                ☁️ Vercel Cloud (Legado)
                             </button>
                             {typeof window !== 'undefined' && window.location?.origin && (
                                 <button
@@ -750,7 +814,7 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                                 type={showSecret ? 'text' : 'password'}
                                 value={masterSecret}
                                 onChange={(e) => setMasterSecret(e.target.value)}
-                                placeholder="Chave mestra configurada na Vercel (TANGO_MASTER_SECRET)"
+                                placeholder="Chave mestra configurada no servidor (TANGO_MASTER_SECRET)"
                                 className="h-11 pr-11 rounded-xl"
                             />
                             <button

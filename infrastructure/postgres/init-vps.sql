@@ -45,19 +45,30 @@ CREATE TABLE IF NOT EXISTS tango_registration_requests (
   id TEXT PRIMARY KEY,
   nif TEXT NOT NULL,
   company_name TEXT NOT NULL,
-  email TEXT NOT NULL,
-  phone TEXT,
+  contact_name TEXT NOT NULL DEFAULT '',
+  phone TEXT NOT NULL DEFAULT '',
+  email TEXT,
+  message TEXT,
   address TEXT,
   country TEXT,
   status TEXT NOT NULL DEFAULT 'pending',
   admin_notes TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  handled_at TIMESTAMPTZ,
   reviewed_at TIMESTAMPTZ
 );
+
+ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS contact_name TEXT;
+ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS message TEXT;
+ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS handled_at TIMESTAMPTZ;
+ALTER TABLE tango_registration_requests ALTER COLUMN email DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_tango_reg_nif ON tango_registration_requests (nif);
 CREATE INDEX IF NOT EXISTS idx_tango_reg_email ON tango_registration_requests (email);
 CREATE INDEX IF NOT EXISTS idx_tango_reg_status ON tango_registration_requests (status);
+CREATE INDEX IF NOT EXISTS idx_tango_registration_requests_status ON tango_registration_requests (status, created_at DESC);
 
 -- ---------------------------------------------------------------------
 -- 3. Tokens Seguros de Recuperação de Senha

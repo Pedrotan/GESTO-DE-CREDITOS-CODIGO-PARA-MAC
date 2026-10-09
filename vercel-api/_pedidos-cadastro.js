@@ -19,7 +19,12 @@ export const ensureRegistrationRequestsTable = async (sql) => {
       handled_at TIMESTAMPTZ
     )
   `);
-  await sql('CREATE INDEX IF NOT EXISTS idx_tango_registration_requests_status ON tango_registration_requests (status, created_at DESC)');
+  try { await sql(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS contact_name TEXT`); } catch {}
+  try { await sql(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS message TEXT`); } catch {}
+  try { await sql(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`); } catch {}
+  try { await sql(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS handled_at TIMESTAMPTZ`); } catch {}
+  try { await sql(`ALTER TABLE tango_registration_requests ALTER COLUMN email DROP NOT NULL`); } catch {}
+  try { await sql('CREATE INDEX IF NOT EXISTS idx_tango_registration_requests_status ON tango_registration_requests (status, created_at DESC)'); } catch {}
 };
 
 const text = (value, max) => String(value ?? '').normalize('NFKC').replace(/[\u0000-\u001f\u007f]/gu, ' ').trim().slice(0, max + 1);

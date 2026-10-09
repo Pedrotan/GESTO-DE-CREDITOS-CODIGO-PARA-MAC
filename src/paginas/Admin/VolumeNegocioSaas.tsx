@@ -16,11 +16,12 @@ import {
 
 const URL_KEY = 'tango_master_cloud_url';
 const SECRET_KEY = 'tango_master_cloud_secret';
-const DEFAULT_URL = 'https://tango-gestao-creditos.vercel.app';
+const DEFAULT_URL = 'https://tangogestaoecreditos.tech';
 
 const callUsageApi = async (period: string) => {
-    const base = (localStorage.getItem(URL_KEY) || DEFAULT_URL).trim().replace(/\/+$/, '');
-    const secret = (localStorage.getItem(SECRET_KEY) || '').trim();
+    let base = (localStorage.getItem(URL_KEY) || DEFAULT_URL).trim().replace(/\/+$/, '');
+    if (base.includes('vercel.app')) base = DEFAULT_URL;
+    const secret = (localStorage.getItem(SECRET_KEY) || 'TangoMaster#2026!ChaveForteHostinger').trim();
     if (!secret) throw new Error('Configure a Chave Mestra em "Empresas Cloud" para ver os relatórios.');
     const headerSafe = /^[\x20-\x7e]*$/.test(secret);
     const response = await fetch(`${base}/api/tenants`, {

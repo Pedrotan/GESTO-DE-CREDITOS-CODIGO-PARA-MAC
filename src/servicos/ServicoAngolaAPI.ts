@@ -118,7 +118,7 @@ export class ServicoAngolaAPI {
         // O Master usa primeiro o servidor: as chaves dos fornecedores permanecem no backend.
         const tenantId = typeof localStorage !== 'undefined' ? localStorage.getItem('tango_active_tenant_id') : null;
         const tenantCode = typeof localStorage !== 'undefined' ? localStorage.getItem('tango_active_tenant_code') : null;
-        const lookupServer = server?.url || (typeof window !== 'undefined' && window.location.protocol.startsWith('http') ? window.location.origin : 'https://tango-gestao-creditos.vercel.app');
+        const lookupServer = server?.url || (typeof window !== 'undefined' && window.location.protocol.startsWith('http') ? window.location.origin : 'https://tangogestaoecreditos.tech');
         if ((server?.url && server.secret) || (tenantId && tenantCode)) {
             try {
                 const params = new URLSearchParams({ document, type });
