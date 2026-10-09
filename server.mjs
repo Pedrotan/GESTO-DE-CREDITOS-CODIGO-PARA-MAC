@@ -96,7 +96,7 @@ const initDatabaseBridge = async () => {
 
         const fields = (result.fields || []).map(f => ({
           name: f.name,
-          dataTypeID: f.dataTypeID
+          dataTypeID: [1082, 1083, 1114, 1184, 1266].includes(f.dataTypeID) ? 25 : f.dataTypeID
         }));
 
         return new Response(JSON.stringify({
