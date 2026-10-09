@@ -8,7 +8,7 @@ export default tseslint.config(
   { ignores: [
     "dist/**", "dist-admin/**", "dist-electron/**", "dist-electron-admin/**",
     "release/**", "release-admin/**", "node_modules/**", "vercel-web/**",
-    "**/._*"
+    "**/._*", "tmp/**", "scratch/**"
   ] },
   {
     extends: [js.configs.recommended, ...tseslint.configs.recommended],
