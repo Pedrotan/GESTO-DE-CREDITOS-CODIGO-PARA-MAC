@@ -44,6 +44,9 @@ services:
       - VERCEL_CLOUD_URL=${VERCEL_CLOUD_URL:-https://tango-gestao-creditos.vercel.app}
       - VPS_IP_URL=${VPS_IP_URL:-http://191.215.45.104}
       - VPS_DOMAIN_URL=${VPS_DOMAIN_URL:-http://tangogestaoecreditos.tech}
+    volumes:
+      - ./server.mjs:/app/server.mjs:ro
+      - ./vercel-api:/app/vercel-api:ro
     depends_on:
       db:
         condition: service_healthy
