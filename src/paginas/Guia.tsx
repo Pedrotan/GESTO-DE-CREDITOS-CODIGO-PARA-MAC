@@ -96,7 +96,7 @@ export default function Guide() {
         "- Taxa de Esforço: (nova prestação + outros encargos mensais com créditos) ÷ rendimento mensal líquido. Verde abaixo de 30%, amarelo até ao limite da empresa (por omissão 33%) e vermelho acima.",
         "",
         "## 12. Simulador de Crédito (padrão dos bancos angolanos)",
-        "- Produtos: Crédito Pessoal, Salário, Consumo, Microcrédito e Empresa, com limites, TAN, comissões e sistema configuráveis em Configurações › Simulador e Produtos.",
+        "- Produtos: Crédito Pessoal, Salário, Consumo, Microcrédito e Empresa, com limites, TAN, comissões e sistema configuráveis em Configurações › Produtos de Crédito.",
         "- Custos: TAN (e taxa mensal TAN ÷ 12), TAEG pela TIR dos fluxos reais, MTIC, comissão de abertura e de processamento, seguro e Imposto do Selo (utilização e juros).",
         "- Risco: calculado pela taxa de esforço, histórico de pagamentos, créditos activos e garantias; ajusta a TAN e pode ser alterado com justificação registada na auditoria.",
         "- Ficha de Simulação (PDF): número único, código de verificação e QR code, plano completo, incumprimento, validade, assinaturas e página de termos e legislação.",

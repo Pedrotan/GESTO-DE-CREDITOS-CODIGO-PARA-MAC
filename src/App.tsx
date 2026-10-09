@@ -25,6 +25,7 @@ const Contactos = lazyWithReload(() => import("./paginas/Contactos"));
 const Despesas = lazyWithReload(() => import("./paginas/Despesas"));
 const Sessoes = lazyWithReload(() => import("./paginas/Sessoes"));
 const Creditos = lazyWithReload(() => import("./paginas/Creditos"));
+const FichaCredito = lazyWithReload(() => import("./paginas/FichaCredito"));
 const Pagamentos = lazyWithReload(() => import("./paginas/Pagamentos"));
 const Contratos = lazyWithReload(() => import("./paginas/Contratos"));
 const Notificacoes = lazyWithReload(() => import("./paginas/Notificacoes"));
@@ -322,6 +323,14 @@ const AppContent = () => {
               element={
                 <ProtectedRoute permission="view_credits">
                   <Creditos />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/creditos/:id"
+              element={
+                <ProtectedRoute permission="view_credits">
+                  <FichaCredito />
                 </ProtectedRoute>
               }
             />

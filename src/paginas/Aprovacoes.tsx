@@ -24,6 +24,7 @@ import { ServicoFinanceiro, type CreditApprovalRecord } from '@/servicos/Servico
 import { ServicoAlcadas, type Escalation, type EscalationApproval } from '@/servicos/ServicoAlcadas';
 import type { InstallmentBalance } from '@/bibliotecas/liquidacao-prestacoes';
 import type { Credit } from '@/tipos/credito';
+import { ReestruturacoesPendentes } from '@/componentes/creditos/ReestruturacoesPendentes';
 
 // Aprovações de crédito: pedidos pendentes e histórico de decisões (quem decidiu, quando e porquê), com filtros
 // por período e estado, detalhes do pedido antes de decidir, exportação e relatórios mensais.
@@ -267,6 +268,9 @@ export default function Approvals() {
                 </div>
 
                 <SeletorPeriodo value={period} onChange={setPeriod} kinds={['day', 'week', 'month', 'year', 'custom', 'all']} />
+
+                <ReestruturacoesPendentes actor={user ? { id: user.id, name: user.name, role: user.role, permissions: user.permissions } : null}
+                    clientNameOf={creditId => credits.find(item => item.id === creditId)?.clientName || creditId} />
 
                 {/* Resumo do período */}
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

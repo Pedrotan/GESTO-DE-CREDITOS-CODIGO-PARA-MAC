@@ -1,6 +1,12 @@
 import { Bar, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { cn } from '@/bibliotecas/utils';
 import { formatCurrency } from '@/bibliotecas/formatters';
+import { useState } from 'react';
+import { FileSpreadsheet, FileText, Loader2 } from 'lucide-react';
+import { Button } from '@/componentes/ui/button';
+import { downloadDataUrl, renderReportExcel, renderReportPdf } from '@/bibliotecas/relatorios-pagamentos';
+import { annualReportDef } from '@/bibliotecas/relatorios-creditos';
+import { ServicoPagamentos } from '@/servicos/ServicoPagamentos';
 import { MONTHS_LONG } from './CabecalhoCarteira';
 import type { CarteiraState } from './useCarteira';
 
@@ -11,12 +17,27 @@ const short = (minor: number) => {
 };
 
 /** Meses × indicadores (concedido, desembolsado, recebido, juros, em atraso), com totais e gráfico. */
-export function VisaoAnualCreditos({ state }: { state: CarteiraState }) {
+export function VisaoAnualCreditos({ state, settings, actor }: { state: CarteiraState; settings?: any; actor?: { id: string; name: string; role: string } | null }) {
     const { months, total } = state.annual;
+    const [busy, setBusy] = useState<'pdf' | 'xlsx' | null>(null);
+    const exportReport = async (format: 'pdf' | 'xlsx') => {
+        if (!actor) return;
+        setBusy(format);
+        try {
+            const def = annualReportDef(state);
+            const file = format === 'pdf' ? renderReportPdf(def, settings, actor.name, 'datauri') : renderReportExcel(def, settings, actor.name, 'datauri');
+            await ServicoPagamentos.saveReport({ reportType: def.key, title: def.title, format, fileName: file.fileName, dataUrl: file.dataUrl, filters: { subtitulo: def.subtitle } }, actor as any).catch(() => undefined);
+            downloadDataUrl(file.dataUrl, file.fileName);
+        } finally { setBusy(null); }
+    };
     const current = state.today.slice(0, 7);
     const data = months.map(month => ({ name: MONTHS_LONG[month.index].slice(0, 3), Desembolsado: month.disbursedMinor / 100, Recebido: month.receivedMinor / 100, 'Em atraso': month.overdueMinor / 100 }));
     return (
         <div className="space-y-4">
+            <div className="flex justify-end gap-2">
+                <Button size="sm" variant="outline" className="gap-1.5" disabled={!!busy || !actor} onClick={() => void exportReport('pdf')}>{busy === 'pdf' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileText className="h-4 w-4 text-red-600" />} Exportar PDF</Button>
+                <Button size="sm" variant="outline" className="gap-1.5" disabled={!!busy || !actor} onClick={() => void exportReport('xlsx')}>{busy === 'xlsx' ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4 text-emerald-600" />} Exportar Excel</Button>
+            </div>
             <div className="rounded-2xl border bg-card p-4 shadow-sm">
                 <h3 className="mb-3 text-sm font-bold">Desembolsado, recebido e em atraso por mês — {state.year}</h3>
                 <div className="h-72">

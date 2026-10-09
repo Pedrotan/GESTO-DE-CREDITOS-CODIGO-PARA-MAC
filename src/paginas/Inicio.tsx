@@ -15,6 +15,8 @@ import {
   SelectValue,
 } from '@/componentes/ui/select';
 import { useData } from '@/contextos/ContextoDados';
+import { useCarteira } from '@/componentes/creditos/useCarteira';
+import { IN_PORTFOLIO } from '@/bibliotecas/carteira-credito';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { formatCurrency, getAdaptiveDonutValue } from '@/bibliotecas/formatters';
 import { useToast } from '@/componentes/ui/use-toast';
@@ -83,6 +85,9 @@ import {
 export default function Dashboard() {
   const { clients, credits, payments, contracts, companySettings } = useData();
   const { user } = useAuth();
+  // Fonte única (A2): a mesma carteira da página de Créditos decide que créditos estão em curso e em atraso.
+  const carteira = useCarteira();
+  const sharedBook = useMemo(() => new Map(carteira.rows.filter(row => IN_PORTFOLIO.includes(row.stage)).map(row => [row.id, row])), [carteira.rows]);
 
   // Estado para Ordenação dos Melhores Clientes
   const [clientSort, setClientSort] = useState<'desc' | 'asc'>('desc');
@@ -293,12 +298,15 @@ export default function Dashboard() {
     const installments = Number(credit.installments || 0);
     return openCreditStatuses.has(credit.status) && (balance > 0.01 || (installments > 0 && paidInstallments < installments));
   }, [openCreditStatuses]);
-  const activeCredits = credits.filter(c => c.status === 'active' && isCreditOpen(c));
-  const overdueCredits = credits.filter(c => (c.status === 'overdue' || c.status === 'defaulted') && isCreditOpen(c));
+  // Em curso e em atraso como na página de Créditos (antes dependia do estado gravado, que podia estar desatualizado).
+  const inBook = useCallback((credit: any) => carteira.loading ? (openCreditStatuses.has(credit.status) && isCreditOpen(credit)) : sharedBook.has(credit.id), [carteira.loading, sharedBook, openCreditStatuses, isCreditOpen]);
+  const isLate = useCallback((credit: any) => carteira.loading ? ((credit.status === 'overdue' || credit.status === 'defaulted') && isCreditOpen(credit)) : (sharedBook.get(credit.id)?.daysOverdue || 0) > 0, [carteira.loading, sharedBook, isCreditOpen]);
+  const activeCredits = credits.filter(c => inBook(c));
+  const overdueCredits = credits.filter(c => inBook(c) && isLate(c));
 
   const historicalDisbursed = credits.reduce((acc, c) => acc + c.principalAmount, 0);
   const totalDisbursed = credits
-    .filter(c => c.status === 'active' && !c.deletedAt && isCreditOpen(c))
+    .filter(c => !c.deletedAt && inBook(c))
     .reduce((sum, c) => {
       const paidPrincipal = payments
         .filter(p => p.creditId === c.id && p.status !== 'cancelled' && !p.deletedAt)
@@ -412,7 +420,7 @@ export default function Dashboard() {
   }, [profitClientRows, profitSearchTerm]);
 
   const investedByOrigin = useMemo(() => {
-    const baseActive = credits.filter(c => c.status === 'active' && !c.deletedAt && isCreditOpen(c) && isWithinInvestedPeriod(c.startDate));
+    const baseActive = credits.filter(c => !c.deletedAt && inBook(c) && isWithinInvestedPeriod(c.startDate));
 
     const calcForCategory = (cat: 'COMUM' | 'APOSENTADO' | 'ESTRANGEIRO') => {
       const list = baseActive.filter(credit => {
@@ -433,13 +441,13 @@ export default function Dashboard() {
       aposentado: calcForCategory('APOSENTADO'),
       estrangeiro: calcForCategory('ESTRANGEIRO')
     };
-  }, [credits, clients, payments, isCreditOpen, isWithinInvestedPeriod]);
+  }, [credits, clients, payments, inBook, isWithinInvestedPeriod]);
 
   const filteredInvestedCredits = useMemo(() => {
     const term = investedSearchTerm.trim().toLowerCase();
     const rows = [...credits]
       .filter(credit => {
-        if (!(credit.status === 'active' && !credit.deletedAt && isCreditOpen(credit) && isWithinInvestedPeriod(credit.startDate))) {
+        if (!(!credit.deletedAt && inBook(credit) && isWithinInvestedPeriod(credit.startDate))) {
           return false;
         }
         if (investedCategoryFilter !== 'all') {
@@ -462,7 +470,7 @@ export default function Dashboard() {
         String(client?.phone || '').toLowerCase().includes(term)
       );
     });
-  }, [credits, clients, investedSearchTerm, investedCategoryFilter, isCreditOpen, isWithinInvestedPeriod]);
+  }, [credits, clients, investedSearchTerm, investedCategoryFilter, inBook, isWithinInvestedPeriod]);
 
   const investedRowsPerPage = 10;
   const investedTotalPages = Math.max(1, Math.ceil(filteredInvestedCredits.length / investedRowsPerPage));

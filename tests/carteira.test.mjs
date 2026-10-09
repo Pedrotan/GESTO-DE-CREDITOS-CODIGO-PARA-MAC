@@ -33,6 +33,7 @@ async function loadModules() {
                 export { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
                 export * as C from '@/bibliotecas/carteira-credito';
                 export * as L from '@/bibliotecas/liquidacao-antecipada';
+                export * as R2 from '@/bibliotecas/reestruturacao';
                 export * as P from '@/bibliotecas/pagamentos-analise';
                 export * as R from '@/bibliotecas/regras-credito';
                 export * as F from '@/bibliotecas/fuso-angola';
@@ -115,12 +116,14 @@ const pay = async (M, creditId, amount, dateIso = new Date().toISOString()) => {
     return M.ServicoFinanceiro.addPaymentAndUpdateCredit({ id, idempotencyKey: id, creditId, clientName: row.clientName, amount, allocatedToPrincipal: 0, allocatedToInterest: 0, allocatedToLateInterest: 0,
         method: 'transfer', paymentDate: new Date(dateIso), registeredAt: dateIso, processedBy: 'Teste', status: 'confirmed' }, Number(row.version ?? 0), row.clientId);
 };
-const portfolio = async (M, now = new Date()) => {
-    const context = await M.ServicoCarteira.loadContext();
-    const credits = await M.ServicoFinanceiro.getAllCredits();
-    const payments = await M.ServicoFinanceiro.getAllPayments();
-    const rows = M.C.buildPortfolio(credits, { ...context, payments, now });
-    return { rows, credits, payments, context };
+// A página de Créditos lê da base com a fonte única (ServicoCarteira.loadPortfolioData), como Pagamentos e Contabilidade.
+const portfolio = async (M, now = new Date(), scope = { role: 'super_admin' }) => {
+    const data = await M.ServicoCarteira.loadPortfolioData();
+    const credits = M.C.visibleCredits(data.credits, scope);
+    const ids = new Set(credits.map(item => item.id));
+    const payments = data.payments.filter(payment => ids.has(payment.creditId));
+    const rows = M.C.buildPortfolio(credits, { ...data, payments, now });
+    return { rows, credits, payments, context: data, entries: data.entries };
 };
 const monthRange = (M) => {
     const month = M.F.luandaTodayKey().slice(0, 7);
@@ -157,8 +160,7 @@ test('L2 · Os valores do mês são iguais em Créditos, Pagamentos e Contabilid
         const { month, range } = monthRange(M);
         await M.ServicoFinanceiro.addCredit(credit({ id: 'CR-bc61b816-4aa6-4eb7-936a-1cd129f4e588', clientId: 'c1', clientName: 'Pedro de Morais Tango', amount: 100_000, interest: 35_000, start: `${month}-01T12:00:00Z`, month }));
         await pay(M, 'CR-bc61b816-4aa6-4eb7-936a-1cd129f4e588', 135_000);
-        const { rows, credits, payments } = await portfolio(M);
-        const entries = (await database.prepare('SELECT * FROM accounting_entries').all()).map(entry => ({ ...entry, timestamp: new Date(entry.timestamp) }));
+        const { rows, credits, payments, entries } = await portfolio(M);
         // Créditos (biblioteca partilhada).
         const figures = M.C.periodFigures({ rows, credits, payments, entries, range });
         // Pagamentos (as funções da própria página de Pagamentos).
@@ -194,15 +196,20 @@ test('L3 · Um crédito de março ainda ativo aparece na Carteira mas não na Pr
         const [year, m] = month.split('-').map(Number);
         const march = `${m > 3 ? year : year - 1}-03`;
         await M.ServicoFinanceiro.addCredit(credit({ id: 'CR-MARCO', clientId: 'c2', clientName: 'Maria Antónia', amount: 600_000, interest: 120_000, installments: 12, start: `${march}-10T12:00:00Z`, month: march }));
+        // O cliente pagou em dia todas as prestações já vencidas: o crédito está "Ativo" (não em atraso).
+        const due = database.prepare(`SELECT dueDate, principalMinor + interestMinor AS total FROM credit_installments WHERE creditId = 'CR-MARCO' ORDER BY installmentNumber`).all()
+            .filter(item => M.F.luandaDateKey(item.dueDate) < M.F.luandaTodayKey());
+        for (const item of due) await pay(M, 'CR-MARCO', Number(item.total) / 100, item.dueDate);
         const { rows, credits, payments } = await portfolio(M);
         const row = rows.find(item => item.id === 'CR-MARCO');
-        assert.ok(M.C.IN_PORTFOLIO.includes(row.stage), `está em curso (${row.stage})`);
+        assert.equal(row.stage, 'ativo', 'ainda ativo (prestações em dia)');
+        assert.ok(row.outstandingMinor > 0 && row.outstandingMinor < 60_000_000, 'tem capital em dívida');
         const carteira = rows.filter(item => M.C.IN_PORTFOLIO.includes(item.stage));
         const producao = rows.filter(item => item.competenceMonth === month);
         assert.ok(carteira.some(item => item.id === 'CR-MARCO'), 'aparece na vista Carteira');
         assert.ok(!producao.some(item => item.id === 'CR-MARCO'), 'não aparece na Produção do mês atual');
         assert.equal(M.C.periodFigures({ rows, credits, payments, entries: [], range }).grantedCount, 0, 'não conta como concedido no mês');
-        console.log(`    L3: CR-MARCO (concedido em ${march}) · Carteira ✔ (${M.C.STAGES[row.stage].label}, ${kz(row.outstandingMinor)} em dívida) · Produção de ${month} ✘`);
+        console.log(`    L3: CR-MARCO (concedido em ${march}, ${due.length} prestações pagas em dia) · Carteira ✔ (${M.C.STAGES[row.stage].label}, ${kz(row.outstandingMinor)} em dívida) · Produção de ${month} ✘`);
     } finally { database.close(); }
 });
 
@@ -313,5 +320,139 @@ test('L7 · Liquidação antecipada parcial recalcula o plano (reduzir prestaç�
         assert.equal(Number(after.capital), 120_000_000 - 30_000_000, 'capital em dívida depois do pagamento: 900 000 Kz');
         assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM credit_restructurings WHERE creditId = 'CR-ANTECIPADO' AND kind = 'early_settlement'`).get().n, 1, 'o plano original fica no histórico');
         console.log(`    L7: 300 000 Kz antecipados · reduzir prestação: 9 × ${kz(lower.newPlan[1].totalMinor)} (antes ${kz(rows[4].principalMinor + rows[4].interestMinor)}) · reduzir prazo: ${shorter.newCount} × ${kz(shorter.newPlan[1].totalMinor)} · poupança ${kz(lower.interestSavedMinor)} vs ${kz(shorter.interestSavedMinor)} · execução real: pagos ${kz(done.payNowMinor)}, em dívida ${kz(Number(after.capital))} em ${simulation.newCount} prestações`);
+    } finally { database.close(); }
+});
+
+// ── Testes adicionais da reformulação (causa do A1, fonte única, ciclo de vida e operações especiais) ──────────
+
+test('A1 · Causa corrigida: a carteira lê da base e os pagamentos seguem o crédito (não quem os registou)', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const { month } = monthRange(M);
+        // Crédito de um gestor (como os criados noutro dispositivo) e pagamento registado por outro utilizador.
+        await M.ServicoFinanceiro.addCredit({ ...credit({ id: 'CR-bc61b816-gestor', clientId: 'c1', clientName: 'Pedro de Morais Tango', amount: 100_000, interest: 35_000, start: `${month}-01T12:00:00Z`, month }), usuario_id: 'u-gestor' });
+        await pay(M, 'CR-bc61b816-gestor', 135_000);
+        database.prepare(`UPDATE payments SET usuario_id = ? WHERE creditId = 'CR-bc61b816-gestor'`).run(ADMIN.id);
+        // Antes: a página usava as listas do contexto, filtradas por quem registou cada linha; o pagamento do
+        // administrador desaparecia da vista do gestor e o crédito parecia por pagar (ou desaparecia de todo).
+        const legacyPayments = (await M.ServicoFinanceiro.getAllPayments()).filter(payment => payment.usuario_id === 'u-gestor');
+        assert.equal(legacyPayments.length, 0, 'o filtro antigo por utilizador perdia o pagamento');
+        // Agora: fonte única lida da base; os pagamentos acompanham os créditos visíveis.
+        const { rows, payments } = await portfolio(M, new Date(), { role: 'manager', userId: 'u-gestor' });
+        const row = rows.find(item => item.id === 'CR-bc61b816-gestor');
+        assert.ok(row, 'o crédito aparece em Créditos');
+        assert.equal(payments.length, 1, 'o pagamento conta no crédito');
+        assert.equal(row.stage, 'liquidado');
+        assert.equal(row.outstandingMinor, 0);
+        const pagamentos = await M.ServicoFinanceiro.getPaymentsForManagement();
+        assert.ok(pagamentos.some(payment => payment.creditId === row.id), 'e continua visível em Pagamentos');
+        console.log(`    A1: ${row.reference} visível ao gestor com o pagamento registado por outro utilizador · estado ${M.C.STAGES[row.stage].label} · em dívida ${kz(row.outstandingMinor)}`);
+    } finally { database.close(); }
+});
+
+test('A2 · A referência curta CR-AAAA-NNNN é a mesma em Créditos e em Pagamentos (conta os créditos apagados)', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const { month } = monthRange(M);
+        await M.ServicoFinanceiro.addCredit({ ...credit({ id: 'CR-APAGADO', clientId: 'c2', clientName: 'Maria Antónia', amount: 10_000, start: `${month}-01T08:00:00Z`, month }), status: 'pending_approval' });
+        await M.ServicoFinanceiro.addCredit(credit({ id: 'CR-SEGUINTE', clientId: 'c3', clientName: 'João Baptista', amount: 20_000, start: `${month}-02T08:00:00Z`, month }));
+        database.prepare(`UPDATE credits SET deletedAt = ? WHERE id = 'CR-APAGADO'`).run(new Date().toISOString());
+        const { rows, context } = await portfolio(M);
+        const numbersPagamentos = M.P.contractNumbers([...context.credits, ...context.deletedCredits]);
+        const row = rows.find(item => item.id === 'CR-SEGUINTE');
+        assert.equal(row.reference, numbersPagamentos.get('CR-SEGUINTE'));
+        assert.match(row.reference, /^CR-\d{4}-0002$/);
+        console.log(`    A2: CR-SEGUINTE → ${row.reference} em Créditos e ${numbersPagamentos.get('CR-SEGUINTE')} em Pagamentos`);
+    } finally { database.close(); }
+});
+
+test('G · Desembolso só com saldo em Caixa/Banco: sem saldo, nada é gravado', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const { month } = monthRange(M);
+        database.prepare(`UPDATE shared_settings SET value = '{"cashGuard":true}' WHERE key = 'accounting_config'`).run();
+        await assert.rejects(M.ServicoFinanceiro.addCredit(credit({ id: 'CR-SEM-SALDO', clientId: 'c5', clientName: 'Rui Fernandes', amount: 80_000, start: `${month}-01T12:00:00Z`, month })),
+            /Saldo de Caixa e Bancos insuficiente/);
+        assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM credits WHERE id = 'CR-SEM-SALDO'`).get().n, 0);
+        assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM accounting_entries`).get().n, 0);
+        console.log('    G: sem saldo em Caixa/Banco → desembolso recusado, 0 créditos e 0 lançamentos gravados');
+    } finally { database.close(); }
+});
+
+test('H · Reestruturação: novo plano só depois de aprovado por outra pessoa; o original fica no histórico', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const today = M.F.luandaTodayKey();
+        const [y, m, d] = today.split('-').map(Number);
+        const start = new Date(Date.UTC(y, m - 1, d - 40, 12)).toISOString();
+        await M.ServicoFinanceiro.addCredit(credit({ id: 'CR-REESTRUTURAR', clientId: 'c3', clientName: 'João Baptista', amount: 600_000, installments: 6, rate: 24, method: 'PRICE', interest: 0, start, month: today.slice(0, 7) }));
+        const before = await portfolio(M);
+        const row = before.rows.find(item => item.id === 'CR-REESTRUTURAR');
+        assert.equal(row.stage, 'em_atraso', 'a primeira prestação está em atraso');
+        const installments = before.context.installments.filter(item => item.creditId === 'CR-REESTRUTURAR');
+        const first = new Date(Date.UTC(y, m, Math.min(d, 28))).toISOString().slice(0, 10);
+        const proposal = M.R2.buildRestructuring({ installments, months: 12, ratePercent: 24, method: 'PRICE', firstDueKey: first, todayKey: today });
+        assert.equal(proposal.plan.reduce((sum, item) => sum + item.principalMinor, 0), row.outstandingMinor, 'o novo plano reparte exatamente o capital em dívida');
+        assert.ok(proposal.overdueInterestMinor > 0 && proposal.plan[0].interestMinor > proposal.plan[1].interestMinor, 'os juros vencidos passam para a 1.ª prestação');
+        const credits = await M.ServicoFinanceiro.getAllCredits();
+        const target = credits.find(item => item.id === 'CR-REESTRUTURAR');
+        const requestId = await M.ServicoCarteira.requestRestructure({ credit: target, plan: proposal.plan, replacedIds: proposal.replacedIds, params: { months: 12 }, reason: 'Perda de rendimento comprovada; o cliente propõe pagar em 12 meses', actor: ADMIN });
+        assert.equal((await portfolio(M)).rows.find(item => item.id === 'CR-REESTRUTURAR').stage, 'em_atraso', 'pendente: nada muda antes da aprovação');
+        await assert.rejects(M.ServicoCarteira.decideRestructure(requestId, true, 'Aprovo o plano proposto pelo próprio pedido', ADMIN), /Quem pediu a reestruturação não a pode aprovar/);
+        await M.ServicoCarteira.decideRestructure(requestId, true, 'Plano sustentável face ao novo rendimento do cliente', { id: 'u-dir', name: 'Diogo Diretor', role: 'credit_director' });
+        const after = (await portfolio(M)).rows.find(item => item.id === 'CR-REESTRUTURAR');
+        assert.equal(after.stage, 'reestruturado');
+        assert.equal(after.totalCount, 12);
+        assert.equal(after.outstandingMinor, row.outstandingMinor, 'o capital em dívida mantém-se');
+        const stored = database.prepare(`SELECT status, originalPlan FROM credit_restructurings WHERE id = ?`).get(requestId);
+        assert.equal(stored.status, 'approved');
+        assert.equal(JSON.parse(stored.originalPlan).length, 6, 'o plano original (6 prestações) fica guardado');
+        assert.equal(database.prepare(`SELECT status FROM credits WHERE id = 'CR-REESTRUTURAR'`).get().status, 'renegotiated');
+        console.log(`    H: 6 → ${after.totalCount} prestações · capital ${kz(after.outstandingMinor)} mantido · juros vencidos ${kz(proposal.overdueInterestMinor)} na 1.ª · quem pediu não aprova · aprovado pelo diretor → ${M.C.STAGES[after.stage].label}`);
+    } finally { database.close(); }
+});
+
+test('H · Contencioso: só a partir de Ativo/Em atraso, com motivo; o crédito passa a "Contencioso"', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const today = M.F.luandaTodayKey();
+        const [y, m, d] = today.split('-').map(Number);
+        const start = new Date(Date.UTC(y, m - 1, d - 70, 12)).toISOString();
+        await M.ServicoFinanceiro.addCredit(credit({ id: 'CR-JURIDICO', clientId: 'c4', clientName: 'Ana Domingos', amount: 200_000, installments: 2, start, month: today.slice(0, 7) }));
+        const target = (await M.ServicoFinanceiro.getAllCredits()).find(item => item.id === 'CR-JURIDICO');
+        const manager = { id: 'u-gestor', name: 'Gestor', role: 'manager', permissions: [] };
+        await assert.rejects(M.ServicoCarteira.sendToLegal({ credit: target, debtMinor: 20_000_000, priority: 'high', reason: 'Setenta dias de atraso e sem resposta aos contactos', actor: manager }), /aprovado por um administrador/);
+        await M.ServicoCarteira.sendToLegal({ credit: target, debtMinor: 20_000_000, priority: 'high', reason: 'Setenta dias de atraso, duas promessas falhadas e sem resposta', actor: ADMIN });
+        const row = (await portfolio(M)).rows.find(item => item.id === 'CR-JURIDICO');
+        assert.equal(row.stage, 'contencioso');
+        await assert.rejects(M.ServicoCarteira.sendToLegal({ credit: target, debtMinor: 20_000_000, priority: 'high', reason: 'Nova tentativa de abrir o processo de contencioso', actor: ADMIN }), /já tem um processo/);
+        assert.ok(database.prepare(`SELECT COUNT(*) AS n FROM audit_logs WHERE details LIKE '%para contencioso%'`).get().n === 1, 'fica na auditoria');
+        console.log(`    H: gestor sem permissão → recusado · administrador com motivo → ${M.C.STAGES[row.stage].label} · segundo envio → recusado`);
+    } finally { database.close(); }
+});
+
+test('D · Variação dos cards da Carteira: valores no fim do mês anterior com a imputação de sempre', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const today = M.F.luandaTodayKey();
+        const [y, m] = today.split('-').map(Number);
+        const previousEnd = new Date(Date.UTC(y, m - 1, 0)).toISOString().slice(0, 10);
+        const start = new Date(Date.UTC(y, m - 3, 5, 12)).toISOString();
+        await M.ServicoFinanceiro.addCredit(credit({ id: 'CR-VARIACAO', clientId: 'c2', clientName: 'Maria Antónia', amount: 300_000, installments: 3, interest: 30_000, start, month: start.slice(0, 7) }));
+        const plan = database.prepare(`SELECT dueDate, principalMinor + interestMinor AS total FROM credit_installments WHERE creditId = 'CR-VARIACAO' ORDER BY installmentNumber`).all();
+        await pay(M, 'CR-VARIACAO', Number(plan[0].total) / 100, plan[0].dueDate);
+        const { rows, context, payments } = await portfolio(M);
+        const then = M.C.portfolioKpisAt(rows, context.installments, payments, previousEnd);
+        const now = M.C.portfolioKpisAt(rows, context.installments, payments, today);
+        assert.equal(then.activeMinor, 20_000_000, 'no fim do mês anterior: 300 000 − 100 000 de capital pago');
+        assert.equal(now.activeMinor, 20_000_000);
+        assert.ok(now.overdueMinor >= then.overdueMinor, 'o atraso não diminui sem pagamentos');
+        console.log(`    D: fim do mês anterior ${kz(then.activeMinor)} em dívida, ${kz(then.overdueMinor)} em atraso · hoje ${kz(now.activeMinor)}, ${kz(now.overdueMinor)} em atraso`);
     } finally { database.close(); }
 });

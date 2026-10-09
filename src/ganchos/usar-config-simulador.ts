@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { DEFAULT_SIMULATOR_CONFIG, type SimulatorConfig } from '@/bibliotecas/config-simulador';
 import { SIMULATOR_CONFIG_EVENT, ServicoConfigSimulador } from '@/servicos/ServicoConfigSimulador';
 
-/** Configuração do simulador (Definições › Simulador e Produtos), actualizada quando é guardada. */
+/** Configuração do simulador (Definições › Produtos de Crédito), actualizada quando é guardada. */
 export function useConfigSimulador() {
     const [config, setConfig] = useState<SimulatorConfig>(DEFAULT_SIMULATOR_CONFIG);
     const [loading, setLoading] = useState(true);

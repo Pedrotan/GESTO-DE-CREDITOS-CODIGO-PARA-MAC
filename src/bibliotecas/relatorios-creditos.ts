@@ -2,7 +2,7 @@
 // data, produção mensal, aging e PAR30, mapa de vencimentos, créditos por situação, rentabilidade por produto e
 // por gestor, e o extrato de um crédito para o cliente. Os valores vêm da biblioteca partilhada da carteira.
 import { luandaDateKey, formatLuandaDate } from '@/bibliotecas/fuso-angola';
-import { AGING_LABELS, IN_PORTFOLIO, STAGES, agingOf, type AgingBucket, type InstallmentRow, type PortfolioRow } from '@/bibliotecas/carteira-credito';
+import { AGING_LABELS, IN_PORTFOLIO, STAGES, agingOf, type AgingBucket, type InstallmentRow, type PortfolioRow, type annualTable } from '@/bibliotecas/carteira-credito';
 import type { Cell, ReportDef, Section } from '@/bibliotecas/relatorios-pagamentos';
 import type { Payment } from '@/tipos/credito';
 
@@ -162,4 +162,22 @@ export function buildCreditReport(key: CreditReportKey, input: CreditReportInput
         }
     }
     return { key: `creditos-${key}`, title: info.title, subtitle, orientation, fileBase: `creditos-${key}`, summary, sections, tagline: 'CARTEIRA DE CRÉDITO' };
+}
+
+/** Relatório da visão anual (PDF e Excel, mesmo cabeçalho dos restantes relatórios). */
+export function annualReportDef(state: { annual: ReturnType<typeof annualTable>; year: number; today: string }): ReportDef {
+    const { months, total } = state.annual;
+    const MONTHS_LONG = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+    const formatCurrency = (value: number) => `${value.toLocaleString('pt-AO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
+    const money = (minor: number) => minor / 100;
+    return {
+        key: 'creditos-anual', title: `Visão Anual de Créditos ${state.year}`, subtitle: `Meses × indicadores · situação em ${state.today.split('-').reverse().join('/')}`,
+        orientation: 'landscape', fileBase: `visao-anual-creditos-${state.year}`,
+        summary: [['Créditos concedidos', String(total.grantedCount)], ['Capital desembolsado', `${formatCurrency(money(total.disbursedMinor))}`], ['Recebido', formatCurrency(money(total.receivedMinor))], ['Juros recebidos', formatCurrency(money(total.interestMinor))]],
+        sections: [{
+            heading: `Indicadores por mês — ${state.year}`, head: ['Mês', 'Concedidos', 'Capital concedido', 'Capital desembolsado', 'Recebido', 'Juros recebidos', 'Em atraso'], numeric: [1], money: [2, 3, 4, 5, 6],
+            rows: months.map(month => [MONTHS_LONG[month.index], month.grantedCount, money(month.grantedMinor), money(month.disbursedMinor), money(month.receivedMinor), money(month.interestMinor), money(month.overdueMinor)]),
+            foot: [['Total', total.grantedCount, money(total.grantedMinor), money(total.disbursedMinor), money(total.receivedMinor), money(total.interestMinor), money(total.overdueMinor)]],
+        }],
+    };
 }

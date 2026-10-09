@@ -3,8 +3,8 @@
 import type { Client, Credit, Payment, Simulation } from '@/tipos/credito';
 import type { Warranty } from '@/tipos/contencioso';
 import type { RiskLevel, RateType, SimulatorConfig, SimulatorProduct } from '@/bibliotecas/config-simulador';
-import type { AmortizationSystem, FeeMode, FeePayment, GraceType, SimulationInput } from '@/bibliotecas/simulador-credito';
-import type { RiskInputs } from '@/bibliotecas/risco-simulacao';
+import { effortRate, simulateCredit, type AmortizationSystem, type FeeMode, type FeePayment, type GraceType, type SimulationInput, type SimulationResult } from '@/bibliotecas/simulador-credito';
+import { assessRisk, type RiskInputs } from '@/bibliotecas/risco-simulacao';
 
 export type SimulatorForm = {
     clientId: string | null;
@@ -209,4 +209,34 @@ export function formFromSimulation(simulation: Simulation, config: SimulatorConf
         baseRate: Number(simulation.interestRate) ? Number(simulation.interestRate) * 12 : base.baseRate,
         applyRiskAdjustment: false,
     };
+}
+
+export type Computed = {
+    ready: boolean;
+    baseRate: number;
+    riskAdjustment: number;
+    annualRate: number;
+    result: SimulationResult | null;
+    effort: number | null;
+    risk: ReturnType<typeof assessRisk>;
+    riskLevel: RiskLevel;
+};
+
+/** Cálculo completo: risco a partir da prestação sem ajuste, depois TAN ajustada ao risco e simulação final. */
+export function computeSimulation(form: SimulatorForm, config: SimulatorConfig, history: ReturnType<typeof clientHistory>): Computed {
+    const ready = form.principal > 0 && form.months > 0;
+    const baseRate = baseAnnualRate(form);
+    const baseResult = ready ? simulateCredit(buildInput(form, config, baseRate)) : null;
+    const baseEffort = baseResult?.valid ? effortRate(baseResult.maxInstallment, form.otherDebts, form.income) : null;
+    const risk = assessRisk({
+        effortRate: baseEffort, effortLimit: config.effortLimit,
+        latePayments: history?.latePayments || 0, maxDaysOverdue: history?.maxDaysOverdue || 0, paidCredits: history?.paidCredits || 0,
+        activeCredits: history?.activeCredits || 0, defaultedCredits: history?.defaultedCredits || 0, guaranteeCoverage: history?.guaranteeCoverage || 0,
+    });
+    const riskLevel = form.riskOverride ?? risk.level;
+    const riskAdjustment = form.applyRiskAdjustment ? config.riskSpread[riskLevel] : 0;
+    const annualRate = Math.max(0, baseRate + riskAdjustment);
+    const result = ready ? simulateCredit(buildInput(form, config, annualRate)) : null;
+    const effort = result?.valid ? effortRate(result.maxInstallment, form.otherDebts, form.income) : null;
+    return { ready, baseRate, riskAdjustment, annualRate, result, effort, risk, riskLevel };
 }

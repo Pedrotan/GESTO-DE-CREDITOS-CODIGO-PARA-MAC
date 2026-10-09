@@ -70,7 +70,7 @@ export function LimitesGlobais({ state }: { state: AlcadasState }) {
             <section className="space-y-4 rounded-2xl border bg-card p-4 shadow-sm md:p-6 xl:col-span-2">
                 <div>
                     <h3 className="flex items-center gap-2 text-lg font-bold"><Package className="h-5 w-5 text-primary" /> Limites por produto de crédito</h3>
-                    <p className="text-sm text-muted-foreground">Produtos do Simulador (Definições › Simulador e Produtos). O montante máximo do produto continua a valer; aqui define a alçada do produto: acima dela o pedido sobe na cadeia. Vazio = sem limite próprio.</p>
+                    <p className="text-sm text-muted-foreground">Produtos do Simulador (Definições › Produtos de Crédito). O montante máximo do produto continua a valer; aqui define a alçada do produto: acima dela o pedido sobe na cadeia. Vazio = sem limite próprio.</p>
                 </div>
                 <div className="overflow-x-auto rounded-xl border">
                     <table className="w-full text-sm">
