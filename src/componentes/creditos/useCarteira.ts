@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useData } from '@/contextos/ContextoDados';
+import { useAuth } from '@/contextos/ContextoAutenticacao';
+import type { AccountingEntry, Credit, Payment } from '@/tipos/credito';
 import * as C from '@/bibliotecas/carteira-credito';
 import { luandaDateKey, luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { ServicoCarteira, type Restructuring } from '@/servicos/ServicoCarteira';
@@ -24,8 +26,10 @@ const monthRange = (year: number, month: number) => {
 
 /** Estado da página de Créditos: dados calculados com a biblioteca partilhada e filtros da vista escolhida. */
 export function useCarteira(input: { search?: string } = {}) {
-    const { credits, payments, clients, accountingEntries, dataLoadIssues, isDataLoading } = useData();
-    const [context, setContext] = useState<Awaited<ReturnType<typeof ServicoCarteira.loadContext>> | null>(null);
+    // As listas do contexto só servem de sinal de mudança (um crédito ou pagamento novo volta a ler a base).
+    const { credits: contextCredits, payments: contextPayments, clients, dataLoadIssues, isDataLoading, activeContextUserId, users: contextUsers } = useData() as any;
+    const { user } = useAuth();
+    const [data, setData] = useState<Awaited<ReturnType<typeof ServicoCarteira.loadPortfolioData>> | null>(null);
     const [users, setUsers] = useState<UserRow[]>([]);
     const [productNames, setProductNames] = useState<Map<string, string>>(new Map());
     const [contextError, setContextError] = useState('');
@@ -39,31 +43,48 @@ export function useCarteira(input: { search?: string } = {}) {
     const [cloud, setCloud] = useState<CloudSyncStatus>(getLastCloudSyncStatus);
 
     const reloadContext = useCallback(async () => {
-        try { setContext(await ServicoCarteira.loadContext()); setContextError(''); }
-        catch (error: any) { setContextError(error?.message || 'Não foi possível carregar o plano de prestações.'); }
+        try { setData(await ServicoCarteira.loadPortfolioData()); setContextError(''); }
+        catch (error: any) { setContextError(error?.message || 'Não foi possível carregar a carteira de crédito.'); }
     }, []);
-    // O plano de prestações muda com cada crédito/pagamento: volta a ler quando os dados do contexto mudam.
-    useEffect(() => { void reloadContext(); }, [reloadContext, credits, payments]);
+    useEffect(() => { void reloadContext(); }, [reloadContext, contextCredits, contextPayments]);
     useEffect(() => { void ServicoAlcadas.users().then(setUsers).catch(() => setUsers([])); }, []);
     useEffect(() => { void ServicoConfigSimulador.load().then(config => setProductNames(new Map(config.products.map(item => [item.id, item.name])))).catch(() => undefined); }, []);
     useEffect(() => {
-        const handler = (event: Event) => setCloud((event as CustomEvent<CloudSyncStatus>).detail);
+        const handler = (event: Event) => {
+            const status = (event as CustomEvent<CloudSyncStatus>).detail;
+            setCloud(status);
+            // Terminada a sincronização, lê de novo: os dados vindos de outros dispositivos aparecem logo.
+            if (status?.state === 'synced' && Number(status.pulled || 0) > 0) void reloadContext();
+        };
         window.addEventListener('tango-cloud-sync-status', handler);
         return () => window.removeEventListener('tango-cloud-sync-status', handler);
-    }, []);
+    }, [reloadContext]);
+
+    // Mesma regra de visibilidade do resto do sistema; os pagamentos acompanham os créditos visíveis.
+    const scope = useMemo(() => ({ role: user?.role, userId: user?.id, contextUserId: activeContextUserId, users: contextUsers || [] }), [user?.role, user?.id, activeContextUserId, contextUsers]);
+    const credits: Credit[] = useMemo(() => data ? C.visibleCredits(data.credits, scope) : [], [data, scope]);
+    const creditIds = useMemo(() => new Set(credits.map(credit => credit.id)), [credits]);
+    const payments: Payment[] = useMemo(() => (data?.payments || []).filter(payment => creditIds.has(payment.creditId)), [data, creditIds]);
+    const entries: AccountingEntry[] = useMemo(() => (data?.entries || []).filter(entry => !entry.creditId || creditIds.has(entry.creditId)), [data, creditIds]);
+    const context = data;
 
     const rows = useMemo(() => context ? C.buildPortfolio(credits, {
         installments: context.installments, payments, legalCreditIds: context.legalCreditIds, writtenOffIds: context.writtenOffIds,
-        escalatedIds: context.escalatedIds, clients, users, productOf: context.productOf, productNames,
+        escalatedIds: context.escalatedIds, clients, users, productOf: context.productOf, productNames, deletedCredits: context.deletedCredits,
     }) : [], [context, credits, payments, clients, users, productNames]);
 
     const range = useMemo(() => monthRange(year, month), [year, month]);
     const previousRange = useMemo(() => month === 0 ? monthRange(year - 1, 11) : monthRange(year, month - 1), [year, month]);
     const monthKey = range.start.slice(0, 7);
-    const entries = accountingEntries;
     const figures = useMemo(() => C.periodFigures({ rows, credits, payments, entries, clients, range }), [rows, credits, payments, entries, clients, range]);
     const previousFigures = useMemo(() => C.periodFigures({ rows, credits, payments, entries, clients, range: previousRange }), [rows, credits, payments, entries, clients, previousRange]);
     const kpis = useMemo(() => C.portfolioKpis(rows, context?.installments || []), [rows, context]);
+    // Variação da vista Carteira: o mesmo método (capital pago até à data, imputação FIFO) hoje e no fim do mês anterior.
+    const kpiTrend = useMemo(() => {
+        const [y, m] = today.split('-').map(Number);
+        const previousEnd = new Date(Date.UTC(y, m - 1, 0)).toISOString().slice(0, 10);
+        return { current: C.portfolioKpisAt(rows, context?.installments || [], payments, today), previous: C.portfolioKpisAt(rows, context?.installments || [], payments, previousEnd), previousEnd };
+    }, [rows, context, payments, today]);
     const annual = useMemo(() => C.annualTable({ rows, credits, payments, entries, installments: context?.installments || [], clients, year }), [rows, credits, payments, entries, context, clients, year]);
     const dots = useMemo(() => C.monthDots(rows, context?.installments || [], year), [rows, context, year]);
     const alerts = useMemo(() => C.creditAlerts(rows, context?.installments || [], context?.brokenPromises || []), [rows, context]);
@@ -119,9 +140,9 @@ export function useCarteira(input: { search?: string } = {}) {
     const restructurings: Restructuring[] = context?.restructurings || [];
 
     return {
-        loading: isDataLoading || !context, contextError, dataLoadIssues, stale, cloud,
+        loading: isDataLoading || !context, contextError, credits, payments, entries, dataLoadIssues, stale, cloud,
         view, setView, year, setYear, month, setMonth, range, monthKey, tab, setTab, card, setCard, filters, setFilters,
-        rows, viewRows, visibleRows, tabCounts, figures, previousFigures, kpis, annual, dots, alerts, users, context, restructurings,
+        rows, viewRows, visibleRows, tabCounts, figures, previousFigures, kpis, kpiTrend, annual, dots, alerts, users, context, restructurings,
         reloadContext, today,
     };
 }

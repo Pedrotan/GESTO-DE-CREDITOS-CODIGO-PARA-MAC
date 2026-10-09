@@ -43,7 +43,7 @@ import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { ComparadorCenarios, MAX_SCENARIOS, type Scenario } from '@/componentes/simulador/ComparadorCenarios';
 import {
     QUICK_TERMS, activeProducts, baseAnnualRate, buildInput, clientHistory, defaultForm, formFromSimulation, newSimulationNumber,
-    newVerificationCode, parseDetails, productFields, simulationStatus, type SimulatorForm, type StoredDetails,
+    newVerificationCode, parseDetails, productFields, simulationStatus, computeSimulation, type SimulatorForm, type StoredDetails,
 } from '@/componentes/simulador/modelo';
 
 type SavedRef = { id: string; number: string; code: string; issuedAt: Date; expiresAt: Date; signature: string; status: 'simulated' | 'converted'; convertedCreditId?: string | null };
@@ -66,35 +66,8 @@ const Section = ({ title, children, className }: { title: string; children: Reac
     </div>
 );
 
-type Computed = {
-    ready: boolean;
-    baseRate: number;
-    riskAdjustment: number;
-    annualRate: number;
-    result: SimulationResult | null;
-    effort: number | null;
-    risk: ReturnType<typeof assessRisk>;
-    riskLevel: RiskLevel;
-};
-
-/** Cálculo completo: risco a partir da prestação sem ajuste, depois TAN ajustada ao risco e simulação final. */
-function compute(form: SimulatorForm, config: SimulatorConfig, history: ReturnType<typeof clientHistory>): Computed {
-    const ready = form.principal > 0 && form.months > 0;
-    const baseRate = baseAnnualRate(form);
-    const baseResult = ready ? simulateCredit(buildInput(form, config, baseRate)) : null;
-    const baseEffort = baseResult?.valid ? effortRate(baseResult.maxInstallment, form.otherDebts, form.income) : null;
-    const risk = assessRisk({
-        effortRate: baseEffort, effortLimit: config.effortLimit,
-        latePayments: history?.latePayments || 0, maxDaysOverdue: history?.maxDaysOverdue || 0, paidCredits: history?.paidCredits || 0,
-        activeCredits: history?.activeCredits || 0, defaultedCredits: history?.defaultedCredits || 0, guaranteeCoverage: history?.guaranteeCoverage || 0,
-    });
-    const riskLevel = form.riskOverride ?? risk.level;
-    const riskAdjustment = form.applyRiskAdjustment ? config.riskSpread[riskLevel] : 0;
-    const annualRate = Math.max(0, baseRate + riskAdjustment);
-    const result = ready ? simulateCredit(buildInput(form, config, annualRate)) : null;
-    const effort = result?.valid ? effortRate(result.maxInstallment, form.otherDebts, form.income) : null;
-    return { ready, baseRate, riskAdjustment, annualRate, result, effort, risk, riskLevel };
-}
+// O cálculo completo (risco → TAN ajustada → simulação) está em modelo.ts, partilhado com o assistente de novo crédito.
+const compute = computeSimulation;
 
 export function SimuladorCredito() {
     const { companySettings, clients, credits, payments, warranties, simulations, addSimulation, deleteSimulation, updateSimulationStatus, addCredit, addLog } = useData();
@@ -638,7 +611,7 @@ export function SimuladorCredito() {
                                             </Select>
                                         </div>
                                         <p className="text-[11px] leading-tight text-muted-foreground">
-                                            Imposto do Selo: {formatPercent(useRate)} sobre a utilização ({(form.months || product.minMonths) >= 60 ? '5 anos ou mais' : (form.months || product.minMonths) > 12 ? 'mais de 1 ano' : 'até 1 ano'}) e {formatPercent(config.stampDuty.interest)} sobre os juros de cada prestação. Taxas em Configurações › Simulador e Produtos.
+                                            Imposto do Selo: {formatPercent(useRate)} sobre a utilização ({(form.months || product.minMonths) >= 60 ? '5 anos ou mais' : (form.months || product.minMonths) > 12 ? 'mais de 1 ano' : 'até 1 ano'}) e {formatPercent(config.stampDuty.interest)} sobre os juros de cada prestação. Taxas em Configurações › Produtos de Crédito.
                                         </p>
                                     </Section>
 
@@ -876,7 +849,7 @@ export function SimuladorCredito() {
 
 function GuiaSimulador({ config, onTerms }: { config: SimulatorConfig; onTerms: () => void }) {
     const items: Array<[string, string]> = [
-        ['Produto', 'Escolha o produto: os limites de montante e prazo, a TAN, as comissões e o sistema de amortização vêm de Configurações › Simulador e Produtos.'],
+        ['Produto', 'Escolha o produto: os limites de montante e prazo, a TAN, as comissões e o sistema de amortização vêm de Configurações › Produtos de Crédito.'],
         ['Montante e prazo', 'Use o cursor ou escreva o valor (ex.: 1000000 aparece como 1 000 000,00 Kz). O prazo é escolhido em meses, com atalhos de 6 a 60 meses.'],
         ['Datas e carência', 'A data de início é a do desembolso. As prestações vencem no dia escolhido (1 a 28); se calhar num fim-de-semana ou feriado, passa para o dia útil seguinte. A carência pode ser só de capital (paga juros) ou de capital e juros (juros capitalizados).'],
         ['TAN e TAEG', 'A TAN é a taxa anual nominal (a mensal é TAN ÷ 12). A TAEG junta juros, comissões, Imposto do Selo e seguros e é calculada pela TIR dos fluxos reais.'],

@@ -1,4 +1,4 @@
-// Configuração do simulador (Definições › Simulador e Produtos): produtos, Imposto do Selo, limite da
+// Configuração do simulador (Definições › Produtos de Crédito): produtos, Imposto do Selo, limite da
 // taxa de esforço, ajuste da taxa por nível de risco, mora e validade das simulações. Guardada em
 // shared_settings para valer em todos os dispositivos da empresa.
 

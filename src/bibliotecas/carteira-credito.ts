@@ -208,9 +208,30 @@ export function stageOf(credit: Credit, input: { outstanding: number; interestOu
     return input.daysOverdue > 0 ? 'em_atraso' : 'ativo';
 }
 
-export function buildPortfolio(credits: Credit[], context: PortfolioContext): PortfolioRow[] {
-    const numbers = contractNumbers(credits);
+/**
+ * Constrói a carteira. A numeração CR-AAAA-NNNN conta também os créditos apagados (`deletedCredits`), como na
+ * página de Pagamentos: o mesmo crédito tem a mesma referência curta em todas as páginas.
+ */
+export function buildPortfolio(credits: Credit[], context: PortfolioContext & { deletedCredits?: Credit[] }): PortfolioRow[] {
+    const numbers = contractNumbers([...credits, ...(context.deletedCredits || [])]);
     return credits.filter(credit => !credit.deletedAt).map(credit => portfolioRow(credit, context, numbers));
+}
+
+/**
+ * Visibilidade dos créditos (a mesma regra do resto do sistema): gestor escolhido em "Modo", super administrador
+ * vê tudo, administrador vê os seus e os dos gestores, os restantes só os seus. Os pagamentos seguem o crédito
+ * (não quem os registou): um pagamento registado por outro utilizador continua a contar no crédito visível.
+ */
+export function visibleCredits<T extends { usuario_id?: string | null }>(credits: T[], scope: {
+    role?: string | null; userId?: string | null; contextUserId?: string | null; users?: Array<{ id: string; role?: string }>;
+}): T[] {
+    if (scope.contextUserId) return credits.filter(credit => credit.usuario_id === scope.contextUserId);
+    if (!scope.role || scope.role === 'super_admin') return credits;
+    if (scope.role === 'admin') {
+        const allowed = new Set([scope.userId, ...(scope.users || []).filter(user => user.role === 'manager').map(user => user.id)]);
+        return credits.filter(credit => allowed.has(credit.usuario_id || ''));
+    }
+    return credits.filter(credit => credit.usuario_id === scope.userId);
 }
 
 /** "Em curso hoje": créditos com dinheiro na rua (ativos, em atraso, reestruturados e em contencioso). */
@@ -246,6 +267,47 @@ export function portfolioKpis(rows: PortfolioRow[], installments: InstallmentRow
         moraMinor: book.reduce((sum, row) => sum + row.moraMinor, 0),
         defaultRate: active > 0 ? Math.round((over90 / active) * 1000) / 10 : null,
         futureInterestMinor: book.reduce((sum, row) => sum + row.interestOutstandingMinor, 0),
+    };
+}
+
+/**
+ * Indicadores da carteira numa data passada (para a variação face ao período anterior). O capital em dívida é o
+ * concedido menos o capital pago até essa data (como no relatório "Carteira de crédito numa data"); o atraso usa a
+ * imputação de sempre — os pagamentos até essa data cobrem primeiro as prestações mais antigas.
+ */
+export function portfolioKpisAt(rows: PortfolioRow[], installments: InstallmentRow[], payments: Payment[], dateKey: string) {
+    const confirmed = payments.filter(payment => payment.status === 'confirmed' && !payment.deletedAt && luandaDateKey(payment.paymentDate) <= dateKey);
+    let activeMinor = 0, activeCount = 0, overdueMinor = 0, overdueCount = 0, over30 = 0, over90 = 0, futureInterestMinor = 0;
+    for (const row of rows) {
+        if (['pedido', 'em_analise', 'rejeitado', 'cancelado'].includes(row.stage) || row.grantedKey > dateKey) continue;
+        const paid = confirmed.filter(payment => payment.creditId === row.id);
+        const principalPaid = paid.reduce((sum, payment) => sum + toMinor(payment.allocatedToPrincipal), 0);
+        const interestPaid = paid.reduce((sum, payment) => sum + toMinor(payment.allocatedToInterest), 0);
+        const outstanding = Math.max(0, row.grantedMinor - principalPaid);
+        if (outstanding <= 0) continue;
+        activeMinor += outstanding; activeCount += 1;
+        futureInterestMinor += Math.max(0, row.contractedInterestMinor - interestPaid);
+        let available = principalPaid + interestPaid;
+        let firstLate: string | null = null;
+        let late = 0;
+        for (const item of installments.filter(entry => entry.creditId === row.id && real(entry)).sort((a, b) => num(a.installmentNumber) - num(b.installmentNumber))) {
+            const total = num(item.principalMinor) + num(item.interestMinor);
+            const covered = Math.min(total, available);
+            available -= covered;
+            const due = luandaDateKey(item.dueDate);
+            if (due < dateKey && covered < total) { late += total - covered; firstLate = firstLate || due; }
+        }
+        if (late > 0 && firstLate) {
+            const days = dayDiff(firstLate, dateKey);
+            overdueMinor += late; overdueCount += 1;
+            if (days > 30) over30 += outstanding;
+            if (days > 90) over90 += outstanding;
+        }
+    }
+    return {
+        activeMinor, activeCount, overdueMinor, overdueCount, futureInterestMinor,
+        par30: activeMinor > 0 ? Math.round((over30 / activeMinor) * 1000) / 10 : null,
+        defaultRate: activeMinor > 0 ? Math.round((over90 / activeMinor) * 1000) / 10 : null,
     };
 }
 

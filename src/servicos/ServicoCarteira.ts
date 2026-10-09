@@ -9,7 +9,7 @@ import type { EarlySettlement, PlanItem } from '@/bibliotecas/liquidacao-antecip
 import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
 import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { ServicoCobrancaOperacional } from '@/servicos/ServicoCobrancaOperacional';
-import type { Credit } from '@/tipos/credito';
+import type { AccountingEntry, Credit } from '@/tipos/credito';
 
 type Actor = { id: string; name: string; role: string; permissions?: string[] };
 type Statement = { sql: string; params: unknown[]; expectChanges?: number };
@@ -59,6 +59,73 @@ export class ServicoCarteira {
             productOf: new Map<string, string>(simulations.map(item => [item.convertedCreditId, item.productId] as [string, string])),
             restructurings: restructurings.map(row => this.mapRestructuring(row)),
         };
+    }
+
+    /**
+     * Fonte única da página de Créditos e do Painel: lê da base os créditos (com os apagados, para a numeração),
+     * os pagamentos com a mesma função da página de Pagamentos e os lançamentos com a mesma consulta da
+     * Contabilidade. Não depende das listas do contexto, que podem estar filtradas ou ter falhado a carregar
+     * (era o que fazia desaparecer um crédito em Créditos enquanto continuava visível em Pagamentos e na Contabilidade).
+     */
+    static async loadPortfolioData() {
+        const [credits, deletedCredits, payments, entries, context] = await Promise.all([
+            ServicoFinanceiro.getAllCredits(),
+            ServicoFinanceiro.getDeletedCredits().catch(() => [] as Credit[]),
+            ServicoFinanceiro.getPaymentsForManagement(),
+            db.all<any>('SELECT * FROM accounting_entries ORDER BY rowid').catch(() => []),
+            this.loadContext(),
+        ]);
+        return {
+            ...context, credits, deletedCredits, payments,
+            entries: entries.map(entry => ({ ...entry, timestamp: new Date(entry.timestamp), amountTotalMinor: entry.amountTotalMinor === null || entry.amountTotalMinor === undefined ? undefined : Number(entry.amountTotalMinor) })) as AccountingEntry[],
+        };
+    }
+
+    /**
+     * Ficha do crédito: tudo o que é específico de um crédito (plano, mora à data, documentos, garantias,
+     * contencioso, cobrança, lançamentos, histórico, transferências, reestruturações e pedidos de abate).
+     */
+    static async loadCreditFile(creditId: string, moraAsOf: Date = new Date()) {
+        const pattern = `%${creditId}%`;
+        const [installments, mora, documents, transfers, restructurings, warranties, legalCases, collection, entries, audit, writeoffRequests] = await Promise.all([
+            ServicoFinanceiro.getCreditInstallments(creditId).catch(() => []),
+            ServicoFinanceiro.getLateInterestSummary(creditId, moraAsOf).catch(() => null),
+            this.documents(creditId),
+            this.transfers(creditId),
+            this.restructurings(creditId),
+            db.all<any>('SELECT * FROM warranties WHERE creditId = ? AND deletedAt IS NULL ORDER BY createdAt DESC', [creditId]).catch(() => []),
+            db.all<any>('SELECT * FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL ORDER BY createdAt DESC', [creditId]).catch(() => []),
+            db.all<any>('SELECT * FROM collection_events WHERE creditId = ? ORDER BY createdAt DESC', [creditId]).catch(() => []),
+            db.all<any>('SELECT * FROM accounting_entries WHERE creditId = ? ORDER BY rowid', [creditId]).catch(() => []),
+            db.all<any>('SELECT id, timestamp, userName, action, entity, details, metadata FROM audit_logs WHERE details LIKE ? OR metadata LIKE ? ORDER BY timestamp DESC LIMIT 500', [pattern, pattern]).catch(() => []),
+            db.all<any>(`SELECT * FROM accounting_requests WHERE kind = 'writeoff' AND targetId = ? ORDER BY requestedAt DESC`, [creditId]).catch(() => []),
+        ]);
+        return { installments, mora, documents, transfers, restructurings, warranties, legalCases, collection, entries, audit, writeoffRequests };
+    }
+
+    /**
+     * Envia um crédito para contencioso (saída especial a partir de Ativo ou Em atraso): abre o processo no módulo
+     * de Contencioso com a dívida atual, na mesma transação que a auditoria. Só quem pode aprovar processos de
+     * contencioso (ou um administrador/diretor de crédito) o faz, sempre com motivo. Não há lançamento contabilístico
+     * próprio: o crédito continua na carteira até ser liquidado ou abatido (o abate tem o seu lançamento).
+     */
+    static async sendToLegal(input: { credit: Credit; debtMinor: number; priority: 'normal' | 'high' | 'critical'; reason: string; actor: Actor }) {
+        const allowed = ADMIN.includes(input.actor.role) || input.actor.role === 'credit_director' || can(input.actor, 'contencioso.aprovar');
+        if (!allowed) throw new Error('O envio para contencioso é aprovado por um administrador, diretor de crédito ou responsável de contencioso.');
+        await ServicoAuditoriaAvancada.assertJustification(input.reason, input.actor.id);
+        if (!['active', 'overdue', 'renegotiated', 'defaulted'].includes(input.credit.status)) throw new Error('Só créditos ativos ou em atraso podem seguir para contencioso.');
+        const open = await db.get<{ id: string }>(`SELECT id FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL AND stage <> 'closed'`, [input.credit.id]).catch(() => undefined);
+        if (open) throw new Error('Este crédito já tem um processo de contencioso aberto.');
+        const id = crypto.randomUUID();
+        const when = new Date().toISOString();
+        await db.transaction([
+            { sql: `INSERT INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, createdAt, updatedAt, usuario_id)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, input.credit.clientId, input.credit.id, 'interpellated', input.priority, input.debtMinor / 100, 'Enviado para contencioso a partir da ficha do crédito', input.reason.trim(), when, when, input.credit.usuario_id || input.actor.id], expectChanges: 1 },
+            audit(input.actor, 'create', `Enviou o crédito ${input.credit.id} de ${input.credit.clientName} para contencioso (dívida ${(input.debtMinor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz)`,
+                { creditId: input.credit.id, legalCaseId: id, reason: input.reason, justification: input.reason, from: input.credit.status, to: 'contencioso' }, when),
+        ]);
+        return id;
     }
 
     private static mapRestructuring(row: any): Restructuring {
@@ -139,7 +206,7 @@ export class ServicoCarteira {
 
     /** Pede uma reestruturação: fica pendente até outra pessoa (com permissão) aprovar. */
     static async requestRestructure(input: { credit: Credit; plan: PlanItem[]; replacedIds: string[]; params: Record<string, unknown>; reason: string; actor: Actor }) {
-        if (!can(input.actor, 'manage_credits') && !can(input.actor, 'creditos.editar')) throw new Error('Sem permissão para reestruturar créditos.');
+        if (!can(input.actor, 'manage_credits') && !can(input.actor, 'creditos.editar') && !can(input.actor, 'creditos.reestruturar')) throw new Error('Sem permissão para reestruturar créditos.');
         await ServicoAuditoriaAvancada.assertJustification(input.reason, input.actor.id);
         if (!['active', 'overdue', 'renegotiated', 'defaulted'].includes(input.credit.status)) throw new Error('Só créditos ativos ou em atraso podem ser reestruturados.');
         if ((await this.restructurings(input.credit.id)).some(item => item.status === 'pending')) throw new Error('Já existe um pedido de reestruturação pendente para este crédito.');
@@ -188,7 +255,7 @@ export class ServicoCarteira {
      * logo a seguir no assistente de pagamento (a imputação é a de sempre: a prestação mais antiga primeiro).
      */
     static async earlySettlement(input: { credit: Credit; simulation: EarlySettlement; reason: string; actor: Actor }) {
-        if (!can(input.actor, 'manage_payments') && !can(input.actor, 'pagamentos.registar')) throw new Error('Sem permissão para liquidações antecipadas.');
+        if (!can(input.actor, 'manage_payments') && !can(input.actor, 'pagamentos.registar') && !can(input.actor, 'pagamentos.criar')) throw new Error('Sem permissão para liquidações antecipadas.');
         await ServicoAuditoriaAvancada.assertJustification(input.reason, input.actor.id);
         const sim = input.simulation;
         const settlement: PlanItem = { number: 1, dueDate: new Date(`${sim.asOfKey}T12:00:00Z`).toISOString(), principalMinor: sim.capitalMinor, interestMinor: sim.accruedInterestMinor, totalMinor: sim.capitalMinor + sim.accruedInterestMinor };

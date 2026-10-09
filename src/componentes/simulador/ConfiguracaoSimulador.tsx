@@ -29,7 +29,7 @@ const Field = ({ label, hint, children }: { label: string; hint?: string; childr
 
 const slug = (name: string) => name.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'produto';
 
-/** Definições › Simulador e Produtos: produtos, Imposto do Selo, taxa de esforço, risco, mora e validade. */
+/** Definições › Produtos de Crédito: produtos, Imposto do Selo, taxa de esforço, risco, mora e validade. */
 export function ConfiguracaoSimulador() {
     const { user } = useAuth();
     const { addLog } = useData();
@@ -77,7 +77,7 @@ export function ConfiguracaoSimulador() {
         <div className="space-y-6">
             <div className="flex flex-col gap-3 rounded-xl border bg-muted/30 p-4 md:flex-row md:items-center md:justify-between">
                 <div>
-                    <p className="font-bold">Simulador e Produtos</p>
+                    <p className="font-bold">Produtos de Crédito</p>
                     <p className="text-sm text-muted-foreground">Estes parâmetros alimentam o Simulador, a Ficha de Simulação (PDF) e os pedidos de crédito convertidos. São partilhados por todos os dispositivos da empresa.</p>
                     {!admin && <p className="mt-1 text-xs font-semibold text-amber-600">Só um administrador pode alterar estes valores.</p>}
                 </div>

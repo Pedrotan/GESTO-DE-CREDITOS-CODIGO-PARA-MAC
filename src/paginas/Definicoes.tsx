@@ -115,6 +115,8 @@ import { ptBR } from 'date-fns/locale';
 import { ServicoAutoBackup, AutoBackupConfig, AutoBackupLog } from '@/servicos/ServicoAutoBackup';
 import { ConflictReview } from '@/componentes/sync/ConflictReview';
 import { ConfiguracaoSimulador } from '@/componentes/simulador/ConfiguracaoSimulador';
+import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
+import { canManageInterestTiers } from '@/bibliotecas/taxas-juro';
 
 const SUPPORT_PHONE = "+244 941537486";
 const SYSTEM_NAME = "Tango Gestão de Créditos";
@@ -411,6 +413,7 @@ export default function Settings() {
     const [isOnline, setIsOnline] = useState(navigator.onLine);
     const [lastOnlineStatus, setLastOnlineStatus] = useState(navigator.onLine);
     const [activeTab, setActiveTab] = useState('general');
+    const [isRatesDialogOpen, setIsRatesDialogOpen] = useState(false);
     const [isModulesModalOpen, setIsModulesModalOpen] = useState(false);
 
     // Estados para Contas Bancárias e Modelos de Contrato
@@ -3392,8 +3395,19 @@ export default function Settings() {
                     </Card>
                 </TabsContent>
 
-                {/* Simulador e Produtos */}
+                {/* Produtos de Crédito */}
                 <TabsContent value="simulador" className="mt-6 space-y-6">
+                    {/* Tabela de taxas de juro por prazo (antes "Cadastrar Taxas de Juro" na página de Créditos). */}
+                    <Card className="card-elevated border-none shadow-lg">
+                        <CardHeader className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                            <div>
+                                <CardTitle>Tabela de taxas de juro por prazo</CardTitle>
+                                <CardDescription>Taxas usadas no formulário de crédito conforme o número de meses. Partilhada por todos os dispositivos da empresa.</CardDescription>
+                            </div>
+                            <Button className="shrink-0" disabled={!canManageInterestTiers(user?.role)} onClick={() => setIsRatesDialogOpen(true)}>Cadastrar taxas de juro</Button>
+                        </CardHeader>
+                    </Card>
+                    <TabelaTaxasDialog open={isRatesDialogOpen} onOpenChange={setIsRatesDialogOpen} />
                     <ConfiguracaoSimulador />
                 </TabsContent>
 

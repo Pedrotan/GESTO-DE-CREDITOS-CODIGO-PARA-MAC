@@ -8,40 +8,44 @@ const kz = (minor: number) => formatCurrency(minor / 100);
 const HIDDEN = '••••••';
 const readHidden = () => { try { return localStorage.getItem('creditos_ocultar_valores') === '1'; } catch { return false; } };
 
-function Variation({ current, previous, inverse }: { current: number; previous: number; inverse?: boolean }) {
+function Variation({ current, previous, inverse, title = 'Variação face ao período anterior' }: { current: number; previous: number; inverse?: boolean; title?: string }) {
     const change = previous ? Math.round(((current - previous) / previous) * 1000) / 10 : current ? null : 0;
     if (change === null) return <span className="rounded-full bg-black/10 px-2 py-0.5 text-[10px] font-bold text-slate-900/70 dark:bg-white/10 dark:text-slate-300" title="Sem valor no mês anterior">novo</span>;
     const good = change === 0 ? null : inverse ? change < 0 : change > 0;
     return (
-        <span title="Variação face ao mês anterior" className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold',
+        <span title={title} className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold',
             good === null ? 'bg-black/10 text-slate-900/70 dark:bg-white/10 dark:text-slate-300' : good ? 'bg-emerald-700/15 text-emerald-900 dark:text-emerald-300' : 'bg-red-700/15 text-red-900 dark:text-red-300')}>
             {change === 0 ? '■' : change > 0 ? '▲' : '▼'} {Math.abs(change).toLocaleString('pt-AO', { maximumFractionDigits: 1 })}%
         </span>
     );
 }
 
+/** Detalhe por trás de cada card (o olho): as linhas que somam o valor mostrado. */
+export type CardDetail = 'clients' | 'capital' | 'projected' | 'outstanding' | 'realized' | 'overdue' | 'due' | 'mora' | 'interest' | 'paidoff';
+
 type CardDef = {
     key: CardFilter | 'cash'; css: string; icon: ComponentType<{ className?: string }>; group: string; title: string;
-    value: ReactNode; footer: ReactNode; detail?: 'clients' | 'capital' | 'projected' | 'outstanding' | 'realized';
-    variation?: { current: number; previous: number; inverse?: boolean };
+    value: ReactNode; footer: ReactNode; detail?: CardDetail;
+    variation?: { current: number; previous: number; inverse?: boolean; title?: string };
 };
 
 export function CartoesCarteira({ state, onDetails, cashFlowCard }: {
     state: CarteiraState;
-    onDetails: (type: 'clients' | 'capital' | 'projected' | 'outstanding' | 'realized') => void;
+    onDetails: (type: CardDetail) => void;
     cashFlowCard: ReactNode;
 }) {
     const [hidden, setHidden] = useState(readHidden);
     const show = (value: string) => hidden ? HIDDEN : value;
-    const { kpis, figures, previousFigures } = state;
+    const { kpis, figures, previousFigures, kpiTrend } = state;
+    const trend = (key: 'activeMinor' | 'overdueMinor' | 'futureInterestMinor' | 'defaultRate', inverse?: boolean) => ({ current: Number(kpiTrend.current[key] || 0), previous: Number(kpiTrend.previous[key] || 0), inverse, title: `Variação face a ${kpiTrend.previousEnd.split('-').reverse().join('/')} (fim do mês anterior)` });
     const pct = (value: number | null) => value === null ? '—' : `${value.toLocaleString('pt-AO', { maximumFractionDigits: 1 })}%`;
     const cards: CardDef[] = state.view === 'carteira' ? [
-        { key: 'carteira', css: 'card-kpi-sky', icon: Briefcase, group: 'Carteira', title: 'Carteira Ativa', value: show(kz(kpis.activeMinor)), footer: `${kpis.activeCount} crédito(s) em curso · capital em dívida`, detail: 'outstanding' },
-        { key: 'atraso', css: 'card-kpi-coral', icon: AlertTriangle, group: 'Risco', title: 'Em Atraso', value: show(kz(kpis.overdueMinor)), footer: <>{kpis.overdueCount} crédito(s) · <strong>PAR30 {pct(kpis.par30)}</strong> da carteira</> },
-        { key: 'vence7', css: 'card-kpi-amber', icon: CalendarClock, group: 'Cobrança', title: 'A Vencer em 7 Dias', value: show(kz(kpis.dueSoonMinor)), footer: `${kpis.dueSoonCount} prestação(ões) até ${new Date(Date.now() + 7 * 86_400_000).toLocaleDateString('pt-AO')}` },
-        { key: 'mora', css: 'card-kpi-purple', icon: AlarmClock, group: 'Mora', title: 'Mora Acumulada', value: show(kz(kpis.moraMinor)), footer: 'Juros de mora por cobrar' },
-        { key: 'incumprimento', css: 'card-kpi-flow', icon: Percent, group: 'Qualidade', title: 'Taxa de Incumprimento', value: show(pct(kpis.defaultRate)), footer: 'Capital com mais de 90 dias de atraso' },
-        { key: 'juros', css: 'card-kpi-mint', icon: TrendingUp, group: 'Expectativa', title: 'Juros por Receber', value: show(kz(kpis.futureInterestMinor)), footer: 'Juros futuros dos créditos em curso', detail: 'projected' },
+        { key: 'carteira', css: 'card-kpi-sky', icon: Briefcase, group: 'Carteira', title: 'Carteira Ativa', value: show(kz(kpis.activeMinor)), footer: `${kpis.activeCount} crédito(s) em curso · capital em dívida`, detail: 'outstanding', variation: trend('activeMinor') },
+        { key: 'atraso', css: 'card-kpi-coral', icon: AlertTriangle, group: 'Risco', title: 'Em Atraso', value: show(kz(kpis.overdueMinor)), footer: <>{kpis.overdueCount} crédito(s) · <strong>PAR30 {pct(kpis.par30)}</strong> da carteira</>, detail: 'overdue', variation: trend('overdueMinor', true) },
+        { key: 'vence7', css: 'card-kpi-amber', icon: CalendarClock, group: 'Cobrança', title: 'A Vencer em 7 Dias', value: show(kz(kpis.dueSoonMinor)), footer: `${kpis.dueSoonCount} prestação(ões) até ${new Date(Date.now() + 7 * 86_400_000).toLocaleDateString('pt-AO')}`, detail: 'due' },
+        { key: 'mora', css: 'card-kpi-purple', icon: AlarmClock, group: 'Mora', title: 'Mora Acumulada', value: show(kz(kpis.moraMinor)), footer: 'Juros de mora por cobrar', detail: 'mora' },
+        { key: 'incumprimento', css: 'card-kpi-flow', icon: Percent, group: 'Qualidade', title: 'Taxa de Incumprimento', value: show(pct(kpis.defaultRate)), footer: 'Capital com mais de 90 dias de atraso', detail: 'overdue', variation: trend('defaultRate', true) },
+        { key: 'juros', css: 'card-kpi-mint', icon: TrendingUp, group: 'Expectativa', title: 'Juros por Receber', value: show(kz(kpis.futureInterestMinor)), footer: 'Juros futuros dos créditos em curso', detail: 'interest', variation: trend('futureInterestMinor') },
     ] : [
         { key: 'concedidos', css: 'card-kpi-sky', icon: Users, group: 'Produção', title: 'Créditos Concedidos', value: show(String(figures.grantedCount)), footer: `${figures.grantedClients} cliente(s) · ${show(kz(figures.grantedMinor))}`, detail: 'clients', variation: { current: figures.grantedCount, previous: previousFigures.grantedCount } },
         { key: 'all', css: 'card-kpi-coral', icon: ArrowUpRight, group: 'Desembolso', title: 'Capital Desembolsado', value: show(kz(figures.disbursedMinor)), footer: 'Saídas de Caixa/Banco registadas no razão', detail: 'capital', variation: { current: figures.disbursedMinor, previous: previousFigures.disbursedMinor } },
@@ -49,7 +53,7 @@ export function CartoesCarteira({ state, onDetails, cashFlowCard }: {
         { key: 'all', css: 'card-kpi-mint', icon: HandCoins, group: 'Realizado', title: 'Recebido no Período', value: show(formatCurrency(figures.received.total)),
             footer: <>Capital {show(formatCurrency(figures.received.principal))} · Juros {show(formatCurrency(figures.received.interest))} · Mora {show(formatCurrency(figures.received.late))}</>, detail: 'realized',
             variation: { current: figures.received.total, previous: previousFigures.received.total } },
-        { key: 'liquidados_periodo', css: 'card-kpi-amber', icon: CheckCircle2, group: 'Fecho', title: 'Liquidados no Período', value: show(String(figures.paidOffCount)), footer: 'Créditos totalmente pagos no mês', variation: { current: figures.paidOffCount, previous: previousFigures.paidOffCount } },
+        { key: 'liquidados_periodo', css: 'card-kpi-amber', icon: CheckCircle2, group: 'Fecho', title: 'Liquidados no Período', value: show(String(figures.paidOffCount)), footer: 'Créditos totalmente pagos no mês', detail: 'paidoff', variation: { current: figures.paidOffCount, previous: previousFigures.paidOffCount } },
     ];
     return (
         <div className="mb-6">

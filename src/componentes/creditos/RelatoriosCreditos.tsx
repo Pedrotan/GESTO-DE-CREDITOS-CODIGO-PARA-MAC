@@ -22,7 +22,8 @@ export async function generateCreditReport(key: CreditReportKey, input: CreditRe
 }
 
 export function RelatoriosCreditos({ state, open, onClose, actor }: { state: CarteiraState; open: boolean; onClose: () => void; actor: Actor | null }) {
-    const { companySettings, payments } = useData();
+    const { companySettings } = useData();
+    const payments = state.payments;
     const [date, setDate] = useState(state.today);
     const [month, setMonth] = useState(state.today.slice(0, 7));
     const [creditId, setCreditId] = useState('');

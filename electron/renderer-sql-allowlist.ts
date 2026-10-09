@@ -339,9 +339,11 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM accounting_divergence_events ORDER BY createdAt DESC, rowid DESC",
   "SELECT * FROM accounting_entries ORDER BY rowid",
   "SELECT * FROM accounting_entries ORDER BY timestamp DESC, id DESC LIMIT ?",
+  "SELECT * FROM accounting_entries WHERE creditId = ? ORDER BY rowid",
   "SELECT * FROM accounting_entries WHERE timestamp < ? OR (timestamp = ? AND id < ?) ORDER BY timestamp DESC, id DESC LIMIT ?",
   "SELECT * FROM accounting_requests ORDER BY requestedAt DESC",
   "SELECT * FROM accounting_requests WHERE id = ?",
+  "SELECT * FROM accounting_requests WHERE kind = 'writeoff' AND targetId = ? ORDER BY requestedAt DESC",
   "SELECT * FROM audit_alert_comments WHERE alertId = ? ORDER BY createdAt",
   "SELECT * FROM audit_alerts ORDER BY occurredAt DESC LIMIT 1000",
   "SELECT * FROM audit_log_chain ORDER BY seq",
@@ -356,6 +358,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM clients WHERE id = ?",
   "SELECT * FROM closed_months",
   "SELECT * FROM collection_events ORDER BY createdAt DESC, rowid DESC",
+  "SELECT * FROM collection_events WHERE creditId = ? ORDER BY createdAt DESC",
   "SELECT * FROM collection_events WHERE id = ? AND kind = ?",
   "SELECT * FROM collection_events WHERE kind IN ('promise','promise_kept','promise_broken') ORDER BY createdAt",
   "SELECT * FROM collection_messages ORDER BY sentAt DESC",
@@ -378,6 +381,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM ledger_transactions WHERE id = ?",
   "SELECT * FROM legal_cases WHERE clientId = ?",
   "SELECT * FROM legal_cases WHERE creditId = ?",
+  "SELECT * FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM legal_cases WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM legal_cases WHERE deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM legal_cases WHERE id = ?",
@@ -413,6 +417,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM users WHERE id = ?",
   "SELECT * FROM warranties WHERE clientId = ?",
   "SELECT * FROM warranties WHERE creditId = ?",
+  "SELECT * FROM warranties WHERE creditId = ? AND deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE id = ?",
@@ -463,6 +468,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id FROM credit_writeoffs WHERE creditId = ? LIMIT 1",
   "SELECT id FROM credits WHERE id = ?",
   "SELECT id FROM ledger_transactions WHERE id = ?",
+  "SELECT id FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL AND stage <> 'closed'",
   "SELECT id FROM notifications WHERE id = ?",
   "SELECT id FROM payments WHERE idempotencyKey = ?",
   "SELECT id FROM users WHERE email = ?",
@@ -498,6 +504,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp",
   "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs",
   "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp",
+  "SELECT id, timestamp, userName, action, entity, details, metadata FROM audit_logs WHERE details LIKE ? OR metadata LIKE ? ORDER BY timestamp DESC LIMIT 500",
   "SELECT id, totalDueMinor, totalDue, deletedAt FROM credits WHERE id = ?",
   "SELECT id, usuario_id, clientName FROM credits WHERE deletedAt IS NULL",
   "SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
@@ -544,6 +551,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'",
   "UPDATE company_settings SET installDate = ? WHERE installDate IS NULL",
   "UPDATE company_settings SET name = 'Tango Gestão de Créditos' WHERE name = 'Provisório' OR name = 'Empresa' OR name IS NULL OR name = ''",
+  "UPDATE company_settings SET name = ?, nif = ?, logo = COALESCE(?, logo), enableMultiTenant = COALESCE(?, enableMultiTenant) WHERE id = 1",
   "UPDATE company_settings SET rescueKey = NULL WHERE rescueKey = ?",
   "UPDATE contracts SET clientId = COALESCE(?, clientId), clientName = COALESCE(?, clientName), title = COALESCE(?, title), value = COALESCE(?, value), startDate = COALESCE(?, startDate), endDate = COALESCE(?, endDate), status = COALESCE(?, status), terms = COALESCE(?, terms), usuario_id = COALESCE(?, usuario_id) WHERE id = ?",
   "UPDATE contracts SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
@@ -1990,6 +1998,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM accounting_entries ORDER BY timestamp DESC, id DESC LIMIT ?"
   ],
   [
+    "d5814b3b7408d81e6ea22a3b88741bf22b3caf4c04ae630ea7c64ef1fed80d38",
+    "SELECT * FROM accounting_entries WHERE creditId = ? ORDER BY rowid"
+  ],
+  [
     "b0cdb0811bac354926eb5eedafd1f49b0bde0a3f8a8febc336239030b745b62a",
     "SELECT * FROM accounting_entries WHERE timestamp < ? OR (timestamp = ? AND id < ?) ORDER BY timestamp DESC, id DESC LIMIT ?"
   ],
@@ -2000,6 +2012,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "b7b6282bac6d45888f8f97187b878142ea489e92d33f4d9a815b35271eab3585",
     "SELECT * FROM accounting_requests WHERE id = ?"
+  ],
+  [
+    "8f975bed20cca69d7736867e4c93134298f50ecd5a5f9c303947bc2f2e486d9e",
+    "SELECT * FROM accounting_requests WHERE kind = 'writeoff' AND targetId = ? ORDER BY requestedAt DESC"
   ],
   [
     "c6c83a7d10c90a73d29d6416d64c647da3c62861cb92e7e8f604914fc648b8c9",
@@ -2056,6 +2072,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "cdf2a72cc97bea161bd897b97056e04c894f4f5afd8cf0f087650aad4147897b",
     "SELECT * FROM collection_events ORDER BY createdAt DESC, rowid DESC"
+  ],
+  [
+    "1f0846d0bc26ccea3730ce396ceb7df42b2ff668540f97df6802eb4c4ef7d973",
+    "SELECT * FROM collection_events WHERE creditId = ? ORDER BY createdAt DESC"
   ],
   [
     "750219de86b49a3572f7163c84fa6e5f2ba1abc7337a5f9fba43ded8d9e49e7e",
@@ -2144,6 +2164,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "92260e9f960a32d4c6da9f2224e9ac90fee4ee574479ee08f2235d56e86ba16b",
     "SELECT * FROM legal_cases WHERE creditId = ?"
+  ],
+  [
+    "54e97cced0912309b616daa7be6917ec9d30b283ea88d68b4ceaa89ff32a87de",
+    "SELECT * FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL ORDER BY createdAt DESC"
   ],
   [
     "8cfba6e750a4147d690368f0901fa4a4758ffd3488e5e1e1f36c7318dff52318",
@@ -2284,6 +2308,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "e3015af552ceeeb487c5bddf2c633fee2c5bf6f77435a7fbefee25a7c23f9aaa",
     "SELECT * FROM warranties WHERE creditId = ?"
+  ],
+  [
+    "bd26999387bebc3ae62752bf379734dd8316d7bbfb97b5440d37ce1a26b4ce93",
+    "SELECT * FROM warranties WHERE creditId = ? AND deletedAt IS NULL ORDER BY createdAt DESC"
   ],
   [
     "24b477382aab6c6566afbd523eae421960531de01c4656a8730c25513e33ff58",
@@ -2486,6 +2514,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id FROM ledger_transactions WHERE id = ?"
   ],
   [
+    "58a62a73f807521538b754c006e02077867d67b3199a5ceded3d7a4dc8a371f7",
+    "SELECT id FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL AND stage <> 'closed'"
+  ],
+  [
     "5202cc4abdce53a37ab39a6b28071d6d20df0455b0b050c5fdf30cd5e9c0ff48",
     "SELECT id FROM notifications WHERE id = ?"
   ],
@@ -2624,6 +2656,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "4c603e933bf26c91ba8819985b723329ba01977ff95541ac85776f7622f1bda8",
     "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp"
+  ],
+  [
+    "c6e443cd9c8c37b255d18b0b1ce45e6d91699f3fb334b82104daabea473fadee",
+    "SELECT id, timestamp, userName, action, entity, details, metadata FROM audit_logs WHERE details LIKE ? OR metadata LIKE ? ORDER BY timestamp DESC LIMIT 500"
   ],
   [
     "14fee47bb181f867e0e0738dbbeef2b087656dcd28b049f1b862bac69d87da45",
@@ -2808,6 +2844,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "547700147b2f941bb1dc7e18ae66898e5682843e58b424b89b9a83c768cf8d78",
     "UPDATE company_settings SET name = 'Tango Gestão de Créditos' WHERE name = 'Provisório' OR name = 'Empresa' OR name IS NULL OR name = ''"
+  ],
+  [
+    "433308b829e9909105a0acfe75f711010b54b4177399d8f884e292e619d79c73",
+    "UPDATE company_settings SET name = ?, nif = ?, logo = COALESCE(?, logo), enableMultiTenant = COALESCE(?, enableMultiTenant) WHERE id = 1"
   ],
   [
     "cd2d870a39f3cc21c902caf66fb4044863c21d91a3c2c3456a16e4b612d34c18",
