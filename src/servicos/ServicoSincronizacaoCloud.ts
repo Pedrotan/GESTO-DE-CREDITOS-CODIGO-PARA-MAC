@@ -41,6 +41,8 @@ export const CLOUD_SYNC_BOOTSTRAP_KEY = 'cloud_sync_bootstrap_v3';
 const REPROCESS_KEY = 'cloud_sync_reprocess_v2';
 // Última lista de utilizadores enviada por este computador (só se reenvia quando muda).
 const USERS_DIGEST_KEY = 'cloud_sync_users_digest_v1';
+// Impressão digital da chave com que este computador já enviou a fotografia completa dos dados.
+const KEY_FINGERPRINT_KEY = 'cloud_sync_key_fingerprint_v1';
 /** Avisa o login de que chegaram utilizadores (versão web). */
 export const USERS_SYNCED_EVENT = 'tango-users-synced';
 const MAX_PUSH_OPERATIONS = 100;
@@ -72,6 +74,8 @@ export type CloudSyncStatus = {
     conflicts?: number;
     /** Operações da nuvem cifradas com uma chave antiga, ignoradas por não poderem ser lidas. */
     skipped?: number;
+    /** O servidor recusou o Código de Acesso guardado (alterado ou revogado no Tango Master). */
+    authFailed?: boolean;
 };
 let lastStatus: CloudSyncStatus = { state: 'idle' };
 export const getLastCloudSyncStatus = () => lastStatus;
@@ -317,47 +321,97 @@ const applyGroups = async (groups: RemoteGroup[]): Promise<ApplyResult> => {
     }
 };
 
-// Colunas de utilizador que cada dispositivo gere sozinho (2FA, bloqueios por tentativas, presença).
-const WEB_LOCAL_USER_COLUMNS = new Set(['twoFactorEnabled', 'twoFactorSecret', 'mfaRecoveryCodes', 'failedAttempts', 'blockedAt', 'lastLogin', 'lastSeen', 'ip']);
-type UsersRoster = { kind: 'users'; columns: string[]; rows: unknown[][]; createdAt: string };
+// Colunas de utilizador que cada dispositivo gere sozinho (2FA, bloqueios por tentativas, presença, fotografia).
+const LOCAL_USER_COLUMNS = new Set(['twoFactorEnabled', 'twoFactorSecret', 'mfaRecoveryCodes', 'failedAttempts', 'blockedAt', 'lastLogin', 'lastSeen', 'ip', 'avatar']);
+// Navegador: impressão de cada utilizador tal como foi sincronizado da última vez (só se envia o que mudou).
+const USERS_STATE_KEY = 'cloud_sync_users_state_v1';
+// Computador: utilizadores incluídos na última lista enviada (para comunicar as remoções).
+const USERS_IDS_KEY = 'cloud_sync_users_ids_v1';
+type UsersRoster = { kind: 'users'; columns: string[]; rows: unknown[][]; deleted?: string[]; createdAt: string };
+
+const sharedUserColumns = async () => [...await localTableColumns('users')]
+    .filter(column => /^[a-z_][a-z0-9_]*$/iu.test(column) && !LOCAL_USER_COLUMNS.has(column));
+
+/** Utilizadores deste navegador (colunas partilhadas) e a impressão de cada um. */
+const readLocalUsers = async () => {
+    const columns = await sharedUserColumns();
+    const fingerprints: Record<string, string> = {};
+    if (!columns.includes('id')) return { columns, rows: [] as unknown[][], fingerprints };
+    const records = await sqlite.all<Record<string, unknown>>(`SELECT ${columns.map(quoteIdentifier).join(', ')} FROM users ORDER BY id`);
+    const rows = records.map(record => columns.map(column => record[column] ?? null));
+    for (const row of rows) {
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify(row))));
+        fingerprints[String(row[columns.indexOf('id')])] = bytesToBase64(digest).slice(0, 22);
+    }
+    return { columns, rows, fingerprints };
+};
+
+const saveUsersState = async () => {
+    const { fingerprints } = await readLocalUsers();
+    localStorage.setItem(scopedStorageKey(USERS_STATE_KEY), JSON.stringify(fingerprints));
+};
 
 /**
- * Lista de utilizadores enviada pelo computador da empresa (que é a referência): no navegador substitui os
- * utilizadores locais, mantendo o 2FA e os bloqueios deste navegador. O computador nunca a aplica.
+ * Lista de utilizadores vinda de outro dispositivo da empresa: cria/actualiza e remove os indicados, mantendo
+ * o 2FA e os bloqueios locais. No computador quem valida e grava é o processo principal (senhas protegidas).
  */
 const applyUserRoster = async (roster: UsersRoster) => {
-    const local = await localTableColumns('users');
-    const columns = (roster.columns || []).filter(column => /^[a-z_][a-z0-9_]*$/iu.test(column) && local.has(column) && !WEB_LOCAL_USER_COLUMNS.has(column));
-    if (!columns.includes('id') || !columns.includes('password')) return 0;
+    if (window.electronAPI?.syncUsersApply) {
+        const result = await window.electronAPI.syncUsersApply({ columns: roster.columns, rows: roster.rows, deleted: roster.deleted || [] });
+        return result.applied + result.deleted;
+    }
+    const local = new Set(await sharedUserColumns());
+    const columns = (roster.columns || []).filter(column => local.has(column));
+    if (!columns.includes('id') || !columns.includes('password') || !columns.includes('email')) return 0;
     const positions = columns.map(column => roster.columns.indexOf(column));
     const list = columns.map(quoteIdentifier).join(', ');
     const updates = columns.filter(column => column !== 'id').map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ');
     const statements: SqlTransactionStatement[] = [];
-    const ids: string[] = [];
     for (const row of roster.rows || []) {
         if (!Array.isArray(row)) continue;
         const values = positions.map(position => row[position] ?? null);
         const id = String(values[columns.indexOf('id')] || '');
+        const email = String(values[columns.indexOf('email')] || '').toLowerCase();
         if (!id || !values[columns.indexOf('password')]) continue;
-        ids.push(id);
+        // Email já usado por outro utilizador deste navegador: não se sobrepõe.
+        const clash = await sqlite.all<{ id: string }>('SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1', [email, id]);
+        if (clash.length) continue;
         statements.push({ sql: `INSERT INTO users (${list}) VALUES (${columns.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`, params: values });
     }
-    if (!ids.length) return 0;
-    statements.push({ sql: `DELETE FROM users WHERE id NOT IN (${ids.map(() => '?').join(', ')})`, params: ids });
+    for (const id of roster.deleted || []) statements.push({ sql: 'DELETE FROM users WHERE id = ?', params: [String(id)] });
+    if (!statements.length) return 0;
     applyingRemote = true;
     try { await sqlite.transaction(statements); } finally { applyingRemote = false; }
+    // O que chegou não volta a ser enviado por este navegador.
+    await saveUsersState();
     window.dispatchEvent(new Event(USERS_SYNCED_EVENT));
-    return ids.length;
+    return statements.length;
+};
+
+/** Navegador: utilizadores criados, alterados ou removidos aqui desde a última sincronização. */
+const webUsersChange = async () => {
+    const saved = localStorage.getItem(scopedStorageKey(USERS_STATE_KEY));
+    const previous: Record<string, string> = saved ? JSON.parse(saved) : {};
+    const { columns, rows, fingerprints } = await readLocalUsers();
+    if (!columns.includes('id') || !columns.includes('password')) return null;
+    const changed = rows.filter(row => {
+        const id = String(row[columns.indexOf('id')]);
+        return previous[id] !== fingerprints[id] && Boolean(row[columns.indexOf('password')]);
+    });
+    const deleted = Object.keys(previous).filter(id => !(id in fingerprints));
+    if (!changed.length && !deleted.length) return null;
+    return { columns, rows: changed, deleted, fingerprints };
 };
 
 const applyOperations = async (operations: SyncOperation[]): Promise<ApplyResult> => {
     const accepted = operations.filter(operation => operation.commandVersion === 1 && activeConfig && operation.tenantId === activeConfig.tenantId);
-    const rosters = accepted.filter(operation => (operation as any).kind === 'users') as unknown as UsersRoster[];
+    const rosters = (accepted.filter(operation => (operation as any).kind === 'users') as unknown as UsersRoster[])
+        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
     const valid = accepted.filter(operation => (operation as any).kind !== 'users');
     let rosterApplied = 0;
-    if (rosters.length && !window.electronAPI) {
-        const latest = rosters.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[rosters.length - 1];
-        rosterApplied = await applyUserRoster(latest) ? 1 : 0;
+    for (const roster of rosters) {
+        try { rosterApplied += await applyUserRoster(roster) ? 1 : 0; }
+        catch (error) { console.warn('[CloudSync] Utilizadores recebidos não aplicados:', error); }
     }
     const waiting = await readAll(INCOMING_STORE);
     const { complete, pending } = groupOperations([...waiting, ...valid]);
@@ -437,6 +491,17 @@ export const syncCloudNow = async () => {
         if (!config.apiKey || config.apiKey.length < 8) return { success: false, message: 'Configure uma chave de sincronização com pelo menos 8 caracteres.' };
         emitStatus({ state: 'syncing' });
         try {
+            // Os dados vão cifrados com o Código de Acesso: se mudou, o histórico antigo deixa de ser legível
+            // para os outros dispositivos. O computador (referência da empresa) reenvia então tudo com a chave nova.
+            if (window.electronAPI) {
+                const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${config.tenantId}:${config.apiKey}`)));
+                const fingerprint = bytesToBase64(digest).slice(0, 24);
+                if (localStorage.getItem(scopedStorageKey(KEY_FINGERPRINT_KEY)) !== fingerprint) {
+                    localStorage.removeItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY));
+                    localStorage.removeItem(scopedStorageKey(USERS_DIGEST_KEY));
+                    localStorage.setItem(scopedStorageKey(KEY_FINGERPRINT_KEY), fingerprint);
+                }
+            }
             await createBootstrapOperations();
             const key = await deriveKey(config.apiKey, config.tenantId);
             let cursor = Number(localStorage.getItem(scopedStorageKey(CURSOR_KEY)) || '0');
@@ -450,6 +515,7 @@ export const syncCloudNow = async () => {
                 ? await window.electronAPI.syncUsersPayload({
                     apiKey: config.apiKey, tenantId: config.tenantId, deviceId: getDeviceId(),
                     knownDigest: localStorage.getItem(scopedStorageKey(USERS_DIGEST_KEY)),
+                    knownIds: JSON.parse(localStorage.getItem(scopedStorageKey(USERS_IDS_KEY)) || '[]'),
                 }).catch(error => { console.warn('[CloudSync] Utilizadores não enviados:', error); return null; })
                 : null;
 
@@ -465,9 +531,12 @@ export const syncCloudNow = async () => {
                     signal: AbortSignal.timeout(20_000)
                 });
                 const body = await response.json().catch(() => ({}));
-                if (!response.ok) throw new Error(body.message || body.error || `Erro de sincronização (${response.status}).`);
+                if (!response.ok) throw Object.assign(new Error(body.message || body.error || `Erro de sincronização (${response.status}).`), { status: response.status });
                 await deleteOperations(queued.map(operation => operation.id));
-                if (round === 0 && usersOut?.digest) localStorage.setItem(scopedStorageKey(USERS_DIGEST_KEY), usersOut.digest);
+                if (round === 0 && usersOut?.digest) {
+                    localStorage.setItem(scopedStorageKey(USERS_DIGEST_KEY), usersOut.digest);
+                    localStorage.setItem(scopedStorageKey(USERS_IDS_KEY), JSON.stringify(usersOut.ids || []));
+                }
                 totalPushed += supported.length;
 
                 const incoming: SyncOperation[] = [];
@@ -485,6 +554,28 @@ export const syncCloudNow = async () => {
                 cursor = Number(body.cursor || cursor);
                 localStorage.setItem(scopedStorageKey(CURSOR_KEY), String(cursor));
                 if (!body.hasMore && queued.length < MAX_PUSH_OPERATIONS) break;
+            }
+
+            // Navegador: envia os utilizadores criados/alterados/removidos aqui (depois de receber os dos outros).
+            if (!window.electronAPI) {
+                const change = await webUsersChange().catch(error => { console.warn('[CloudSync] Utilizadores locais:', error); return null; });
+                if (change) {
+                    const operation = {
+                        id: crypto.randomUUID(), deviceId: getDeviceId(), kind: 'users', commandVersion: 1, tenantId: config.tenantId,
+                        entityId: 'users', createdAt: new Date().toISOString(), columns: change.columns, rows: change.rows, deleted: change.deleted,
+                    } as unknown as SyncOperation;
+                    const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
+                        // O cursor fica igual: o que vier na resposta é recebido na próxima sincronização.
+                        body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, operations: [{ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) }] }),
+                        signal: AbortSignal.timeout(20_000)
+                    });
+                    if (response.ok) {
+                        localStorage.setItem(scopedStorageKey(USERS_STATE_KEY), JSON.stringify(change.fingerprints));
+                        totalPushed += 1;
+                    }
+                }
             }
 
             if ((totalPulled || totalConflicts) && config.onRemoteApplied) await config.onRemoteApplied();
@@ -508,7 +599,7 @@ export const syncCloudNow = async () => {
             failureCount += 1;
             retryNotBefore = Date.now() + delay;
             const pending = await getPendingSyncCount().catch(() => 0);
-            emitStatus({ state: 'error', message, pending, at: new Date().toISOString() });
+            emitStatus({ state: 'error', message, pending, at: new Date().toISOString(), authFailed: error?.status === 401 });
             scheduleSync(delay);
             return { success: false, message };
         }

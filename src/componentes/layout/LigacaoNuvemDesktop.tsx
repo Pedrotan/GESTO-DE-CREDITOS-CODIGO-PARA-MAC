@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Cloud, CloudOff, KeyRound, Loader2, ShieldCheck } from 'lucide-react';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -63,6 +63,21 @@ export function LigacaoNuvemDesktop() {
         });
         return () => { cancelled = true; };
     }, [eligible, alreadyLinked, nif, isAdmin]);
+
+    // Código de Acesso recusado pela nuvem (alterado no Tango Master): pedir o código actual, uma vez por sessão.
+    const authPrompted = useRef(false);
+    useEffect(() => {
+        if (!isDesktop || !isAdmin || !alreadyLinked) return;
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent<CloudSyncStatus>).detail;
+            if (!detail?.authFailed || authPrompted.current) return;
+            authPrompted.current = true;
+            setError('O Código de Acesso guardado neste computador já não é aceite pela nuvem (foi alterado no Tango Master). Introduza o código actual da empresa para retomar a sincronização.');
+            setOpen(true);
+        };
+        window.addEventListener('tango-cloud-sync-status', handler);
+        return () => window.removeEventListener('tango-cloud-sync-status', handler);
+    }, [isDesktop, isAdmin, alreadyLinked]);
 
     // Abertura manual (indicador "Modo Local" no cabeçalho).
     useEffect(() => {

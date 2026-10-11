@@ -104,19 +104,16 @@ CREATE INDEX IF NOT EXISTS idx_tango_sync_tenant ON tango_sync_data (tenant_id, 
 -- ---------------------------------------------------------------------
 -- 5. Relatórios de Utilização e Métricas SaaS
 -- ---------------------------------------------------------------------
+-- Resumo mensal agregado por empresa (mesmo formato que vercel-api/_uso-empresas.js).
 CREATE TABLE IF NOT EXISTS tango_usage_reports (
-  id TEXT PRIMARY KEY,
   tenant_id TEXT NOT NULL,
+  period TEXT NOT NULL,
+  metrics JSONB NOT NULL,
+  device_id TEXT,
+  app_version TEXT,
   reported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  active_clients INTEGER NOT NULL DEFAULT 0,
-  active_loans INTEGER NOT NULL DEFAULT 0,
-  total_portfolio NUMERIC(15, 2) NOT NULL DEFAULT 0,
-  monthly_volume NUMERIC(15, 2) NOT NULL DEFAULT 0,
-  system_version TEXT,
-  metadata JSONB
+  PRIMARY KEY (tenant_id, period)
 );
-
-CREATE INDEX IF NOT EXISTS idx_tango_usage_tenant ON tango_usage_reports (tenant_id, reported_at DESC);
 
 -- ---------------------------------------------------------------------
 -- 6. Rate Limiting Distribuído (Anti-DDoS e Anti-Força Bruta)

@@ -96,6 +96,8 @@ export const LigacaoEmpresaWeb = () => {
     const [accessCode, setAccessCode] = useState('');
     const [showCode, setShowCode] = useState(false);
     const [isBusy, setIsBusy] = useState(false);
+    // Ligação concluída: o portal continua visível (com a confirmação) até o utilizador seguir para o login.
+    const [isFinishing, setIsFinishing] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
     const [infoModal, setInfoModal] = useState<InfoModal>(null);
     const [request, setRequest] = useState({ companyName: '', contactName: '', phone: '', email: '', message: '' });
@@ -187,6 +189,7 @@ export const LigacaoEmpresaWeb = () => {
             const verifiedPasskey = data.syncPasskey || cleanCode;
             const effectiveSyncUrl = serverUrl || window.location.origin;
 
+            setIsFinishing(true);
             localStorage.setItem('tango_company_status', 'ACTIVE');
             localStorage.setItem('tango_active_tenant_authorized', 'true');
             localStorage.setItem('tango_active_tenant_id', verifiedTenantId);
@@ -215,8 +218,7 @@ export const LigacaoEmpresaWeb = () => {
                 stopCloudSync();
             }
 
-            setIsAuthorized(true);
-            window.dispatchEvent(new Event('tango_tenant_authorized'));
+            // A confirmação aparece ainda nesta página; só ao clicar em "Continuar para o Login" se abre o login.
             await Swal.fire({
                 title: 'Empresa Ligada!',
                 html: `Este computador está agora ligado a <strong>${verifiedName.replace(/[<>&"]/g, '')}</strong>.<br/><br/>` +
@@ -226,8 +228,11 @@ export const LigacaoEmpresaWeb = () => {
                 icon: 'success',
                 confirmButtonText: 'Continuar para o Login',
                 confirmButtonColor: '#5b1ee2',
-                allowOutsideClick: false
+                allowOutsideClick: false,
+                allowEscapeKey: false
             });
+            setIsAuthorized(true);
+            window.dispatchEvent(new Event('tango_tenant_authorized'));
             window.location.hash = '#/entrar';
             window.location.reload();
         } catch (err) {
@@ -262,7 +267,7 @@ export const LigacaoEmpresaWeb = () => {
     // Portal de acesso só na versão web; o executável segue para o assistente local (licença/ativação).
     if (!isPublicWebBuild) return null;
     const isCompanyActive = isCompanyActiveLocally();
-    if (isCompanyActive || isAuthorized) return null;
+    if (!isFinishing && (isCompanyActive || isAuthorized)) return null;
     if (typeof window !== 'undefined' && (
         window.location.hash.includes('tango-master') ||
         window.location.hash.includes('reset-password') ||

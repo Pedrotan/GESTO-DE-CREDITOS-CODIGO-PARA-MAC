@@ -83,12 +83,16 @@ export const GuardaSubscricaoWeb = () => {
         void check();
         const timer = setInterval(() => void check(), CHECK_INTERVAL_MS);
         const onFocus = () => void check();
+        // A sincronização recusou o código: confirmar já (código alterado → volta ao pedido do código).
+        const onSync = (event: Event) => { if ((event as CustomEvent<{ authFailed?: boolean }>).detail?.authFailed) void check(); };
         window.addEventListener('focus', onFocus);
         window.addEventListener('online', onFocus);
+        window.addEventListener('tango-cloud-sync-status', onSync);
         return () => {
             clearInterval(timer);
             window.removeEventListener('focus', onFocus);
             window.removeEventListener('online', onFocus);
+            window.removeEventListener('tango-cloud-sync-status', onSync);
         };
     }, [check]);
 

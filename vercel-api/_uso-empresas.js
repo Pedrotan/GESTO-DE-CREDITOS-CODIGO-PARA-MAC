@@ -12,6 +12,15 @@ export const PERIOD_PATTERN = /^\d{4}-(0[1-9]|1[0-2])$/;
 const MAX_METRIC = 1e15;
 
 export const ensureUsageTable = async (sql) => {
+  // O script inicial da VPS criava esta tabela com outro formato (sem period/metrics) e o CREATE IF NOT EXISTS
+  // mantinha-a, pelo que cada relatório falhava (500). Guarda-a com outro nome, sem apagar nada, e cria a certa.
+  const columns = await sql(`SELECT column_name FROM information_schema.columns
+    WHERE table_schema = current_schema() AND table_name = 'tango_usage_reports'`);
+  const names = new Set(columns.map(row => row.column_name));
+  if (names.size && (!names.has('period') || !names.has('metrics'))) {
+    await sql(`ALTER TABLE tango_usage_reports RENAME TO tango_usage_reports_legacy_${Date.now()}`);
+    await sql(`DROP INDEX IF EXISTS idx_tango_usage_tenant`);
+  }
   await sql(`
     CREATE TABLE IF NOT EXISTS tango_usage_reports (
       tenant_id TEXT NOT NULL,

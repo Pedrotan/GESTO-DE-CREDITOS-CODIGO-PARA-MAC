@@ -3043,7 +3043,13 @@ app.whenReady().then(async () => {
     if (result.applied || result.conflicts) broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
     return result;
   });
-  // Utilizadores para a versão web (só do computador para a nuvem): lista completa com a palavra-passe já
+  // Colunas de utilizador partilhadas entre dispositivos: sem 2FA, bloqueios, presença nem fotografia (ficheiro local).
+  const sharedUserColumns = async (): Promise<string[]> => {
+    const localOnly = new Set(["twoFactorEnabled", "twoFactorSecret", "mfaRecoveryCodes", "failedAttempts", "blockedAt", "lastLogin", "lastSeen", "ip", "avatar"]);
+    const info: any = await runQuery("query", 'PRAGMA table_info("users")');
+    return (info || []).map((row: any) => String(row.name)).filter((name: string) => /^[a-z_][\w]*$/i.test(name) && !localOnly.has(name));
+  };
+  // Utilizadores para a versão web (do computador para a nuvem): lista completa com a palavra-passe já
   // protegida (bcrypt), cifrada aqui com a mesma chave da empresa que as restantes operações. O renderer só
   // recebe a carga cifrada. Segredos de 2FA e estado de sessão ficam neste computador.
   ipcMain.handle("sync-users-payload", async (event, input) => {
@@ -3055,17 +3061,27 @@ app.whenReady().then(async () => {
     if (apiKey.length < 8 || apiKey.length > 500 || !tenantId || tenantId.length > 200 || !deviceId || deviceId.length > 100) {
       throw new TypeError("Pedido de sincronização de utilizadores inválido.");
     }
-    const localOnly = new Set(["twoFactorEnabled", "twoFactorSecret", "mfaRecoveryCodes", "failedAttempts", "blockedAt", "lastLogin", "lastSeen", "ip"]);
-    const info: any = await runQuery("query", 'PRAGMA table_info("users")');
-    const columns = (info || []).map((row: any) => String(row.name)).filter((name: string) => /^[a-z_][\w]*$/i.test(name) && !localOnly.has(name));
-    if (!columns.includes("id") || !columns.includes("password")) return { digest: "", id: null, payload: null };
-    const rows: any = await runQuery("query", `SELECT ${columns.map((name: string) => `"${name}"`).join(", ")} FROM users ORDER BY id`);
-    const values = (rows || []).map((row: any) => columns.map((name: string) => row[name] ?? null));
-    const digest = crypto.createHash("sha256").update(JSON.stringify([columns, values])).digest("hex");
-    if (input?.knownDigest === digest) return { digest, id: null, payload: null };
+    let columns = await sharedUserColumns();
+    if (!columns.includes("id") || !columns.includes("password")) return { digest: "", id: null, payload: null, ids: [] };
+    const readRows = async () => {
+      const rows: any = await runQuery("query", `SELECT ${columns.map((name: string) => `"${name}"`).join(", ")} FROM users ORDER BY id`);
+      return (rows || []).map((row: any) => columns.map((name: string) => row[name] ?? null));
+    };
+    let values = await readRows();
+    // Assinaturas em imagem podem ser grandes: vão sem elas se a lista ultrapassar o limite de uma operação.
+    if (JSON.stringify(values).length > 1_500_000 && columns.includes("signature")) {
+      columns = columns.filter((name: string) => name !== "signature");
+      values = await readRows();
+    }
+    const ids: string[] = values.map((row: unknown[]) => String(row[columns.indexOf("id")]));
+    // Utilizadores enviados antes e que já não existem: removidos neste computador, removem-se também na web.
+    const knownIds: string[] = Array.isArray(input?.knownIds) ? input.knownIds.slice(0, 5000).map(String) : [];
+    const deleted = knownIds.filter(id => !ids.includes(id));
+    const digest = crypto.createHash("sha256").update(JSON.stringify([columns, values, deleted])).digest("hex");
+    if (input?.knownDigest === digest) return { digest, id: null, payload: null, ids };
     const operation = {
       id: crypto.randomUUID(), deviceId, kind: "users", commandVersion: 1, tenantId, entityId: "users",
-      createdAt: new Date().toISOString(), columns, rows: values,
+      createdAt: new Date().toISOString(), columns, rows: values, deleted,
     };
     // Mesmo formato de sincronizacao: PBKDF2 (120 000, SHA-256, sal tango-sync:<empresa>) + AES-GCM.
     const subtle = crypto.webcrypto.subtle;
@@ -3077,7 +3093,60 @@ app.whenReady().then(async () => {
     );
     const iv = crypto.webcrypto.getRandomValues(new Uint8Array(12));
     const encrypted = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(JSON.stringify(operation))));
-    return { digest, id: operation.id, payload: `${Buffer.from(iv).toString("base64")}.${Buffer.from(encrypted).toString("base64")}` };
+    return { digest, id: operation.id, payload: `${Buffer.from(iv).toString("base64")}.${Buffer.from(encrypted).toString("base64")}`, ids };
+  });
+  // Utilizadores criados, alterados ou removidos na versão web (já decifrados pelo renderer com a chave da
+  // empresa). Só entram com palavra-passe protegida (bcrypt); nunca se remove a conta em uso nem o último
+  // super administrador. Cada recepção fica na auditoria.
+  ipcMain.handle("sync-users-apply", async (event, roster) => {
+    assertTrustedIpcSender(event);
+    const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
+    const incomingColumns: string[] = Array.isArray(roster?.columns) ? roster.columns.slice(0, 80).map(String) : [];
+    const incomingRows: unknown[] = Array.isArray(roster?.rows) ? roster.rows.slice(0, 2000) : [];
+    const deleted: string[] = Array.isArray(roster?.deleted) ? roster.deleted.slice(0, 2000).map(String) : [];
+    const allowed = new Set(await sharedUserColumns());
+    const columns = incomingColumns.filter(name => allowed.has(name));
+    if (!["id", "name", "email", "password", "role"].every(name => columns.includes(name))) return { applied: 0, deleted: 0 };
+    const at = (row: unknown[], name: string) => row[incomingColumns.indexOf(name)];
+    const statements: Array<{ sql: string; params: unknown[] }> = [];
+    let applied = 0;
+    for (const row of incomingRows) {
+      if (!Array.isArray(row)) continue;
+      const id = String(at(row, "id") || "");
+      const email = String(at(row, "email") || "").trim().toLowerCase();
+      if (!/^[\w.:-]{1,100}$/.test(id) || !email || email.length > 254) continue;
+      if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(String(at(row, "password") || ""))) continue;
+      if (!/^[a-z_]{2,40}$/.test(String(at(row, "role") || ""))) continue;
+      // Email já usado por outro utilizador deste computador: não se sobrepõe.
+      const sameEmail: any = await runQuery("get", "SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1", [email, id]);
+      if (sameEmail) continue;
+      const values = columns.map(name => {
+        const value = at(row, name);
+        return value === undefined ? null : value !== null && typeof value === "object" ? JSON.stringify(value) : value;
+      });
+      statements.push({
+        sql: `INSERT INTO users (${columns.map(name => `"${name}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) ON CONFLICT(id) DO UPDATE SET ${columns.filter(name => name !== "id").map(name => `"${name}" = excluded."${name}"`).join(", ")}`,
+        params: values,
+      });
+      applied += 1;
+    }
+    let removed = 0;
+    for (const id of deleted) {
+      if (id === String(currentUser.id)) continue;
+      const target: any = await runQuery("get", "SELECT role FROM users WHERE id = ? LIMIT 1", [id]);
+      if (!target) continue;
+      if (target.role === "super_admin") {
+        const admins: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users WHERE role = 'super_admin'");
+        if (Number(admins?.total || 0) <= 1) continue;
+      }
+      statements.push({ sql: "DELETE FROM users WHERE id = ?", params: [id] });
+      removed += 1;
+    }
+    if (!statements.length) return { applied: 0, deleted: 0 };
+    await runTransaction(validateDbTransaction(statements));
+    await writeAuthAudit(currentUser, "users_synced_from_web",
+      `Sincronização de utilizadores da versão web: ${applied} criado(s)/actualizado(s), ${removed} removido(s).`);
+    return { applied, deleted: removed };
   });
   ipcMain.handle("db-import", async (event, payload) => {
     assertTrustedIpcSender(event);

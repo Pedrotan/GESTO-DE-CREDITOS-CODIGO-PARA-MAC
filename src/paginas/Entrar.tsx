@@ -33,6 +33,7 @@ import { ModalAvisoHorario } from '@/componentes/modals/ModalAvisoHorario';
 import { isCompanyActiveLocally, authenticateCentralLogin } from '@/servicos/ServicoIdentidadeEmpresa';
 import { startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { useWebMultiTenant } from '@/ganchos/usar-multi-empresa-web';
+import { ModalTermosSistema } from '@/componentes/legal/ModalTermosSistema';
 
 const systemSlides = [
     {
@@ -623,6 +624,9 @@ export default function Login() {
                     </div>
                 </div>
             </section>
+
+            {/* Termos de Utilização e Política de Privacidade: só fecha depois de aceites */}
+            <ModalTermosSistema />
 
             {/* Error Modal */}
             <Dialog open={Boolean(requiredMfaSetup)} onOpenChange={() => undefined}>

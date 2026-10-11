@@ -187,12 +187,18 @@ const api = Object.freeze({
         return ipcRenderer.invoke('sync-apply-remote', JSON.parse(JSON.stringify(groups)));
     },
     // Utilizadores para a versão web: o processo principal devolve só a carga já cifrada (nunca as senhas).
-    syncUsersPayload: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null }) => {
+    syncUsersPayload: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null; knownIds?: string[] }) => {
         if (!input || typeof input !== 'object') throw new TypeError('Pedido inválido.');
         return ipcRenderer.invoke('sync-users-payload', {
             apiKey: String(input.apiKey || ''), tenantId: String(input.tenantId || ''),
-            deviceId: String(input.deviceId || ''), knownDigest: input.knownDigest ? String(input.knownDigest) : null
+            deviceId: String(input.deviceId || ''), knownDigest: input.knownDigest ? String(input.knownDigest) : null,
+            knownIds: Array.isArray(input.knownIds) ? input.knownIds.slice(0, 5000).map(String) : []
         });
+    },
+    // Utilizadores vindos da versão web: o processo principal valida e grava (ver sync-users-apply).
+    syncUsersApply: (roster: { columns: string[]; rows: unknown[][]; deleted?: string[] }) => {
+        if (!roster || typeof roster !== 'object') throw new TypeError('Lista de utilizadores inválida.');
+        return ipcRenderer.invoke('sync-users-apply', JSON.parse(JSON.stringify({ columns: roster.columns, rows: roster.rows, deleted: roster.deleted || [] })));
     },
 
     dbLoad: () => ipcRenderer.invoke('db-load'),

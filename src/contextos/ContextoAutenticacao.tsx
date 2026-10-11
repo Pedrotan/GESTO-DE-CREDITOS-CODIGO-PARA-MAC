@@ -51,6 +51,16 @@ interface ContextoAutenticacaoType {
     verify2FA: (userId: string, code: string) => Promise<{ authenticated: boolean; reason?: 'challenge_expired' | 'replayed_code' | 'invalid_code' }>;
 }
 
+// No computador o processo principal recusa leituras que incluam senhas ou segredos de 2FA (SELECT * incluído):
+// a lista de utilizadores pede só as restantes colunas. No navegador a base é local e a leitura é completa.
+const SECRET_USER_COLUMNS = new Set(['password', 'twoFactorSecret', 'mfaRecoveryCodes']);
+const usersListSql = async () => {
+    if (typeof window === 'undefined' || !window.electronAPI) return 'SELECT * FROM users';
+    const info = await db.all<{ name: string }>('PRAGMA table_info(users)');
+    const columns = info.map(column => column.name).filter(name => /^[A-Za-z_]w*$/.test(name) && !SECRET_USER_COLUMNS.has(name));
+    return `SELECT ${columns.map(name => `"${name}"`).join(', ')} FROM users`;
+};
+
 const ContextoAutenticacao = createContext<ContextoAutenticacaoType | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
@@ -128,7 +138,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 }
 
                 // Load all users for state
-                const allUsersRaw = await db.all<any>('SELECT * FROM users');
+                const allUsersRaw = await db.all<any>(await usersListSql());
                 const allUsers = allUsersRaw.map(u => {
                     let parsedPermissions = [];
                     let parsedExceptions = [];
@@ -335,7 +345,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     // carrega, por isso volta a ser lida logo após cada login (páginas Utilizadores e Sessões).
     const reloadUsers = useCallback(async () => {
         try {
-            const rows = await db.all<any>('SELECT * FROM users');
+            const rows = await db.all<any>(await usersListSql());
             const list = rows.map(u => {
                 let parsedPermissions = [];
                 let parsedExceptions = [];

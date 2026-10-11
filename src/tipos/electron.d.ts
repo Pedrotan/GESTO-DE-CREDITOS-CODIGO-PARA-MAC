@@ -31,7 +31,8 @@ export interface ElectronAPI {
     dbExec: (sql: string) => Promise<{ success: boolean } | void>;
     dbTransaction: (statements: Array<{ sql: string; params?: any[]; type?: 'execute' | 'exec'; expectChanges?: number }>) => Promise<any[]>;
     syncApplyRemote?: (groups: import('@/bibliotecas/sync-operacoes').RemoteGroup[]) => Promise<import('@/bibliotecas/sync-operacoes').ApplyResult>;
-    syncUsersPayload?: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null }) => Promise<{ digest: string; id: string | null; payload: string | null }>;
+    syncUsersPayload?: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null; knownIds?: string[] }) => Promise<{ digest: string; id: string | null; payload: string | null; ids: string[] }>;
+    syncUsersApply?: (roster: { columns: string[]; rows: unknown[][]; deleted?: string[] }) => Promise<{ applied: number; deleted: number }>;
     dbLoad: () => Promise<Uint8Array | null>;
     dbSave: (data: Uint8Array) => Promise<boolean>;
     dbImport: (data: Uint8Array, confirmation: string) => Promise<{ success: boolean }>;
