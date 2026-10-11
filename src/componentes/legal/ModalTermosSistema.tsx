@@ -1,15 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { FileText, ShieldCheck } from 'lucide-react';
 import { Button } from '@/componentes/ui/button';
 import { Checkbox } from '@/componentes/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { cn } from '@/bibliotecas/utils';
+import { isPublicWebBuild } from '@/bibliotecas/ambiente';
+import { isCompanyActiveLocally } from '@/servicos/ServicoIdentidadeEmpresa';
 import {
     SYSTEM_PRIVACY_POLICY, SYSTEM_TERMS_OF_USE, SYSTEM_TERMS_UPDATED_AT, SYSTEM_TERMS_VERSION,
     acceptSystemTerms, hasAcceptedSystemTerms, type SystemTermsSection,
 } from '@/bibliotecas/termos-sistema';
 
 type Tab = 'termos' | 'privacidade';
+
+// Na web, enquanto o portal da empresa (NIF e Código de Acesso) cobre o login, o modal não pode abrir:
+// ficaria escondido por baixo e, sendo modal, bloquearia os cliques no portal.
+const companyPortalVisible = () => isPublicWebBuild && !isCompanyActiveLocally()
+    && localStorage.getItem('tango_active_tenant_authorized') !== 'true';
 
 const Sections = ({ sections }: { sections: SystemTermsSection[] }) => (
     <div className="space-y-4">
@@ -29,14 +36,25 @@ const Sections = ({ sections }: { sections: SystemTermsSection[] }) => (
  * botão de fechar: só depois de o utilizador confirmar que leu e aceita. Volta a aparecer quando a versão muda.
  */
 export function ModalTermosSistema() {
-    const [open, setOpen] = useState(() => !hasAcceptedSystemTerms());
+    const [pending, setPending] = useState(() => !hasAcceptedSystemTerms());
+    const [portalVisible, setPortalVisible] = useState(companyPortalVisible);
+    useEffect(() => {
+        const refresh = () => setPortalVisible(companyPortalVisible());
+        window.addEventListener('tango_tenant_authorized', refresh);
+        window.addEventListener('storage', refresh);
+        return () => {
+            window.removeEventListener('tango_tenant_authorized', refresh);
+            window.removeEventListener('storage', refresh);
+        };
+    }, []);
+    const open = pending && !portalVisible;
     const [tab, setTab] = useState<Tab>('termos');
     const [agreed, setAgreed] = useState(false);
 
     const accept = () => {
         if (!agreed) return;
         acceptSystemTerms();
-        setOpen(false);
+        setPending(false);
     };
 
     return (
