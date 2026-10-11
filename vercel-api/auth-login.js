@@ -1,11 +1,8 @@
-import crypto from 'node:crypto';
-import { neon } from '@neondatabase/serverless';
-import { applyCors, enforceDistributedRateLimit } from './_security.js';
+import { applyCors } from './_security.js';
 import { recordRejectedOrigin } from './_alertas.js';
 
 // Autenticação Central: POST /api/v1/auth/login
-// Retorna token de sessão e, somente agora que o utilizador está autenticado,
-// autoriza o descarregamento das credenciais de sincronização seguras para o SQLite local.
+// Sem utilizadores no servidor, as credenciais não podem ser validadas aqui: o endpoint recusa sempre.
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -25,28 +22,16 @@ export default async function handler(req, res) {
 
   const email = (req.body?.email || '').toString().trim().toLowerCase();
   const password = (req.body?.password || '').toString();
-  const tenantId = (req.body?.tenantId || '').toString().trim().toUpperCase();
 
   if (!email || !password) {
     return send(res, 400, { success: false, message: 'E-mail e senha são obrigatórios.' });
   }
 
-  // Gera token de sessão criptográfico seguro para a sessão
-  const sessionToken = crypto.randomBytes(32).toString('hex');
-
-  // Devolve o token de sessão e autorização para sincronização offline
-  return send(res, 200, {
-    success: true,
-    token: sessionToken,
-    user: {
-      email,
-      name: email.split('@')[0],
-      role: 'admin'
-    },
-    syncCredentials: {
-      tenantId: tenantId || null,
-      authorizedAt: new Date().toISOString()
-    },
-    message: 'Autenticação central bem-sucedida.'
+  // O servidor não guarda utilizadores nem palavras-passe: não pode validar credenciais. Antes este endpoint
+  // devolvia sucesso (perfil admin) para qualquer email/senha; recusar sempre, sem emitir token.
+  return send(res, 501, {
+    success: false,
+    code: 'CENTRAL_LOGIN_UNAVAILABLE',
+    message: 'Os utilizadores da empresa ainda não estão disponíveis neste navegador. O início de sessão é feito com os utilizadores existentes neste dispositivo.'
   });
 }

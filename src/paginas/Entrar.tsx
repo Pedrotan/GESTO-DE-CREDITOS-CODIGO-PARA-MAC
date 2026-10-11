@@ -143,6 +143,7 @@ export default function Login() {
             const cleanPassword = password.trim();
 
             let success = await login(cleanEmail, cleanPassword);
+            let centralMessage = '';
 
             // Se o login local não tiver o utilizador (cache limpo numa empresa ativa),
             // autenticar no endpoint central POST /api/v1/auth/login:
@@ -169,22 +170,21 @@ export default function Login() {
                         } catch (syncErr) {
                             console.warn('[Login] Sincronização offline inicial:', syncErr);
                         }
-                        // Re-tentar login local após sincronização
+                        // Re-tentar login local após sincronização (sem sessão local não se entra no painel)
                         success = await login(cleanEmail, cleanPassword);
-                        if (!success) {
-                            handleLoginSuccess();
-                            return;
-                        }
                     }
-                } catch (centralErr) {
+                } catch (centralErr: any) {
                     console.warn('[Login] Autenticação central:', centralErr);
+                    centralMessage = centralErr?.message || '';
                 }
             }
 
             if (success) {
                 handleLoginSuccess();
             } else {
-                setErrorMessage('Email ou password incorretos. Por favor, tente novamente.');
+                setErrorMessage(centralMessage && !hasUsers
+                    ? centralMessage
+                    : 'Email ou password incorretos. Por favor, tente novamente.');
                 setIsErrorModalOpen(true);
             }
         } catch (error: any) {

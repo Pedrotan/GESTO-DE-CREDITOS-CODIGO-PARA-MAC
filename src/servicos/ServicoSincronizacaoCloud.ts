@@ -39,6 +39,10 @@ const CURSOR_KEY = 'cloud_sync_cursor_v1';
 // chaves anteriores que os dispositivos novos não conseguem ler.
 export const CLOUD_SYNC_BOOTSTRAP_KEY = 'cloud_sync_bootstrap_v3';
 const REPROCESS_KEY = 'cloud_sync_reprocess_v2';
+// Última lista de utilizadores enviada por este computador (só se reenvia quando muda).
+const USERS_DIGEST_KEY = 'cloud_sync_users_digest_v1';
+/** Avisa o login de que chegaram utilizadores (versão web). */
+export const USERS_SYNCED_EVENT = 'tango-users-synced';
 const MAX_PUSH_OPERATIONS = 100;
 const MAX_PULL_ROUNDS = 10;
 const SYNC_INTERVAL_MS = 30_000;
@@ -313,8 +317,48 @@ const applyGroups = async (groups: RemoteGroup[]): Promise<ApplyResult> => {
     }
 };
 
+// Colunas de utilizador que cada dispositivo gere sozinho (2FA, bloqueios por tentativas, presença).
+const WEB_LOCAL_USER_COLUMNS = new Set(['twoFactorEnabled', 'twoFactorSecret', 'mfaRecoveryCodes', 'failedAttempts', 'blockedAt', 'lastLogin', 'lastSeen', 'ip']);
+type UsersRoster = { kind: 'users'; columns: string[]; rows: unknown[][]; createdAt: string };
+
+/**
+ * Lista de utilizadores enviada pelo computador da empresa (que é a referência): no navegador substitui os
+ * utilizadores locais, mantendo o 2FA e os bloqueios deste navegador. O computador nunca a aplica.
+ */
+const applyUserRoster = async (roster: UsersRoster) => {
+    const local = await localTableColumns('users');
+    const columns = (roster.columns || []).filter(column => /^[a-z_][a-z0-9_]*$/iu.test(column) && local.has(column) && !WEB_LOCAL_USER_COLUMNS.has(column));
+    if (!columns.includes('id') || !columns.includes('password')) return 0;
+    const positions = columns.map(column => roster.columns.indexOf(column));
+    const list = columns.map(quoteIdentifier).join(', ');
+    const updates = columns.filter(column => column !== 'id').map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ');
+    const statements: SqlTransactionStatement[] = [];
+    const ids: string[] = [];
+    for (const row of roster.rows || []) {
+        if (!Array.isArray(row)) continue;
+        const values = positions.map(position => row[position] ?? null);
+        const id = String(values[columns.indexOf('id')] || '');
+        if (!id || !values[columns.indexOf('password')]) continue;
+        ids.push(id);
+        statements.push({ sql: `INSERT INTO users (${list}) VALUES (${columns.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`, params: values });
+    }
+    if (!ids.length) return 0;
+    statements.push({ sql: `DELETE FROM users WHERE id NOT IN (${ids.map(() => '?').join(', ')})`, params: ids });
+    applyingRemote = true;
+    try { await sqlite.transaction(statements); } finally { applyingRemote = false; }
+    window.dispatchEvent(new Event(USERS_SYNCED_EVENT));
+    return ids.length;
+};
+
 const applyOperations = async (operations: SyncOperation[]): Promise<ApplyResult> => {
-    const valid = operations.filter(operation => operation.commandVersion === 1 && activeConfig && operation.tenantId === activeConfig.tenantId);
+    const accepted = operations.filter(operation => operation.commandVersion === 1 && activeConfig && operation.tenantId === activeConfig.tenantId);
+    const rosters = accepted.filter(operation => (operation as any).kind === 'users') as unknown as UsersRoster[];
+    const valid = accepted.filter(operation => (operation as any).kind !== 'users');
+    let rosterApplied = 0;
+    if (rosters.length && !window.electronAPI) {
+        const latest = rosters.sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)))[rosters.length - 1];
+        rosterApplied = await applyUserRoster(latest) ? 1 : 0;
+    }
     const waiting = await readAll(INCOMING_STORE);
     const { complete, pending } = groupOperations([...waiting, ...valid]);
 
@@ -329,7 +373,7 @@ const applyOperations = async (operations: SyncOperation[]): Promise<ApplyResult
     const result = await applyGroups(groups);
     await deleteOperations(waiting.map(operation => operation.id), INCOMING_STORE);
     await putOperations(stillWaiting, INCOMING_STORE);
-    return result;
+    return { ...result, applied: result.applied + rosterApplied };
 };
 
 // Versões anteriores retinham créditos/pagamentos remotos em sync_conflicts. Aplica uma vez as inserções
@@ -401,11 +445,19 @@ export const syncCloudNow = async () => {
             let totalConflicts = 0;
             let totalSkipped = 0;
             const profile = await companyProfile();
+            // Computador: lista de utilizadores cifrada no processo principal, enviada só quando muda.
+            const usersOut = window.electronAPI?.syncUsersPayload
+                ? await window.electronAPI.syncUsersPayload({
+                    apiKey: config.apiKey, tenantId: config.tenantId, deviceId: getDeviceId(),
+                    knownDigest: localStorage.getItem(scopedStorageKey(USERS_DIGEST_KEY)),
+                }).catch(error => { console.warn('[CloudSync] Utilizadores não enviados:', error); return null; })
+                : null;
 
             for (let round = 0; round < MAX_PULL_ROUNDS; round++) {
                 const queued = await getQueuedOperations();
                 const supported = queued.filter(operation => ['statement', 'snapshot', 'dynamic'].includes(operation.kind));
                 const outgoing = await Promise.all(supported.map(async operation => ({ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) })));
+                if (round === 0 && usersOut?.payload && usersOut.id) outgoing.push({ id: usersOut.id, deviceId: getDeviceId(), payload: usersOut.payload });
                 const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
@@ -415,6 +467,7 @@ export const syncCloudNow = async () => {
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw new Error(body.message || body.error || `Erro de sincronização (${response.status}).`);
                 await deleteOperations(queued.map(operation => operation.id));
+                if (round === 0 && usersOut?.digest) localStorage.setItem(scopedStorageKey(USERS_DIGEST_KEY), usersOut.digest);
                 totalPushed += supported.length;
 
                 const incoming: SyncOperation[] = [];

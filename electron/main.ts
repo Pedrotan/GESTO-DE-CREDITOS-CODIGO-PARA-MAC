@@ -3043,6 +3043,42 @@ app.whenReady().then(async () => {
     if (result.applied || result.conflicts) broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
     return result;
   });
+  // Utilizadores para a versão web (só do computador para a nuvem): lista completa com a palavra-passe já
+  // protegida (bcrypt), cifrada aqui com a mesma chave da empresa que as restantes operações. O renderer só
+  // recebe a carga cifrada. Segredos de 2FA e estado de sessão ficam neste computador.
+  ipcMain.handle("sync-users-payload", async (event, input) => {
+    assertTrustedIpcSender(event);
+    userAuth.assertAuthenticated(event.sender.id);
+    const apiKey = String(input?.apiKey || "");
+    const tenantId = String(input?.tenantId || "");
+    const deviceId = String(input?.deviceId || "");
+    if (apiKey.length < 8 || apiKey.length > 500 || !tenantId || tenantId.length > 200 || !deviceId || deviceId.length > 100) {
+      throw new TypeError("Pedido de sincronização de utilizadores inválido.");
+    }
+    const localOnly = new Set(["twoFactorEnabled", "twoFactorSecret", "mfaRecoveryCodes", "failedAttempts", "blockedAt", "lastLogin", "lastSeen", "ip"]);
+    const info: any = await runQuery("query", 'PRAGMA table_info("users")');
+    const columns = (info || []).map((row: any) => String(row.name)).filter((name: string) => /^[a-z_][\w]*$/i.test(name) && !localOnly.has(name));
+    if (!columns.includes("id") || !columns.includes("password")) return { digest: "", id: null, payload: null };
+    const rows: any = await runQuery("query", `SELECT ${columns.map((name: string) => `"${name}"`).join(", ")} FROM users ORDER BY id`);
+    const values = (rows || []).map((row: any) => columns.map((name: string) => row[name] ?? null));
+    const digest = crypto.createHash("sha256").update(JSON.stringify([columns, values])).digest("hex");
+    if (input?.knownDigest === digest) return { digest, id: null, payload: null };
+    const operation = {
+      id: crypto.randomUUID(), deviceId, kind: "users", commandVersion: 1, tenantId, entityId: "users",
+      createdAt: new Date().toISOString(), columns, rows: values,
+    };
+    // Mesmo formato de sincronizacao: PBKDF2 (120 000, SHA-256, sal tango-sync:<empresa>) + AES-GCM.
+    const subtle = crypto.webcrypto.subtle;
+    const encoder = new TextEncoder();
+    const material = await subtle.importKey("raw", encoder.encode(apiKey), "PBKDF2", false, ["deriveKey"]);
+    const key = await subtle.deriveKey(
+      { name: "PBKDF2", salt: encoder.encode(`tango-sync:${tenantId}`), iterations: 120_000, hash: "SHA-256" },
+      material, { name: "AES-GCM", length: 256 }, false, ["encrypt"]
+    );
+    const iv = crypto.webcrypto.getRandomValues(new Uint8Array(12));
+    const encrypted = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(JSON.stringify(operation))));
+    return { digest, id: operation.id, payload: `${Buffer.from(iv).toString("base64")}.${Buffer.from(encrypted).toString("base64")}` };
+  });
   ipcMain.handle("db-import", async (event, payload) => {
     assertTrustedIpcSender(event);
     const currentUser: any = userAuth.assertAuthenticated(event.sender.id);

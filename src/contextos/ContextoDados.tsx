@@ -1159,11 +1159,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     useEffect(() => {
         if (!companySettings.syncEnabled || !isCloudSyncUrl(companySettings.syncUrl)) return;
-        const apiKey = companySettings.syncApiKey || companySettings.syncPasskey || '';
+        // No navegador, a chave é o Código de Acesso validado na ligação à empresa (o mesmo que a cloud confirma).
+        const webCode = !(window as any).electronAPI ? localStorage.getItem('tango_active_tenant_code') : null;
+        const webTenant = !(window as any).electronAPI ? localStorage.getItem('tango_active_tenant_id') : null;
+        const apiKey = webCode || companySettings.syncApiKey || companySettings.syncPasskey || '';
         return startCloudSync({
             url: companySettings.syncUrl,
             apiKey,
-            tenantId: companySettings.nif || 'tango-default',
+            tenantId: webTenant || companySettings.nif || 'tango-default',
             onRemoteApplied: refreshData
         });
     }, [companySettings.syncEnabled, companySettings.syncUrl, companySettings.syncApiKey, companySettings.syncPasskey, companySettings.nif, refreshData]);

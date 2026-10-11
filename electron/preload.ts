@@ -186,6 +186,14 @@ const api = Object.freeze({
         if (!Array.isArray(groups)) throw new TypeError('Lote de sincronização inválido.');
         return ipcRenderer.invoke('sync-apply-remote', JSON.parse(JSON.stringify(groups)));
     },
+    // Utilizadores para a versão web: o processo principal devolve só a carga já cifrada (nunca as senhas).
+    syncUsersPayload: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null }) => {
+        if (!input || typeof input !== 'object') throw new TypeError('Pedido inválido.');
+        return ipcRenderer.invoke('sync-users-payload', {
+            apiKey: String(input.apiKey || ''), tenantId: String(input.tenantId || ''),
+            deviceId: String(input.deviceId || ''), knownDigest: input.knownDigest ? String(input.knownDigest) : null
+        });
+    },
 
     dbLoad: () => ipcRenderer.invoke('db-load'),
     dbSave: (data: Uint8Array) => ipcRenderer.invoke('db-save', data),

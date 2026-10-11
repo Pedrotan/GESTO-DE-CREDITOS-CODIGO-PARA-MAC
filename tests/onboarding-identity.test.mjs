@@ -142,7 +142,7 @@ test('4. Redefinição de Senha: POST /api/v1/auth/reset-password valida token e
     assert.equal(weakPassRes2.statusCode, 400);
 });
 
-test('5. Login Central: POST /api/v1/auth/login gera token de sessão e autoriza sincronização offline', async () => {
+test('5. Login Central: POST /api/v1/auth/login nunca autentica sem utilizadores no servidor', async () => {
     const loginHandler = await loadHandler('auth-login.js');
 
     // Campos obrigatórios
@@ -150,18 +150,13 @@ test('5. Login Central: POST /api/v1/auth/login gera token de sessão e autoriza
     await loginHandler(req({ method: 'POST', body: {} }), emptyRes);
     assert.equal(emptyRes.statusCode, 400);
 
-    // Login com sucesso
-    const successRes = createMockResponse();
+    // Qualquer credencial é recusada e nenhum token é emitido
+    const res = createMockResponse();
     await loginHandler(req({
         method: 'POST',
-        body: {
-            email: 'admin@tango.ao',
-            password: 'MinhaSenhaSegura123',
-            tenantId: 'TG-TEST-0001'
-        }
-    }), successRes);
-    assert.equal(successRes.statusCode, 200);
-    assert.equal(successRes.body.success, true);
-    assert.ok(successRes.body.token);
-    assert.equal(successRes.body.syncCredentials.tenantId, 'TG-TEST-0001');
+        body: { email: 'admin@tango.ao', password: 'MinhaSenhaSegura123', tenantId: 'TG-TEST-0001' }
+    }), res);
+    assert.equal(res.statusCode, 501);
+    assert.equal(res.body.success, false);
+    assert.equal(res.body.token, undefined);
 });

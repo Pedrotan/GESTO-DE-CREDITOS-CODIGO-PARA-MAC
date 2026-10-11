@@ -373,6 +373,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
     }, []);
 
+    // Versão web: os utilizadores chegam do computador da empresa pela sincronização; actualizar a lista
+    // (e o aviso "nenhum utilizador") assim que chegam.
+    useEffect(() => {
+        const handler = () => { void reloadUsers(); };
+        window.addEventListener('tango-users-synced', handler);
+        return () => window.removeEventListener('tango-users-synced', handler);
+    }, [reloadUsers]);
+
     const login = async (emailOrUsername: string, password: string): Promise<boolean> => {
         try {
             const cleanInput = emailOrUsername.trim().toLowerCase();
