@@ -75,6 +75,10 @@ const postCloud = async (path: string, body: Record<string, unknown>) => {
                 return { ok: true, data };
             }
             lastResult = { ok: false, data };
+            // Resposta definitiva do servidor (ex.: código errado, empresa não registada): não perguntar aos
+            // servidores seguintes, que têm outra base de dados e dariam outra resposta. Só falhas de rede ou
+            // erros do servidor (5xx) passam ao seguinte.
+            if (response.status < 500) return lastResult;
         } catch {
             // Tenta o próximo servidor
         }

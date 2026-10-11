@@ -51,9 +51,9 @@ const postJson = async (path: string, body: Record<string, unknown>) => {
             const isSuccess = res.ok && data.success !== false;
             lastResult = { ok: isSuccess, status: res.status, data, serverUrl: base };
             if (isSuccess) return lastResult;
-            if (data.code === 'ALREADY_REGISTERED' || data.code === 'BLOCKED' || data.code === 'EXPIRED') {
-                return lastResult;
-            }
+            // Resposta definitiva (código errado, empresa não registada, bloqueada...): os servidores seguintes
+            // têm outra base de dados. Só falhas de rede ou erros 5xx passam ao seguinte.
+            if (res.status < 500) return lastResult;
         } catch {
             // Continua para o próximo servidor na cascata
         }

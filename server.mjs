@@ -155,34 +155,10 @@ const initDatabaseBridge = async () => {
         ALTER TABLE tango_registration_requests ALTER COLUMN email DROP NOT NULL;
       `);
 
-      const seedCompanies = [
-        {
-          id: '5417002673',
-          tHash: 'fb14d0c3542ee0136f183c1ffd300102eeda2a76e32990bdcc9b63c5d9918de3',
-          name: 'DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA',
-          kHash: '99eb32203237b3c361d1caa31cb82630d3a24194387900ae7ba27b3ee3f3840a',
-          code: 'TG-AG9E-VTBY'
-        },
-        {
-          id: '5417001439',
-          tHash: '511787b16436e18bf21f42ca118854a49d77e3a5b844f58db680460d1bffe06f',
-          name: 'Erecabde Comércio e Serviços LDA',
-          kHash: 'dddb9f0511251eb895877e8c40a16ac3a56c426a6fee18cd10ac0a827c909b5a',
-          code: 'TG-1357-4F6V'
-        }
-      ];
-
-      // Só cria as empresas iniciais em falta: nunca repõe códigos, estado ou validade geridos no Tango Master.
-      for (const sc of seedCompanies) {
-        await pgPool.query(`
-          INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash, access_code, status)
-          VALUES ($1, $2, $3, $4, $5, 'active')
-          ON CONFLICT DO NOTHING
-        `, [sc.id, sc.tHash, sc.name, sc.kHash, sc.code]);
-      }
-      console.log('[VPS Database] Empresas autorizadas do Tango Master verificadas e ativas na base de dados.');
+      // As empresas só existem quando cadastradas no Tango Master (sem empresas nem códigos fixos no código).
+      console.log('[VPS Database] Tabelas do Tango Master verificadas.');
     } catch (seedErr) {
-      console.warn('[VPS Database] Aviso ao semear empresas iniciais:', seedErr.message);
+      console.warn('[VPS Database] Aviso ao preparar as tabelas do Tango Master:', seedErr.message);
     }
   } catch (err) {
     console.warn('[VPS Database] Aviso ao configurar ponte PostgreSQL local:', err.message);
@@ -394,7 +370,15 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
       }
 
-      fs.createReadStream(filePath).pipe(res);
+      // Tamanho conhecido (o navegador sabe quando o ficheiro chegou completo) e erros de leitura tratados.
+      res.setHeader('Content-Length', stats.size);
+      const stream = fs.createReadStream(filePath);
+      stream.on('error', error => {
+        console.error(`[VPS Servidor] Falha ao enviar ${safePath}:`, error.message);
+        res.destroy(error);
+      });
+      res.on('close', () => stream.destroy());
+      stream.pipe(res);
       return;
     }
 
