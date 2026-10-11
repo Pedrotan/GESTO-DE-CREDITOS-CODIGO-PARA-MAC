@@ -30,10 +30,34 @@ import { scopedStorageKey } from '@/bibliotecas/contas';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import QRCode from 'qrcode';
 import { ModalAvisoHorario } from '@/componentes/modals/ModalAvisoHorario';
-import { isCompanyActiveLocally, authenticateCentralLogin } from '@/servicos/ServicoIdentidadeEmpresa';
-import { startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { isCompanyActiveLocally } from '@/servicos/ServicoIdentidadeEmpresa';
+import { receiveUsersFromCloud, type UsersRosterOutcome } from '@/servicos/ServicoSincronizacaoCloud';
+import { db } from '@/bibliotecas/bd';
 import { useWebMultiTenant } from '@/ganchos/usar-multi-empresa-web';
 import { ModalTermosSistema } from '@/componentes/legal/ModalTermosSistema';
+
+// Versão web: os utilizadores são os do Tango ERP do computador da empresa, que os envia pela sincronização.
+const webUserExists = async (login: string) => Boolean(await db.get<{ id: string }>(
+    'SELECT id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ? LIMIT 1', [login.toLowerCase(), login.toLowerCase()]
+).catch(() => undefined));
+
+const webUsersCount = async () => Number((await db.get<{ total: number }>('SELECT COUNT(*) AS total FROM users').catch(() => undefined))?.total || 0);
+
+/** Explica porque o utilizador ainda não existe neste navegador e o que fazer. */
+const usersRosterMessage = (outcome: UsersRosterOutcome, usersHere: number) => {
+    if (outcome.state === 'error') {
+        return `Não foi possível receber os utilizadores da empresa: ${outcome.message || 'erro de ligação ao servidor'} Verifique a Internet e tente novamente.`;
+    }
+    if (outcome.state === 'unreadable') {
+        return 'Os utilizadores da empresa chegaram, mas foram protegidos com um Código de Acesso diferente do usado neste navegador. '
+            + 'No computador da empresa abra o Tango ERP, volte a ligar à versão web com o Código de Acesso actual e aguarde «Sincronizado». Depois tente novamente aqui.';
+    }
+    if (outcome.state === 'none' && !usersHere) {
+        return 'O computador da empresa ainda não enviou os utilizadores. Instale a versão mais recente do Tango ERP nesse computador, '
+            + 'inicie sessão e aguarde o estado «Sincronizado». Depois tente novamente aqui com o mesmo email e palavra-passe.';
+    }
+    return 'Este email não pertence a nenhum utilizador da empresa. Use o mesmo email com que entra no Tango ERP do computador da empresa.';
+};
 
 const systemSlides = [
     {
@@ -94,6 +118,7 @@ export default function Login() {
     const [password, setPassword] = useState('');
     const [activeSlide, setActiveSlide] = useState(0);
     const [loading, setLoading] = useState(false);
+    const [loadingLabel, setLoadingLabel] = useState('A autenticar...');
     const [errorMessage, setErrorMessage] = useState('');
     const [isErrorModalOpen, setIsErrorModalOpen] = useState(false);
     const [logoError, setLogoError] = useState(false);
@@ -104,6 +129,12 @@ export default function Login() {
             setActiveSlide((prev) => (prev + 1) % systemSlides.length);
         }, 5000);
         return () => clearInterval(interval);
+    }, []);
+
+    // Versão web ainda sem utilizadores: pede-os ao abrir o login (chegam enquanto o utilizador escreve).
+    useEffect(() => {
+        if (!isPublicWebBuild || !isCompanyActiveLocally()) return;
+        void webUsersCount().then(count => { if (!count) void receiveUsersFromCloud(); });
     }, []);
     const [rememberMe, setRememberMe] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
@@ -144,48 +175,25 @@ export default function Login() {
             const cleanPassword = password.trim();
 
             let success = await login(cleanEmail, cleanPassword);
-            let centralMessage = '';
+            let usersMessage = '';
 
-            // Se o login local não tiver o utilizador (cache limpo numa empresa ativa),
-            // autenticar no endpoint central POST /api/v1/auth/login:
-            if (!success) {
-                try {
-                    const tenantId = localStorage.getItem('tango_active_tenant_id') || undefined;
-                    const centralAuth = await authenticateCentralLogin({
-                        email: cleanEmail,
-                        password: cleanPassword,
-                        tenantId
-                    });
-
-                    if (centralAuth.success && centralAuth.token) {
-                        localStorage.setItem('tango_session_token', centralAuth.token);
-                        try {
-                            if (centralAuth.syncCredentials?.tenantId) {
-                                startCloudSync({
-                                    url: window.location.origin,
-                                    apiKey: centralAuth.token,
-                                    tenantId: centralAuth.syncCredentials.tenantId
-                                });
-                                await syncCloudNow();
-                            }
-                        } catch (syncErr) {
-                            console.warn('[Login] Sincronização offline inicial:', syncErr);
-                        }
-                        // Re-tentar login local após sincronização (sem sessão local não se entra no painel)
-                        success = await login(cleanEmail, cleanPassword);
-                    }
-                } catch (centralErr: any) {
-                    console.warn('[Login] Autenticação central:', centralErr);
-                    centralMessage = centralErr?.message || '';
+            // Versão web: o utilizador pode ainda não ter chegado do computador da empresa. Pede já a lista
+            // ao servidor e tenta de novo; se continuar a faltar, explica o motivo em vez de "password errada".
+            if (!success && isPublicWebBuild && isCompanyActiveLocally() && !await webUserExists(cleanEmail)) {
+                setLoadingLabel('A receber os utilizadores da empresa...');
+                const outcome = await receiveUsersFromCloud();
+                if (await webUserExists(cleanEmail)) {
+                    setLoadingLabel('A autenticar...');
+                    success = await login(cleanEmail, cleanPassword);
+                } else {
+                    usersMessage = usersRosterMessage(outcome, await webUsersCount());
                 }
             }
 
             if (success) {
                 handleLoginSuccess();
             } else {
-                setErrorMessage(centralMessage && !hasUsers
-                    ? centralMessage
-                    : 'Email ou password incorretos. Por favor, tente novamente.');
+                setErrorMessage(usersMessage || 'Email ou password incorretos. Por favor, tente novamente.');
                 setIsErrorModalOpen(true);
             }
         } catch (error: any) {
@@ -204,6 +212,7 @@ export default function Login() {
             setIsErrorModalOpen(true);
         } finally {
             setLoading(false);
+            setLoadingLabel('A autenticar...');
         }
     };
 
@@ -477,7 +486,7 @@ export default function Login() {
                                                 Empresa Ativa e Verificada
                                             </p>
                                             <p className="text-[11px] text-blue-700 leading-relaxed">
-                                                Inicie sessão com o seu e-mail e senha de administrador para sincronizar os dados da sua organização.
+                                                Entre com o mesmo email e palavra-passe que usa no Tango ERP do computador da empresa.
                                             </p>
                                         </div>
                                     )}
@@ -487,7 +496,7 @@ export default function Login() {
                                         className="mt-2 h-12 w-full rounded-xl bg-gradient-to-r from-blue-600 via-[#2563eb] to-indigo-600 text-sm font-bold text-white shadow-lg shadow-blue-500/20 hover:from-blue-700 hover:to-indigo-700 hover:shadow-xl hover:scale-[1.01] active:scale-[0.99] transition-all"
                                         disabled={loading}
                                     >
-                                        {loading ? 'A autenticar...' : 'Entrar no Sistema'}
+                                        {loading ? loadingLabel : 'Entrar no Sistema'}
                                     </Button>
 
                                     <div className="pt-5 border-t border-slate-100 text-center space-y-1">

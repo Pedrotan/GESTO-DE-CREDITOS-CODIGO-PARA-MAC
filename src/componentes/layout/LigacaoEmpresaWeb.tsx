@@ -195,6 +195,8 @@ export const LigacaoEmpresaWeb = () => {
             localStorage.setItem('tango_active_tenant_id', verifiedTenantId);
             localStorage.setItem('tango_active_tenant_name', verifiedName);
             localStorage.setItem('tango_active_tenant_code', cleanCode);
+            // Código como está guardado no servidor: é com ele que o computador da empresa cifra os dados.
+            localStorage.setItem('tango_active_tenant_sync_key', verifiedPasskey);
             localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
             // Layout conforme a empresa foi configurada (multi-empresa ou não).
             storeWebMultiTenant(data.multiTenant);
@@ -210,7 +212,7 @@ export const LigacaoEmpresaWeb = () => {
 
             let pulled = 0;
             try {
-                startCloudSync({ url: effectiveSyncUrl, apiKey: verifiedPasskey, tenantId: verifiedTenantId });
+                startCloudSync({ url: effectiveSyncUrl, apiKey: verifiedPasskey, tenantId: verifiedTenantId, extraKeys: [cleanCode] });
                 pulled = (await syncCloudNow()).pulled || 0;
             } catch (syncErr) {
                 console.warn('[LigacaoEmpresaWeb] Sincronização inicial:', syncErr);

@@ -60,7 +60,7 @@ import { ServicoTarefaCalendario } from '@/servicos/ServicoTarefaCalendario';
 import { ServicoTaxasJuro } from '@/servicos/ServicoTaxasJuro';
 import { SHARED_SETTING_KEYS, ServicoDefinicoesPartilhadas } from '@/servicos/ServicoDefinicoesPartilhadas';
 import { DEFAULT_ACCESS_SCHEDULE, normalizeAccessSchedule, validateAccessSchedule, type AccessSchedule } from '@/bibliotecas/horario-acesso';
-import { isCloudSyncUrl, startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { isCloudSyncUrl, startCloudSync, syncCloudNow, webCloudSyncConfig } from '@/servicos/ServicoSincronizacaoCloud';
 import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { LegalCase, Warranty } from '@/tipos/contencioso';
 import { getScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from '@/bibliotecas/contas';
@@ -1157,19 +1157,28 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         return () => clearInterval(interval);
     }, [refreshData]);
 
+    // Navegador: o código na forma do servidor pode chegar depois do arranque (verificação da subscrição).
+    const [webSyncKeyVersion, setWebSyncKeyVersion] = useState(0);
+    useEffect(() => {
+        const handler = () => setWebSyncKeyVersion(version => version + 1);
+        window.addEventListener('tango_tenant_sync_key_changed', handler);
+        return () => window.removeEventListener('tango_tenant_sync_key_changed', handler);
+    }, []);
+
     useEffect(() => {
         if (!companySettings.syncEnabled || !isCloudSyncUrl(companySettings.syncUrl)) return;
-        // No navegador, a chave é o Código de Acesso validado na ligação à empresa (o mesmo que a cloud confirma).
-        const webCode = !(window as any).electronAPI ? localStorage.getItem('tango_active_tenant_code') : null;
-        const webTenant = !(window as any).electronAPI ? localStorage.getItem('tango_active_tenant_id') : null;
-        const apiKey = webCode || companySettings.syncApiKey || companySettings.syncPasskey || '';
+        // No navegador, a chave é o Código de Acesso tal como está guardado no servidor (o mesmo que o computador
+        // recebe ao ligar-se): o código escrito pelo utilizador pode diferir em hífens ou espaços.
+        const web = webCloudSyncConfig();
+        const apiKey = web?.apiKey || companySettings.syncApiKey || companySettings.syncPasskey || '';
         return startCloudSync({
             url: companySettings.syncUrl,
             apiKey,
-            tenantId: webTenant || companySettings.nif || 'tango-default',
+            tenantId: web?.tenantId || companySettings.nif || 'tango-default',
+            extraKeys: [...(web?.extraKeys || []), companySettings.syncPasskey, companySettings.syncApiKey],
             onRemoteApplied: refreshData
         });
-    }, [companySettings.syncEnabled, companySettings.syncUrl, companySettings.syncApiKey, companySettings.syncPasskey, companySettings.nif, refreshData]);
+    }, [companySettings.syncEnabled, companySettings.syncUrl, companySettings.syncApiKey, companySettings.syncPasskey, companySettings.nif, refreshData, webSyncKeyVersion]);
 
     useEffect(() => {
         const initServerInfo = async () => {

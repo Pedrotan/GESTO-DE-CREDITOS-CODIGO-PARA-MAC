@@ -3146,7 +3146,22 @@ app.whenReady().then(async () => {
       removed += 1;
     }
     if (!statements.length) return { applied: 0, deleted: 0 };
-    await runTransaction(validateDbTransaction(statements));
+    try {
+      await runTransaction(validateDbTransaction(statements));
+    } catch (error: any) {
+      // Um registo inválido não impede os restantes: um a um.
+      console.warn("[Sync] Utilizadores da web aplicados um a um:", error?.message);
+      let written = 0;
+      for (const statement of statements) {
+        try {
+          await runTransaction(validateDbTransaction([statement]));
+          written += 1;
+        } catch (rowError: any) {
+          console.warn("[Sync] Utilizador da web não gravado:", rowError?.message);
+        }
+      }
+      if (!written) throw error;
+    }
     await writeAuthAudit(currentUser, "users_synced_from_web",
       `Sincronização de utilizadores da versão web: ${applied} criado(s)/actualizado(s), ${removed} removido(s).`);
     return { applied, deleted: removed };

@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
 import { useToast } from '@/ganchos/usar-toast';
-import { isCloudSyncUrl, type CloudSyncStatus } from '@/servicos/ServicoSincronizacaoCloud';
+import { isCloudSyncUrl, resendUsersOnNextSync, type CloudSyncStatus } from '@/servicos/ServicoSincronizacaoCloud';
 import { cleanCompanyNif, getCloudBaseUrl, fetchCloudCompanyStatus, verifyCloudCompany } from '@/servicos/ServicoLigacaoNuvem';
 
 // App de computador: usa o NIF da empresa para a encontrar na nuvem (versão web) e, depois de confirmado
@@ -126,6 +126,8 @@ export function LigacaoNuvemDesktop() {
         try {
             const linked = await verifyCloudCompany(nif, accessCode);
             if (cleanCompanyNif(linked.tenantId) !== nif) throw new Error('O Código de Acesso pertence a outra empresa.');
+            // Religar envia sempre os utilizadores de novo: a versão web pode tê-los perdido.
+            resendUsersOnNextSync();
             await updateCompanySettings({
                 syncEnabled: true,
                 syncUrl: getCloudBaseUrl(),
@@ -143,7 +145,7 @@ export function LigacaoNuvemDesktop() {
                 description: result?.state === 'error'
                     ? `${result.message || 'Erro de sincronização.'} Vai tentar de novo automaticamente.`
                     : result
-                        ? `${result.pushed || 0} alterações enviadas e ${result.pulled || 0} recebidas.${result.skipped ? ` ${result.skipped} alterações antigas, cifradas com uma chave anterior, foram ignoradas.` : ''} A partir de agora é automática.`
+                        ? `${result.pushed || 0} alterações enviadas e ${result.pulled || 0} recebidas.${result.usersSent ? ' Os utilizadores já podem entrar na versão web.' : ''}${result.skipped ? ` ${result.skipped} alterações antigas, cifradas com uma chave anterior, foram ignoradas.` : ''} A partir de agora é automática.`
                         : 'A sincronização continua em segundo plano e passa a ser automática.',
                 variant: result?.state === 'error' ? 'destructive' : undefined,
             });

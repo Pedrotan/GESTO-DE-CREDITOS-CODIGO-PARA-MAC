@@ -26,6 +26,11 @@ type CloudSyncConfig = {
     url: string;
     apiKey: string;
     tenantId: string;
+    /**
+     * Outras formas conhecidas do mesmo Código de Acesso (ex.: como foi escrito no navegador). Só servem para
+     * ler o que outro dispositivo cifrou; o envio usa sempre `apiKey`.
+     */
+    extraKeys?: Array<string | null | undefined>;
     onRemoteApplied?: () => void | Promise<void>;
 };
 
@@ -40,19 +45,26 @@ const CURSOR_KEY = 'cloud_sync_cursor_v1';
 export const CLOUD_SYNC_BOOTSTRAP_KEY = 'cloud_sync_bootstrap_v3';
 const REPROCESS_KEY = 'cloud_sync_reprocess_v2';
 // Última lista de utilizadores enviada por este computador (só se reenvia quando muda).
-const USERS_DIGEST_KEY = 'cloud_sync_users_digest_v1';
+// v2: reenvia uma vez, marcada como lista completa, para o servidor a guardar à parte para a versão web.
+const USERS_DIGEST_KEY = 'cloud_sync_users_digest_v2';
+// Navegador: data da última lista completa de utilizadores recebida do computador da empresa.
+const USERS_ROSTER_AT_KEY = 'cloud_sync_users_roster_at_v1';
 // Impressão digital da chave com que este computador já enviou a fotografia completa dos dados.
 const KEY_FINGERPRINT_KEY = 'cloud_sync_key_fingerprint_v1';
 /** Avisa o login de que chegaram utilizadores (versão web). */
 export const USERS_SYNCED_EVENT = 'tango-users-synced';
 const MAX_PUSH_OPERATIONS = 100;
+// Bytes por pedido (envio e recepção): com ficheiros, 100 operações podiam passar o limite do servidor e,
+// em ligações lentas, não chegar dentro do tempo.
+const MAX_PUSH_BYTES = 1_500_000;
+const MAX_PULL_BYTES = 2_000_000;
 const MAX_PULL_ROUNDS = 10;
 const SYNC_INTERVAL_MS = 30_000;
 const INCOMPLETE_GROUP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SYNCABLE_SQL = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
 
 let activeConfig: CloudSyncConfig | null = null;
-let syncPromise: Promise<{ success: boolean; pushed?: number; pulled?: number; conflicts?: number; message?: string }> | null = null;
+let syncPromise: Promise<{ success: boolean; pushed?: number; pulled?: number; conflicts?: number; skipped?: number; message?: string; usersRoster?: UsersRosterOutcome }> | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let onlineHandler: (() => void) | null = null;
 let writeHandler: (() => void) | null = null;
@@ -76,6 +88,21 @@ export type CloudSyncStatus = {
     skipped?: number;
     /** O servidor recusou o Código de Acesso guardado (alterado ou revogado no Tango Master). */
     authFailed?: boolean;
+    /** Computador: a lista de utilizadores foi enviada nesta sincronização. */
+    usersSent?: boolean;
+    /** Navegador: estado da lista de utilizadores vinda do computador da empresa. */
+    usersRoster?: UsersRosterOutcome;
+};
+
+export type UsersRosterOutcome = {
+    /**
+     * none: o computador ainda não enviou a lista; current: já recebida e sem alterações; applied: recebida agora;
+     * unreadable: cifrada com outro Código de Acesso; error: falha ao contactar o servidor ou ao gravar.
+     */
+    state: 'none' | 'current' | 'applied' | 'unreadable' | 'error';
+    at?: string;
+    applied?: number;
+    message?: string;
 };
 let lastStatus: CloudSyncStatus = { state: 'idle' };
 export const getLastCloudSyncStatus = () => lastStatus;
@@ -142,15 +169,26 @@ const readAll = async (store: string): Promise<SyncOperation[]> => {
     return values;
 };
 
-// Envia no máximo MAX_PUSH_OPERATIONS, sem nunca partir uma transacção entre dois envios.
-const getQueuedOperations = async (limit = MAX_PUSH_OPERATIONS): Promise<SyncOperation[]> => {
+// Envia no máximo MAX_PUSH_OPERATIONS (e cerca de MAX_PUSH_BYTES), sem nunca partir uma transacção entre dois envios.
+const getQueuedOperations = async (limit = MAX_PUSH_OPERATIONS): Promise<{ batch: SyncOperation[]; more: boolean }> => {
     const all = await readAll(STORE_NAME);
-    if (all.length <= limit) return all;
-    const batch = all.slice(0, limit);
-    const lastTx = batch[batch.length - 1].txId;
-    if (lastTx) batch.push(...all.slice(limit).filter(operation => operation.txId === lastTx));
-    return batch;
+    const batch: SyncOperation[] = [];
+    let bytes = 0;
+    for (let index = 0; index < all.length; index++) {
+        const size = JSON.stringify(all[index]).length;
+        if (batch.length && (batch.length >= limit || bytes + size > MAX_PUSH_BYTES)) {
+            const lastTx = batch[batch.length - 1].txId;
+            if (lastTx) batch.push(...all.slice(index).filter(operation => operation.txId === lastTx));
+            break;
+        }
+        batch.push(all[index]);
+        bytes += size;
+    }
+    return { batch, more: batch.length < all.length };
 };
+
+// Tempo de espera proporcional ao volume: em ligações lentas (dezenas de KB/s) 2 MB levam minutos.
+const requestTimeout = (bytes: number) => Math.min(300_000, 30_000 + Math.ceil(bytes / 10));
 
 const deleteOperations = async (ids: string[], store = STORE_NAME) => {
     if (!ids.length) return;
@@ -231,17 +269,53 @@ const bytesToBase64 = (bytes: Uint8Array) => {
 };
 const base64ToBytes = (value: string) => Uint8Array.from(atob(value), char => char.charCodeAt(0));
 
-const deriveKey = async (secret: string, tenantId: string) => {
-    const encoder = new TextEncoder();
-    const material = await crypto.subtle.importKey('raw', encoder.encode(secret), 'PBKDF2', false, ['deriveKey']);
-    return crypto.subtle.deriveKey(
-        { name: 'PBKDF2', salt: encoder.encode(`tango-sync:${tenantId}`), iterations: 120_000, hash: 'SHA-256' },
-        material,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt', 'decrypt']
-    );
+// A derivação (120 000 iterações) é cara: cada chave é calculada uma vez por sessão.
+const derivedKeys = new Map<string, Promise<CryptoKey>>();
+const deriveKey = (secret: string, tenantId: string) => {
+    const cacheId = `${tenantId}\n${secret}`;
+    let key = derivedKeys.get(cacheId);
+    if (!key) {
+        key = (async () => {
+            const encoder = new TextEncoder();
+            const material = await crypto.subtle.importKey('raw', encoder.encode(secret), 'PBKDF2', false, ['deriveKey']);
+            return crypto.subtle.deriveKey(
+                { name: 'PBKDF2', salt: encoder.encode(`tango-sync:${tenantId}`), iterations: 120_000, hash: 'SHA-256' },
+                material,
+                { name: 'AES-GCM', length: 256 },
+                false,
+                ['encrypt', 'decrypt']
+            );
+        })();
+        key.catch(() => derivedKeys.delete(cacheId));
+        derivedKeys.set(cacheId, key);
+    }
+    return key;
 };
+
+const normalizeAccessCode = (value: string) => value.trim().replace(/[-\s]/g, '').toUpperCase();
+
+/**
+ * Formas do mesmo Código de Acesso: como foi guardado, sem hífens/espaços e no formato do Tango Master
+ * (TG-XXXX-XXXX). O servidor aceita todas, mas a chave de cifra depende do texto exacto: um dispositivo que
+ * guardou o código escrito de outra forma não conseguia ler o que o outro enviou.
+ */
+const accessCodeVariants = (values: Array<string | null | undefined>) => {
+    const variants: string[] = [];
+    for (const value of values) {
+        if (!value) continue;
+        const normalized = normalizeAccessCode(value);
+        variants.push(value, value.trim(), normalized);
+        if (/^TG[A-Z0-9]{8}$/.test(normalized)) variants.push(`TG-${normalized.slice(2, 6)}-${normalized.slice(6)}`);
+    }
+    return [...new Set(variants.filter(variant => variant.length >= 4))];
+};
+
+/** Chaves para ler: a de envio primeiro, depois as outras formas conhecidas do código. */
+const readKeysFor = async (config: CloudSyncConfig) =>
+    Promise.all(accessCodeVariants([config.apiKey, ...(config.extraKeys || [])]).map(secret => deriveKey(secret, config.tenantId)));
+
+const sameTenant = (left?: string, right?: string) =>
+    String(left || '').replace(/[^a-z0-9]/giu, '').toUpperCase() === String(right || '').replace(/[^a-z0-9]/giu, '').toUpperCase();
 
 const encryptOperation = async (operation: SyncOperation, key: CryptoKey) => {
     const iv = crypto.getRandomValues(new Uint8Array(12));
@@ -255,6 +329,20 @@ const decryptOperation = async (payload: string, key: CryptoKey): Promise<SyncOp
     if (!ivValue || !encryptedValue) throw new Error('Carga de sincronização inválida.');
     const decrypted = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: base64ToBytes(ivValue) }, key, base64ToBytes(encryptedValue));
     return JSON.parse(new TextDecoder().decode(decrypted));
+};
+
+/** Tenta cada chave; a que funcionar passa para o início da lista (as seguintes costumam usar a mesma). */
+const decryptWithAny = async (payload: string, keys: CryptoKey[]): Promise<SyncOperation> => {
+    for (let index = 0; index < keys.length; index++) {
+        try {
+            const operation = await decryptOperation(payload, keys[index]);
+            if (index > 0) keys.unshift(...keys.splice(index, 1));
+            return operation;
+        } catch {
+            // tenta a chave seguinte
+        }
+    }
+    throw new Error('Alteração cifrada com um Código de Acesso diferente.');
 };
 
 const quoteIdentifier = (value: string) => `"${value.replace(/"/g, '""')}"`;
@@ -376,31 +464,70 @@ const applyUserRoster = async (roster: UsersRoster) => {
         return result.applied + result.deleted;
     }
     const local = new Set(await sharedUserColumns());
-    const columns = (roster.columns || []).filter(column => local.has(column));
+    const incoming = Array.isArray(roster.columns) ? roster.columns.map(String) : [];
+    const columns = incoming.filter(column => local.has(column));
     if (!columns.includes('id') || !columns.includes('password') || !columns.includes('email')) return 0;
-    const positions = columns.map(column => roster.columns.indexOf(column));
-    const list = columns.map(quoteIdentifier).join(', ');
+    // Colunas obrigatórias neste navegador que o outro dispositivo pode não ter (bases antigas).
+    const missing = ['name', 'createdAt'].filter(column => local.has(column) && !columns.includes(column));
+    const target = [...columns, ...missing];
+    const list = target.map(quoteIdentifier).join(', ');
     const updates = columns.filter(column => column !== 'id').map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ');
+    const upsert = `INSERT INTO users (${list}) VALUES (${target.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`;
     const statements: SqlTransactionStatement[] = [];
     for (const row of roster.rows || []) {
         if (!Array.isArray(row)) continue;
-        const values = positions.map(position => row[position] ?? null);
-        const id = String(values[columns.indexOf('id')] || '');
-        const email = String(values[columns.indexOf('email')] || '').toLowerCase();
-        if (!id || !values[columns.indexOf('password')]) continue;
+        const value = (column: string) => row[incoming.indexOf(column)] ?? null;
+        const id = String(value('id') || '');
+        const email = String(value('email') || '').trim().toLowerCase();
+        // Sem perfil (role) não se sabe que permissões dar: o utilizador não entra.
+        if (!id || !email || !value('password') || !value('role')) continue;
         // Email já usado por outro utilizador deste navegador: não se sobrepõe.
         const clash = await sqlite.all<{ id: string }>('SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1', [email, id]);
         if (clash.length) continue;
-        statements.push({ sql: `INSERT INTO users (${list}) VALUES (${columns.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`, params: values });
+        // Nome de utilizador já usado por outro: entra sem ele (o login também aceita o email).
+        const username = columns.includes('username') && value('username')
+            ? String(value('username')) : null;
+        const usernameTaken = username
+            ? (await sqlite.all<{ id: string }>('SELECT id FROM users WHERE LOWER(username) = ? AND id <> ? LIMIT 1', [username.toLowerCase(), id])).length > 0
+            : false;
+        const params = target.map(column => {
+            const current = column === 'username' && usernameTaken ? null : value(column);
+            if (current !== null && current !== '') return typeof current === 'object' ? JSON.stringify(current) : current;
+            if (column === 'createdAt') return new Date().toISOString();
+            if (column === 'name') return email;
+            if (column === 'status') return 'active';
+            return current;
+        });
+        statements.push({ sql: upsert, params });
     }
     for (const id of roster.deleted || []) statements.push({ sql: 'DELETE FROM users WHERE id = ?', params: [String(id)] });
     if (!statements.length) return 0;
+    let applied = 0;
     applyingRemote = true;
-    try { await sqlite.transaction(statements); } finally { applyingRemote = false; }
+    try {
+        try {
+            await sqlite.transaction(statements);
+            applied = statements.length;
+        } catch (error) {
+            // Um registo inválido não pode impedir os restantes de entrar: um a um.
+            console.warn('[CloudSync] Lista de utilizadores aplicada registo a registo:', (error as Error)?.message);
+            for (const statement of statements) {
+                try {
+                    await sqlite.transaction([statement]);
+                    applied += 1;
+                } catch (rowError) {
+                    console.warn('[CloudSync] Utilizador recebido não gravado:', (rowError as Error)?.message);
+                }
+            }
+        }
+    } finally {
+        applyingRemote = false;
+    }
+    if (!applied) throw new Error('Nenhum utilizador recebido pôde ser gravado neste navegador.');
     // O que chegou não volta a ser enviado por este navegador.
     await saveUsersState();
     window.dispatchEvent(new Event(USERS_SYNCED_EVENT));
-    return statements.length;
+    return applied;
 };
 
 /** Navegador: utilizadores criados, alterados ou removidos aqui desde a última sincronização. */
@@ -418,18 +545,26 @@ const webUsersChange = async () => {
     return { columns, rows: changed, deleted, fingerprints };
 };
 
+const isUsersRoster = (operation: SyncOperation) => (operation as any).kind === 'users';
+
 const applyOperations = async (operations: SyncOperation[]): Promise<ApplyResult> => {
-    const accepted = operations.filter(operation => operation.commandVersion === 1 && activeConfig && operation.tenantId === activeConfig.tenantId);
-    const rosters = (accepted.filter(operation => (operation as any).kind === 'users') as unknown as UsersRoster[])
+    const accepted = operations.filter(operation => operation.commandVersion === 1 && activeConfig && sameTenant(operation.tenantId, activeConfig.tenantId));
+    const waiting = await readAll(INCOMING_STORE);
+    // Listas de utilizadores que ficaram por aplicar (ex.: chegaram ao computador sem sessão iniciada).
+    const rosters = [...waiting, ...accepted].filter(isUsersRoster)
         .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
-    const valid = accepted.filter(operation => (operation as any).kind !== 'users');
+    const valid = accepted.filter(operation => !isUsersRoster(operation));
+    const retryRosters: SyncOperation[] = [];
     let rosterApplied = 0;
     for (const roster of rosters) {
-        try { rosterApplied += await applyUserRoster(roster) ? 1 : 0; }
-        catch (error) { console.warn('[CloudSync] Utilizadores recebidos não aplicados:', error); }
+        try { rosterApplied += await applyUserRoster(roster as unknown as UsersRoster) ? 1 : 0; }
+        catch (error) {
+            console.warn('[CloudSync] Utilizadores recebidos não aplicados:', error);
+            // No computador a recusa costuma ser falta de sessão: tenta de novo nas próximas sincronizações.
+            if (window.electronAPI && Date.parse(roster.createdAt) > Date.now() - 7 * INCOMPLETE_GROUP_MAX_AGE_MS) retryRosters.push(roster);
+        }
     }
-    const waiting = await readAll(INCOMING_STORE);
-    const { complete, pending } = groupOperations([...waiting, ...valid]);
+    const { complete, pending } = groupOperations([...waiting.filter(operation => !isUsersRoster(operation)), ...valid]);
 
     // Transacções que nunca chegam completas não podem ficar à espera para sempre.
     const cutoff = Date.now() - INCOMPLETE_GROUP_MAX_AGE_MS;
@@ -441,9 +576,47 @@ const applyOperations = async (operations: SyncOperation[]): Promise<ApplyResult
 
     const result = await applyGroups(groups);
     await deleteOperations(waiting.map(operation => operation.id), INCOMING_STORE);
-    await putOperations(stillWaiting, INCOMING_STORE);
+    await putOperations([...stillWaiting, ...retryRosters], INCOMING_STORE);
     return { ...result, applied: result.applied + rosterApplied };
 };
+
+/**
+ * Navegador: lista completa de utilizadores guardada no servidor pelo computador da empresa. Não depende do
+ * cursor: chega mesmo que tenha sido enviada antes de este navegador ser ligado ou cifrada com outra forma do código.
+ */
+const receiveUsersRoster = async (config: CloudSyncConfig, saved: any, keys: CryptoKey[]): Promise<UsersRosterOutcome> => {
+    if (saved === undefined) return { state: 'error', message: 'O servidor ainda não tem a versão mais recente.' };
+    if (!saved) return { state: 'none' };
+    if (saved.unchanged || !saved.payload) return { state: 'current', at: saved.updatedAt };
+    let roster: SyncOperation;
+    try {
+        roster = await decryptWithAny(String(saved.payload), keys);
+    } catch {
+        return { state: 'unreadable', at: saved.updatedAt };
+    }
+    if (!isUsersRoster(roster) || !sameTenant(roster.tenantId, config.tenantId)) return { state: 'unreadable', at: saved.updatedAt };
+    try {
+        const applied = await applyUserRoster(roster as unknown as UsersRoster);
+        // Nada gravado (ex.: base deste navegador ainda a preparar): não marcar como recebida, volta a pedir.
+        if (!applied) return { state: 'error', at: saved.updatedAt, message: 'A base de dados deste navegador ainda não está pronta.' };
+        localStorage.setItem(scopedStorageKey(USERS_ROSTER_AT_KEY), String(saved.updatedAt || ''));
+        return { state: 'applied', at: saved.updatedAt, applied };
+    } catch (error: any) {
+        return { state: 'error', at: saved.updatedAt, message: error?.message || 'Os utilizadores recebidos não puderam ser gravados.' };
+    }
+};
+
+const localUsersCount = async () => {
+    try {
+        return Number((await sqlite.all<{ total: number }>('SELECT COUNT(*) AS total FROM users'))[0]?.total || 0);
+    } catch {
+        return 0;
+    }
+};
+
+let lastUsersRoster: UsersRosterOutcome | undefined;
+let rejectedRosterAt: string | undefined;
+export const getLastUsersRoster = () => lastUsersRoster;
 
 // Versões anteriores retinham créditos/pagamentos remotos em sync_conflicts. Aplica uma vez as inserções
 // retidas (seguras); alterações e eliminações retidas continuam para revisão manual.
@@ -519,12 +692,21 @@ export const syncCloudNow = async () => {
             }
             await createBootstrapOperations();
             const key = await deriveKey(config.apiKey, config.tenantId);
+            const readKeys = await readKeysFor(config);
             let cursor = Number(localStorage.getItem(scopedStorageKey(CURSOR_KEY)) || '0');
             let totalPushed = 0;
             let totalPulled = await reprocessRetainedOperations();
             let totalConflicts = 0;
             let totalSkipped = 0;
+            let usersSent = false;
+            let usersRoster: UsersRosterOutcome | undefined;
             const profile = await companyProfile();
+            // Navegador: pede sempre a lista de utilizadores do computador (só vem de novo quando mudou, ou
+            // completa se este navegador ainda não tiver nenhum utilizador).
+            const isWeb = !window.electronAPI;
+            const rosterSince = !isWeb ? undefined : await localUsersCount() > 0
+                ? localStorage.getItem(scopedStorageKey(USERS_ROSTER_AT_KEY)) || undefined
+                : rejectedRosterAt;
             // Computador: lista de utilizadores cifrada no processo principal, enviada só quando muda.
             const usersOut = window.electronAPI?.syncUsersPayload
                 ? await window.electronAPI.syncUsersPayload({
@@ -535,15 +717,22 @@ export const syncCloudNow = async () => {
                 : null;
 
             for (let round = 0; round < MAX_PULL_ROUNDS; round++) {
-                const queued = await getQueuedOperations();
+                const { batch: queued, more } = await getQueuedOperations();
                 const supported = queued.filter(operation => ['statement', 'snapshot', 'dynamic'].includes(operation.kind));
-                const outgoing = await Promise.all(supported.map(async operation => ({ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) })));
-                if (round === 0 && usersOut?.payload && usersOut.id) outgoing.push({ id: usersOut.id, deviceId: getDeviceId(), payload: usersOut.payload });
+                const outgoing: Array<{ id: string; deviceId: string; payload: string; kind?: 'users' }> = await Promise.all(
+                    supported.map(async operation => ({ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) })));
+                // Lista completa: o servidor guarda também a última à parte, para a versão web a pedir directamente.
+                if (round === 0 && usersOut?.payload && usersOut.id) outgoing.push({ id: usersOut.id, deviceId: getDeviceId(), payload: usersOut.payload, kind: 'users' });
+                const requestBody = JSON.stringify({
+                    tenantId: config.tenantId, deviceId: getDeviceId(), cursor, operations: outgoing, maxBytes: MAX_PULL_BYTES,
+                    ...(round === 0 && profile ? { companyProfile: profile } : {}),
+                    ...(round === 0 && isWeb ? { usersRoster: true, usersRosterSince: rosterSince } : {}),
+                });
                 const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
-                    body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, operations: outgoing, ...(round === 0 && profile ? { companyProfile: profile } : {}) }),
-                    signal: AbortSignal.timeout(20_000)
+                    body: requestBody,
+                    signal: AbortSignal.timeout(requestTimeout(requestBody.length + MAX_PULL_BYTES))
                 });
                 const body = await response.json().catch(() => ({}));
                 if (!response.ok) throw Object.assign(new Error(body.message || body.error || `Erro de sincronização (${response.status}).`), { status: response.status });
@@ -551,14 +740,22 @@ export const syncCloudNow = async () => {
                 if (round === 0 && usersOut?.digest) {
                     localStorage.setItem(scopedStorageKey(USERS_DIGEST_KEY), usersOut.digest);
                     localStorage.setItem(scopedStorageKey(USERS_IDS_KEY), JSON.stringify(usersOut.ids || []));
+                    usersSent = Boolean(usersOut.payload);
+                    if (usersSent) console.info('[CloudSync] Lista de utilizadores enviada para a versão web.');
                 }
                 totalPushed += supported.length;
+
+                if (round === 0 && isWeb) {
+                    usersRoster = await receiveUsersRoster(config, body.usersRoster, readKeys);
+                    if (usersRoster.state === 'applied') totalPulled += 1;
+                    if (usersRoster.state === 'unreadable' && usersRoster.at) rejectedRosterAt = usersRoster.at;
+                }
 
                 const incoming: SyncOperation[] = [];
                 for (const item of body.operations || []) {
                     // Uma operação cifrada com uma chave antiga não pode bloquear a sincronização de tudo o resto.
                     try {
-                        incoming.push(await decryptOperation(item.payload, key));
+                        incoming.push(await decryptWithAny(item.payload, readKeys));
                     } catch {
                         totalSkipped += 1;
                     }
@@ -568,8 +765,9 @@ export const syncCloudNow = async () => {
                 totalConflicts += result.conflicts;
                 cursor = Number(body.cursor || cursor);
                 localStorage.setItem(scopedStorageKey(CURSOR_KEY), String(cursor));
-                if (!body.hasMore && queued.length < MAX_PUSH_OPERATIONS) break;
+                if (!body.hasMore && !more) break;
             }
+            if (usersRoster) lastUsersRoster = usersRoster;
 
             // Navegador: envia os utilizadores criados/alterados/removidos aqui (depois de receber os dos outros).
             if (!window.electronAPI) {
@@ -583,8 +781,8 @@ export const syncCloudNow = async () => {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
                         // O cursor fica igual: o que vier na resposta é recebido na próxima sincronização.
-                        body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, operations: [{ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) }] }),
-                        signal: AbortSignal.timeout(20_000)
+                        body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, pull: false, operations: [{ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) }] }),
+                        signal: AbortSignal.timeout(requestTimeout(JSON.stringify(change.rows).length * 2))
                     });
                     if (response.ok) {
                         localStorage.setItem(scopedStorageKey(USERS_STATE_KEY), JSON.stringify(change.fingerprints));
@@ -599,11 +797,11 @@ export const syncCloudNow = async () => {
                 deviceId: getDeviceId(), query: (sql, params) => sqlite.all(sql, params), appVersion: `${window.electronAPI ? 'PC' : 'Web'} 3.0.2`,
             });
             if (totalSkipped) console.warn(`[CloudSync] ${totalSkipped} operações antigas cifradas com outra chave foram ignoradas.`);
-            const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped };
+            const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped, usersRoster };
             failureCount = 0;
             retryNotBefore = 0;
             const pending = await getPendingSyncCount().catch(() => 0);
-            emitStatus({ state: pending ? 'pending' : 'synced', pending, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped, at: new Date().toISOString() });
+            emitStatus({ state: pending ? 'pending' : 'synced', pending, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped, usersSent, usersRoster: lastUsersRoster, at: new Date().toISOString() });
             return result;
         } catch (error: any) {
             const message = error?.name === 'TimeoutError' ? 'O servidor demorou muito a responder.'
@@ -630,6 +828,7 @@ const scheduleSync = (delay = 750) => {
 export const startCloudSync = (config: CloudSyncConfig) => {
     stopCloudSync();
     activeConfig = { ...config, url: normalizeBaseUrl(config.url) };
+    rejectedRosterAt = undefined;
     failureCount = 0;
     retryNotBefore = 0;
     onlineHandler = () => { retryNotBefore = 0; scheduleSync(100); };
@@ -665,4 +864,59 @@ export const stopCloudSync = () => {
     writeHandler = null;
     activeConfig = null;
     emitStatus({ state: 'idle' });
+};
+
+/** Computador: volta a enviar a lista completa de utilizadores na próxima sincronização (ex.: ao religar à web). */
+export const resendUsersOnNextSync = () => {
+    localStorage.removeItem(scopedStorageKey(USERS_DIGEST_KEY));
+};
+
+/** Navegador: configuração da empresa ligada (guardada na ligação com NIF e Código de Acesso). */
+export const webCloudSyncConfig = (): CloudSyncConfig | null => {
+    if (typeof window === 'undefined' || window.electronAPI) return null;
+    const tenantId = localStorage.getItem('tango_active_tenant_id');
+    const typedCode = localStorage.getItem('tango_active_tenant_code');
+    const serverCode = localStorage.getItem('tango_active_tenant_sync_key');
+    const apiKey = serverCode || typedCode;
+    if (!tenantId || !apiKey) return null;
+    return { url: window.location.origin, apiKey, tenantId, extraKeys: [typedCode, serverCode] };
+};
+
+/**
+ * Login da versão web: pede já ao servidor a lista de utilizadores do computador da empresa e grava-a,
+ * sem esperar pela sincronização completa (pedido leve, sem receber as restantes alterações).
+ */
+export const receiveUsersFromCloud = async (): Promise<UsersRosterOutcome> => {
+    const config = activeConfig || webCloudSyncConfig();
+    if (!config) return { state: 'error', message: 'Este navegador ainda não está ligado a uma empresa.' };
+    if (!navigator.onLine) return { state: 'error', message: 'Sem ligação à Internet.' };
+    try {
+        const readKeys = await readKeysFor(config);
+        const requestBody = JSON.stringify({
+            tenantId: config.tenantId, deviceId: getDeviceId(), cursor: 0, operations: [], pull: false, usersRoster: true,
+        });
+        const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
+            body: requestBody,
+            signal: AbortSignal.timeout(requestTimeout(MAX_PULL_BYTES)),
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok) {
+            return {
+                state: 'error',
+                message: response.status === 401
+                    ? 'O Código de Acesso guardado neste navegador já não é aceite. Volte a ligar a empresa com o código actual.'
+                    : body.message || `O servidor respondeu com erro (${response.status}).`,
+            };
+        }
+        const outcome = await receiveUsersRoster(config, body.usersRoster, readKeys);
+        lastUsersRoster = outcome;
+        return outcome;
+    } catch (error: any) {
+        return {
+            state: 'error',
+            message: error?.name === 'TimeoutError' ? 'O servidor demorou muito a responder.' : 'Não foi possível contactar o servidor da nuvem.',
+        };
+    }
 };

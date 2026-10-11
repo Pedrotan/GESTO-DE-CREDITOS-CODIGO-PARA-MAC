@@ -13,7 +13,7 @@ import 'sweetalert2/dist/sweetalert2.min.css';
 
 const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const DISMISS_KEY = 'tango_subscription_warning_dismissed';
-const TENANT_KEYS = ['tango_company_status', 'tango_active_tenant_authorized', 'tango_active_tenant_code', 'tango_active_tenant_multi'];
+const TENANT_KEYS = ['tango_company_status', 'tango_active_tenant_authorized', 'tango_active_tenant_code', 'tango_active_tenant_sync_key', 'tango_active_tenant_multi'];
 
 type Blocked = { reason: 'blocked' | 'expired'; message: string };
 
@@ -57,6 +57,11 @@ export const GuardaSubscricaoWeb = () => {
                 setBlocked(null);
                 // A empresa pode ter mudado o modo multi-empresa no executável: o layout acompanha.
                 storeWebMultiTenant(data.multiTenant);
+                // Navegadores ligados antes de guardarem o código na forma do servidor (a que cifra os dados).
+                if (data.syncPasskey && localStorage.getItem('tango_active_tenant_sync_key') !== data.syncPasskey) {
+                    localStorage.setItem('tango_active_tenant_sync_key', String(data.syncPasskey));
+                    window.dispatchEvent(new Event('tango_tenant_sync_key_changed'));
+                }
                 setExpiresAt(data.expiresAt || null);
                 return;
             }
