@@ -2968,24 +2968,27 @@ app.whenReady().then(async () => {
       if (reservedFirstUser) firstUserCreationReserved = false;
     }
   });
+  // Depois de existir um utilizador nesta conta, as leituras exigem sessão. Contar os utilizadores antes de cada
+  // leitura punha uma consulta extra na fila da base e, atrás de leituras grandes, falhava por timeout.
+  let usersKnownForPath = "";
+  const accountHasUsers = async () => {
+    if (usersKnownForPath === dbPath) return true;
+    const count: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
+    if (Number(count?.total || 0) > 0) { usersKnownForPath = dbPath; return true; }
+    return false;
+  };
   ipcMain.handle("db-query", async (event, sql, params) => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("query", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!financialSchemaBootstrapOpen) {
-      const count: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
-      if (Number(count?.total || 0) > 0) userAuth.assertAuthenticated(event.sender.id);
-    }
+    if (!financialSchemaBootstrapOpen && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
     return runQuery("query", request.sql, request.params);
   });
   ipcMain.handle("db-get", async (event, sql, params) => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("get", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!financialSchemaBootstrapOpen) {
-      const count: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
-      if (Number(count?.total || 0) > 0) userAuth.assertAuthenticated(event.sender.id);
-    }
+    if (!financialSchemaBootstrapOpen && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
     return runQuery("get", request.sql, request.params);
   });
   ipcMain.handle("db-exec", async (event, sql) => {

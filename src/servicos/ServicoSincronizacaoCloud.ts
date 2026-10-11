@@ -261,36 +261,51 @@ const quoteIdentifier = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
 // Fotografia completa das tabelas sincronizáveis, para que um dispositivo novo receba tudo o que já existe.
 // As linhas entram com INSERT OR IGNORE: nunca substituem dados que o outro dispositivo já tenha.
+// Lê por páginas (as tabelas com ficheiros em pequenas páginas) e cede a vez entre páginas: uma leitura única
+// de uma tabela grande ocupava a base mais de 60 s e as outras consultas falhavam por timeout.
+const BOOTSTRAP_PAGE_SIZE = 200;
+const BOOTSTRAP_FILE_TABLES: Record<string, number> = { payment_proofs: 5, credit_documents: 5 };
+// O servidor aceita até 2 MB por operação cifrada (base64 ≈ +35%): linhas maiores não se enviam.
+const MAX_SNAPSHOT_ROW_CHARS = 1_400_000;
 const createBootstrapOperations = async () => {
     if (localStorage.getItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY)) === 'true') return;
     const tables = await sqlite.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
     const deviceId = getDeviceId();
     const operations: SyncOperation[] = [];
     let order = 0;
+    let oversized = 0;
 
     for (const { name } of tables) {
         if (!/^[\w-]+$/u.test(name) || SYNC_EXCLUDED_TABLES.has(name.toLowerCase())) continue;
-        const rows = await sqlite.all<Record<string, unknown>>(`SELECT * FROM ${quoteIdentifier(name)}`);
-        for (const row of rows) {
-            const columns = Object.keys(row);
-            if (!columns.length) continue;
-            operations.push({
-                id: crypto.randomUUID(),
-                deviceId,
-                kind: 'snapshot',
-                table: name,
-                columns,
-                params: columns.map(column => row[column] ?? null),
-                commandVersion: 1,
-                tenantId: activeConfig?.tenantId || '',
-                entityId: String(row.id || ''),
-                createdAt: new Date(Date.now() + order++).toISOString(),
-                bootstrap: true
-            });
-            if (operations.length >= 250) await putOperations(operations.splice(0));
+        const pageSize = BOOTSTRAP_FILE_TABLES[name.toLowerCase()] || BOOTSTRAP_PAGE_SIZE;
+        for (let offset = 0; ; offset += pageSize) {
+            const rows = await sqlite.all<Record<string, unknown>>(`SELECT * FROM ${quoteIdentifier(name)} LIMIT ${pageSize} OFFSET ${offset}`);
+            for (const row of rows) {
+                const columns = Object.keys(row);
+                if (!columns.length) continue;
+                const params = columns.map(column => row[column] ?? null);
+                if (JSON.stringify(params).length > MAX_SNAPSHOT_ROW_CHARS) { oversized += 1; continue; }
+                operations.push({
+                    id: crypto.randomUUID(),
+                    deviceId,
+                    kind: 'snapshot',
+                    table: name,
+                    columns,
+                    params,
+                    commandVersion: 1,
+                    tenantId: activeConfig?.tenantId || '',
+                    entityId: String(row.id || ''),
+                    createdAt: new Date(Date.now() + order++).toISOString(),
+                    bootstrap: true
+                });
+                if (operations.length >= 250) await putOperations(operations.splice(0));
+            }
+            if (rows.length < pageSize) break;
+            await new Promise(resolve => setTimeout(resolve, 0));
         }
     }
     await putOperations(operations);
+    if (oversized) console.warn(`[CloudSync] ${oversized} registos maiores do que o limite de envio ficaram só neste dispositivo.`);
     localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
 };
 
