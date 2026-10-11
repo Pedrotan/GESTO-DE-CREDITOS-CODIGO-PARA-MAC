@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tango-creditos-pwa-v1';
+const CACHE_NAME = 'tango-creditos-pwa-v2';
 const APP_SHELL = ['/', '/manifest.webmanifest', '/favicon.png', '/pwa-192.png', '/pwa-512.png', '/sql-wasm.wasm'];
 
 self.addEventListener('install', event => {
@@ -19,6 +19,8 @@ self.addEventListener('fetch', event => {
   if (request.method !== 'GET') return;
   const url = new URL(request.url);
   if (url.pathname.startsWith('/api/')) return;
+  // Eventos em tempo real (SSE) nunca passam pela cache: uma resposta HTML guardada partia a ligação.
+  if (url.pathname === '/events' || (request.headers.get('accept') || '').includes('text/event-stream')) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(

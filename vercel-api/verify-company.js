@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
+import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -94,6 +95,7 @@ export default async function handler(req, res) {
     } catch {
       // Ignorar se já existe
     }
+    await ensureTenantProfileColumns(sql);
 
     // Procurar a empresa cadastrada pelo NIF
     const rows = await sql('SELECT * FROM tango_tenants WHERE UPPER(tenant_id) = $1', [tenantId]);
@@ -156,6 +158,8 @@ export default async function handler(req, res) {
       syncPasskey: tenant.access_code || rawCode,
       status: tenant.status,
       expiresAt: tenant.expires_at,
+      // Layout da versão web: true/false conforme configurado na empresa; null = ainda desconhecido.
+      multiTenant: typeof tenant.multi_tenant === 'boolean' ? tenant.multi_tenant : null,
       message: 'Empresa verificada e autorizada com sucesso!'
     });
 

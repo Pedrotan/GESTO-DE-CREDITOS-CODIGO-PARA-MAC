@@ -14,6 +14,7 @@ import { formatCurrency, formatDateTime } from '@/bibliotecas/formatters';
 import { cn, getFileUrl } from '@/bibliotecas/utils';
 import { ROLES } from '@/tipos/autenticacao';
 import { AccountSwitcher } from '@/componentes/contas/AccountSwitcher';
+import { useWebMultiTenant } from '@/ganchos/usar-multi-empresa-web';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,6 +69,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
     window.addEventListener('tango-cloud-sync-status', handler);
     return () => window.removeEventListener('tango-cloud-sync-status', handler);
   }, []);
+  const webMultiTenant = useWebMultiTenant();
   const cloudLinked = Boolean(companySettings?.syncEnabled && isCloudSyncUrl(companySettings?.syncUrl));
   const pendingLabel = cloudStatus.pending ? `${cloudStatus.pending} pendente${cloudStatus.pending === 1 ? '' : 's'}` : '';
   const cloudStatusLabel = cloudStatus.state === 'synced' ? 'Sincronizado'
@@ -404,7 +406,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           )}
         </div>
 
-        {companySettings?.enableMultiTenant !== false && (
+        {(webMultiTenant ?? companySettings?.enableMultiTenant !== false) && (
           <div className="hidden lg:block">
             <AccountSwitcher compact />
           </div>

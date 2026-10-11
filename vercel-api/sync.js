@@ -56,6 +56,11 @@ export default async function handler(req, res) {
     if (!await enforceDistributedRateLimit(sql, req, res, {
       limit: 600, windowMs: 60_000, scope: 'sync-tenant', subject: tenantId, dimension: 'subject'
     })) return;
+    // O executável da empresa informa se foi configurado como multi-empresa (a web mostra o mesmo layout).
+    if (typeof body.companyProfile?.multiTenant === 'boolean') {
+      await sql(`UPDATE tango_tenants SET multi_tenant = $2 WHERE UPPER(tenant_id) = UPPER($1) AND multi_tenant IS DISTINCT FROM $2`,
+        [tenantId, body.companyProfile.multiTenant]);
+    }
   } catch (error) {
     console.error('[sync][auth]', error);
     return send(res, 500, { success: false, message: 'O servidor não conseguiu validar o acesso.' });

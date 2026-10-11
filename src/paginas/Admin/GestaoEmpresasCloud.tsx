@@ -26,6 +26,8 @@ export type CloudTenant = {
     createdAt: string;
     lastSyncAt: string | null;
     operations?: number;
+    /** Modo multi-empresa (definido no cadastro e actualizado pelo executável da empresa); null = desconhecido. */
+    multiTenant?: boolean | null;
 };
 
 export type RegistrationRequest = {
@@ -106,6 +108,7 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
     const [expiryOption, setExpiryOption] = useState<'1m' | '3m' | '6m' | '1y' | 'lifetime' | 'custom'>('1y');
     const [customExpiry, setCustomExpiry] = useState('');
     const [paidAmount, setPaidAmount] = useState('');
+    const [multiTenantOption, setMultiTenantOption] = useState(false);
     const [isSearchingNIF, setIsSearchingNIF] = useState(false);
     const [nifFoundSource, setNifFoundSource] = useState<string | null>(null);
     const [isCreating, setIsCreating] = useState(false);
@@ -283,7 +286,8 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                         tenantId: tenant.tenantId,
                         name: tenant.name,
                         accessCode: tenant.accessCode || undefined,
-                        expiresAt: tenant.expiresAt || undefined
+                        expiresAt: tenant.expiresAt || undefined,
+                        ...(typeof tenant.multiTenant === 'boolean' ? { multiTenant: tenant.multiTenant } : {})
                     });
                     count++;
                 } catch (err: any) {
@@ -389,7 +393,8 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                 tenantId: cleanNif,
                 name: cleanName,
                 accessCode: cleanCode,
-                expiresAt: expiresAt || undefined
+                expiresAt: expiresAt || undefined,
+                multiTenant: multiTenantOption
             });
 
             const issued = {
@@ -412,7 +417,8 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                 expiresAt,
                 createdAt: new Date().toISOString(),
                 lastSyncAt: null,
-                operations: 0
+                operations: 0,
+                multiTenant: multiTenantOption
             };
 
             const updatedTenants = [newRecord, ...tenants.filter(t => t.tenantId !== cleanNif)];
@@ -452,6 +458,20 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
             const updated = tenants.map(t => t.tenantId === tenant.tenantId ? { ...t, status: nextStatus as any } : t);
             setTenants(updated);
             notify('success', nextStatus === 'blocked' ? `Acesso de "${tenant.name}" bloqueado.` : `Acesso de "${tenant.name}" reativado.`);
+        } catch (e: any) {
+            notify('error', e.message);
+        } finally {
+            setBusyTenant('');
+        }
+    };
+
+    const handleToggleMultiTenant = async (tenant: CloudTenant) => {
+        setBusyTenant(tenant.tenantId);
+        try {
+            const next = tenant.multiTenant !== true;
+            await api('update', { tenantId: tenant.tenantId, multiTenant: next });
+            setTenants(tenants.map(t => t.tenantId === tenant.tenantId ? { ...t, multiTenant: next } : t));
+            notify('success', `"${tenant.name}" passa a usar o layout ${next ? 'Multi-Empresa' : 'de Empresa Única'} na versão web.`);
         } catch (e: any) {
             notify('error', e.message);
         } finally {
@@ -1014,6 +1034,26 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                             />
                             <p className="text-[11px] text-slate-400">Fica registado na Contabilidade do Tango Master.</p>
                         </div>
+                        <div className="mt-3 space-y-1.5">
+                            <Label className="text-xs font-bold text-slate-600 dark:text-slate-300">Modo da Empresa</Label>
+                            <div className="flex flex-wrap gap-2">
+                                {[{ value: false, label: 'Empresa Única' }, { value: true, label: 'Multi-Empresa (Multi-Tenant)' }].map(opt => (
+                                    <button
+                                        key={String(opt.value)}
+                                        type="button"
+                                        onClick={() => setMultiTenantOption(opt.value)}
+                                        className={`px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all border ${
+                                            multiTenantOption === opt.value
+                                                ? 'bg-[#F37021] text-white border-[#F37021] shadow-sm'
+                                                : 'bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-orange-300'
+                                        }`}
+                                    >
+                                        {opt.label}
+                                    </button>
+                                ))}
+                            </div>
+                            <p className="text-[11px] text-slate-400">Define o layout da versão web (seletor de contas). O executável da empresa atualiza-o se for configurado de outra forma.</p>
+                        </div>
                     </div>
                 </div>
 
@@ -1102,6 +1142,15 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                                         >
                                             {tenant.status === 'active' ? 'Ativa' : 'Bloqueada'}
                                         </span>
+                                        <button
+                                            type="button"
+                                            onClick={() => void handleToggleMultiTenant(tenant)}
+                                            disabled={busyTenant === tenant.tenantId}
+                                            title="Alterar o layout da versão web desta empresa"
+                                            className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[10px] font-black uppercase tracking-wider text-slate-700 hover:bg-orange-100 hover:text-[#F37021] disabled:opacity-50 dark:bg-slate-800 dark:text-slate-300"
+                                        >
+                                            {tenant.multiTenant === true ? 'Multi-Empresa' : tenant.multiTenant === false ? 'Empresa Única' : 'Modo por definir'}
+                                        </button>
                                         {(() => {
                                             const state = subscriptionState(tenant.expiresAt);
                                             if (state.kind === 'expired') return (

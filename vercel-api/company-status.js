@@ -71,7 +71,7 @@ export default async function handler(req, res) {
     let tenantRows = [];
     try {
       tenantRows = await sql(`
-        SELECT tenant_id, name, status, expires_at 
+        SELECT * 
         FROM tango_tenants 
         WHERE UPPER(tenant_id) = $1 
            OR UPPER(REPLACE(COALESCE(access_code, ''), '-', '')) = $1
@@ -110,7 +110,7 @@ export default async function handler(req, res) {
           tenantId: tenant.tenant_id,
           name: tenant.name,
           logo: null,
-          isMultiTenant: false
+          isMultiTenant: tenant.multi_tenant === true
         }
       });
     }

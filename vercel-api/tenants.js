@@ -4,6 +4,7 @@ import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
+import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
 
 // API de administração de empresas (tenants) e chaves de sincronização.
 // Uso exclusivo do Painel Master. Protegida por TANGO_MASTER_SECRET
@@ -58,6 +59,7 @@ const ensureTable = async (sql) => {
   } catch {
     // Ignorar se já existe
   }
+  await ensureTenantProfileColumns(sql);
 
   // Necessária aqui também porque a query "list" faz JOIN com esta tabela
   await sql(`
@@ -81,6 +83,7 @@ const toPublicTenant = (row) => ({
   expiresAt: row.expires_at,
   createdAt: row.created_at,
   lastSyncAt: row.last_sync_at,
+  multiTenant: typeof row.multi_tenant === 'boolean' ? row.multi_tenant : null,
   operations: row.operations !== undefined ? Number(row.operations) : undefined
 });
 
@@ -141,6 +144,8 @@ export default async function handler(req, res) {
   const tenantId = rawTenantId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
   const name = String(body.name || '').trim();
   const expiresAt = body.expiresAt ? new Date(body.expiresAt) : null;
+  // Modo multi-empresa escolhido no Tango Master (o executável da empresa actualiza-o depois).
+  const multiTenant = typeof body.multiTenant === 'boolean' ? body.multiTenant : null;
   if (expiresAt && Number.isNaN(expiresAt.getTime())) {
     return send(res, 400, { success: false, message: 'Data de expiração inválida.' });
   }
@@ -246,9 +251,9 @@ export default async function handler(req, res) {
       const normKey = normalizeCode(code);
       
       await sql(
-        `INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash, access_code, status, expires_at)
-         VALUES ($1, $2, $3, $4, $5, 'active', $6)`,
-        [tenantId, tenantHash, name, sha256(normKey), code, expiresAt]
+        `INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash, access_code, status, expires_at, multi_tenant)
+         VALUES ($1, $2, $3, $4, $5, 'active', $6, $7)`,
+        [tenantId, tenantHash, name, sha256(normKey), code, expiresAt, multiTenant]
       );
       await ensureRegistrationRequestsTable(sql);
       await sql(`UPDATE tango_registration_requests SET status = 'approved', handled_at = NOW(), updated_at = NOW()
@@ -258,7 +263,7 @@ export default async function handler(req, res) {
         success: true, 
         key: code, 
         accessCode: code,
-        tenant: { tenantId, name, accessCode: code, status: 'active', expiresAt } 
+        tenant: { tenantId, name, accessCode: code, status: 'active', expiresAt, multiTenant } 
       });
     }
 
@@ -276,9 +281,10 @@ export default async function handler(req, res) {
         `UPDATE tango_tenants SET
            name = COALESCE(NULLIF($2, ''), name),
            status = COALESCE($3, status),
-           expires_at = CASE WHEN $4 THEN $5 ELSE expires_at END
+           expires_at = CASE WHEN $4 THEN $5 ELSE expires_at END,
+           multi_tenant = CASE WHEN $6 THEN $7 ELSE multi_tenant END
          WHERE UPPER(tenant_id) = UPPER($1)`,
-        [tenantId, name, status, body.expiresAt !== undefined, expiresAt]
+        [tenantId, name, status, body.expiresAt !== undefined, expiresAt, multiTenant !== null, multiTenant]
       );
       const [updated] = await sql('SELECT * FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       return send(res, 200, { success: true, tenant: toPublicTenant(updated) });

@@ -6,7 +6,7 @@ import { Textarea } from '@/componentes/ui/textarea';
 import { useData } from '@/contextos/ContextoDados';
 import { scopedStorageKey } from '@/bibliotecas/contas';
 import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
-import { checkCompanyStatus, markCompanyActive, isCompanyActiveLocally } from '@/servicos/ServicoIdentidadeEmpresa';
+import { checkCompanyStatus, isCompanyActiveLocally, storeWebMultiTenant } from '@/servicos/ServicoIdentidadeEmpresa';
 import { getKnownCloudServers } from '@/servicos/ServicoLigacaoNuvem';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import {
@@ -65,6 +65,14 @@ const networkMessage = (err: any) => err?.name === 'TimeoutError'
     ? 'O servidor demorou muito a responder. Verifique a sua ligação à internet.'
     : 'Não foi possível comunicar com o servidor central. Verifique a sua ligação à internet.';
 
+// Navegadores ligados só com o NIF (versão anterior) ficaram sem Código de Acesso e a cloud recusa a
+// sincronização: voltar a pedir o código. Corre antes da primeira renderização da App.
+if (isPublicWebBuild && typeof localStorage !== 'undefined' && !localStorage.getItem('tango_active_tenant_code') &&
+    (localStorage.getItem('tango_company_status') === 'ACTIVE' || localStorage.getItem('tango_active_tenant_authorized') === 'true')) {
+    localStorage.removeItem('tango_company_status');
+    localStorage.removeItem('tango_active_tenant_authorized');
+}
+
 export const LigacaoEmpresaWeb = () => {
     const { updateCompanySettings } = useData();
 
@@ -112,36 +120,11 @@ export const LigacaoEmpresaWeb = () => {
         try {
             const res = await checkCompanyStatus(cleanInput);
             if (res.status === 'ACTIVE') {
-                const companyData = res.company || {
-                    id: cleanInput,
-                    tenantId: cleanInput,
-                    name: res.companyName || 'Empresa Registada',
-                    logo: null
-                };
-
-                await markCompanyActive(companyData);
-                await updateCompanySettings({
-                    nif: companyData.tenantId,
-                    name: companyData.name,
-                    logo: companyData.logo || null,
-                    syncEnabled: true,
-                    syncUrl: res.serverUrl || window.location.origin
-                });
-
-                setIsAuthorized(true);
-
-                await Swal.fire({
-                    title: 'Empresa Ativa Verificada!',
-                    html: `A empresa <strong>${companyData.name.replace(/[<>&"]/g, '')}</strong> está ativa no Tango Master Gen.<br/><br/><span style="color:#64748b;font-size:13px;">Acesso autorizado. Redirecionando para o Login...</span>`,
-                    icon: 'success',
-                    confirmButtonText: 'Continuar para o Login',
-                    confirmButtonColor: '#5b1ee2',
-                    timer: 2500,
-                    allowOutsideClick: false
-                });
-
-                window.location.hash = '#/entrar';
-                window.location.reload();
+                // Empresa ativa: o NIF não chega para entrar. Segue para o Código de Acesso, que também é a chave
+                // de sincronização deste navegador (sem ele a cloud recusa a sincronização).
+                if (res.company?.tenantId) setNif(res.company.tenantId);
+                setCompanyName(res.company?.name || res.companyName || '');
+                goTo('access');
             } else if (res.status === 'PENDING') {
                 localStorage.setItem('tango_company_status', 'PENDING');
                 setIsAuthorized(true);
@@ -204,18 +187,22 @@ export const LigacaoEmpresaWeb = () => {
             const verifiedPasskey = data.syncPasskey || cleanCode;
             const effectiveSyncUrl = serverUrl || window.location.origin;
 
+            localStorage.setItem('tango_company_status', 'ACTIVE');
             localStorage.setItem('tango_active_tenant_authorized', 'true');
             localStorage.setItem('tango_active_tenant_id', verifiedTenantId);
             localStorage.setItem('tango_active_tenant_name', verifiedName);
             localStorage.setItem('tango_active_tenant_code', cleanCode);
             localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
+            // Layout conforme a empresa foi configurada (multi-empresa ou não).
+            storeWebMultiTenant(data.multiTenant);
 
             await updateCompanySettings({
                 nif: verifiedTenantId,
                 name: verifiedName,
                 syncEnabled: true,
                 syncUrl: effectiveSyncUrl,
-                syncPasskey: verifiedPasskey
+                syncPasskey: verifiedPasskey,
+                ...(typeof data.multiTenant === 'boolean' ? { enableMultiTenant: data.multiTenant } : {})
             });
 
             let pulled = 0;

@@ -14,6 +14,12 @@ export const sha256 = (value) => crypto.createHash('sha256').update(String(value
 
 export const normalizeCode = (val) => String(val || '').trim().replace(/[-\s]/g, '').toUpperCase();
 
+// Modo multi-empresa da empresa: definido no cadastro do Tango Master e actualizado pelo executável da empresa.
+// NULL = ainda desconhecido (a versão web mantém o comportamento das suas definições locais).
+export const ensureTenantProfileColumns = async (sql) => {
+  await sql(`ALTER TABLE tango_tenants ADD COLUMN IF NOT EXISTS multi_tenant BOOLEAN`);
+};
+
 // Middleware de autorização por empresa (tenant).
 // Se a empresa estiver registada no Painel Master (tabela tango_tenants),
 // valida a chave/código individual dela + estado + expiração. Caso contrário,
@@ -38,6 +44,7 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
   } catch {
     // Ignorar se já existe
   }
+  await ensureTenantProfileColumns(sql);
 
   // Quem falhou a chave demasiadas vezes fica bloqueado (por IP e por empresa) antes de qualquer comparação.
   if (req) {

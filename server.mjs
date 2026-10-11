@@ -172,15 +172,12 @@ const initDatabaseBridge = async () => {
         }
       ];
 
+      // Só cria as empresas iniciais em falta: nunca repõe códigos, estado ou validade geridos no Tango Master.
       for (const sc of seedCompanies) {
         await pgPool.query(`
           INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash, access_code, status)
           VALUES ($1, $2, $3, $4, $5, 'active')
-          ON CONFLICT (tenant_id) DO UPDATE SET
-            name = EXCLUDED.name,
-            key_hash = EXCLUDED.key_hash,
-            access_code = EXCLUDED.access_code,
-            status = 'active'
+          ON CONFLICT DO NOTHING
         `, [sc.id, sc.tHash, sc.name, sc.kHash, sc.code]);
       }
       console.log('[VPS Database] Empresas autorizadas do Tango Master verificadas e ativas na base de dados.');

@@ -94,6 +94,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     // não executar migrações nem consultas protegidas antes do próximo login.
                     const isSchemaReady = Boolean(schemaStatus?.ready) || Boolean(bootstrap?.hasUsers);
                     if (isSchemaReady && !initialStatus?.authenticated) {
+                        // Atualização instalada sobre uma base com utilizadores: as colunas/tabelas novas só podem ser
+                        // criadas enquanto a janela de arranque está aberta (o login fecha-a). Aplicá-las já, antes do login.
+                        if (!schemaStatus?.ready) {
+                            try { await db.init(); }
+                            catch (e) { console.warn('[Auth] Migrações de arranque falharam:', e); }
+                        }
                         setHasUsers(Boolean(bootstrap?.hasUsers));
                         setUser(null);
                         sessionStorage.removeItem('user');
@@ -374,6 +380,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             let retryNativeAfterRemoteImport = false;
             if (window.electronAPI?.userAuthLogin) {
+                // O login fecha a janela de migrações: esperar que as do arranque terminem.
+                await db.init().catch(e => console.warn('[Auth] Migrações de arranque falharam:', e));
                 const nativeResult = await window.electronAPI.userAuthLogin(cleanInput, cleanPassword);
                 if (nativeResult.accessDenied) throw new Error(nativeResult.message || 'Acesso fora do horário permitido.');
                 if (nativeResult.requires2FA && nativeResult.userId) {
@@ -408,7 +416,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     // Check if sync is enabled to find the Master
                     const Definicoes = await db.get<any>('SELECT syncEnabled, syncUrl, syncPasskey FROM company_settings WHERE id = 1');
 
-                    if (Definicoes?.syncEnabled && Definicoes?.syncUrl) {
+                    // O proxy SQL (/api/sql) só existe no Master da rede local; a cloud (VPS/Vercel) não o tem.
+                    const { VPS_DOMAIN_URL, VPS_IP_URL, VERCEL_CLOUD_URL } = await import('@/servicos/ServicoLigacaoNuvem');
+                    const syncBase = String(Definicoes?.syncUrl || '').trim().replace(/\/+$/, '');
+                    const isCloudServer = /^https:/i.test(syncBase) ||
+                        [VPS_DOMAIN_URL, VPS_IP_URL, VERCEL_CLOUD_URL, 'http://tangogestaoecreditos.tech'].some(base => syncBase.startsWith(base));
+                    if (Definicoes?.syncEnabled && syncBase && !isCloudServer) {
                         console.log('🔍 User not found locally. Attempting remote authentication via Master...');
 
                         const { remoteSql, setRemoteSqlConfig } = await import('@/bibliotecas/adaptador-bd-remoto');

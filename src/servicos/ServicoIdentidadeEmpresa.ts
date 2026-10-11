@@ -3,6 +3,27 @@ import { RepositorioDefinicoesEmpresa } from '@/repositorios/RepositorioDefinico
 
 export type CompanyStatus = 'ACTIVE' | 'PENDING' | 'NOT_FOUND' | 'BLOCKED' | 'EXPIRED';
 
+// Modo multi-empresa da empresa ligada a este navegador, tal como o Tango Master o devolve ao validar o
+// Código de Acesso (definido no cadastro e actualizado pelo executável da empresa).
+export const WEB_MULTI_TENANT_KEY = 'tango_active_tenant_multi';
+export const WEB_PROFILE_EVENT = 'tango_company_profile_changed';
+
+/** true/false conforme a configuração central da empresa; null quando ainda não é conhecida (ou no executável). */
+export const webMultiTenantSetting = (): boolean | null => {
+  if (typeof window === 'undefined' || (window as any).electronAPI || typeof localStorage === 'undefined') return null;
+  const value = localStorage.getItem(WEB_MULTI_TENANT_KEY);
+  return value === '1' ? true : value === '0' ? false : null;
+};
+
+/** Guarda o modo recebido do servidor e avisa o layout (cabeçalho e login) para se ajustar. */
+export const storeWebMultiTenant = (value: unknown) => {
+  if (typeof localStorage === 'undefined') return;
+  const previous = localStorage.getItem(WEB_MULTI_TENANT_KEY);
+  if (typeof value === 'boolean') localStorage.setItem(WEB_MULTI_TENANT_KEY, value ? '1' : '0');
+  else localStorage.removeItem(WEB_MULTI_TENANT_KEY);
+  if (previous !== localStorage.getItem(WEB_MULTI_TENANT_KEY) && typeof window !== 'undefined') window.dispatchEvent(new Event(WEB_PROFILE_EVENT));
+};
+
 export interface CompanyBasicInfo {
   id: string;
   tenantId: string;

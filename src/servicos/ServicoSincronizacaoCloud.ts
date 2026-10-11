@@ -367,6 +367,21 @@ const emitPending = async () => {
     emitStatus({ ...lastStatus, state: lastStatus.state === 'error' ? 'error' : 'pending', pending });
 };
 
+/**
+ * Modo multi-empresa configurado no executável, enviado ao servidor para a versão web mostrar o mesmo layout.
+ * Só o computador o envia: um navegador novo ainda não tem as definições reais da empresa.
+ */
+const companyProfile = async (): Promise<{ multiTenant: boolean } | undefined> => {
+    if (typeof window === 'undefined' || !window.electronAPI) return undefined;
+    try {
+        const row = (await sqlite.all<{ enableMultiTenant: number | null }>('SELECT enableMultiTenant FROM company_settings WHERE id = 1'))[0];
+        if (!row || row.enableMultiTenant === null || row.enableMultiTenant === undefined) return undefined;
+        return { multiTenant: Number(row.enableMultiTenant) !== 0 };
+    } catch {
+        return undefined;
+    }
+};
+
 export const syncCloudNow = async () => {
     if (syncPromise) return syncPromise;
     syncPromise = (async () => {
@@ -385,6 +400,7 @@ export const syncCloudNow = async () => {
             let totalPulled = await reprocessRetainedOperations();
             let totalConflicts = 0;
             let totalSkipped = 0;
+            const profile = await companyProfile();
 
             for (let round = 0; round < MAX_PULL_ROUNDS; round++) {
                 const queued = await getQueuedOperations();
@@ -393,7 +409,7 @@ export const syncCloudNow = async () => {
                 const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
-                    body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, operations: outgoing }),
+                    body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, operations: outgoing, ...(round === 0 && profile ? { companyProfile: profile } : {}) }),
                     signal: AbortSignal.timeout(20_000)
                 });
                 const body = await response.json().catch(() => ({}));

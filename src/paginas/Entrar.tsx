@@ -32,6 +32,7 @@ import QRCode from 'qrcode';
 import { ModalAvisoHorario } from '@/componentes/modals/ModalAvisoHorario';
 import { isCompanyActiveLocally, authenticateCentralLogin } from '@/servicos/ServicoIdentidadeEmpresa';
 import { startCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { useWebMultiTenant } from '@/ganchos/usar-multi-empresa-web';
 
 const systemSlides = [
     {
@@ -85,7 +86,9 @@ export default function Login() {
         : isRealCompanyName(publicInfo?.name) ? publicInfo!.name : 'Tango Gestão de Créditos';
     const loginLogo = companySettings?.logo || publicInfo?.logo || null;
     // A "Conta de trabalho" só aparece quando o modo multi-empresa foi activado nas definições.
-    const multiTenantEnabled = publicInfo?.enableMultiTenant ?? (isRealCompanyName(companySettings?.name) && companySettings?.enableMultiTenant === true);
+    // Na versão web vale o modo devolvido pelo Tango Master ao validar o Código de Acesso.
+    const webMultiTenant = useWebMultiTenant();
+    const multiTenantEnabled = webMultiTenant ?? publicInfo?.enableMultiTenant ?? (isRealCompanyName(companySettings?.name) && companySettings?.enableMultiTenant === true);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [activeSlide, setActiveSlide] = useState(0);

@@ -3,6 +3,7 @@ import { AlertTriangle, CalendarClock, Loader2, RefreshCw, ShieldOff, X } from '
 import { Button } from '@/componentes/ui/button';
 import { stopCloudSync } from '@/servicos/ServicoSincronizacaoCloud';
 import { subscriptionState } from '@/bibliotecas/subscricao';
+import { storeWebMultiTenant } from '@/servicos/ServicoIdentidadeEmpresa';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 
@@ -12,7 +13,7 @@ import 'sweetalert2/dist/sweetalert2.min.css';
 
 const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const DISMISS_KEY = 'tango_subscription_warning_dismissed';
-const TENANT_KEYS = ['tango_active_tenant_authorized', 'tango_active_tenant_code'];
+const TENANT_KEYS = ['tango_company_status', 'tango_active_tenant_authorized', 'tango_active_tenant_code', 'tango_active_tenant_multi'];
 
 type Blocked = { reason: 'blocked' | 'expired'; message: string };
 
@@ -54,6 +55,8 @@ export const GuardaSubscricaoWeb = () => {
             const data = await response.json().catch(() => ({}));
             if (response.ok && data.success) {
                 setBlocked(null);
+                // A empresa pode ter mudado o modo multi-empresa no executável: o layout acompanha.
+                storeWebMultiTenant(data.multiTenant);
                 setExpiresAt(data.expiresAt || null);
                 return;
             }
