@@ -67,4 +67,23 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Bibliotecas grandes em ficheiros próprios: em ligações lentas ou instáveis, um ficheiro único de vários
+        // MB falhava a meio (ERR_INCOMPLETE_CHUNKED_ENCODING); partes menores chegam e ficam em cache uma a uma.
+        manualChunks(id: string) {
+          if (!id.includes("node_modules")) return undefined;
+          if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) return "vendor-react";
+          if (/[\\/]node_modules[\\/]@radix-ui[\\/]/.test(id)) return "vendor-radix";
+          if (/[\\/]node_modules[\\/](recharts|recharts-scale|d3-[\w-]+|victory-vendor|decimal\.js-light)[\\/]/.test(id)) return "vendor-graficos";
+          if (/[\\/]node_modules[\\/](jspdf|jspdf-autotable|html2canvas|canvg|dompurify|fflate|pdf-lib)[\\/]/.test(id)) return "vendor-pdf";
+          if (/[\\/]node_modules[\\/](xlsx|exceljs|jszip)[\\/]/.test(id)) return "vendor-excel";
+          if (/[\\/]node_modules[\\/](date-fns)[\\/]/.test(id)) return "vendor-datas";
+          if (/[\\/]node_modules[\\/](lucide-react)[\\/]/.test(id)) return "vendor-icones";
+          return undefined;
+        },
+      },
+    },
+  },
 }));
