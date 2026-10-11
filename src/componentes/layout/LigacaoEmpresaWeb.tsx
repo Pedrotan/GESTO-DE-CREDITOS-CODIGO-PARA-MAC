@@ -8,6 +8,7 @@ import { scopedStorageKey } from '@/bibliotecas/contas';
 import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { checkCompanyStatus, markCompanyActive, isCompanyActiveLocally } from '@/servicos/ServicoIdentidadeEmpresa';
 import { getKnownCloudServers } from '@/servicos/ServicoLigacaoNuvem';
+import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import {
     Building2, KeyRound, Loader2, ShieldCheck, Eye, EyeOff, ArrowLeft, ArrowRight, ShieldAlert,
     Shield, LogIn, ClipboardList, CheckCircle2, Cloud, Send, Lock, Info, CheckCircle,
@@ -271,6 +272,8 @@ export const LigacaoEmpresaWeb = () => {
         }
     };
 
+    // Portal de acesso só na versão web; o executável segue para o assistente local (licença/ativação).
+    if (!isPublicWebBuild) return null;
     const isCompanyActive = isCompanyActiveLocally();
     if (isCompanyActive || isAuthorized) return null;
     if (typeof window !== 'undefined' && (

@@ -117,7 +117,7 @@ export default async function handler(req, res) {
   ].map(normalizeSecret).filter(Boolean);
 
   if (!candidates.some(candidate => safeEqual(candidate, masterSecret))) {
-    return send(res, 401, { success: false, message: 'Chave mestra inválida. Use o valor de TANGO_MASTER_SECRET configurado no projeto na Vercel.' });
+    return send(res, 401, { success: false, message: 'Chave mestra inválida. Use o mesmo valor de TANGO_MASTER_SECRET configurado neste servidor (ficheiro .env da VPS ou variáveis do projeto na Vercel).' });
   }
 
   const client = neon(databaseUrl);

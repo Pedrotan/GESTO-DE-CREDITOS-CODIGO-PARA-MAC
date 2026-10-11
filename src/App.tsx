@@ -99,7 +99,7 @@ const AppContent = () => {
   const [tenantAuthorized, setTenantAuthorized] = useState(() => {
     return localStorage.getItem('tango_company_status') === 'ACTIVE' ||
            localStorage.getItem('tango_active_tenant_authorized') === 'true' ||
-           (!isPublicWebBuild && isCompanyActiveLocally());
+           !isPublicWebBuild;
   });
 
   useEffect(() => {
@@ -107,7 +107,7 @@ const AppContent = () => {
       setTenantAuthorized(
         localStorage.getItem('tango_company_status') === 'ACTIVE' ||
         localStorage.getItem('tango_active_tenant_authorized') === 'true' ||
-        (!isPublicWebBuild && isCompanyActiveLocally())
+        !isPublicWebBuild
       );
     };
     window.addEventListener('tango_tenant_authorized', handleAuth);
