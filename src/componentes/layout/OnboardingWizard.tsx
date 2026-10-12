@@ -1,10 +1,10 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
-import { Building2, ArrowRight, ShieldCheck, UserCog, Lock, Loader2, CheckCircle, ShieldAlert, Sparkles, CircleCheck, Eye, EyeOff, Laptop, Globe, Wifi, Database, Search, X } from 'lucide-react';
+import { Building2, ArrowRight, ShieldCheck, UserCog, Lock, Loader2, CheckCircle, ShieldAlert, Sparkles, CircleCheck, Eye, EyeOff, Laptop, Globe, Wifi, Database, Search, X, ArrowLeft, Check, Layers } from 'lucide-react';
 import { Checkbox } from '@/componentes/ui/checkbox';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import Swal from 'sweetalert2';
@@ -19,6 +19,41 @@ import { getActiveAccountIdFromStorage, removeScopedLocalStorageItem, scopedStor
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { isCompanyActiveLocally, submitOnboardingCentral } from '@/servicos/ServicoIdentidadeEmpresa';
+import { acceptSystemTerms, setOnboardingOpen } from '@/bibliotecas/termos-sistema';
+type StepMeta = { label: string; title: string; description: string; icon: React.ComponentType<{ className?: string }> };
+const STEP_META: Record<number, StepMeta> = {
+    1: { label: 'Tipo de instalação', title: 'Como deseja configurar este computador?', description: 'Escolha se este será o computador principal (servidor) ou se vai ligar-se a um que já existe na empresa.', icon: Sparkles },
+    1.5: { label: 'Servidor local', title: 'Ligação ao servidor local', description: 'Siga as instruções para ligar este computador ao servidor Master na rede Wi-Fi.', icon: Wifi },
+    2: { label: 'Sobre nós', title: 'Propriedade e suporte', description: 'Conheça a equipa por trás da tecnologia e os nossos canais de suporte.', icon: Globe },
+    3: { label: 'Privacidade', title: 'Privacidade e protecção de dados', description: 'Conformidade com a Lei n.º 22/11 (Lei da Protecção de Dados Pessoais de Angola).', icon: ShieldCheck },
+    4: { label: 'Instituição', title: 'Identidade da instituição', description: 'Como a sua empresa vai aparecer nos documentos, recibos e relatórios.', icon: Building2 },
+    5: { label: 'Multi-empresa', title: 'Módulo multi-empresas', description: 'Escolha se pretende criar e gerir várias empresas isoladas no mesmo sistema.', icon: Layers },
+    6: { label: 'Administrador', title: 'Conta do administrador', description: 'Defina as credenciais de acesso com controlo total do sistema.', icon: UserCog },
+    7: { label: 'Concluído', title: 'Tudo pronto para começar!', description: 'A configuração inicial foi concluída com sucesso. Seja bem-vindo!', icon: CircleCheck },
+};
+
+const INSTALL_OPTIONS: Array<{ mode: 'standard' | 'connect'; icon: React.ComponentType<{ className?: string }>; title: string; text: string; points: string[]; tone: string; badge?: string }> = [
+    {
+        mode: 'standard', icon: Database, title: 'Instalação Principal', badge: 'Recomendado', tone: 'from-blue-600 to-indigo-600',
+        text: 'Este computador será o servidor da empresa: os dados ficam guardados aqui e os outros postos ligam-se a ele.',
+        points: ['Base de dados local e protegida', 'Ligação à versão web', 'Cópias de segurança automáticas'],
+    },
+    {
+        mode: 'connect', icon: Laptop, title: 'Conetar a Servidor', tone: 'from-sky-500 to-cyan-500',
+        text: 'Este computador liga-se a um servidor que já existe na rede Wi-Fi da empresa e trabalha com os mesmos dados.',
+        points: ['Sem configurar a empresa de novo', 'Dados sempre no servidor', 'Ideal para postos de atendimento'],
+    },
+];
+
+/** Enquanto existe, o modal dos termos do login não abre (ficaria por baixo e bloquearia os cliques). */
+const MarcadorOnboardingVisivel = () => {
+    useEffect(() => {
+        setOnboardingOpen(true);
+        return () => setOnboardingOpen(false);
+    }, []);
+    return null;
+};
+
 export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } = {}) => {
     const activeAccountId = getActiveAccountIdFromStorage();
     const isSecondaryAccount = activeAccountId !== 'default';
@@ -429,6 +464,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
             setStep(3);
         } else if (step === 3) {
             if (!acceptedTerms) return;
+            acceptSystemTerms();
             setStep(4);
         } else if (step === 4) {
             if (!companyName.trim()) return;
@@ -782,35 +818,92 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
 
     if (!showOnboarding) return null;
 
+    const stepIndex = Math.max(0, visibleSteps.indexOf(step === 1.5 ? 1 : step));
+    const currentMeta = STEP_META[step] || STEP_META[1];
+    const CurrentIcon = currentMeta.icon;
+    // Voltar ao passo anterior (não depois de concluído).
+    const previousStep: number | undefined = step === 7 ? undefined : step === 1.5 ? 1 : visibleSteps[stepIndex - 1];
+    const progress = Math.round(((stepIndex + 1) / visibleSteps.length) * 100);
+
     return (
         <div className={cn(
-            "fixed inset-0 flex items-center justify-center overflow-y-auto p-3 sm:p-5",
-            isSecondaryAccount 
-                ? "z-[9999] bg-slate-950/70 backdrop-blur-md" 
-                : "z-[9999] bg-slate-950 bg-gradient-to-br from-slate-950 via-slate-900 to-[#0A1128]"
+            "fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto p-3 sm:p-6",
+            isSecondaryAccount ? "bg-slate-950/70 backdrop-blur-md" : "bg-[#050a18]"
         )}>
-            {/* Background Effects */}
+            <MarcadorOnboardingVisivel />
             {!isSecondaryAccount && (
-                <div className="absolute inset-0 overflow-hidden pointer-events-none">
-                    <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] bg-primary/20 rounded-full blur-[140px]" />
-                    <div className="absolute bottom-[-10%] right-[-10%] w-[50%] h-[50%] bg-blue-600/15 rounded-full blur-[140px]" />
+                <div className="pointer-events-none absolute inset-0 overflow-hidden">
+                    <div className="absolute -left-40 -top-40 h-[560px] w-[560px] animate-pulse rounded-full bg-blue-600/25 blur-[160px]" />
+                    <div className="absolute -bottom-52 -right-40 h-[600px] w-[600px] rounded-full bg-indigo-500/20 blur-[170px]" />
+                    <div className="absolute left-1/2 top-1/3 h-[320px] w-[320px] -translate-x-1/2 rounded-full bg-amber-500/10 blur-[150px]" />
+                    <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,.7)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.7)_1px,transparent_1px)] [background-size:46px_46px] [mask-image:radial-gradient(ellipse_at_center,black_25%,transparent_75%)]" />
                 </div>
             )}
 
             <div className={cn(
-                "relative w-full bg-background border border-border/80 shadow-2xl rounded-3xl overflow-hidden flex flex-col animate-in fade-in zoom-in duration-300 my-auto",
-                isSecondaryAccount ? "max-w-[960px] max-h-[92vh]" : "max-w-[740px] max-h-[92vh]"
+                "relative my-auto flex w-full overflow-hidden rounded-[28px] border border-white/10 bg-background shadow-[0_40px_120px_-20px_rgba(0,0,0,0.65)] animate-in fade-in zoom-in-95 duration-500",
+                isSecondaryAccount ? "max-w-[1000px] max-h-[92vh]" : "max-w-[1080px] max-h-[94vh]"
             )}>
-                {/* Header Container */}
-                <div className={cn(
-                    "bg-primary text-primary-foreground relative overflow-hidden shrink-0",
-                    isSecondaryAccount ? "p-4 sm:p-5" : "p-5 sm:p-6"
-                )}>
-                    <div className="absolute right-0 top-0 opacity-10 p-4">
-                        <Sparkles className="h-32 w-32" />
+                {/* Painel lateral: marca e progresso */}
+                <aside className="relative hidden w-[290px] shrink-0 flex-col overflow-hidden bg-gradient-to-b from-[#13235a] via-[#0c1840] to-[#070e26] p-7 text-white md:flex">
+                    <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full border border-white/10" />
+                    <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border border-white/10" />
+                    <div className="pointer-events-none absolute -bottom-28 -left-20 h-72 w-72 rounded-full bg-blue-500/20 blur-3xl" />
+
+                    <div className="relative flex items-center gap-3">
+                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 shadow-inner ring-1 ring-white/20 backdrop-blur">
+                            <Building2 className="h-6 w-6" />
+                        </div>
+                        <div className="leading-tight">
+                            <p className="text-base font-black tracking-tight">Tango Gestão</p>
+                            <p className="text-[11px] font-medium text-white/60">de Créditos · ERP</p>
+                        </div>
                     </div>
 
-                    {/* Close button for secondary account modal */}
+                    <div className="relative mt-8">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-300/90">
+                            {isSecondaryAccount ? 'Nova empresa' : 'Configuração inicial'}
+                        </p>
+                        <p className="mt-2 text-xl font-black leading-snug">
+                            {isSecondaryAccount ? 'Prepare a nova conta de trabalho.' : 'Bem-vindo à nova era da sua gestão.'}
+                        </p>
+                    </div>
+
+                    <ol className="relative mt-8 flex-1">
+                        {visibleSteps.map((s, index) => {
+                            const meta = STEP_META[s];
+                            const done = index < stepIndex;
+                            const current = index === stepIndex;
+                            return (
+                                <li key={s} className="relative flex gap-3 pb-5 last:pb-0">
+                                    {index < visibleSteps.length - 1 && (
+                                        <span className={cn("absolute left-4 top-9 bottom-0 w-px -translate-x-1/2", done ? "bg-emerald-400/70" : "bg-white/15")} />
+                                    )}
+                                    <span className={cn(
+                                        "relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-bold transition-all duration-300",
+                                        done ? "border-emerald-400 bg-emerald-400 text-slate-900"
+                                            : current ? "border-white bg-white text-[#13235a] shadow-[0_0_0_5px_rgba(255,255,255,0.12)]"
+                                                : "border-white/25 text-white/50"
+                                    )}>
+                                        {done ? <Check className="h-4 w-4" /> : index + 1}
+                                    </span>
+                                    <div className="pt-1">
+                                        <p className={cn("text-sm font-semibold", current ? "text-white" : done ? "text-white/80" : "text-white/45")}>{meta.label}</p>
+                                        {current && <p className="text-[11px] text-white/55">Passo actual</p>}
+                                    </div>
+                                </li>
+                            );
+                        })}
+                    </ol>
+
+                    <div className="relative mt-6 space-y-1 border-t border-white/10 pt-4 text-[10px] leading-relaxed text-white/45">
+                        <p className="font-semibold text-white/70">Precisa de ajuda? +244 941 537 486</p>
+                        <p>Desenvolvido por DIGITAL NORTE - Comércio e Prestação de Serviços, (SU), Lda · Cuanza Norte, N'dalatando</p>
+                    </div>
+                </aside>
+
+                <div className="relative flex min-w-0 flex-1 flex-col">
+                    {/* Fechar (criação de conta secundária) */}
                     {isSecondaryAccount && (
                         <button
                             onClick={async () => {
@@ -828,7 +921,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                     setIsLoading(false);
                                 }
                             }}
-                            className="absolute right-3 top-3 z-20 p-2 rounded-xl bg-white/10 hover:bg-white/25 backdrop-blur-sm text-white/80 hover:text-white transition-all duration-200 hover:scale-105 active:scale-95"
+                            className="absolute right-4 top-4 z-20 rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:scale-105 hover:bg-muted hover:text-foreground active:scale-95"
                             title="Fechar"
                             disabled={isLoading}
                         >
@@ -836,93 +929,83 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                         </button>
                     )}
 
-                    <div className="relative z-10">
-                        <div className={cn("flex items-center gap-4", isSecondaryAccount ? "mb-3" : "mb-4")}>
-                            <div className={cn("bg-white/20 rounded-2xl backdrop-blur-sm", isSecondaryAccount ? "p-2.5" : "p-3")}>
-                                <Building2 className={cn("text-white", isSecondaryAccount ? "h-7 w-7" : "h-8 w-8")} />
+                    {/* Cabeçalho do passo */}
+                    <header className="relative shrink-0 border-b border-border/70 px-5 pb-5 pt-6 sm:px-8">
+                        <div className="mb-4 flex items-center gap-3 md:hidden">
+                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#13235a] to-indigo-700 text-white">
+                                <Building2 className="h-5 w-5" />
                             </div>
-                            <div>
-                                <h1 className={cn("font-bold tracking-tight", isSecondaryAccount ? "text-2xl" : "text-3xl")}>Tango Gestão de Créditos</h1>
-                                <p className={cn("text-primary-foreground/70 font-medium", isSecondaryAccount ? "text-sm" : "")}>Gestão Inteligente de Crédito e Cobranças</p>
+                            <p className="text-sm font-black tracking-tight">Tango Gestão de Créditos</p>
+                        </div>
+                        <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">
+                            Passo {stepIndex + 1} de {visibleSteps.length}
+                        </span>
+                        <div className="mt-3 flex items-start gap-4 pr-8">
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-indigo-600 text-white shadow-lg shadow-primary/30">
+                                <CurrentIcon className="h-6 w-6" />
+                            </div>
+                            <div className="min-w-0">
+                                <h2 className="text-xl font-black tracking-tight text-foreground sm:text-2xl">{currentMeta.title}</h2>
+                                <p className="mt-1 text-sm leading-relaxed text-muted-foreground">{currentMeta.description}</p>
                             </div>
                         </div>
-
-                        <div className="space-y-1">
-                            <h2 className="text-xl font-semibold">
-                                {step === 1 && "Bem-vindo à nova era da sua gestão!"}
-                                {step === 1.5 && "Ligação ao Servidor Local"}
-                                {step === 2 && "Informações de Propriedade e Suporte"}
-                                {step === 3 && "Políticas de Privacidade e Proteção de Dados"}
-                                {step === 4 && "Identidade da Instituição"}
-                                {step === 5 && "Módulo Multi-Empresas (Multi-Tenant)"}
-                                {step === 6 && "Segurança do Administrador"}
-                                {step === 7 && "Pronto para Começar!"}
-                            </h2>
-                            <p className="text-primary-foreground/80 leading-relaxed max-w-[90%] text-sm">
-                                {step === 1 && "Prepare o seu negócio de crédito para o próximo nível com ferramentas avançadas e seguras."}
-                                {step === 1.5 && "Siga as instruções abaixo para conetar este computador ao servidor Master na rede Wi-Fi."}
-                                {step === 2 && "Conheça a equipa por trás da tecnologia e os nossos canais de suporte."}
-                                {step === 3 && "Conformidade com a Lei n.º 22/11 (Lei da Protecção de Dados Pessoais de Angola)."}
-                                {step === 4 && "Como deseja que a sua empresa seja identificada nos documentos e relatórios."}
-                                {step === 5 && "Escolha se deseja habilitar a criação e gestão de múltiplas empresas isoladas no sistema."}
-                                {step === 6 && "Defina as credenciais de acesso para a gestão total do sistema."}
-                                {step === 7 && "A configuração inicial foi concluída com sucesso. Seja bem-vindo!"}
-                            </p>
+                        <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-muted md:hidden">
+                            <div className="h-full rounded-full bg-gradient-to-r from-primary to-indigo-600 transition-all duration-500" style={{ width: progress + '%' }} />
                         </div>
-                    </div>
-                </div>
+                    </header>
 
                 {/* Content Area */}
-                <div className={cn("bg-background flex-1 min-h-0 overflow-y-auto", isSecondaryAccount ? "p-4 sm:p-6" : "p-5 sm:p-6")}>
+                <div className={cn("bg-background flex-1 min-h-0 overflow-y-auto", isSecondaryAccount ? "p-5 sm:p-6" : "p-5 sm:p-8")}>
                     {step === 1 ? (
-                        <div className="space-y-8 animate-fade-in flex flex-col items-center justify-center py-4 h-full">
-                            <div className="text-center space-y-2 mb-4">
-                                <h3 className="text-2xl font-bold text-foreground">Como deseja configurar este computador?</h3>
-                                <p className="text-muted-foreground text-sm max-w-md mx-auto">
-                                    Escolha se este será o computador principal (Servidor) ou se irá conetar-se a um já existente.
-                                </p>
+                        <div className="flex h-full flex-col justify-center gap-6 py-1 animate-fade-in">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                                {INSTALL_OPTIONS.map(option => {
+                                    const Icon = option.icon;
+                                    const selected = onboardingMode === option.mode;
+                                    return (
+                                        <button
+                                            key={option.mode}
+                                            type="button"
+                                            onClick={() => {
+                                                setOnboardingMode(option.mode);
+                                                if (option.mode === 'connect') setStep(1.5);
+                                                else handleNext();
+                                            }}
+                                            className={cn(
+                                                "group relative flex flex-col overflow-hidden rounded-2xl border-2 bg-card p-5 text-left transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-primary/10",
+                                                selected ? "border-primary ring-4 ring-primary/10" : "border-border hover:border-primary/40"
+                                            )}
+                                        >
+                                            <span className={cn("pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gradient-to-br opacity-10 blur-2xl transition-opacity duration-300 group-hover:opacity-25", option.tone)} />
+                                            {option.badge && (
+                                                <span className="absolute right-4 top-4 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600">
+                                                    {option.badge}
+                                                </span>
+                                            )}
+                                            <span className={cn("flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg transition-transform duration-300 group-hover:rotate-3 group-hover:scale-110", option.tone)}>
+                                                <Icon className="h-7 w-7" />
+                                            </span>
+                                            <h4 className="mt-4 text-lg font-black tracking-tight text-foreground">{option.title}</h4>
+                                            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{option.text}</p>
+                                            <ul className="mt-4 space-y-1.5">
+                                                {option.points.map(point => (
+                                                    <li key={point} className="flex items-center gap-2 text-xs font-medium text-foreground/80">
+                                                        <CircleCheck className="h-4 w-4 shrink-0 text-emerald-500" /> {point}
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                            <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-bold text-primary">
+                                                Escolher <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
+                                            </span>
+                                        </button>
+                                    );
+                                })}
                             </div>
 
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 w-full max-w-2xl px-4">
-                                {/* Option 1: Standard Server */}
-                                <button
-                                    onClick={() => { setOnboardingMode('standard'); handleNext(); }}
-                                    className={cn(
-                                        "group flex flex-col items-center p-6 rounded-2xl border-2 transition-all text-center space-y-4 hover:shadow-xl",
-                                        onboardingMode === 'standard' ? "border-primary bg-primary/5 ring-4 ring-primary/10" : "border-border hover:border-primary/40 bg-card"
-                                    )}
-                                >
-                                    <div className="bg-primary/10 p-4 rounded-xl group-hover:scale-110 transition-transform">
-                                        <Database className="h-10 w-10 text-primary" />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-lg">Instalação Principal</h4>
-                                        <p className="text-xs text-muted-foreground mt-1">Computador Servidor (Master). Onde os dados serão guardados fisicamente.</p>
-                                    </div>
-                                </button>
-
-                                {/* Option 2: Slave Client */}
-                                <button
-                                    onClick={() => { setOnboardingMode('connect'); setStep(1.5); }}
-                                    className={cn(
-                                        "group flex flex-col items-center p-6 rounded-2xl border-2 transition-all text-center space-y-4 hover:shadow-xl",
-                                        onboardingMode === 'connect' ? "border-primary bg-primary/5 ring-4 ring-primary/10" : "border-border hover:border-primary/40 bg-card"
-                                    )}
-                                >
-                                    <div className="bg-blue-600/10 p-4 rounded-xl group-hover:scale-110 transition-transform">
-                                        <Laptop className="h-10 w-10 text-blue-600" />
-                                    </div>
-                                    <div>
-                                        <h4 className="font-bold text-lg">Conetar a Servidor</h4>
-                                        <p className="text-xs text-muted-foreground mt-1">Computador Cliente (Escravo). Irá buscar as configurações via rede Wi-Fi.</p>
-                                    </div>
-                                </button>
-                            </div>
-
-                            <div className="mt-8">
+                            <div className="text-center">
                                 <Button
                                     variant="link"
-                                    className="text-[10px] text-red-500 hover:text-red-700 opacity-60 hover:opacity-100 transition-opacity"
+                                    className="text-[11px] text-red-500 opacity-60 transition-opacity hover:text-red-700 hover:opacity-100"
                                     onClick={async () => {
                                         if (confirm("⚠️ ATENÇÃO: Isto irá apagar COMPLETAMENTE todos os dados e reiniciar a aplicação como nova.\n\nUse esta opção apenas se estiver a ter problemas técnicos graves ou loops.\n\nDeseja continuar?")) {
                                             try {
@@ -937,7 +1020,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                         }
                                     }}
                                 >
-                                    Problemas Técnicos? Fazer Reset de Fábrica
+                                    Problemas técnicos? Fazer reset de fábrica
                                 </Button>
                             </div>
                         </div>
@@ -1510,25 +1593,29 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                     )}
                 </div>
 
-                {/* Footer Actions */}
-                <div className={cn("border-t bg-muted/10 flex flex-col shrink-0", isSecondaryAccount ? "gap-2.5 p-3.5 sm:p-4" : "gap-3 p-4 sm:p-5")}>
-                    <div className="flex justify-between items-center gap-4">
-                        <div className="flex gap-1.5">
-                            {visibleSteps.map((s) => (
-                                <div
-                                    key={s}
-                                    className={`h-2 rounded-full transition-all duration-300 ${step === s ? 'w-8 sm:w-10 bg-primary' : 'w-2 bg-muted'}`}
-                                />
-                            ))}
-                        </div>
+                {/* Rodapé: voltar, avançar */}
+                <footer className={cn("shrink-0 border-t border-border/70 bg-muted/20", isSecondaryAccount ? "px-5 py-3.5 sm:px-6" : "px-5 py-4 sm:px-8")}>
+                    <div className="flex items-center justify-between gap-3">
+                        {previousStep !== undefined ? (
+                            <Button
+                                type="button"
+                                variant="ghost"
+                                onClick={() => setStep(previousStep)}
+                                disabled={isLoading}
+                                className="h-11 gap-2 rounded-xl px-4 font-semibold text-muted-foreground hover:text-foreground"
+                            >
+                                <ArrowLeft className="h-4 w-4" /> Voltar
+                            </Button>
+                        ) : (
+                            <p className="hidden items-center gap-2 text-xs font-medium text-muted-foreground sm:flex">
+                                <Lock className="h-3.5 w-3.5 text-emerald-600" /> Configuração segura · os dados ficam neste computador
+                            </p>
+                        )}
 
-                        <div className={cn("flex-1", isSecondaryAccount ? "max-w-[300px]" : "max-w-[240px]")}>
+                        <div className="w-full max-w-[260px]">
                             {step < 7 ? (
                                 <Button
-                                    className={cn(
-                                        "w-full gap-2.5 font-bold shadow-gold hover:scale-[1.02] active:scale-[0.98] transition-all",
-                                        isSecondaryAccount ? "h-11 text-sm sm:text-base" : "h-12 text-base"
-                                    )}
+                                    className="h-12 w-full gap-2.5 rounded-xl bg-gradient-to-r from-primary to-indigo-600 text-base font-bold text-white shadow-lg shadow-primary/30 transition-all hover:scale-[1.02] hover:brightness-110 active:scale-[0.98]"
                                     disabled={
                                         step === 3 ? !acceptedTerms :
                                             step === 4 ? !companyName.trim() :
@@ -1539,14 +1626,11 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                     {step === 1 ? 'Começar Agora' :
                                         step === 3 ? 'Aceitar e Continuar' :
                                             'Próximo Passo'}
-                                    <ArrowRight className={cn(isSecondaryAccount ? "h-5 w-5" : "h-5 w-5")} />
+                                    <ArrowRight className="h-5 w-5" />
                                 </Button>
                             ) : (
                                 <Button
-                                    className={cn(
-                                        "w-full font-bold bg-green-600 hover:bg-green-700 shadow-lg shadow-green-600/20 hover:scale-[1.02] active:scale-[0.98] transition-all",
-                                        isSecondaryAccount ? "h-11 text-sm sm:text-base" : "h-12 text-base"
-                                    )}
+                                    className="h-12 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 text-base font-bold text-white shadow-lg shadow-emerald-600/30 transition-all hover:scale-[1.02] hover:brightness-110 active:scale-[0.98]"
                                     onClick={handleComplete}
                                     disabled={isLoading}
                                 >
@@ -1556,21 +1640,18 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                             A Guardar...
                                         </>
                                     ) : (
-                                        'Finalizar e Entrar'
+                                        <>Finalizar e Entrar <ArrowRight className="ml-2 h-5 w-5" /></>
                                     )}
                                 </Button>
                             )}
                         </div>
                     </div>
-
-                    <p className={cn(
-                        "text-center text-muted-foreground uppercase font-medium",
-                        isSecondaryAccount ? "text-[10px] tracking-[0.18em]" : "text-[10px] sm:text-xs tracking-[0.2em] pt-1"
-                    )}>
-                        Desenvolvido por DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA | Cuanza Norte, N´dalatando
+                    <p className="mt-3 text-center text-[9px] font-medium uppercase tracking-[0.2em] text-muted-foreground md:hidden">
+                        Desenvolvido por DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA
                     </p>
+                </footer>
                 </div>
-            </div >
+            </div>
 
             <AlertModal
                 isOpen={alertConfig.isOpen}

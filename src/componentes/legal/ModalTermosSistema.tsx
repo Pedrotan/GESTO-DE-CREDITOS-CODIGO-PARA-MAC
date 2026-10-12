@@ -8,7 +8,7 @@ import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import { isCompanyActiveLocally } from '@/servicos/ServicoIdentidadeEmpresa';
 import {
     SYSTEM_PRIVACY_POLICY, SYSTEM_TERMS_OF_USE, SYSTEM_TERMS_UPDATED_AT, SYSTEM_TERMS_VERSION,
-    acceptSystemTerms, hasAcceptedSystemTerms, type SystemTermsSection,
+    ONBOARDING_VISIBILITY_EVENT, acceptSystemTerms, hasAcceptedSystemTerms, isOnboardingOpen, type SystemTermsSection,
 } from '@/bibliotecas/termos-sistema';
 
 type Tab = 'termos' | 'privacidade';
@@ -38,16 +38,29 @@ const Sections = ({ sections }: { sections: SystemTermsSection[] }) => (
 export function ModalTermosSistema() {
     const [pending, setPending] = useState(() => !hasAcceptedSystemTerms());
     const [portalVisible, setPortalVisible] = useState(companyPortalVisible);
+    const [onboardingVisible, setOnboardingVisible] = useState(isOnboardingOpen);
+    const [checked, setChecked] = useState(false);
     useEffect(() => {
-        const refresh = () => setPortalVisible(companyPortalVisible());
+        const refresh = () => {
+            setPortalVisible(companyPortalVisible());
+            setOnboardingVisible(isOnboardingOpen());
+            // O onboarding também aceita os termos: não voltar a pedi-los no login.
+            setPending(!hasAcceptedSystemTerms());
+        };
         window.addEventListener('tango_tenant_authorized', refresh);
         window.addEventListener('storage', refresh);
+        window.addEventListener(ONBOARDING_VISIBILITY_EVENT, refresh);
+        // O onboarding pode ter aberto antes deste ouvinte existir. Só depois desta verificação o modal pode
+        // abrir: aberto por um instante já deixava a página bloqueada até ao fim da animação de fecho.
+        refresh();
+        setChecked(true);
         return () => {
             window.removeEventListener('tango_tenant_authorized', refresh);
             window.removeEventListener('storage', refresh);
+            window.removeEventListener(ONBOARDING_VISIBILITY_EVENT, refresh);
         };
     }, []);
-    const open = pending && !portalVisible;
+    const open = checked && pending && !portalVisible && !onboardingVisible;
     const [tab, setTab] = useState<Tab>('termos');
     const [agreed, setAgreed] = useState(false);
 

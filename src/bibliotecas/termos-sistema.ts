@@ -134,3 +134,13 @@ export const acceptSystemTerms = () => {
         // Armazenamento indisponível: volta a ser pedida na próxima abertura.
     }
 };
+
+// O assistente de configuração (onboarding) cobre o ecrã: enquanto está aberto, o modal dos termos não pode
+// abrir (ficaria escondido por baixo e, sendo modal, bloquearia todos os cliques).
+export const ONBOARDING_VISIBILITY_EVENT = 'tango-onboarding-visibility';
+let openOnboardings = 0;
+export const isOnboardingOpen = () => openOnboardings > 0;
+export const setOnboardingOpen = (open: boolean) => {
+    openOnboardings = Math.max(0, openOnboardings + (open ? 1 : -1));
+    window.dispatchEvent(new Event(ONBOARDING_VISIBILITY_EVENT));
+};
