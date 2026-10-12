@@ -5,6 +5,7 @@ import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOr
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
+import { importLegacyKeys, listLicenses, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
 
 // API de administração de empresas (tenants) e chaves de sincronização.
 // Uso exclusivo do Painel Master. Protegida por TANGO_MASTER_SECRET
@@ -151,8 +152,25 @@ export default async function handler(req, res) {
   }
 
 
+  const clientIp = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim() || null;
   try {
     await ensureTable(sql);
+    // Licenças (uma por empresa): uma falha aqui não pode impedir a gestão das empresas.
+    let licensesReady = true;
+    try {
+      await prepareLicenses(sql, databaseUrl);
+    } catch (error) {
+      licensesReady = false;
+      console.error('[tenants][licencas]', error);
+    }
+    const keepLicenseInSync = async (changes) => {
+      if (!licensesReady) return;
+      try {
+        await syncLicenseFromTenant(sql, tenantId, changes, clientIp);
+      } catch (error) {
+        console.error('[tenants][licencas][sync]', error);
+      }
+    };
 
     if (action === 'verify') {
       return send(res, 200, { success: true, message: 'Credenciais master válidas e ligadas com sucesso.' });
@@ -233,6 +251,22 @@ export default async function handler(req, res) {
       return send(res, 200, { success: true, request: toPublicRequest(updated[0]) });
     }
 
+    // Licenças: lista com dias restantes (calculados no servidor) e fusão das chaves assinadas antigas do Master.
+    if (action === 'licenses-list' || action === 'licenses-import-legacy') {
+      if (!licensesReady) return send(res, 503, { success: false, message: 'As tabelas de licenças não estão disponíveis neste servidor.' });
+      if (action === 'licenses-import-legacy') {
+        if (!Array.isArray(body.keys) || body.keys.length > 5000) {
+          return send(res, 400, { success: false, message: 'Lista de chaves inválida.' });
+        }
+        const report = await importLegacyKeys(sql, body.keys, clientIp);
+        const licenses = await listLicenses(sql);
+        return send(res, 200, { success: true, report, licenses: licenses.map(toPublicLicense) });
+      }
+      await migrateTenantsToLicenses(sql);
+      const licenses = await listLicenses(sql);
+      return send(res, 200, { success: true, licenses: licenses.map(toPublicLicense) });
+    }
+
     if (!tenantId || tenantId.length > 200) {
       return send(res, 400, { success: false, message: 'Identificação da empresa (NIF) inválida.' });
     }
@@ -258,6 +292,7 @@ export default async function handler(req, res) {
       await ensureRegistrationRequestsTable(sql);
       await sql(`UPDATE tango_registration_requests SET status = 'approved', handled_at = NOW(), updated_at = NOW()
         WHERE nif = $1 AND status = 'pending'`, [tenantId]);
+      await keepLicenseInSync({ expiresAt });
 
       return send(res, 200, { 
         success: true, 
@@ -286,6 +321,7 @@ export default async function handler(req, res) {
          WHERE UPPER(tenant_id) = UPPER($1)`,
         [tenantId, name, status, body.expiresAt !== undefined, expiresAt, multiTenant !== null, multiTenant]
       );
+      await keepLicenseInSync(body.expiresAt !== undefined ? { expiresAt } : {});
       const [updated] = await sql('SELECT * FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       return send(res, 200, { success: true, tenant: toPublicTenant(updated) });
     }

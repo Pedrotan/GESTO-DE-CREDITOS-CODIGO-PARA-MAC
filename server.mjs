@@ -157,6 +157,15 @@ const initDatabaseBridge = async () => {
 
       // As empresas só existem quando cadastradas no Tango Master (sem empresas nem códigos fixos no código).
       console.log('[VPS Database] Tabelas do Tango Master verificadas.');
+
+      // Licenças (uma por empresa): tabelas e migração das empresas já registadas.
+      try {
+        const { prepareLicenses } = await import(pathToFileURL(path.join(__dirname, 'vercel-api', '_licencas.js')).href);
+        const created = await prepareLicenses(async (text, params) => (await pgPool.query(text, params)).rows, process.env.DATABASE_URL);
+        console.log(`[VPS Database] Licenças verificadas (${created} criada(s) por migração).`);
+      } catch (licenseErr) {
+        console.warn('[VPS Database] Aviso ao preparar as licenças:', licenseErr.message);
+      }
     } catch (seedErr) {
       console.warn('[VPS Database] Aviso ao preparar as tabelas do Tango Master:', seedErr.message);
     }

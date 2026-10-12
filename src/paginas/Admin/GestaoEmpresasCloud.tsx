@@ -10,6 +10,7 @@ import {
 import { ServicoAngolaAPI } from '@/servicos/ServicoAngolaAPI';
 import { exportCompanyCredentialsPDF } from '@/bibliotecas/pdf';
 import { RENEWAL_PERIODS, extendSubscription, parsePaidAmount, subscriptionState, type RenewalPeriod } from '@/bibliotecas/subscricao';
+import { PainelLicencasServidor } from './PainelLicencasServidor';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 
@@ -1273,6 +1274,8 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                     </div>
                 )}
             </div>
+
+            <PainelLicencasServidor api={api} notify={notify} />
 
             {/* Guia Explicativo do Ecossistema */}
             <div className="rounded-3xl border border-orange-200 bg-orange-50/60 p-5 text-xs font-semibold leading-relaxed text-slate-700 dark:border-orange-900/50 dark:bg-orange-950/20 dark:text-slate-300">
