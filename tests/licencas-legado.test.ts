@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
-import { legacyKeysForImport } from '../src/bibliotecas/licencas-legado.ts';
+import { extractLicenseKeysFromText, legacyKeysForImport } from '../src/bibliotecas/licencas-legado.ts';
 import { encodeLicensePayload } from '../src/bibliotecas/payload-licenca.ts';
 
 const signedKey = (payload: Record<string, unknown>) =>
@@ -24,4 +24,14 @@ test('converte as chaves do Master em metadados, sem enviar a chave em claro', a
     });
     assert.equal(keys[0].keyHash, crypto.createHash('sha256').update(key).digest('hex'));
     assert.ok(!JSON.stringify(keys).includes(key.slice(0, 40)), 'a chave não segue no pedido');
+});
+
+test('extrai várias chaves coladas de um certificado (com quebras de linha e texto à volta)', () => {
+    const a = signedKey({ jti: crypto.randomUUID(), nif: '5003207439', type: 'annual' });
+    const b = signedKey({ jti: crypto.randomUUID(), nif: '5000000001', type: 'monthly', client: 'Acentuação Lda' });
+    const text = `CHAVE DE ACTIVAÇÃO\n${a.replace(/(.{48})/g, '$1\n')}\nA chave tem ${a.length} caracteres.\n\n${b}Obrigado`;
+    assert.deepEqual(extractLicenseKeysFromText(text), [a, b]);
+    assert.deepEqual(extractLicenseKeysFromText(`${a}\n${a}`), [a], 'repetidas contam uma vez');
+    assert.deepEqual(extractLicenseKeysFromText(a.slice(0, a.length - 8)), [], 'chave cortada não conta');
+    assert.deepEqual(extractLicenseKeysFromText('TG-ABCD-EFGH'), []);
 });

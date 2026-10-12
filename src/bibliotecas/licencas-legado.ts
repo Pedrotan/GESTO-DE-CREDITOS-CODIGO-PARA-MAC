@@ -53,3 +53,38 @@ export const legacyKeysForImport = async (records: LegacyKeyRecord[]) => {
     }
     return { keys, unreadable };
 };
+
+// Início de todas as chaves assinadas: base64 de '{"payload'.
+const KEY_START = 'eyJwYXlsb2Fk';
+
+const decodesToKey = (candidate: string) => {
+    try {
+        const wrapper = JSON.parse(atob(candidate));
+        return typeof wrapper?.payload === 'string' && typeof wrapper?.signature === 'string';
+    } catch {
+        return false;
+    }
+};
+
+/**
+ * Chaves de licença coladas num texto (do certificado PDF, das Definições do ERP, de um e-mail ou de uma cópia de
+ * segurança do Master): ignora espaços e quebras de linha e separa várias chaves seguidas.
+ */
+export const extractLicenseKeysFromText = (text: string): string[] => {
+    const compact = String(text || '').replace(/\s+/g, '');
+    const found: string[] = [];
+    let start = compact.indexOf(KEY_START);
+    while (start !== -1) {
+        const next = compact.indexOf(KEY_START, start + KEY_START.length);
+        let segment = compact.slice(start, next === -1 ? undefined : next);
+        const end = segment.search(/[^A-Za-z0-9+/=]/);
+        if (end !== -1) segment = segment.slice(0, end);
+        // O texto a seguir à chave pode ter letras: procura o maior começo que seja uma chave completa.
+        for (let length = segment.length - (segment.length % 4); length >= 100; length -= 4) {
+            const candidate = segment.slice(0, length);
+            if (decodesToKey(candidate)) { found.push(candidate); break; }
+        }
+        start = next;
+    }
+    return [...new Set(found)];
+};

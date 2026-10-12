@@ -3,7 +3,7 @@ import { BadgeCheck, CloudUpload, KeyRound, Loader2, RefreshCw } from 'lucide-re
 import Swal from 'sweetalert2';
 import { Button } from '@/componentes/ui/button';
 import { cn } from '@/bibliotecas/utils';
-import { legacyKeysForImport, type LegacyKeyRecord } from '@/bibliotecas/licencas-legado';
+import { extractLicenseKeysFromText, legacyKeysForImport, type LegacyKeyRecord } from '@/bibliotecas/licencas-legado';
 
 // Licenças no servidor (uma por empresa): lista com dias restantes e fusão das chaves antigas deste Master.
 
@@ -115,23 +115,43 @@ export function PainelLicencasServidor({ api, notify }: {
     const importLegacy = async () => {
         let records: LegacyKeyRecord[] = [];
         try { records = JSON.parse(localStorage.getItem('tango_master_keys') || '[]'); } catch { records = []; }
-        const { keys, unreadable } = await legacyKeysForImport(Array.isArray(records) ? records : []);
-        if (!keys.length) {
-            notify('error', 'Este Tango Master não tem chaves de licença emitidas para enviar ao servidor.');
-            return;
-        }
+        const local = await legacyKeysForImport(Array.isArray(records) ? records : []);
+        // Chaves que não estão na lista deste Master (reinstalação limpa, outro computador): coladas pelo administrador.
         const confirmation = await Swal.fire({
-            title: 'Juntar as licenças no servidor?',
-            html: `Vão ser enviadas <b>${keys.length}</b> chave(s) emitidas neste computador (só os dados da licença, nunca a chave).<br><br>` +
-                'Em cada empresa fica <b>uma</b> licença: a chave com o prazo mais longo define o plano, as máquinas e a data de fim; ' +
-                'as outras chaves da mesma empresa ficam revogadas. A data de expiração da nuvem não é alterada.',
+            title: 'Juntar as licenças no servidor',
+            html: `<div style="text-align:left;font-size:13px;line-height:1.6">
+                ${local.keys.length
+                    ? `Este Tango Master tem <b>${local.keys.length}</b> chave(s) emitida(s) na sua lista.`
+                    : 'A lista de chaves deste Tango Master está vazia (por exemplo, depois de uma instalação limpa).'}
+                Pode colar abaixo outras chaves de licença (começam por <b>eyJ</b>): do certificado PDF, das Definições do Tango ERP
+                ou de um e-mail. Pode colar várias de uma vez.<br><br>
+                Em cada empresa fica <b>uma</b> licença: a chave com o prazo mais longo define o plano, as máquinas e a data de fim;
+                as outras chaves da mesma empresa ficam revogadas. Só os dados da licença são enviados, nunca a chave.
+            </div>`,
+            input: 'textarea',
+            inputPlaceholder: 'Cole aqui as chaves de licença (opcional se a lista deste Master tiver chaves)',
+            inputAttributes: { 'aria-label': 'Chaves de licença', spellcheck: 'false' },
             icon: 'question',
+            width: 640,
             showCancelButton: true,
             confirmButtonText: 'Juntar licenças',
             cancelButtonText: 'Cancelar',
             confirmButtonColor: '#F37021',
+            preConfirm: (text: string) => {
+                if (!local.keys.length && !extractLicenseKeysFromText(text).length) {
+                    Swal.showValidationMessage(String(text || '').trim()
+                        ? 'Não foi encontrada nenhuma chave de licença completa no texto colado.'
+                        : 'Cole pelo menos uma chave de licença.');
+                    return false;
+                }
+                return text;
+            },
         });
         if (!confirmation.isConfirmed) return;
+        const pasted = await legacyKeysForImport(extractLicenseKeysFromText(String(confirmation.value || '')).map(key => ({ key })));
+        const seen = new Set(local.keys.map(key => key.jti));
+        const keys = [...local.keys, ...pasted.keys.filter(key => !seen.has(key.jti))];
+        const unreadable = local.unreadable + pasted.unreadable;
         setBusy('import');
         try {
             const data = await api('licenses-import-legacy', { keys });
