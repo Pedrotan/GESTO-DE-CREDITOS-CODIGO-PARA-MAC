@@ -2710,9 +2710,28 @@ app.whenReady().then(async () => {
       encryptedSecrets: safeStorage.isEncryptionAvailable(),
     };
   });
+  // Colunas de segurança que o login usa. Numa base criada de raiz (instalação limpa) as migrações do arranque
+  // podiam ainda não as ter acrescentado e o login falhava com "no such column: failedAttempts".
+  const USER_SECURITY_COLUMNS: Array<[string, string]> = [
+    ["username", "TEXT"], ["status", "TEXT DEFAULT 'active'"], ["failedAttempts", "INTEGER DEFAULT 0"], ["blockedAt", "TEXT"],
+    ["lastLogin", "TEXT"], ["lastSeen", "TEXT"], ["ip", "TEXT"], ["permissions", "TEXT"], ["twoFactorEnabled", "INTEGER DEFAULT 0"],
+    ["twoFactorSecret", "TEXT"], ["mfaRecoveryCodes", "TEXT"], ["mustChangePassword", "INTEGER DEFAULT 0"],
+  ];
+  let userColumnsReadyForPath = "";
+  const ensureUserSecurityColumns = async () => {
+    if (userColumnsReadyForPath === dbPath) return;
+    const info: any = await runQuery("query", 'PRAGMA table_info("users")');
+    const existing = new Set((info || []).map((row: any) => String(row.name)));
+    if (!existing.size) return;
+    for (const [name, type] of USER_SECURITY_COLUMNS) {
+      if (!existing.has(name)) await runQuery("exec", `ALTER TABLE users ADD COLUMN "${name}" ${type}`);
+    }
+    userColumnsReadyForPath = dbPath;
+  };
   ipcMain.handle("user-auth-login", async (event, credentials) => {
     assertTrustedIpcSender(event);
     financialSchemaBootstrapOpen = false;
+    await ensureUserSecurityColumns();
     const login = typeof credentials?.login === "string" ? credentials.login.trim().toLowerCase() : "";
     const password = typeof credentials?.password === "string" ? credentials.password : "";
     if (!login || login.length > 254 || !password || password.length > 256) return { authenticated: false };
