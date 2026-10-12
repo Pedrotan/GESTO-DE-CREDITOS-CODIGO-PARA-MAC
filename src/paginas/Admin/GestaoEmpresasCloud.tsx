@@ -10,7 +10,7 @@ import {
 import { ServicoAngolaAPI } from '@/servicos/ServicoAngolaAPI';
 import { exportCompanyCredentialsPDF } from '@/bibliotecas/pdf';
 import { RENEWAL_PERIODS, extendSubscription, parsePaidAmount, subscriptionState, type RenewalPeriod } from '@/bibliotecas/subscricao';
-import { PainelLicencasServidor } from './PainelLicencasServidor';
+import { PainelLicencasServidor, mostrarChaveLicenca } from './PainelLicencasServidor';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 
@@ -443,6 +443,7 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
             setAccessCode(generateFriendlyCode());
 
             notify('success', `Empresa "${cleanName}" cadastrada com sucesso!`);
+            if (data.licenseKey) await mostrarChaveLicenca(data.licenseKey, cleanName, false);
         } catch (e: any) {
             notify('error', e.message || 'Falha ao cadastrar empresa.');
         } finally {

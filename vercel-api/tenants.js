@@ -5,7 +5,10 @@ import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOr
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
-import { importLegacyKeys, listLicenses, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
+import { importLegacyKeys, issueLicenseKey, listLicenses, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
+import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
+
+const KEY_TOOLS = { generate: generateLicenseKey, parse: parseLicenseKey, hash: licenseKeyHash, prefix: licenseKeyPrefix };
 
 // API de administração de empresas (tenants) e chaves de sincronização.
 // Uso exclusivo do Painel Master. Protegida por TANGO_MASTER_SECRET
@@ -293,11 +296,22 @@ export default async function handler(req, res) {
       await sql(`UPDATE tango_registration_requests SET status = 'approved', handled_at = NOW(), updated_at = NOW()
         WHERE nif = $1 AND status = 'pending'`, [tenantId]);
       await keepLicenseInSync({ expiresAt });
+      // Chave de licença da empresa (TANGO-XXXX-…), mostrada só agora: o servidor guarda apenas o hash.
+      let licenseKey = null;
+      if (licensesReady) {
+        try {
+          const issued = await issueLicenseKey(sql, tenantId, KEY_TOOLS, clientIp);
+          if (issued.ok) licenseKey = issued.key;
+        } catch (error) {
+          console.error('[tenants][licencas][chave]', error);
+        }
+      }
 
       return send(res, 200, { 
         success: true, 
         key: code, 
         accessCode: code,
+        licenseKey,
         tenant: { tenantId, name, accessCode: code, status: 'active', expiresAt, multiTenant } 
       });
     }
@@ -324,6 +338,14 @@ export default async function handler(req, res) {
       await keepLicenseInSync(body.expiresAt !== undefined ? { expiresAt } : {});
       const [updated] = await sql('SELECT * FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       return send(res, 200, { success: true, tenant: toPublicTenant(updated) });
+    }
+
+    // Emite ou substitui a chave de licença (TANGO-XXXX-…); as máquinas já activadas continuam ligadas.
+    if (action === 'license-issue-key') {
+      if (!licensesReady) return send(res, 503, { success: false, message: 'As tabelas de licenças não estão disponíveis neste servidor.' });
+      const issued = await issueLicenseKey(sql, tenantId, KEY_TOOLS, clientIp);
+      if (!issued.ok) return send(res, issued.status, { success: false, message: issued.message });
+      return send(res, 200, { success: true, licenseKey: issued.key, keyPrefix: issued.prefix, replaced: issued.replaced });
     }
 
     if (action === 'rotate') {

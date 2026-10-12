@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { BadgeCheck, CloudUpload, Loader2, RefreshCw } from 'lucide-react';
+import { BadgeCheck, CloudUpload, KeyRound, Loader2, RefreshCw } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { Button } from '@/componentes/ui/button';
 import { cn } from '@/bibliotecas/utils';
@@ -9,6 +9,7 @@ import { legacyKeysForImport, type LegacyKeyRecord } from '@/bibliotecas/licenca
 
 type ServerLicense = {
     id: string;
+    keyPrefix: string | null;
     tenantId: string;
     companyName: string;
     plan: string;
@@ -43,12 +44,61 @@ const daysTone = (license: ServerLicense) => {
 
 const formatDate = (value: string | null) => value ? new Date(value).toLocaleDateString('pt-AO') : '—';
 
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, char => `&#${char.charCodeAt(0)};`);
+
+/** Mostra a chave de licença acabada de emitir: o servidor só guarda o hash, por isso não volta a ser mostrada. */
+export const mostrarChaveLicenca = async (key: string, companyName: string, replaced: boolean) => {
+    const result = await Swal.fire({
+        title: 'Chave de licença',
+        icon: 'success',
+        html: `<div style="text-align:left;font-size:14px;line-height:1.6">
+            Chave de licença de <b>${escapeHtml(companyName)}</b>, para activar o Tango ERP nos computadores da empresa:
+            <div style="margin:14px 0;padding:14px;border-radius:12px;background:#0f1c47;color:#fff;font:700 18px/1.4 Consolas,monospace;text-align:center;letter-spacing:1px">${escapeHtml(key)}</div>
+            <b>Guarde-a agora:</b> por segurança, o servidor só guarda uma impressão digital da chave e não a volta a mostrar.
+            ${replaced ? '<br><br>A chave anterior deixou de funcionar para novas activações. Os computadores já activados continuam a funcionar.' : ''}
+        </div>`,
+        showCancelButton: true,
+        confirmButtonText: 'Copiar chave',
+        cancelButtonText: 'Fechar',
+        confirmButtonColor: '#F37021',
+    });
+    if (result.isConfirmed) {
+        try { await navigator.clipboard.writeText(key); } catch { /* sem acesso à área de transferência */ }
+    }
+};
+
 export function PainelLicencasServidor({ api, notify }: {
     api: (action: string, payload?: Record<string, any>) => Promise<any>;
     notify: (type: 'success' | 'error', message: string) => void;
 }) {
     const [licenses, setLicenses] = useState<ServerLicense[] | null>(null);
-    const [busy, setBusy] = useState<'list' | 'import' | null>(null);
+    const [busy, setBusy] = useState<'list' | 'import' | string | null>(null);
+
+    const issueKey = async (license: ServerLicense) => {
+        if (license.keyPrefix) {
+            const confirmation = await Swal.fire({
+                title: 'Emitir uma chave nova?',
+                html: `A chave actual (<b>${escapeHtml(license.keyPrefix)}-…</b>) de <b>${escapeHtml(license.companyName)}</b> deixa de servir para activar computadores novos. ` +
+                    'Os computadores já activados continuam a funcionar.',
+                icon: 'warning',
+                showCancelButton: true,
+                confirmButtonText: 'Emitir chave nova',
+                cancelButtonText: 'Cancelar',
+                confirmButtonColor: '#F37021',
+            });
+            if (!confirmation.isConfirmed) return;
+        }
+        setBusy(license.id);
+        try {
+            const data = await api('license-issue-key', { tenantId: license.tenantId });
+            setLicenses(previous => previous?.map(item => item.id === license.id ? { ...item, keyPrefix: data.keyPrefix } : item) || previous);
+            await mostrarChaveLicenca(data.licenseKey, license.companyName, Boolean(data.replaced));
+        } catch (error: any) {
+            notify('error', error?.message || 'Não foi possível emitir a chave de licença.');
+        } finally {
+            setBusy(null);
+        }
+    };
 
     const load = async () => {
         setBusy('list');
@@ -140,7 +190,7 @@ export function PainelLicencasServidor({ api, notify }: {
 
             {licenses && licenses.length > 0 && (
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[720px] text-left text-xs">
+                    <table className="w-full min-w-[880px] text-left text-xs">
                         <thead className="text-[10px] font-black uppercase tracking-wider text-slate-400">
                             <tr className="border-b border-slate-100 dark:border-slate-800">
                                 <th className="py-2 pr-3">Empresa</th>
@@ -149,7 +199,8 @@ export function PainelLicencasServidor({ api, notify }: {
                                 <th className="py-2 pr-3">Fim</th>
                                 <th className="py-2 pr-3">Dias restantes</th>
                                 <th className="py-2 pr-3">Máquinas</th>
-                                <th className="py-2">Último contacto</th>
+                                <th className="py-2 pr-3">Último contacto</th>
+                                <th className="py-2">Chave</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -173,7 +224,22 @@ export function PainelLicencasServidor({ api, notify }: {
                                         </span>
                                     </td>
                                     <td className="py-2.5 pr-3 text-slate-600 dark:text-slate-300">{license.machines} / {license.maxMachines}</td>
-                                    <td className="py-2.5 text-slate-500">{formatDate(license.lastContactAt)}</td>
+                                    <td className="py-2.5 pr-3 text-slate-500">{formatDate(license.lastContactAt)}</td>
+                                    <td className="py-2.5">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-mono text-[10px] text-slate-500">{license.keyPrefix ? `${license.keyPrefix}-…` : 'Sem chave'}</span>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => issueKey(license)}
+                                                disabled={busy !== null || license.status === 'revogada'}
+                                                className="h-7 gap-1 rounded-lg px-2 text-[10px] font-bold"
+                                            >
+                                                {busy === license.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <KeyRound className="h-3 w-3" />}
+                                                {license.keyPrefix ? 'Nova chave' : 'Emitir chave'}
+                                            </Button>
+                                        </div>
+                                    </td>
                                 </tr>
                             ))}
                         </tbody>

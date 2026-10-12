@@ -297,3 +297,153 @@ export const toPublicLicense = (row) => ({
   revokedLegacyKeys: Number(row.chaves_revogadas || 0),
   source: row.origem,
 });
+
+// --- Etapa 2: chave da licença e activação das máquinas ------------------------------------------------------
+
+/** Validade do token entregue ao Desktop: funciona offline até 7 dias, nunca para lá da data de fim. */
+export const TOKEN_VALIDITY_MS = 7 * 86_400_000;
+/** Um token expirado ainda serve para pedir outro (heartbeat) durante este período; depois, só com a chave. */
+export const HEARTBEAT_GRACE_MS = 90 * 86_400_000;
+
+const REFUSAL_BY_STATE = {
+  suspensa: { status: 403, code: 'LICENCA_SUSPENSA', message: 'A licença desta empresa está suspensa. Contacte o suporte Tango: +244 941 537 486.' },
+  expirada: { status: 403, code: 'LICENCA_EXPIRADA', message: 'A licença desta empresa expirou. Contacte o suporte Tango para a renovar: +244 941 537 486.' },
+  revogada: { status: 403, code: 'LICENCA_REVOGADA', message: 'Esta licença foi revogada. Contacte o suporte Tango: +244 941 537 486.' },
+};
+
+/**
+ * Emite (ou substitui) a chave da licença da empresa e devolve-a em claro uma única vez; o servidor guarda só o hash.
+ * Substituir a chave não desliga as máquinas já activadas: elas renovam o token pelo heartbeat.
+ */
+export const issueLicenseKey = async (sql, tenantId, { generate, parse, hash, prefix }, ip = null) => {
+  await migrateTenantsToLicenses(sql);
+  const [license] = await sql(`SELECT * FROM tango_licencas WHERE UPPER(empresa_id) = UPPER($1)`, [tenantId]);
+  if (!license) return { ok: false, status: 404, message: 'A empresa não tem licença no servidor.' };
+  if (license.estado === 'revogada') return { ok: false, status: 409, message: 'A licença desta empresa está revogada.' };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const key = generate();
+    const chars = parse(key);
+    try {
+      await sql(`UPDATE tango_licencas SET chave_hash = $2, chave_prefixo = $3, atualizado_em = NOW() WHERE id = $1`,
+        [license.id, hash(chars), prefix(chars)]);
+    } catch (error) {
+      if (/duplicate key|unique/i.test(String(error?.message))) continue;
+      throw error;
+    }
+    await recordLicenseEvent(sql, { licenseId: license.id, tenantId: license.empresa_id, type: 'chave_emitida', ip,
+      detail: { prefixo: prefix(chars), substituiuChaveAnterior: Boolean(license.chave_hash), prefixoAnterior: license.chave_prefixo || null } });
+    return { ok: true, key, prefix: prefix(chars), licenseId: license.id, replaced: Boolean(license.chave_hash) };
+  }
+  throw new Error('Não foi possível gerar uma chave única.');
+};
+
+/** Marca como expirada uma licença activa cuja data de fim já passou e devolve o estado efectivo. */
+const effectiveState = async (sql, license, now) => {
+  if (license.estado === 'ativa' && license.data_fim && new Date(license.data_fim).getTime() <= now.getTime()) {
+    await sql(`UPDATE tango_licencas SET estado = 'expirada', atualizado_em = NOW() WHERE id = $1 AND estado = 'ativa'`, [license.id]);
+    await recordLicenseEvent(sql, { licenseId: license.id, tenantId: license.empresa_id, type: 'expirou', detail: { dataFim: license.data_fim } });
+    return 'expirada';
+  }
+  return license.estado;
+};
+
+const tokenClaims = (license, plan, activation, now) => {
+  const ends = license.data_fim ? new Date(license.data_fim).getTime() : Infinity;
+  const validUntil = Math.min(now.getTime() + TOKEN_VALIDITY_MS, ends);
+  return {
+    iss: 'tango-master',
+    sub: license.id,
+    jti: crypto.randomUUID(),
+    empresa_id: license.empresa_id,
+    licenca_id: license.id,
+    plano: license.plano_id,
+    plano_nome: plan?.nome || license.plano_id,
+    escalao: license.escalao,
+    funcionalidades: plan?.funcionalidades || {},
+    max_maquinas: Number(license.max_maquinas),
+    machine_hash: activation.machine_hash,
+    data_fim: license.data_fim ? new Date(license.data_fim).toISOString() : null,
+    valido_ate: new Date(validUntil).toISOString(),
+    hora_servidor: now.toISOString(),
+    iat: Math.floor(now.getTime() / 1000),
+    exp: Math.floor(validUntil / 1000),
+  };
+};
+
+const issueToken = async (sql, license, activation, sign, now) => {
+  const [plan] = await sql(`SELECT nome, funcionalidades FROM tango_planos WHERE id = $1`, [license.plano_id]);
+  const claims = tokenClaims(license, plan, activation, now);
+  return { token: sign(claims), claims };
+};
+
+const refuse = async (sql, license, outcome, detail, ip) => {
+  await recordLicenseEvent(sql, { licenseId: license?.id || null, tenantId: license?.empresa_id || null, type: 'ativacao_recusada', ip,
+    detail: { motivo: outcome.code, ...detail } });
+  return { ok: false, ...outcome };
+};
+
+/**
+ * POST /api/licencas/ativar: valida a chave e a máquina, regista a máquina (até ao máximo da licença) e devolve
+ * um token assinado. `sign(claims)` assina o token (injectado para permitir testes).
+ */
+export const activateLicense = async (sql, { key, machineHash: machine, machineName, ip = null }, { parse, hash, sign }, now = new Date()) => {
+  const chars = parse(key);
+  if (!chars) return { ok: false, failure: true, status: 400, code: 'CHAVE_MAL_ESCRITA', message: 'A chave de licença está mal escrita. Confira os caracteres (formato TANGO-XXXX-XXXX-XXXX-XXXX).' };
+  if (!/^[0-9a-f]{64}$/u.test(String(machine || ''))) return { ok: false, status: 400, code: 'MAQUINA_INVALIDA', message: 'Identificação da máquina inválida.' };
+  const [license] = await sql(`SELECT * FROM tango_licencas WHERE chave_hash = $1`, [hash(chars)]);
+  if (!license) return { ok: false, failure: true, status: 404, code: 'CHAVE_DESCONHECIDA', message: 'Esta chave de licença não existe ou foi substituída por uma nova.' };
+
+  const state = await effectiveState(sql, license, now);
+  if (state !== 'ativa') return refuse(sql, license, REFUSAL_BY_STATE[state], { maquina: machine.slice(0, 12) }, ip);
+
+  const name = String(machineName || '').trim().slice(0, 120) || null;
+  const [existing] = await sql(`SELECT * FROM tango_licenca_ativacoes WHERE licenca_id = $1 AND machine_hash = $2`, [license.id, machine]);
+  let activation = existing;
+  if (existing?.estado === 'ativa') {
+    [activation] = await sql(`UPDATE tango_licenca_ativacoes SET ultimo_heartbeat = $3, nome_maquina = COALESCE($2, nome_maquina)
+      WHERE id = $1 RETURNING *`, [existing.id, name, now.toISOString()]);
+  } else {
+    const [{ total }] = await sql(`SELECT COUNT(*)::int AS total FROM tango_licenca_ativacoes WHERE licenca_id = $1 AND estado = 'ativa'`, [license.id]);
+    if (total >= Number(license.max_maquinas)) {
+      return refuse(sql, license, { status: 409, code: 'LIMITE_MAQUINAS',
+        message: `Esta licença já está activa em ${total} de ${license.max_maquinas} computador(es). Peça ao suporte Tango para libertar um computador ou aumentar o plano.` },
+        { maquina: machine.slice(0, 12), activas: total }, ip);
+    }
+    [activation] = await sql(`INSERT INTO tango_licenca_ativacoes (id, licenca_id, machine_hash, nome_maquina, primeira_ativacao, ultimo_heartbeat, estado)
+      VALUES ($1, $2, $3, $4, $5, $5, 'ativa')
+      ON CONFLICT (licenca_id, machine_hash) DO UPDATE SET estado = 'ativa', ultimo_heartbeat = EXCLUDED.ultimo_heartbeat,
+        nome_maquina = COALESCE(EXCLUDED.nome_maquina, tango_licenca_ativacoes.nome_maquina)
+      RETURNING *`, [crypto.randomUUID(), license.id, machine, name, now.toISOString()]);
+    await recordLicenseEvent(sql, { licenseId: license.id, tenantId: license.empresa_id, type: existing ? 'maquina_reativada' : 'maquina_ativada', ip,
+      detail: { maquina: machine.slice(0, 12), nome: name, activas: total + 1, maximo: Number(license.max_maquinas) } });
+  }
+  const { token, claims } = await issueToken(sql, license, activation, sign, now);
+  return { ok: true, token, claims };
+};
+
+/**
+ * POST /api/licencas/heartbeat: com o token anterior (mesmo expirado há menos de 90 dias) e a mesma máquina,
+ * confirma que a licença continua activa e devolve um token renovado. `verify(token)` devolve as reivindicações.
+ */
+export const licenseHeartbeat = async (sql, { token, machineHash: machine, ip = null }, { verify, sign }, now = new Date()) => {
+  const claims = verify(token);
+  if (!claims) return { ok: false, status: 401, code: 'TOKEN_INVALIDO', message: 'O token de licença é inválido. Active de novo com a chave de licença.' };
+  if (!/^[0-9a-f]{64}$/u.test(String(machine || '')) || claims.machine_hash !== machine) {
+    return { ok: false, status: 401, code: 'MAQUINA_DIFERENTE', message: 'O token pertence a outro computador. Active este computador com a chave de licença.' };
+  }
+  if (Number(claims.exp) * 1000 + HEARTBEAT_GRACE_MS < now.getTime()) {
+    return { ok: false, status: 401, code: 'TOKEN_ANTIGO', message: 'Este computador esteve muito tempo sem ligação. Active-o de novo com a chave de licença.' };
+  }
+  const [license] = await sql(`SELECT * FROM tango_licencas WHERE id = $1`, [claims.licenca_id]);
+  if (!license) return { ok: false, status: 404, code: 'LICENCA_DESCONHECIDA', message: 'A licença deste computador já não existe.' };
+  const state = await effectiveState(sql, license, now);
+  if (state !== 'ativa') return refuse(sql, license, REFUSAL_BY_STATE[state], { origem: 'heartbeat', maquina: machine.slice(0, 12) }, ip);
+  const [activation] = await sql(`UPDATE tango_licenca_ativacoes SET ultimo_heartbeat = $3
+    WHERE licenca_id = $1 AND machine_hash = $2 AND estado = 'ativa' RETURNING *`, [license.id, machine, now.toISOString()]);
+  if (!activation) {
+    return refuse(sql, license, { status: 403, code: 'MAQUINA_LIBERTADA', message: 'Este computador foi desligado da licença. Active-o de novo com a chave de licença.' },
+      { origem: 'heartbeat', maquina: machine.slice(0, 12) }, ip);
+  }
+  const renewed = await issueToken(sql, license, activation, sign, now);
+  return { ok: true, token: renewed.token, claims: renewed.claims };
+};
