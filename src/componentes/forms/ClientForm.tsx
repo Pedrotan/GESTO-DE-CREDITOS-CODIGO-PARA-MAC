@@ -66,6 +66,8 @@ import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { cn } from '@/bibliotecas/utils';
 import { formatAngolanPhone } from '@/bibliotecas/formatters';
+import { analisarTelefoneAngola, telefoneOpcionalValido } from '@/bibliotecas/operadoras-telefone';
+import { IndicadorOperadora } from '@/componentes/ui/IndicadorOperadora';
 import { detetarGeneroPorNome } from '@/bibliotecas/genero';
 import { calcularIdade, validarBI, inferirProvinciaDoBI, normalizarDataISO } from '@/bibliotecas/formatadores';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
@@ -79,7 +81,8 @@ import {
 const clientSchema = z.object({
     name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
     nif: z.string().min(1, 'NIF é obrigatório'),
-    phone: z.string().min(1, 'Telefone é obrigatório'),
+    phone: z.string().min(1, 'Telefone é obrigatório')
+        .refine(value => analisarTelefoneAngola(value).valido, value => ({ message: analisarTelefoneAngola(value).mensagem })),
     email: z.string().email('Email inválido').or(z.literal('')).optional(),
     address: z.string().optional(),
     birthDate: z.string().optional(),
@@ -92,7 +95,8 @@ const clientSchema = z.object({
     spouseName: z.string().optional(),
     spouseBi: z.string().optional(),
     spouseNif: z.string().optional(),
-    spousePhone: z.string().optional(),
+    spousePhone: z.string().optional()
+        .refine(value => telefoneOpcionalValido(value), value => ({ message: analisarTelefoneAngola(value || '').mensagem })),
     spouseEmail: z.string().email('Email do cônjuge inválido').or(z.literal('')).optional(),
     // --- Campos exclusivos da carteira de Aposentados ---
     workInstitution: z.string().optional(),
@@ -1296,6 +1300,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                             className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 font-mono text-sm"
                                                         />
                                                     </FormControl>
+                                                    <IndicadorOperadora valor={field.value} />
                                                     <FormMessage />
                                                 </FormItem>
                                             )}
@@ -1551,6 +1556,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                     </Button>
                                                 </div>
                                             </FormControl>
+                                            <IndicadorOperadora valor={field.value} />
                                             <FormMessage />
                                         </FormItem>
                                     )}
