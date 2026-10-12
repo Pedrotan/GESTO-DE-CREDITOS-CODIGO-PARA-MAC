@@ -4,7 +4,7 @@ import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
-import { Building2, ArrowRight, ShieldCheck, UserCog, Lock, Loader2, CheckCircle, ShieldAlert, Sparkles, CircleCheck, Eye, EyeOff, Laptop, Globe, Wifi, Database, Search, X, ArrowLeft, Check, Layers } from 'lucide-react';
+import { Building2, ArrowRight, ShieldCheck, UserCog, Lock, Loader2, CheckCircle, ShieldAlert, Sparkles, CircleCheck, Eye, EyeOff, Laptop, Globe, Wifi, Database, Search, X, Check, Layers, Server, MonitorSmartphone, Info, Landmark, KeyRound, CircleCheckBig, ChevronLeft, ChevronRight, LockKeyhole, Phone } from 'lucide-react';
 import { Checkbox } from '@/componentes/ui/checkbox';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import Swal from 'sweetalert2';
@@ -22,28 +22,39 @@ import { isCompanyActiveLocally, submitOnboardingCentral } from '@/servicos/Serv
 import { acceptSystemTerms, setOnboardingOpen } from '@/bibliotecas/termos-sistema';
 type StepMeta = { label: string; title: string; description: string; icon: React.ComponentType<{ className?: string }> };
 const STEP_META: Record<number, StepMeta> = {
-    1: { label: 'Tipo de instalação', title: 'Como deseja configurar este computador?', description: 'Escolha se este será o computador principal (servidor) ou se vai ligar-se a um que já existe na empresa.', icon: Sparkles },
+    1: { label: 'Tipo de instalação', title: 'Como vai usar este computador?', description: 'Escolha se este é o computador principal da empresa ou um posto que se liga a um servidor já existente.', icon: Server },
     1.5: { label: 'Servidor local', title: 'Ligação ao servidor local', description: 'Siga as instruções para ligar este computador ao servidor Master na rede Wi-Fi.', icon: Wifi },
-    2: { label: 'Sobre nós', title: 'Propriedade e suporte', description: 'Conheça a equipa por trás da tecnologia e os nossos canais de suporte.', icon: Globe },
+    2: { label: 'Sobre nós', title: 'Propriedade e suporte', description: 'Quem desenvolve o sistema e como nos pode contactar.', icon: Info },
     3: { label: 'Privacidade', title: 'Privacidade e protecção de dados', description: 'Conformidade com a Lei n.º 22/11 (Lei da Protecção de Dados Pessoais de Angola).', icon: ShieldCheck },
-    4: { label: 'Instituição', title: 'Identidade da instituição', description: 'Como a sua empresa vai aparecer nos documentos, recibos e relatórios.', icon: Building2 },
-    5: { label: 'Multi-empresa', title: 'Módulo multi-empresas', description: 'Escolha se pretende criar e gerir várias empresas isoladas no mesmo sistema.', icon: Layers },
-    6: { label: 'Administrador', title: 'Conta do administrador', description: 'Defina as credenciais de acesso com controlo total do sistema.', icon: UserCog },
-    7: { label: 'Concluído', title: 'Tudo pronto para começar!', description: 'A configuração inicial foi concluída com sucesso. Seja bem-vindo!', icon: CircleCheck },
+    4: { label: 'Instituição', title: 'Identidade da instituição', description: 'Como a sua empresa vai aparecer nos documentos, recibos e relatórios.', icon: Landmark },
+    5: { label: 'Multi-empresa', title: 'Módulo multi-empresas', description: 'Indique se pretende gerir várias empresas, cada uma com os seus dados, no mesmo sistema.', icon: Layers },
+    6: { label: 'Administrador', title: 'Conta do administrador', description: 'Crie o acesso com controlo total do sistema.', icon: KeyRound },
+    7: { label: 'Concluído', title: 'Está tudo pronto', description: 'A configuração inicial ficou concluída. Já pode começar a trabalhar.', icon: CircleCheckBig },
 };
 
-const INSTALL_OPTIONS: Array<{ mode: 'standard' | 'connect'; icon: React.ComponentType<{ className?: string }>; title: string; text: string; points: string[]; tone: string; badge?: string }> = [
+const INSTALL_OPTIONS: Array<{ mode: 'standard' | 'connect'; icon: React.ComponentType<{ className?: string }>; title: string; text: string; points: string[]; tile: string; badge?: string }> = [
     {
-        mode: 'standard', icon: Database, title: 'Instalação Principal', badge: 'Recomendado', tone: 'from-blue-600 to-indigo-600',
-        text: 'Este computador será o servidor da empresa: os dados ficam guardados aqui e os outros postos ligam-se a ele.',
+        mode: 'standard', icon: Server, title: 'Instalação principal', badge: 'Recomendado', tile: 'bg-blue-50 text-blue-700 ring-blue-100',
+        text: 'Este computador guarda os dados da empresa e os outros postos ligam-se a ele.',
         points: ['Base de dados local e protegida', 'Ligação à versão web', 'Cópias de segurança automáticas'],
     },
     {
-        mode: 'connect', icon: Laptop, title: 'Conetar a Servidor', tone: 'from-sky-500 to-cyan-500',
-        text: 'Este computador liga-se a um servidor que já existe na rede Wi-Fi da empresa e trabalha com os mesmos dados.',
-        points: ['Sem configurar a empresa de novo', 'Dados sempre no servidor', 'Ideal para postos de atendimento'],
+        mode: 'connect', icon: MonitorSmartphone, title: 'Ligar a um servidor', tile: 'bg-sky-50 text-sky-700 ring-sky-100',
+        text: 'Este computador usa os dados de um servidor que já existe na rede da empresa.',
+        points: ['Não precisa de configurar a empresa', 'Os dados ficam no servidor', 'Ideal para postos de atendimento'],
     },
 ];
+
+/** Marca do Tango: «T» geométrico com o apontamento dourado da identidade. */
+export const MarcaTango = ({ className }: { className?: string }) => (
+    <svg viewBox="0 0 48 48" className={className} aria-hidden="true">
+        <rect width="48" height="48" rx="13" fill="#ffffff" fillOpacity="0.1" />
+        <rect x="0.75" y="0.75" width="46.5" height="46.5" rx="12.25" fill="none" stroke="#ffffff" strokeOpacity="0.22" strokeWidth="1.5" />
+        <rect x="12" y="13" width="24" height="5.5" rx="2.75" fill="#ffffff" />
+        <rect x="21.25" y="13" width="5.5" height="23" rx="2.75" fill="#ffffff" />
+        <rect x="30" y="29" width="6" height="7" rx="2" fill="#F5B83D" />
+    </svg>
+);
 
 /** Enquanto existe, o modal dos termos do login não abre (ficaria por baixo e bloquearia os cliques). */
 const MarcadorOnboardingVisivel = () => {
@@ -828,44 +839,40 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
     return (
         <div className={cn(
             "fixed inset-0 z-[9999] flex items-center justify-center overflow-y-auto p-3 sm:p-6",
-            isSecondaryAccount ? "bg-slate-950/70 backdrop-blur-md" : "bg-[#050a18]"
+            isSecondaryAccount ? "bg-slate-950/70 backdrop-blur-md" : "bg-[#060c1d]"
         )}>
             <MarcadorOnboardingVisivel />
             {!isSecondaryAccount && (
                 <div className="pointer-events-none absolute inset-0 overflow-hidden">
-                    <div className="absolute -left-40 -top-40 h-[560px] w-[560px] animate-pulse rounded-full bg-blue-600/25 blur-[160px]" />
-                    <div className="absolute -bottom-52 -right-40 h-[600px] w-[600px] rounded-full bg-indigo-500/20 blur-[170px]" />
-                    <div className="absolute left-1/2 top-1/3 h-[320px] w-[320px] -translate-x-1/2 rounded-full bg-amber-500/10 blur-[150px]" />
-                    <div className="absolute inset-0 opacity-[0.06] [background-image:linear-gradient(rgba(255,255,255,.7)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.7)_1px,transparent_1px)] [background-size:46px_46px] [mask-image:radial-gradient(ellipse_at_center,black_25%,transparent_75%)]" />
+                    <div className="absolute -left-48 -top-48 h-[560px] w-[560px] rounded-full bg-blue-700/20 blur-[160px]" />
+                    <div className="absolute -bottom-56 -right-48 h-[600px] w-[600px] rounded-full bg-indigo-700/15 blur-[170px]" />
                 </div>
             )}
 
             <div className={cn(
-                "relative my-auto flex w-full overflow-hidden rounded-[28px] border border-white/10 bg-background shadow-[0_40px_120px_-20px_rgba(0,0,0,0.65)] animate-in fade-in zoom-in-95 duration-500",
+                "relative my-auto flex w-full overflow-hidden rounded-[26px] bg-background shadow-[0_30px_90px_-20px_rgba(0,0,0,0.7)] ring-1 ring-white/10 animate-in fade-in zoom-in-95 duration-500",
                 isSecondaryAccount ? "max-w-[1000px] max-h-[92vh]" : "max-w-[1080px] max-h-[94vh]"
             )}>
                 {/* Painel lateral: marca e progresso */}
-                <aside className="relative hidden w-[290px] shrink-0 flex-col overflow-hidden bg-gradient-to-b from-[#13235a] via-[#0c1840] to-[#070e26] p-7 text-white md:flex">
-                    <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full border border-white/10" />
-                    <div className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full border border-white/10" />
-                    <div className="pointer-events-none absolute -bottom-28 -left-20 h-72 w-72 rounded-full bg-blue-500/20 blur-3xl" />
+                <aside className="relative hidden w-[290px] shrink-0 flex-col overflow-hidden bg-[#0f1c47] p-7 text-white md:flex">
+                    <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#16286a]/60 via-transparent to-[#070e26]/80" />
+                    <div className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full border border-white/[0.07]" />
+                    <div className="pointer-events-none absolute -right-12 -top-12 h-40 w-40 rounded-full border border-white/[0.07]" />
 
                     <div className="relative flex items-center gap-3">
-                        <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-white/15 shadow-inner ring-1 ring-white/20 backdrop-blur">
-                            <Building2 className="h-6 w-6" />
-                        </div>
+                        <MarcaTango className="h-11 w-11 shrink-0" />
                         <div className="leading-tight">
                             <p className="text-base font-black tracking-tight">Tango Gestão</p>
-                            <p className="text-[11px] font-medium text-white/60">de Créditos · ERP</p>
+                            <p className="text-[11px] font-medium text-white/55">de Créditos</p>
                         </div>
                     </div>
 
-                    <div className="relative mt-8">
-                        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-amber-300/90">
+                    <div className="relative mt-9">
+                        <p className="text-[11px] font-bold uppercase tracking-[0.2em] text-[#F5B83D]">
                             {isSecondaryAccount ? 'Nova empresa' : 'Configuração inicial'}
                         </p>
-                        <p className="mt-2 text-xl font-black leading-snug">
-                            {isSecondaryAccount ? 'Prepare a nova conta de trabalho.' : 'Bem-vindo à nova era da sua gestão.'}
+                        <p className="mt-2 text-[19px] font-bold leading-snug">
+                            {isSecondaryAccount ? 'Prepare a nova conta de trabalho.' : 'Vamos preparar o sistema da sua empresa.'}
                         </p>
                     </div>
 
@@ -875,30 +882,29 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                             const done = index < stepIndex;
                             const current = index === stepIndex;
                             return (
-                                <li key={s} className="relative flex gap-3 pb-5 last:pb-0">
+                                <li key={s} className="relative flex items-center gap-3 pb-5 last:pb-0">
                                     {index < visibleSteps.length - 1 && (
-                                        <span className={cn("absolute left-4 top-9 bottom-0 w-px -translate-x-1/2", done ? "bg-emerald-400/70" : "bg-white/15")} />
+                                        <span className={cn("absolute left-4 top-8 h-5 w-px -translate-x-1/2", done ? "bg-emerald-400/60" : "bg-white/15")} />
                                     )}
                                     <span className={cn(
-                                        "relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full border text-xs font-bold transition-all duration-300",
-                                        done ? "border-emerald-400 bg-emerald-400 text-slate-900"
-                                            : current ? "border-white bg-white text-[#13235a] shadow-[0_0_0_5px_rgba(255,255,255,0.12)]"
-                                                : "border-white/25 text-white/50"
+                                        "relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all duration-300",
+                                        done ? "bg-emerald-400 text-[#0f1c47]"
+                                            : current ? "bg-white text-[#0f1c47] ring-4 ring-white/15"
+                                                : "border border-white/20 text-white/45"
                                     )}>
-                                        {done ? <Check className="h-4 w-4" /> : index + 1}
+                                        {done ? <Check className="h-4 w-4" strokeWidth={3} /> : index + 1}
                                     </span>
-                                    <div className="pt-1">
-                                        <p className={cn("text-sm font-semibold", current ? "text-white" : done ? "text-white/80" : "text-white/45")}>{meta.label}</p>
-                                        {current && <p className="text-[11px] text-white/55">Passo actual</p>}
-                                    </div>
+                                    <p className={cn("text-sm", current ? "font-bold text-white" : done ? "font-medium text-white/75" : "font-medium text-white/40")}>{meta.label}</p>
                                 </li>
                             );
                         })}
                     </ol>
 
-                    <div className="relative mt-6 space-y-1 border-t border-white/10 pt-4 text-[10px] leading-relaxed text-white/45">
-                        <p className="font-semibold text-white/70">Precisa de ajuda? +244 941 537 486</p>
-                        <p>Desenvolvido por DIGITAL NORTE - Comércio e Prestação de Serviços, (SU), Lda · Cuanza Norte, N'dalatando</p>
+                    <div className="relative mt-6 space-y-1.5 border-t border-white/10 pt-4 text-[10px] leading-relaxed text-white/45">
+                        <p className="flex items-center gap-1.5 text-[11px] font-semibold text-white/75">
+                            <Phone className="h-3.5 w-3.5" /> Suporte: +244 941 537 486
+                        </p>
+                        <p>DIGITAL NORTE - Comércio e Prestação de Serviços, (SU), Lda · N'dalatando, Cuanza Norte</p>
                     </div>
                 </aside>
 
@@ -921,7 +927,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                     setIsLoading(false);
                                 }
                             }}
-                            className="absolute right-4 top-4 z-20 rounded-xl p-2 text-muted-foreground transition-all duration-200 hover:scale-105 hover:bg-muted hover:text-foreground active:scale-95"
+                            className="absolute right-4 top-4 z-20 rounded-xl p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
                             title="Fechar"
                             disabled={isLoading}
                         >
@@ -932,17 +938,15 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                     {/* Cabeçalho do passo */}
                     <header className="relative shrink-0 border-b border-border/70 px-5 pb-5 pt-6 sm:px-8">
                         <div className="mb-4 flex items-center gap-3 md:hidden">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#13235a] to-indigo-700 text-white">
-                                <Building2 className="h-5 w-5" />
-                            </div>
+                            <MarcaTango className="h-9 w-9 rounded-xl bg-[#0f1c47]" />
                             <p className="text-sm font-black tracking-tight">Tango Gestão de Créditos</p>
                         </div>
-                        <span className="inline-flex items-center rounded-full bg-primary/10 px-3 py-1 text-[11px] font-bold uppercase tracking-[0.16em] text-primary">
-                            Passo {stepIndex + 1} de {visibleSteps.length}
-                        </span>
+                        <p className="text-xs font-semibold text-muted-foreground">
+                            Passo <span className="text-foreground">{stepIndex + 1}</span> de {visibleSteps.length}
+                        </p>
                         <div className="mt-3 flex items-start gap-4 pr-8">
-                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-primary to-indigo-600 text-white shadow-lg shadow-primary/30">
-                                <CurrentIcon className="h-6 w-6" />
+                            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#0f1c47] text-white shadow-md shadow-[#0f1c47]/20">
+                                <CurrentIcon className="h-[22px] w-[22px]" />
                             </div>
                             <div className="min-w-0">
                                 <h2 className="text-xl font-black tracking-tight text-foreground sm:text-2xl">{currentMeta.title}</h2>
@@ -950,7 +954,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                             </div>
                         </div>
                         <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-muted md:hidden">
-                            <div className="h-full rounded-full bg-gradient-to-r from-primary to-indigo-600 transition-all duration-500" style={{ width: progress + '%' }} />
+                            <div className="h-full rounded-full bg-[#0f1c47] transition-all duration-500" style={{ width: progress + '%' }} />
                         </div>
                     </header>
 
@@ -958,56 +962,80 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                 <div className={cn("bg-background flex-1 min-h-0 overflow-y-auto", isSecondaryAccount ? "p-5 sm:p-6" : "p-5 sm:p-8")}>
                     {step === 1 ? (
                         <div className="flex h-full flex-col justify-center gap-6 py-1 animate-fade-in">
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" role="radiogroup" aria-label="Tipo de instalação">
                                 {INSTALL_OPTIONS.map(option => {
                                     const Icon = option.icon;
                                     const selected = onboardingMode === option.mode;
+                                    const choose = () => {
+                                        setOnboardingMode(option.mode);
+                                        if (option.mode === 'connect') setStep(1.5);
+                                        else handleNext();
+                                    };
                                     return (
-                                        <button
+                                        <div
                                             key={option.mode}
-                                            type="button"
-                                            onClick={() => {
-                                                setOnboardingMode(option.mode);
-                                                if (option.mode === 'connect') setStep(1.5);
-                                                else handleNext();
-                                            }}
+                                            role="radio"
+                                            aria-checked={selected}
+                                            tabIndex={0}
+                                            onClick={() => setOnboardingMode(option.mode)}
+                                            onDoubleClick={choose}
+                                            onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setOnboardingMode(option.mode); } }}
                                             className={cn(
-                                                "group relative flex flex-col overflow-hidden rounded-2xl border-2 bg-card p-5 text-left transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl hover:shadow-primary/10",
-                                                selected ? "border-primary ring-4 ring-primary/10" : "border-border hover:border-primary/40"
+                                                "group relative flex cursor-pointer flex-col rounded-2xl border bg-card p-5 text-left outline-none transition-all duration-200 focus-visible:ring-4 focus-visible:ring-primary/20",
+                                                selected ? "border-[#0f1c47] shadow-[0_0_0_1px_#0f1c47,0_12px_30px_-12px_rgba(15,28,71,0.35)]" : "border-border hover:border-slate-300 hover:shadow-md"
                                             )}
                                         >
-                                            <span className={cn("pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-gradient-to-br opacity-10 blur-2xl transition-opacity duration-300 group-hover:opacity-25", option.tone)} />
-                                            {option.badge && (
-                                                <span className="absolute right-4 top-4 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-emerald-600">
-                                                    {option.badge}
+                                            <div className="flex items-start justify-between">
+                                                <span className={cn("flex h-12 w-12 items-center justify-center rounded-xl ring-1", option.tile)}>
+                                                    <Icon className="h-6 w-6" />
                                                 </span>
-                                            )}
-                                            <span className={cn("flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br text-white shadow-lg transition-transform duration-300 group-hover:rotate-3 group-hover:scale-110", option.tone)}>
-                                                <Icon className="h-7 w-7" />
-                                            </span>
-                                            <h4 className="mt-4 text-lg font-black tracking-tight text-foreground">{option.title}</h4>
-                                            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{option.text}</p>
-                                            <ul className="mt-4 space-y-1.5">
+                                                <span className={cn(
+                                                    "flex h-5 w-5 items-center justify-center rounded-full border-2 transition-colors",
+                                                    selected ? "border-[#0f1c47] bg-[#0f1c47]" : "border-slate-300 bg-white"
+                                                )}>
+                                                    {selected && <Check className="h-3 w-3 text-white" strokeWidth={3.5} />}
+                                                </span>
+                                            </div>
+                                            <div className="mt-4 flex flex-wrap items-center gap-2">
+                                                <h4 className="text-[17px] font-bold tracking-tight text-foreground">{option.title}</h4>
+                                                {option.badge && (
+                                                    <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-emerald-700 ring-1 ring-emerald-100">
+                                                        {option.badge}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{option.text}</p>
+                                            <ul className="mt-4 space-y-2 border-t border-border/70 pt-4">
                                                 {option.points.map(point => (
-                                                    <li key={point} className="flex items-center gap-2 text-xs font-medium text-foreground/80">
-                                                        <CircleCheck className="h-4 w-4 shrink-0 text-emerald-500" /> {point}
+                                                    <li key={point} className="flex items-center gap-2 text-[13px] text-foreground/80">
+                                                        <Check className="h-4 w-4 shrink-0 text-emerald-600" strokeWidth={2.5} /> {point}
                                                     </li>
                                                 ))}
                                             </ul>
-                                            <span className="mt-5 inline-flex items-center gap-1.5 text-sm font-bold text-primary">
-                                                Escolher <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-1" />
-                                            </span>
-                                        </button>
+                                            <button
+                                                type="button"
+                                                onClick={event => { event.stopPropagation(); choose(); }}
+                                                className={cn(
+                                                    "mt-5 inline-flex h-10 items-center justify-center gap-2 rounded-xl text-sm font-semibold transition-all",
+                                                    selected
+                                                        ? "bg-[#0f1c47] text-white hover:bg-[#182b6b]"
+                                                        : "border border-border bg-background text-foreground hover:border-slate-300 hover:bg-muted/60"
+                                                )}
+                                            >
+                                                {selected ? 'Continuar com esta opção' : 'Escolher esta opção'}
+                                                <ChevronRight className="h-4 w-4" />
+                                            </button>
+                                        </div>
                                     );
                                 })}
                             </div>
 
                             <div className="text-center">
-                                <Button
-                                    variant="link"
-                                    className="text-[11px] text-red-500 opacity-60 transition-opacity hover:text-red-700 hover:opacity-100"
+                                <button
+                                    type="button"
+                                    className="text-[11px] font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-red-600 hover:underline"
                                     onClick={async () => {
-                                        if (confirm("⚠️ ATENÇÃO: Isto irá apagar COMPLETAMENTE todos os dados e reiniciar a aplicação como nova.\n\nUse esta opção apenas se estiver a ter problemas técnicos graves ou loops.\n\nDeseja continuar?")) {
+                                        if (confirm("ATENÇÃO: isto apaga completamente todos os dados e reinicia a aplicação como nova.\n\nUse apenas se tiver problemas técnicos graves.\n\nDeseja continuar?")) {
                                             try {
                                                 if ((window as any).electronAPI?.dbNuclearReset) {
                                                     await (window as any).electronAPI.dbNuclearReset();
@@ -1020,8 +1048,8 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                         }
                                     }}
                                 >
-                                    Problemas técnicos? Fazer reset de fábrica
-                                </Button>
+                                    Problemas técnicos? Repor a aplicação de fábrica
+                                </button>
                             </div>
                         </div>
                     ) : step === 1.5 ? (
@@ -1594,28 +1622,27 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                 </div>
 
                 {/* Rodapé: voltar, avançar */}
-                <footer className={cn("shrink-0 border-t border-border/70 bg-muted/20", isSecondaryAccount ? "px-5 py-3.5 sm:px-6" : "px-5 py-4 sm:px-8")}>
+                <footer className={cn("shrink-0 border-t border-border/70 bg-slate-50/70", isSecondaryAccount ? "px-5 py-3.5 sm:px-6" : "px-5 py-4 sm:px-8")}>
                     <div className="flex items-center justify-between gap-3">
                         {previousStep !== undefined ? (
-                            <Button
+                            <button
                                 type="button"
-                                variant="ghost"
                                 onClick={() => setStep(previousStep)}
                                 disabled={isLoading}
-                                className="h-11 gap-2 rounded-xl px-4 font-semibold text-muted-foreground hover:text-foreground"
+                                className="inline-flex h-11 items-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground shadow-sm transition-all hover:border-slate-300 hover:bg-muted/60 disabled:opacity-50"
                             >
-                                <ArrowLeft className="h-4 w-4" /> Voltar
-                            </Button>
+                                <ChevronLeft className="h-4 w-4" /> Voltar
+                            </button>
                         ) : (
                             <p className="hidden items-center gap-2 text-xs font-medium text-muted-foreground sm:flex">
-                                <Lock className="h-3.5 w-3.5 text-emerald-600" /> Configuração segura · os dados ficam neste computador
+                                <LockKeyhole className="h-3.5 w-3.5 text-emerald-600" /> Os dados ficam guardados neste computador
                             </p>
                         )}
 
-                        <div className="w-full max-w-[260px]">
+                        <div className="w-full max-w-[250px]">
                             {step < 7 ? (
                                 <Button
-                                    className="h-12 w-full gap-2.5 rounded-xl bg-gradient-to-r from-primary to-indigo-600 text-base font-bold text-white shadow-lg shadow-primary/30 transition-all hover:scale-[1.02] hover:brightness-110 active:scale-[0.98]"
+                                    className="group h-12 w-full justify-between rounded-xl bg-[#0f1c47] pl-5 pr-2 text-[15px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_8px_20px_-8px_rgba(15,28,71,0.6)] transition-all hover:bg-[#182b6b] active:scale-[0.99] disabled:bg-slate-300 disabled:shadow-none"
                                     disabled={
                                         step === 3 ? !acceptedTerms :
                                             step === 4 ? !companyName.trim() :
@@ -1623,31 +1650,29 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                     }
                                     onClick={handleNext}
                                 >
-                                    {step === 1 ? 'Começar Agora' :
-                                        step === 3 ? 'Aceitar e Continuar' :
-                                            'Próximo Passo'}
-                                    <ArrowRight className="h-5 w-5" />
+                                    {step === 1 ? 'Começar' :
+                                        step === 3 ? 'Aceitar e continuar' :
+                                            'Continuar'}
+                                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/10 transition-transform group-hover:translate-x-0.5">
+                                        <ArrowRight className="h-4 w-4" />
+                                    </span>
                                 </Button>
                             ) : (
                                 <Button
-                                    className="h-12 w-full rounded-xl bg-gradient-to-r from-emerald-600 to-green-600 text-base font-bold text-white shadow-lg shadow-emerald-600/30 transition-all hover:scale-[1.02] hover:brightness-110 active:scale-[0.98]"
+                                    className="group h-12 w-full justify-between rounded-xl bg-emerald-600 pl-5 pr-2 text-[15px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.15),0_8px_20px_-8px_rgba(5,150,105,0.6)] transition-all hover:bg-emerald-700 active:scale-[0.99]"
                                     onClick={handleComplete}
                                     disabled={isLoading}
                                 >
-                                    {isLoading ? (
-                                        <>
-                                            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                                            A Guardar...
-                                        </>
-                                    ) : (
-                                        <>Finalizar e Entrar <ArrowRight className="ml-2 h-5 w-5" /></>
-                                    )}
+                                    {isLoading ? 'A guardar...' : 'Finalizar e entrar'}
+                                    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/15">
+                                        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" strokeWidth={3} />}
+                                    </span>
                                 </Button>
                             )}
                         </div>
                     </div>
                     <p className="mt-3 text-center text-[9px] font-medium uppercase tracking-[0.2em] text-muted-foreground md:hidden">
-                        Desenvolvido por DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA
+                        DIGITAL NORTE - Comércio e Prestação de Serviços, (SU), Lda
                     </p>
                 </footer>
                 </div>

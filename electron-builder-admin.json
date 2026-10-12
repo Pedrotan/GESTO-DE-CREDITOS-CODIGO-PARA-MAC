@@ -64,6 +64,9 @@
         "artifactName": "${productName}_Setup.${ext}",
         "deleteAppDataOnUninstall": true,
         "include": "build/installer.nsh",
+      "installerSidebar": "build/installerSidebarMaster.bmp",
+      "uninstallerSidebar": "build/installerSidebarMaster.bmp",
+      "installerHeader": "build/installerHeaderMaster.bmp",
         "warningsAsErrors": false
     }
 }

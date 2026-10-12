@@ -30,6 +30,8 @@ bun.lockb
 # Build artifacts
 build/*
 !build/installer.nsh
+!build/installerSidebar*.bmp
+!build/installerHeader*.bmp
 release
 release-admin
 dist-admin
