@@ -8,6 +8,7 @@ import { Header } from './Header';
 import { TickerTaxas } from './TickerTaxas';
 import { LembreteFechoMes } from './LembreteFechoMes';
 import { LigacaoNuvemDesktop } from './LigacaoNuvemDesktop';
+import { AvisoLicencaNuvem } from './AvisoLicencaNuvem';
 import { ControloHorarioAcesso } from './ControloHorarioAcesso';
 import { BannerCongelamento } from '@/componentes/contabilidade/ControloPanico';
 import { MonitorSeguranca } from '@/componentes/seguranca/MonitorSeguranca';
@@ -78,6 +79,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
           subtitle={subtitle}
           onMobileMenuToggle={() => setMobileMenuOpen(!mobileMenuOpen)}
         />
+        <AvisoLicencaNuvem />
         <BannerCongelamento />
         <MonitorSeguranca />
         <EnvioRelatoriosAgendados />

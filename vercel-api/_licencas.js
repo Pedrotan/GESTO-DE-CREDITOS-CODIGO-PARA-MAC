@@ -386,7 +386,7 @@ const refuse = async (sql, license, outcome, detail, ip) => {
  * POST /api/licencas/ativar: valida a chave e a máquina, regista a máquina (até ao máximo da licença) e devolve
  * um token assinado. `sign(claims)` assina o token (injectado para permitir testes).
  */
-export const activateLicense = async (sql, { key, machineHash: machine, machineName, ip = null }, { parse, hash, sign }, now = new Date()) => {
+export const activateLicense = async (sql, { key, machineHash: machine, legacyMachineHash = null, machineName, ip = null }, { parse, hash, sign }, now = new Date()) => {
   const chars = parse(key);
   if (!chars) return { ok: false, failure: true, status: 400, code: 'CHAVE_MAL_ESCRITA', message: 'A chave de licença está mal escrita. Confira os caracteres (formato TANGO-XXXX-XXXX-XXXX-XXXX).' };
   if (!/^[0-9a-f]{64}$/u.test(String(machine || ''))) return { ok: false, status: 400, code: 'MAQUINA_INVALIDA', message: 'Identificação da máquina inválida.' };
@@ -397,7 +397,20 @@ export const activateLicense = async (sql, { key, machineHash: machine, machineN
   if (state !== 'ativa') return refuse(sql, license, REFUSAL_BY_STATE[state], { maquina: machine.slice(0, 12) }, ip);
 
   const name = String(machineName || '').trim().slice(0, 120) || null;
-  const [existing] = await sql(`SELECT * FROM tango_licenca_ativacoes WHERE licenca_id = $1 AND machine_hash = $2`, [license.id, machine]);
+  let [existing] = await sql(`SELECT * FROM tango_licenca_ativacoes WHERE licenca_id = $1 AND machine_hash = $2`, [license.id, machine]);
+  // Computador registado a partir de uma chave antiga (pelo identificador antigo): passa a usar a impressão digital
+  // nova em vez de ocupar outro lugar da licença.
+  const legacy = /^[0-9a-f]{64}$/u.test(String(legacyMachineHash || '')) && legacyMachineHash !== machine ? legacyMachineHash : null;
+  if (!existing && legacy) {
+    const [migrated] = await sql(`UPDATE tango_licenca_ativacoes SET machine_hash = $3, ultimo_heartbeat = $4,
+        nome_maquina = COALESCE($5, nome_maquina), estado = 'ativa'
+      WHERE licenca_id = $1 AND machine_hash = $2 AND estado = 'ativa' RETURNING *`, [license.id, legacy, machine, now.toISOString(), String(machineName || '').trim().slice(0, 120) || null]);
+    if (migrated) {
+      existing = migrated;
+      await recordLicenseEvent(sql, { licenseId: license.id, tenantId: license.empresa_id, type: 'maquina_migrada', ip,
+        detail: { de: legacy.slice(0, 12), para: machine.slice(0, 12) } });
+    }
+  }
   let activation = existing;
   if (existing?.estado === 'ativa') {
     [activation] = await sql(`UPDATE tango_licenca_ativacoes SET ultimo_heartbeat = $3, nome_maquina = COALESCE($2, nome_maquina)

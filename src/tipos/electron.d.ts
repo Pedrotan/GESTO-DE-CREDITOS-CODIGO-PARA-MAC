@@ -107,6 +107,11 @@ export interface ElectronAPI {
         printerName?: string;
         silent?: boolean;
     }) => Promise<{ success: boolean; printerName?: string; printers?: any[]; error?: string }>;
+    cloudLicenseStatus: () => Promise<import('../bibliotecas/licenca-nuvem-cliente').CloudLicenseStatus>;
+    cloudLicenseRefresh: () => Promise<import('../bibliotecas/licenca-nuvem-cliente').CloudLicenseStatus>;
+    cloudLicenseActivate: (payload: { key: string; serverUrl?: string; legacyMachineId?: string }) => Promise<
+        { success: true; status: import('../bibliotecas/licenca-nuvem-cliente').CloudLicenseStatus } | { success: false; code: string; message: string }>;
+    onCloudLicenseChanged: (callback: (status: import('../bibliotecas/licenca-nuvem-cliente').CloudLicenseStatus) => void) => () => void;
     readLicenseKeys: () => Promise<{ success: boolean; publicKey?: string; hasPrivateKey?: boolean; error?: string }>;
     generateLicenseKeypair: () => Promise<{ success: boolean; publicKey: string; hasPrivateKey: boolean }>;
     signLicensePayload: (payload: string) => Promise<{ success: boolean; payload: string; signature: string }>;

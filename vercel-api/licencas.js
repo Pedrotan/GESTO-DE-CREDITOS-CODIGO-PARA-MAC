@@ -71,7 +71,7 @@ export default async function handler(req, res) {
     };
 
     const result = route === 'ativar'
-      ? await activateLicense(sql, { key: body.chave ?? body.key, machineHash, machineName: body.nome_maquina ?? body.machineName, ip }, tools)
+      ? await activateLicense(sql, { key: body.chave ?? body.key, machineHash, legacyMachineHash: String(body.legacy_machine_hash || '').toLowerCase() || null, machineName: body.nome_maquina ?? body.machineName, ip }, tools)
       : await licenseHeartbeat(sql, { token: body.token, machineHash, ip }, tools);
 
     if (!result.ok) {

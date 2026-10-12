@@ -8,6 +8,8 @@ import { validateLicense, getLicenseTypeName, getMachineId, resolveLicenseKey, s
 import { ShieldCheck, Key, Lock, Phone, Copy, Check } from 'lucide-react';
 import { toast } from '@/ganchos/usar-toast';
 import { differenceInDays, parseISO, isValid } from 'date-fns';
+import { isCloudLicenseKey } from '@/bibliotecas/licenca-nuvem-cliente';
+import { activateThisComputer } from '@/servicos/ServicoLicencaNuvem';
 
 export default function Ativacao() {
     const { companySettings, updateCompanySettings } = useData();
@@ -79,6 +81,27 @@ export default function Ativacao() {
 
         setIsLoading(true);
         try {
+            // Chave da empresa (TANGO-…): o servidor regista este computador e devolve a licença assinada.
+            if (isCloudLicenseKey(key)) {
+                const result = await activateThisComputer(key);
+                if (!result.success) {
+                    setStatus('invalid');
+                    setLicenseInfo({ message: result.message });
+                    toast({ title: 'Activação recusada', description: result.message, variant: 'destructive' });
+                    return;
+                }
+                setStatus('valid');
+                setGlobalLicenseKey(result.key);
+                await updateCompanySettings({ ...companySettings, licenseKey: result.key }).catch(() => undefined);
+                toast({
+                    title: 'Computador activado!',
+                    description: `Licença ${result.status?.licenca?.planoNome || ''} da empresa válida neste computador.`.replace('  ', ' '),
+                    duration: 5000,
+                });
+                setTimeout(() => navigate('/'), 1500);
+                return;
+            }
+
             const validation = await validateLicense(key.trim());
 
             if (validation.isValid) {
@@ -154,14 +177,15 @@ export default function Ativacao() {
                         <div className="relative">
                             <Key className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                             <Input
-                                placeholder="Insira a chave de ativação..."
+                                placeholder="TANGO-XXXX-XXXX-XXXX-XXXX"
                                 className="pl-9 font-mono uppercase tracking-wider h-11"
                                 value={key}
                                 onChange={(e) => setKey(e.target.value)}
                             />
                         </div>
                         <p className="text-[11px] text-muted-foreground">
-                            A chave é composta por caracteres alfanuméricos fornecidos pelo administrador.
+                            Introduza a chave da empresa (TANGO-XXXX-XXXX-XXXX-XXXX) com a Internet ligada. A primeira activação
+                            regista este computador na licença; depois funciona até 7 dias sem Internet.
                         </p>
                     </div>
 
@@ -192,7 +216,7 @@ export default function Ativacao() {
                             Entre em contacto com o suporte técnico para adquirir uma nova chave ou renovar a sua subscrição mensal, trimestral ou anual.
                         </p>
                         <p className="text-xs font-bold text-blue-700 dark:text-blue-300 pt-1">
-                            WhatsApp: +244 942537486
+                            WhatsApp: +244 941 537 486
                         </p>
                     </div>
                 </CardContent>

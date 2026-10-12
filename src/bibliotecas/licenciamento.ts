@@ -1,6 +1,8 @@
 import { differenceInDays, parseISO, isValid, isBefore, format } from 'date-fns';
 import { verifySignature, importPublicKey } from './crypto_layer';
 import { decodeLicensePayload, licenseAppliesToDevice, normalizeLicenseKey, validateSignedLicensePayload } from './payload-licenca';
+import { cloudStatusToLicenseInfo, getCloudLicenseStatus, isCloudLicenseKey } from './licenca-nuvem-cliente';
+export { cloudStatusToLicenseInfo };
 
 // Chave Pública do Tango Master: definida em chave-publica-licencas.ts (usada também pelo processo principal).
 import { MASTER_PUBLIC_KEY, MASTER_PUBLIC_KEYS } from './chave-publica-licencas';
@@ -177,6 +179,10 @@ export interface LicenseInfo {
     machineId?: string;
     message?: string;
     isLegacy?: boolean;
+    /** Licença da empresa no servidor (chave TANGO-…), validada por token assinado. */
+    isCloud?: boolean;
+    /** Sem token válido (mais de 7 dias sem ligação, licença terminada ou relógio atrasado): só leitura. */
+    readOnly?: boolean;
 }
 
 /**
@@ -219,6 +225,15 @@ export const getMachineId = async (): Promise<string> => {
  * Now Async!
  */
 export const validateLicense = async (key: string, companyNif: string = activeCompanyNif): Promise<LicenseInfo> => {
+    // Computador activado com a chave da empresa (TANGO-…): o token do servidor manda sobre as chaves antigas.
+    const cloud = cloudStatusToLicenseInfo(await getCloudLicenseStatus());
+    if (cloud) return cloud;
+    if (isCloudLicenseKey(key)) {
+        return {
+            isValid: false, type: 'trial', tier: 'singular', expirationDate: new Date(), status: 'invalid', daysRemaining: 0,
+            message: 'Esta chave de licença ainda não foi activada neste computador. Carregue em "Validar e Salvar Licença" com a Internet ligada.'
+        };
+    }
     let baseId = 'GLOBAL';
     if ((window as any).electronAPI) {
         try {

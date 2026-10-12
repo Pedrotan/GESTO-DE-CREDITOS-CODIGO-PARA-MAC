@@ -110,6 +110,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { appAdapter } from '@/bibliotecas/adaptador-aplicacao';
 import { validateLicense, getLicenseTypeName, getMachineId } from '@/bibliotecas/licenciamento';
 import { normalizeLicenseKey } from '@/bibliotecas/payload-licenca';
+import { isCloudLicenseKey } from '@/bibliotecas/licenca-nuvem-cliente';
+import { activateThisComputer } from '@/servicos/ServicoLicencaNuvem';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { ServicoAutoBackup, AutoBackupConfig, AutoBackupLog } from '@/servicos/ServicoAutoBackup';
@@ -829,8 +831,18 @@ export default function Settings() {
         try {
             // Verificar se a chave de licença foi alterada
             const isNewKey = normalizeLicenseKey(formData.licenseKey) !== (companySettings?.licenseKey || '').trim();
+            let licenseKeyToSave = normalizeLicenseKey(formData.licenseKey);
 
-            if (isNewKey && normalizeLicenseKey(formData.licenseKey) !== '') {
+            if (isNewKey && isCloudLicenseKey(formData.licenseKey)) {
+                // Chave da empresa (TANGO-…): activação deste computador no servidor da nuvem.
+                const activation = await activateThisComputer(formData.licenseKey);
+                if (!activation.success) {
+                    setAlertConfig({ isOpen: true, title: "Licença não activada", description: activation.message, type: "error" });
+                    return;
+                }
+                licenseKeyToSave = activation.key;
+                setLicense(await validateLicense(activation.key));
+            } else if (isNewKey && normalizeLicenseKey(formData.licenseKey) !== '') {
                 // 1. Validar estrutura e assinatura
                 const licenseResult = await validateLicense(normalizeLicenseKey(formData.licenseKey));
 
@@ -904,7 +916,7 @@ export default function Settings() {
                 enableSuppliersModule: formData.enableSuppliersModule,
                 enableSuppliersModuleAdminOnly: formData.enableSuppliersModuleAdminOnly,
                 enableMultiTenant: formData.enableMultiTenant,
-                licenseKey: normalizeLicenseKey(formData.licenseKey),
+                licenseKey: licenseKeyToSave,
                 defaultSimulationInterestRate: Number(formData.defaultSimulationInterestRate),
                 defaultSimulationAdminFee: Number(formData.defaultSimulationAdminFee),
                 defaultSimulationIof: Number(formData.defaultSimulationIof),

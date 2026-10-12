@@ -284,6 +284,16 @@ const api = Object.freeze({
     encryptData: (data: string) => ipcRenderer.invoke('encrypt-data', ensureText(data, 'Dados')),
     decryptData: (data: string) => ipcRenderer.invoke('decrypt-data', ensureText(data, 'Dados')),
 
+    // Licença da empresa (chave TANGO-…): estado, activação, renovação e avisos de mudança.
+    cloudLicenseStatus: () => ipcRenderer.invoke('cloud-license-status'),
+    cloudLicenseRefresh: () => ipcRenderer.invoke('cloud-license-refresh'),
+    cloudLicenseActivate: (payload: { key: string; serverUrl?: string; legacyMachineId?: string }) => ipcRenderer.invoke('cloud-license-activate', {
+        key: ensureText(payload?.key, 'Chave de licença', 64),
+        serverUrl: payload?.serverUrl ? ensureText(payload.serverUrl, 'Servidor', 300) : undefined,
+        legacyMachineId: payload?.legacyMachineId ? ensureText(payload.legacyMachineId, 'Identificador', 200) : undefined,
+    }),
+    onCloudLicenseChanged: (callback: (status: any) => void) => subscribe('cloud-license-changed', callback),
+
     readLicenseKeys: () => ipcRenderer.invoke('read-license-keys'),
     generateLicenseKeypair: () => ipcRenderer.invoke('generate-license-keypair'),
     signLicensePayload: (payload: string) => ipcRenderer.invoke('sign-license-payload', ensureText(payload, 'Payload da licenca', 64_000)),

@@ -194,6 +194,25 @@ test('chaves erradas: ao fim de 5 tentativas o IP fica bloqueado', async () => {
     assert.equal((await activate({ chave: 'TANGO-ABCD', machine_hash: PC1 }, '10.8.8.8')).body.code, 'CHAVE_MAL_ESCRITA');
 });
 
+test('computador de uma licença antiga passa para a impressão digital nova sem gastar outro lugar', async () => {
+    const L = await import(pathToFileURL(path.join(ROOT, 'vercel-api/_licencas.js')).href);
+    const [license] = await sql(`SELECT id FROM tango_licencas WHERE empresa_id = '5003207439'`);
+    await sql(`UPDATE tango_licenca_ativacoes SET estado = 'libertada' WHERE licenca_id = $1`, [license.id]);
+    await sql(`UPDATE tango_licencas SET max_maquinas = 1 WHERE id = $1`, [license.id]);
+    const oldHash = L.machineHash('TANGO-16EDE273');
+    await sql(`INSERT INTO tango_licenca_ativacoes (id, licenca_id, machine_hash, estado) VALUES ($1, $2, $3, 'ativa')`,
+        [crypto.randomUUID(), license.id, oldHash]);
+    const PC3 = machine('pc-3');
+    const moved = await activate({ chave: licenseKey, machine_hash: PC3, legacy_machine_hash: oldHash });
+    assert.equal(moved.statusCode, 200, JSON.stringify(moved.body));
+    const rows = await sql(`SELECT machine_hash FROM tango_licenca_ativacoes WHERE licenca_id = $1 AND estado = 'ativa'`, [license.id]);
+    assert.deepEqual(rows.map(row => row.machine_hash), [PC3]);
+    const events = await sql(`SELECT COUNT(*)::int AS total FROM tango_licenca_eventos WHERE tipo = 'maquina_migrada'`);
+    assert.equal(events[0].total, 1);
+    // Outro computador sem ligação a uma licença antiga continua limitado pelo máximo.
+    assert.equal((await activate({ chave: licenseKey, machine_hash: machine('pc-4'), legacy_machine_hash: oldHash })).body.code, 'LIMITE_MAQUINAS');
+});
+
 test('chave pública e servidor sem chave de assinatura', async () => {
     const info = await invoke(licencas, { method: 'GET', url: '/api/licencas/chave-publica' });
     assert.equal(info.statusCode, 200);

@@ -21,6 +21,8 @@ import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
 import { MASTER_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-licencas';
+import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-tokens';
+import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
@@ -1469,6 +1471,153 @@ const startServerInternal = async (passkey) => {
     });
   });
 };
+// --- Licença da empresa no Desktop (etapa 4): activação com a chave TANGO-…, token cifrado e modo só leitura ---
+let cachedMachineFingerprint: string | null = null;
+/** Identificador estável do Windows (MachineGuid), do macOS (IOPlatformUUID) ou do Linux (machine-id). */
+const readMachineGuid = (): string => {
+  const { execFileSync } = require("child_process");
+  try {
+    if (process.platform === "win32") {
+      const out = execFileSync("reg", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"], { encoding: "utf8", windowsHide: true, timeout: 5000 });
+      const match = /MachineGuid\s+REG_SZ\s+([0-9a-f-]{36})/i.exec(out);
+      if (match) return match[1];
+    } else if (process.platform === "darwin") {
+      const out = execFileSync("ioreg", ["-rd1", "-c", "IOPlatformExpertDevice"], { encoding: "utf8", timeout: 5000 });
+      const match = /"IOPlatformUUID"\s*=\s*"([^"]+)"/.exec(out);
+      if (match) return match[1];
+    } else if (fs.existsSync("/etc/machine-id")) {
+      return fs.readFileSync("/etc/machine-id", "utf8").trim();
+    }
+  } catch (error) {
+    console.warn("[Licença] Identificador da máquina indisponível:", (error as Error)?.message);
+  }
+  // Último recurso: um identificador aleatório guardado nesta instalação (estável enquanto ela existir).
+  const fallbackPath = path.join(app.getPath("userData"), "machine-fallback-id.txt");
+  if (!fs.existsSync(fallbackPath)) fs.writeFileSync(fallbackPath, crypto.randomUUID(), { mode: 0o600 });
+  return fs.readFileSync(fallbackPath, "utf8").trim();
+};
+const currentMachineFingerprint = () => cachedMachineFingerprint ??= machineFingerprint(readMachineGuid());
+const cloudLicensePath = () => path.join(app.getPath("userData"), "license-cloud.bin");
+const readCloudLicense = (): CloudLicenseRecord | null => {
+  try {
+    if (!fs.existsSync(cloudLicensePath()) || !safeStorage.isEncryptionAvailable()) return null;
+    return JSON.parse(safeStorage.decryptString(fs.readFileSync(cloudLicensePath())));
+  } catch {
+    return null;
+  }
+};
+const writeCloudLicense = (record: CloudLicenseRecord) => {
+  if (!safeStorage.isEncryptionAvailable()) throw new Error("O cofre do Windows não está disponível para guardar a licença.");
+  fs.writeFileSync(cloudLicensePath(), safeStorage.encryptString(JSON.stringify(record)), { mode: 0o600 });
+};
+let cloudLicenseReadOnly: CloudLicenseStatus | null = null;
+const cloudLicenseStatusNow = (): CloudLicenseStatus => {
+  if (isTangoMaster) return { state: "none" };
+  const record = readCloudLicense();
+  const status = evaluateCloudLicense(record, currentMachineFingerprint(), LICENSE_TOKEN_PUBLIC_KEYS);
+  // Guarda a maior hora local vista (de hora a hora): um relógio que volta atrás é detectado depois.
+  if (record && status.state !== "clock" && Date.now() - (Date.parse(record.lastLocalTime) || 0) > 3_600_000) {
+    try { writeCloudLicense({ ...record, lastLocalTime: new Date().toISOString() }); } catch { /* cofre indisponível */ }
+  }
+  cloudLicenseReadOnly = status.state === "readonly" || status.state === "clock" ? status : null;
+  return status;
+};
+const notifyCloudLicense = (status: CloudLicenseStatus) => {
+  for (const window of BrowserWindow.getAllWindows()) window.webContents.send("cloud-license-changed", status);
+};
+/** Escrita bloqueada enquanto a licença deste computador está em modo só leitura. */
+const assertCloudLicenseWritable = () => {
+  if (isTangoMaster || financialSchemaBootstrapOpen || !cloudLicenseReadOnly) return;
+  throw new Error(`Modo só de leitura: ${cloudLicenseReadOnly.message || "a licença deste computador precisa de ser validada."}`);
+};
+const postLicenseServer = async (serverUrl: string, route: string, body: Record<string, unknown>) => {
+  const response = await fetch(`${serverUrl}/api/licencas/${route}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(20_000),
+  });
+  const data: any = await response.json().catch(() => ({}));
+  return { ok: response.ok && data.success === true, data, status: response.status };
+};
+const cleanLicenseServerUrl = (value: unknown) => {
+  const text = String(value || "").trim().replace(/\/+$/, "");
+  return /^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(text) || /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(text) ? text : "";
+};
+/** Pede um token novo ao servidor (ao abrir, a cada 24 h, ou quando o utilizador pede). */
+const cloudLicenseHeartbeat = async (force = false): Promise<CloudLicenseStatus> => {
+  if (isTangoMaster) return { state: "none" };
+  const record = readCloudLicense();
+  const fingerprint = currentMachineFingerprint();
+  const claims = record ? verifyCloudToken(record.token, LICENSE_TOKEN_PUBLIC_KEYS) : null;
+  if (!record || !claims || claims.machine_hash !== fingerprint || (!force && !heartbeatDue(record, claims))) return cloudLicenseStatusNow();
+  try {
+    const { ok, data } = await postLicenseServer(record.serverUrl, "heartbeat", { token: record.token, machine_hash: fingerprint });
+    const renewed = ok ? verifyCloudToken(data.token, LICENSE_TOKEN_PUBLIC_KEYS) : null;
+    if (renewed && renewed.machine_hash === fingerprint) {
+      writeCloudLicense(recordFromToken(data.token, record.serverUrl, renewed, record));
+    } else if (!ok && isLicenseRefusal(data.code)) {
+      writeCloudLicense({ ...record, lastCheckAt: new Date().toISOString(), refusal: { code: String(data.code), message: String(data.message || ""), at: new Date().toISOString() } });
+    }
+  } catch (error) {
+    console.warn("[Licença] Sem ligação ao servidor de licenças:", (error as Error)?.message);
+  }
+  const status = cloudLicenseStatusNow();
+  notifyCloudLicense(status);
+  return status;
+};
+function registerCloudLicenseHandlers() {
+  ipcMain.handle("cloud-license-status", async (event) => {
+    assertTrustedIpcSender(event);
+    return cloudLicenseStatusNow();
+  });
+  ipcMain.handle("cloud-license-refresh", async (event) => {
+    assertTrustedIpcSender(event);
+    return cloudLicenseHeartbeat(true);
+  });
+  ipcMain.handle("cloud-license-activate", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    if (isTangoMaster) throw new Error("A activação de licenças é feita no Tango ERP.");
+    const key = String(payload?.key || "").trim();
+    if (!isCloudLicenseKey(key)) return { success: false, code: "CHAVE_MAL_ESCRITA", message: "A chave de licença tem o formato TANGO-XXXX-XXXX-XXXX-XXXX." };
+    const previous = readCloudLicense();
+    const serverUrl = cleanLicenseServerUrl(payload?.serverUrl) || previous?.serverUrl || DEFAULT_LICENSE_SERVER;
+    const fingerprint = currentMachineFingerprint();
+    const legacyId = String(payload?.legacyMachineId || "").trim();
+    let result;
+    try {
+      result = await postLicenseServer(serverUrl, "ativar", {
+        chave: key,
+        machine_hash: fingerprint,
+        legacy_machine_hash: legacyId ? legacyMachineHash(legacyId) : undefined,
+        nome_maquina: os.hostname().slice(0, 120),
+      });
+    } catch (error) {
+      return { success: false, code: "SEM_LIGACAO", message: (error as Error)?.name === "TimeoutError"
+        ? "O servidor de licenças demorou muito a responder. Tente de novo."
+        : "Não foi possível contactar o servidor de licenças. Verifique a ligação à Internet." };
+    }
+    if (!result.ok) return { success: false, code: result.data.code || `HTTP_${result.status}`, message: result.data.message || `O servidor de licenças respondeu com erro (${result.status}).` };
+    const claims = verifyCloudToken(result.data.token, LICENSE_TOKEN_PUBLIC_KEYS);
+    if (!claims || claims.machine_hash !== fingerprint) {
+      return { success: false, code: "TOKEN_NAO_CONFIAVEL", message: "A resposta do servidor não tem uma assinatura Tango válida. Confirme o endereço do servidor." };
+    }
+    writeCloudLicense(recordFromToken(result.data.token, serverUrl, claims, previous));
+    const status = cloudLicenseStatusNow();
+    notifyCloudLicense(status);
+    return { success: true, status };
+  });
+  if (!isTangoMaster) {
+    setTimeout(() => void cloudLicenseHeartbeat(), 15_000);
+    setInterval(() => void cloudLicenseHeartbeat(), 6 * 3_600_000);
+    let lastNotifiedState = "";
+    setInterval(() => {
+      const status = cloudLicenseStatusNow();
+      if (status.state !== lastNotifiedState) { lastNotifiedState = status.state; notifyCloudLicense(status); }
+    }, 10 * 60_000);
+    try { cloudLicenseStatusNow(); } catch (error) { console.warn("[Licença]", (error as Error)?.message); }
+  }
+}
 function registerMainHandlers() {
   const assertMasterSession = (event: Electron.IpcMainInvokeEvent) => {
     assertTrustedIpcSender(event);
@@ -2036,6 +2185,7 @@ app.whenReady().then(async () => {
     }
   });
   registerMainHandlers();
+  registerCloudLicenseHandlers();
   electron.session.defaultSession.webRequest.onHeadersReceived(
     { urls: ["http://*/*", "https://*/*"] },
     (details, callback) => {
@@ -2970,6 +3120,7 @@ app.whenReady().then(async () => {
   };
   ipcMain.handle("db-execute", async (event, sql, params) => {
     assertTrustedIpcSender(event);
+    assertCloudLicenseWritable();
     const request = validateSqlRequest("execute", sql, params);
     assertRendererSqlAllowlisted([request], financialSchemaBootstrapOpen);
     assertFinancialSqlAuthorized(event, [request]);
@@ -3024,6 +3175,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("db-transaction", async (event, statements) => {
     assertTrustedIpcSender(event);
+    assertCloudLicenseWritable();
     const safeStatements = validateDbTransaction(statements);
     assertRendererSqlAllowlisted(safeStatements, financialSchemaBootstrapOpen);
     assertFinancialSqlAuthorized(event, safeStatements);
