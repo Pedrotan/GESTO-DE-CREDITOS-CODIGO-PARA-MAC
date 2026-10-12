@@ -28,7 +28,8 @@ bun.lockb
 *.sw?
 
 # Build artifacts
-build
+build/*
+!build/installer.nsh
 release
 release-admin
 dist-admin
