@@ -56,7 +56,7 @@ export default async function handler(req, res) {
   const providedKey = req.headers['x-sync-passkey'] || bearer;
   try {
     const auth = await authorizeTenant(sql, tenantId, providedKey, req);
-    if (!auth.ok) return send(res, auth.status, { success: false, message: auth.message });
+    if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code, message: auth.message });
     if (!await enforceDistributedRateLimit(sql, req, res, {
       limit: 600, windowMs: 60_000, scope: 'sync-tenant', subject: tenantId, dimension: 'subject'
     })) return;

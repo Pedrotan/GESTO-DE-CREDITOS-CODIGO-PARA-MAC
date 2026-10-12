@@ -41,7 +41,7 @@ export default async function handler(req, res) {
     if (!await enforceDistributedRateLimit(sql, req, res, { limit: 30, windowMs: 60 * 60_000, scope: 'usage_report' })) return;
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const auth = await authorizeTenant(sql, tenantId, req.headers['x-sync-passkey'] || bearer, req);
-    if (!auth.ok) return send(res, auth.status, { success: false, message: auth.message });
+    if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code, message: auth.message });
 
     await ensureUsageTable(sql);
     const canonicalTenant = tenantId.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();

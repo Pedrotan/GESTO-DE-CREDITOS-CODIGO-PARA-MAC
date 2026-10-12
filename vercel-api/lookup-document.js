@@ -46,7 +46,7 @@ export default async function handler(req, res) {
   }
   if (!authorized && req.headers['x-tenant-id'] && req.headers['x-sync-passkey']) {
     const access = await authorizeTenant(sql, String(req.headers['x-tenant-id']), String(req.headers['x-sync-passkey']), req);
-    if (!access.ok) return send(res, access.status, { success: false, message: access.message });
+    if (!access.ok) return send(res, access.status, { success: false, code: access.code, message: access.message });
     authorized = true;
   }
   if (!authorized) {

@@ -3,6 +3,7 @@ import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
+import { licenseGate } from './_licencas.js';
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -148,6 +149,18 @@ export default async function handler(req, res) {
     }
 
     await clearAuthFailures(sql, { scope: 'company_code', subject: tenantId });
+
+    // Licença da empresa: suspensa, revogada ou expirada bloqueia a versão web e a ligação do Desktop.
+    const license = await licenseGate(sql, tenantId);
+    if (!license.ok) {
+      return send(res, license.status, {
+        success: false,
+        code: license.legacyCode,
+        licenseCode: license.code,
+        message: license.message
+      });
+    }
+
     // Empresa aprovada com sucesso!
     return send(res, 200, {
       success: true,

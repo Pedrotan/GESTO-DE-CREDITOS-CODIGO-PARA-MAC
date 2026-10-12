@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { recordRejectedOrigin } from './_alertas.js';
 import { normalizeNif } from './_pedidos-cadastro.js';
+import { licenseGate } from './_licencas.js';
 
 // Retorna o status de uma empresa no Tango Master Gen sem expor dados sensíveis.
 // Endpoint oficial: GET /api/v1/companies/status/{identificador} e POST /api/company-status
@@ -98,6 +99,16 @@ export default async function handler(req, res) {
           success: false,
           status: 'EXPIRED',
           message: 'A subscrição desta empresa expirou. Solicite a renovação no Tango Master Gen.'
+        });
+      }
+
+      const license = await licenseGate(sql, tenant.tenant_id);
+      if (!license.ok) {
+        return send(res, 403, {
+          success: false,
+          status: license.legacyCode,
+          licenseCode: license.code,
+          message: license.message
         });
       }
 

@@ -447,3 +447,35 @@ export const licenseHeartbeat = async (sql, { token, machineHash: machine, ip = 
   const renewed = await issueToken(sql, license, activation, sign, now);
   return { ok: true, token: renewed.token, claims: renewed.claims };
 };
+
+// --- Etapa 3: verificação da licença em cada pedido da empresa ----------------------------------------------
+
+/** Códigos antigos usados pelos clientes (versão web e Desktop) para mostrar o bloqueio. */
+const LEGACY_CODE_BY_STATE = { suspensa: 'BLOCKED', revogada: 'BLOCKED', expirada: 'EXPIRED' };
+
+/**
+ * A licença da empresa permite usar a nuvem agora? Uma empresa sem linha de licença (registada antes das
+ * licenças ou pela chave global) segue só as regras da própria empresa.
+ */
+export const checkTenantLicense = async (sql, tenantId, now = new Date()) => {
+  const [license] = await sql(`SELECT id, empresa_id, estado, data_fim FROM tango_licencas WHERE UPPER(empresa_id) = UPPER($1)`, [tenantId]);
+  if (!license) return { ok: true, license: null };
+  const state = await effectiveState(sql, license, now);
+  if (state === 'ativa') return { ok: true, license };
+  return { ok: false, state, legacyCode: LEGACY_CODE_BY_STATE[state], ...REFUSAL_BY_STATE[state] };
+};
+
+/**
+ * Middleware de licença para as rotas da empresa (sincronização, versão web, relatórios, consultas).
+ * Se as tabelas de licenças não estiverem disponíveis, deixa passar: o estado e a validade da empresa já foram
+ * verificados por quem chama, e uma falha da base não deve parar todas as empresas.
+ */
+export const licenseGate = async (sql, tenantId) => {
+  try {
+    await prepareLicenses(sql, process.env.DATABASE_URL || 'default');
+    return await checkTenantLicense(sql, tenantId);
+  } catch (error) {
+    console.error('[licencas][verificacao]', error?.message || error);
+    return { ok: true, license: null, unavailable: true };
+  }
+};

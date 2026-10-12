@@ -79,6 +79,24 @@ export function LigacaoNuvemDesktop() {
         return () => window.removeEventListener('tango-cloud-sync-status', handler);
     }, [isDesktop, isAdmin, alreadyLinked]);
 
+    // Licença suspensa, expirada ou revogada: a nuvem pára a sincronização. Avisar uma vez por sessão, com o contacto.
+    const licenseWarned = useRef(false);
+    useEffect(() => {
+        if (!isDesktop || !alreadyLinked) return;
+        const handler = (event: Event) => {
+            const detail = (event as CustomEvent<CloudSyncStatus>).detail;
+            if (!detail?.licenseRefused || licenseWarned.current) return;
+            licenseWarned.current = true;
+            toast({
+                title: detail.licenseRefused === 'LICENCA_EXPIRADA' ? 'Licença expirada' : 'Licença sem efeito',
+                description: `${detail.message || 'A licença desta empresa não está activa.'} Este computador continua a funcionar, mas deixa de sincronizar com a versão web até a licença ser renovada.`,
+                variant: 'destructive',
+            });
+        };
+        window.addEventListener('tango-cloud-sync-status', handler);
+        return () => window.removeEventListener('tango-cloud-sync-status', handler);
+    }, [isDesktop, alreadyLinked, toast]);
+
     // Abertura manual (indicador "Modo Local" no cabeçalho).
     useEffect(() => {
         const handler = async () => {

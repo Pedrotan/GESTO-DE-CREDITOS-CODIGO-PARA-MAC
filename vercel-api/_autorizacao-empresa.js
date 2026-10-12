@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { clearAuthFailures, lockoutRemaining, registerAuthFailure } from './_alertas.js';
+import { licenseGate } from './_licencas.js';
 
 // Autorização de uma empresa (tenant) pelo seu código de acesso. Partilhada pela sincronização e
 // pelo envio dos relatórios de utilização.
@@ -91,6 +92,9 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
   if (tenant.expires_at && new Date(tenant.expires_at).getTime() < Date.now()) {
     return { ok: false, status: 403, message: 'A chave ou código de acesso desta empresa expirou. Contacte o administrador.' };
   }
+  // A licença da empresa (fonte única de verdade) tem de estar activa: sem ela, a nuvem recusa o pedido.
+  const license = await licenseGate(sql, tenantId);
+  if (!license.ok) return { ok: false, status: license.status, code: license.code, message: license.message };
   await sql('UPDATE tango_tenants SET last_sync_at = NOW() WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
   if (req) await clearAuthFailures(sql, { scope: 'tenant_key', subject: tenantId });
   return { ok: true };

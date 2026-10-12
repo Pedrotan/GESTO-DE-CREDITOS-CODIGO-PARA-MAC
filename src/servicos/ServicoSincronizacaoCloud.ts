@@ -88,6 +88,8 @@ export type CloudSyncStatus = {
     skipped?: number;
     /** O servidor recusou o Código de Acesso guardado (alterado ou revogado no Tango Master). */
     authFailed?: boolean;
+    /** O servidor recusou porque a licença da empresa está suspensa, expirada ou revogada (LICENCA_*). */
+    licenseRefused?: string;
     /** Computador: a lista de utilizadores foi enviada nesta sincronização. */
     usersSent?: boolean;
     /** Navegador: estado da lista de utilizadores vinda do computador da empresa. */
@@ -735,7 +737,7 @@ export const syncCloudNow = async () => {
                     signal: AbortSignal.timeout(requestTimeout(requestBody.length + MAX_PULL_BYTES))
                 });
                 const body = await response.json().catch(() => ({}));
-                if (!response.ok) throw Object.assign(new Error(body.message || body.error || `Erro de sincronização (${response.status}).`), { status: response.status });
+                if (!response.ok) throw Object.assign(new Error(body.message || body.error || `Erro de sincronização (${response.status}).`), { status: response.status, code: body.code });
                 await deleteOperations(queued.map(operation => operation.id));
                 if (round === 0 && usersOut?.digest) {
                     localStorage.setItem(scopedStorageKey(USERS_DIGEST_KEY), usersOut.digest);
@@ -812,7 +814,8 @@ export const syncCloudNow = async () => {
             failureCount += 1;
             retryNotBefore = Date.now() + delay;
             const pending = await getPendingSyncCount().catch(() => 0);
-            emitStatus({ state: 'error', message, pending, at: new Date().toISOString(), authFailed: error?.status === 401 });
+            const licenseRefused = /^LICENCA_/.test(String(error?.code || '')) ? String(error.code) : undefined;
+            emitStatus({ state: 'error', message, pending, at: new Date().toISOString(), authFailed: error?.status === 401, licenseRefused });
             scheduleSync(delay);
             return { success: false, message };
         }
