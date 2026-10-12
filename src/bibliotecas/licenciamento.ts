@@ -3,33 +3,51 @@ import { verifySignature, importPublicKey } from './crypto_layer';
 import { decodeLicensePayload, licenseAppliesToDevice, normalizeLicenseKey, validateSignedLicensePayload } from './payload-licenca';
 
 // Chave Pública do Tango Master: definida em chave-publica-licencas.ts (usada também pelo processo principal).
-import { MASTER_PUBLIC_KEY } from './chave-publica-licencas';
-export { MASTER_PUBLIC_KEY };
+import { MASTER_PUBLIC_KEY, MASTER_PUBLIC_KEYS } from './chave-publica-licencas';
+export { MASTER_PUBLIC_KEY, MASTER_PUBLIC_KEYS };
 
 /**
- * Obtém a chave pública para validação de licença.
- * Tenta ler do sistema de ficheiros via Electron IPC, ou usa a chave hardcoded como fallback.
+ * Chaves públicas aceites para validar licenças: a do Tango Master deste computador (quando existe) e as
+ * embutidas na aplicação (actual e anteriores), para que as licenças emitidas com uma chave antiga continuem válidas.
  */
-let cachedPublicKey: string | null = null;
+let cachedPublicKeys: string[] | null = null;
 
-export const getPublicLicenseKey = async (): Promise<string> => {
-    if (cachedPublicKey) return cachedPublicKey;
-
-    if ((window as any).electronAPI && (window as any).electronAPI.readLicenseKeys) {
+export const getPublicLicenseKeys = async (): Promise<string[]> => {
+    if (cachedPublicKeys) return cachedPublicKeys;
+    const keys: string[] = [];
+    if ((window as any).electronAPI?.readLicenseKeys) {
         try {
             const response = await (window as any).electronAPI.readLicenseKeys();
-            if (response && response.success && response.publicKey) {
-                console.log("✅ [Licenciamento] Chave pública carregada do sistema de ficheiros.");
-                cachedPublicKey = response.publicKey;
-                return response.publicKey;
-            }
-        } catch (e) {
-            console.error("❌ [Licenciamento] Falha ao ler chave pública do disco:", e);
+            if (response?.success && response.publicKey) keys.push(response.publicKey);
+        } catch {
+            // Só o Tango Master lê a chave do disco; o ERP usa as embutidas.
         }
     }
+    cachedPublicKeys = [...keys, ...MASTER_PUBLIC_KEYS];
+    return cachedPublicKeys;
+};
 
-    console.log("ℹ️ [Licenciamento] Usando chave pública hardcoded.");
-    return MASTER_PUBLIC_KEY;
+export const getPublicLicenseKey = async (): Promise<string> => (await getPublicLicenseKeys())[0] || MASTER_PUBLIC_KEY;
+
+const invalidLicense = (message: string): LicenseInfo => ({
+    isValid: false,
+    type: 'trial',
+    tier: 'singular',
+    expirationDate: new Date(),
+    status: 'invalid',
+    daysRemaining: 0,
+    message
+});
+
+/** Explica porque é que o texto colado não é uma chave de licença assinada. */
+const unreadableKeyMessage = (key: string) => {
+    if (/^TG-?[A-Z0-9]{4}-?[A-Z0-9]{4}$/iu.test(key)) {
+        return 'Isto é o Código de Acesso à nuvem da empresa (TG-…), não a chave de licença. Use-o em "Ligar à versão web" e cole aqui a chave de licença (começa por "eyJ").';
+    }
+    if (!key.startsWith('ey') && !key.startsWith('{')) {
+        return `A chave de licença começa por "eyJ" e tem mais de 1000 caracteres; o texto colado começa por "${key.slice(0, 6)}". Copie a chave inteira no Tango Master (botão Copiar) ou o bloco completo do certificado.`;
+    }
+    return `A chave de licença está incompleta ou foi alterada (${key.length} caracteres colados). Copie-a de novo no Tango Master, com o botão Copiar.`;
 };
 
 const GLOBAL_LICENSE_STORAGE_KEY = 'tango_global_license_key_v1';
@@ -246,25 +264,17 @@ export const validateLicense = async (key: string, companyNif: string = activeCo
         try {
             const { payload, signature } = licenseObject;
 
-            // --- NOVO: Carregamento Dinâmico da Chave Pública ---
-            const currentPublicKey = await getPublicLicenseKey();
-            const sourceInfo = (window as any).electronAPI ? " (Disk/IPC)" : " (Hardcoded/Web)";
-            const keyPreview = currentPublicKey.substring(0, 15) + "...";
-
-            const publicKey = await importPublicKey(currentPublicKey);
-
-            const isValidSig = await verifySignature(payload, signature, publicKey);
+            let isValidSig = false;
+            for (const candidate of await getPublicLicenseKeys()) {
+                try {
+                    if (await verifySignature(payload, signature, await importPublicKey(candidate))) { isValidSig = true; break; }
+                } catch {
+                    // Assinatura de outro tamanho de chave: experimenta a seguinte.
+                }
+            }
 
             if (!isValidSig) {
-                return {
-                    isValid: false,
-                    type: 'trial',
-                    tier: 'singular',
-                    expirationDate: new Date(),
-                    status: 'invalid',
-                    daysRemaining: 0,
-                    message: `Erro na assinatura digital: A chave pública no sistema não corresponde. \nUsando: ${keyPreview}${sourceInfo}. \nVerifique se o Master e o ERP estão sincronizados (gerar nova chave no Master).`
-                };
+                return invalidLicense('A assinatura da licença não corresponde a nenhuma chave do Tango Master conhecida por esta aplicação. A licença foi emitida com outra chave de assinatura ou foi alterada.');
             }
 
             const data: LicensePayload = JSON.parse(decodeLicensePayload(payload));
@@ -306,17 +316,10 @@ export const validateLicense = async (key: string, companyNif: string = activeCo
 
         } catch (e) {
             console.warn("RSA license validation failed", e);
+            return invalidLicense(`A chave de licença tem dados inválidos (${e instanceof Error ? e.message : 'formato desconhecido'}). Gere-a de novo no Tango Master.`);
         }
     }
-    return {
-        isValid: false,
-        type: 'trial',
-        tier: 'singular',
-        expirationDate: new Date(),
-        status: 'invalid',
-        daysRemaining: 0,
-        message: 'Chave de licença assinada inválida ou obsoleta.'
-    };
+    return invalidLicense(unreadableKeyMessage(trimmedKey));
 };
 
 /**

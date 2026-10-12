@@ -167,6 +167,21 @@
     ${GetTime} "" "L" $0 $1 $2 $3 $4 $5 $6
     StrCpy $R0 "$DESKTOP\${TANGO_DISPLAY_NAME} - dados anteriores $2-$1-$0 $4h$5"
     !insertmacro TangoAllDataFolders "move"
+    !if "${APP_ID}" == "com.sistema.tangomaster"
+      ; A chave de assinatura das licenças nunca recomeça: sem ela, as licenças novas deixam de ser aceites pelos
+      ; ERP já instalados. Fica no lugar (com o "Local State", que guarda a chave do cofre do Windows que a protege).
+      ${If} ${FileExists} "$R0\Tango Gestao de Creditos\license-signing-key.bin"
+        CreateDirectory "$APPDATA\Tango Gestao de Creditos"
+        CopyFiles /SILENT "$R0\Tango Gestao de Creditos\license-signing-key.bin" "$APPDATA\Tango Gestao de Creditos"
+        CopyFiles /SILENT "$R0\Tango Gestao de Creditos\Local State" "$APPDATA\Tango Gestao de Creditos"
+        DetailPrint "Chave de assinatura das licenças mantida."
+      ${EndIf}
+      ; Chave pública partilhada com o ERP deste computador.
+      ${If} ${FileExists} "$R0\TangoMaster_Config\public_key.json"
+        CreateDirectory "$DOCUMENTS\TangoMaster_Config"
+        CopyFiles /SILENT "$R0\TangoMaster_Config\public_key.json" "$DOCUMENTS\TangoMaster_Config"
+      ${EndIf}
+    !endif
     DetailPrint "Instalação limpa: cópia dos dados anteriores em $R0"
     SetShellVarContext all
   ${EndIf}

@@ -20,7 +20,7 @@ import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
 import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
-import { MASTER_PUBLIC_KEY } from '../src/bibliotecas/chave-publica-licencas';
+import { MASTER_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-licencas';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
@@ -1189,7 +1189,7 @@ const registerLanAuthFailure = (clientIp: string, pathname: string) => {
   }
 };
 const licensePublicKeys = () => {
-  const keys = [MASTER_PUBLIC_KEY];
+  const keys = [...MASTER_PUBLIC_KEYS];
   for (const folder of [path.join(app.getPath("documents"), "TangoMaster_Config"), app.getAppPath(), process.resourcesPath]) {
     try {
       const file = path.join(folder, "public_key.json");

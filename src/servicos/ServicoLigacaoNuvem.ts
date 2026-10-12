@@ -86,14 +86,26 @@ const postCloud = async (path: string, body: Record<string, unknown>) => {
     return lastResult;
 };
 
+export const cloudCompanyStatusFrom = (raw: unknown): CloudCompanyStatus | null => {
+    switch (String(raw || '').trim().toUpperCase()) {
+        case 'ACTIVE': return 'active';
+        case 'BLOCKED': case 'SUSPENDED': return 'blocked';
+        case 'EXPIRED': return 'expired';
+        case 'NOT_FOUND': case 'NOT_REGISTERED': case 'PENDING': return 'not_registered';
+        default: return null;
+    }
+};
+
 /** Estado da empresa na nuvem, ou null se o servidor não respondeu. */
 export const fetchCloudCompanyStatus = async (nif: string): Promise<{ status: CloudCompanyStatus; companyName?: string } | null> => {
     const clean = cleanCompanyNif(nif);
     if (clean.length < 9) return null;
     try {
-        const { ok, data } = await postCloud('/api/company-status', { nif: clean });
-        if (!ok || !data.status) return null;
-        return { status: data.status, companyName: data.companyName };
+        // O servidor responde ACTIVE / NOT_FOUND / PENDING (200) ou BLOCKED / EXPIRED (403).
+        const { data } = await postCloud('/api/company-status', { nif: clean });
+        const status = cloudCompanyStatusFrom(data?.status);
+        if (!status) return null;
+        return { status, companyName: data.companyName || data.company?.name };
     } catch {
         return null;
     }
