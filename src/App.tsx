@@ -71,13 +71,10 @@ const ProtectedRoute = ({ children, permission }: { children: JSX.Element; permi
     return <Navigate to="/entrar" replace />;
   }
 
-  // Se exigir uma permissão específica e o usuário não for super_admin
-  if (permission && user?.role !== 'super_admin') {
-    const hasPermission = user?.permissions?.includes(permission);
-    if (!hasPermission) {
-      console.warn(`Acesso negado à rota protegida por: ${permission}`);
-      return <Navigate to="/" replace />;
-    }
+  // Página com permissão própria: só a conta principal passa sempre; os outros precisam da permissão
+  // (a mesma regra do menu). O acesso directo pelo endereço mostra «Acesso negado».
+  if (permission && !ServicoControloAcesso.temPermissao(user, permission)) {
+    return <AcessoNegado permission={permission} />;
   }
 
   return (
@@ -90,6 +87,25 @@ const ProtectedRoute = ({ children, permission }: { children: JSX.Element; permi
 };
 
 import { db } from "@/bibliotecas/bd";
+import { ServicoControloAcesso } from "@/servicos/ServicoControloAcesso";
+import { AVAILABLE_PERMISSIONS } from "@/tipos/autenticacao";
+
+/** Ecrã mostrado quando o utilizador abre uma página para a qual não tem permissão. */
+const AcessoNegado = ({ permission }: { permission: string }) => {
+  const label = AVAILABLE_PERMISSIONS.find(item => item.id === permission)?.label || permission;
+  return (
+    <div className="flex min-h-[60vh] items-center justify-center p-6">
+      <div className="max-w-md rounded-3xl border border-red-100 bg-white p-8 text-center shadow-sm dark:border-red-900/40 dark:bg-slate-900">
+        <p className="text-5xl font-black text-red-600">403</p>
+        <h1 className="mt-3 text-xl font-black text-slate-900 dark:text-white">Acesso negado</h1>
+        <p className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+          Não tem permissão para abrir esta página ({label}). Peça ao Super Administrador principal para lhe atribuir a permissão.
+        </p>
+        <a href="#/" className="mt-5 inline-block rounded-xl bg-slate-900 px-5 py-2.5 text-sm font-bold text-white hover:bg-slate-700">Voltar ao painel</a>
+      </div>
+    </div>
+  );
+};
 
 
 
@@ -289,7 +305,7 @@ const AppContent = () => {
             <Route
               path="/mercado"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute permission="view_market">
                   <Mercado />
                 </ProtectedRoute>
               }
@@ -313,7 +329,7 @@ const AppContent = () => {
             <Route
               path="/fornecedores"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute permission="manage_suppliers">
                   {companySettings.enableSuppliersModule !== false ? <Fornecedores /> : <Navigate to="/" replace />}
                 </ProtectedRoute>
               }
@@ -410,7 +426,7 @@ const AppContent = () => {
             <Route
               path="/logs-auditoria"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute permission="view_audit_logs">
                   <LogsAuditoria />
                 </ProtectedRoute>
               }
@@ -442,7 +458,7 @@ const AppContent = () => {
             <Route
               path="/chat"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute permission="view_chat">
                   <Chat />
                 </ProtectedRoute>
               }
@@ -514,7 +530,7 @@ const AppContent = () => {
             <Route
               path="/simulador"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute permission="use_simulator">
                   <Suspense fallback={suspenseFallback}>
                     <SimuladorCredito />
                   </Suspense>

@@ -8,8 +8,8 @@ import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 
 const DEFAULT_PERMISSIONS: Record<Role, string[]> = {
     super_admin: AVAILABLE_PERMISSIONS.map(p => p.id),
-    admin: ['manage_clients', 'view_credits', 'approve_loans', 'manage_payments', 'view_reports', 'manage_settings', 'view_audit_logs', 'manage_limits', 'manage_fiscal', 'generate_fiscal_docs'],
-    manager: ['manage_clients', 'view_credits', 'manage_payments']
+    admin: ['manage_clients', 'view_credits', 'approve_loans', 'manage_payments', 'view_reports', 'manage_settings', 'view_audit_logs', 'manage_limits', 'manage_fiscal', 'generate_fiscal_docs', 'view_market', 'use_simulator', 'view_chat', 'manage_suppliers'],
+    manager: ['manage_clients', 'view_credits', 'manage_payments', 'view_market', 'use_simulator', 'view_chat']
 };
 
 const getIP = async () => {
@@ -57,7 +57,7 @@ const SECRET_USER_COLUMNS = new Set(['password', 'twoFactorSecret', 'mfaRecovery
 const usersListSql = async () => {
     if (typeof window === 'undefined' || !window.electronAPI) return 'SELECT * FROM users';
     const info = await db.all<{ name: string }>('PRAGMA table_info(users)');
-    const columns = info.map(column => column.name).filter(name => /^[A-Za-z_]w*$/.test(name) && !SECRET_USER_COLUMNS.has(name));
+    const columns = info.map(column => column.name).filter(name => /^[A-Za-z_]\w*$/.test(name) && !SECRET_USER_COLUMNS.has(name));
     return `SELECT ${columns.map(name => `"${name}"`).join(', ')} FROM users`;
 };
 

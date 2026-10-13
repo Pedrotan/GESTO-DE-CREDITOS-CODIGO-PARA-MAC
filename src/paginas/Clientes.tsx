@@ -82,6 +82,7 @@ import { useToast } from "@/componentes/ui/use-toast";
 import { v4 as uuidv4 } from 'uuid';
 import { ClientDetailsModal } from '@/componentes/modals/ClientDetailsModal';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
+import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 
 type BadgeVariant = 'default' | 'primary' | 'secondary' | 'destructive' | 'success' | 'warning' | 'info' | 'outline';
 
@@ -587,7 +588,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
             }
             const freshClient = clients.find(c => c.id === selectedClient.id) || selectedClient;
             const requiresApproval = requiresCreditApproval({
-                canApprove: user?.role === 'super_admin' || Boolean(user?.permissions?.includes('approve_loans')),
+                canApprove: ServicoControloAcesso.temPermissao(user, 'approve_loans'),
                 principalAmount: data.principalAmount,
                 availableCredit: Number(freshClient.availableCredit || 0),
                 clientStatus: freshClient.status,

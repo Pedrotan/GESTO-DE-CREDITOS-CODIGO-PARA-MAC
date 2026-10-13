@@ -21,6 +21,7 @@ import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
 import { MASTER_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-licencas';
+import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, isPrimaryOwner, PAGE_PERMISSIONS, parsePermissionList } from '../src/bibliotecas/conta-principal';
 import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-tokens';
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
@@ -998,9 +999,11 @@ const assertFinancialSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statem
     assertFinancialPermission(user, table);
   }
 };
-const hasManageUsers = (user: any) => ['super_admin', 'admin'].includes(String(user?.role)) ||
+// Acesso total só para o Super Administrador principal; todos os outros (incluindo outros Super Administradores)
+// têm só as permissões atribuídas. Os administradores existentes receberam a lista completa na migração 2026101301.
+const hasManageUsers = (user: any) => isPrimaryOwner(user) ||
   (Array.isArray(user?.permissions) && user.permissions.includes('manage_users'));
-const hasPermission = (user: any, permission: string) => ['super_admin', 'admin'].includes(String(user?.role)) ||
+const hasPermission = (user: any, permission: string) => isPrimaryOwner(user) ||
   (Array.isArray(user?.permissions) && user.permissions.includes(permission));
 const assertUserPermission = (event: Electron.IpcMainInvokeEvent, permission?: string) => {
   const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
@@ -2792,6 +2795,18 @@ app.whenReady().then(async () => {
       return `${value.slice(0, 5)}-${value.slice(5)}`;
     });
   };
+  // Alterações de perfis e permissões aceites: registadas na auditoria depois de gravadas (quem, o quê, quando).
+  const pendingPrivilegeAudits: Array<{ actor: any; kind: string; targetId: string; sql: string; params: unknown[] }> = [];
+  const flushPrivilegeAudits = async () => {
+    for (const item of pendingPrivilegeAudits.splice(0)) {
+      const target: any = item.targetId ? await runQuery("get", "SELECT name, role, permissions, status FROM users WHERE id = ? LIMIT 1", [item.targetId]).catch(() => null) : null;
+      const label = item.kind === 'insert' ? 'Criou o utilizador' : item.kind === 'delete' ? 'Eliminou o utilizador' : 'Alterou perfil/permissões/estado de';
+      await writeAuthAudit(item.actor, item.kind === 'delete' ? 'delete' : 'update', `${label} ${target?.name || item.targetId}`, {
+        targetUserId: item.targetId, change: item.kind, role: target?.role ?? null, status: target?.status ?? null,
+        permissions: target ? parsePermissionList(target.permissions) : null,
+      });
+    }
+  };
   const assertUserSqlAuthorized = async (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>) => {
     let reservedHere = false;
     try {
@@ -2817,6 +2832,22 @@ app.whenReady().then(async () => {
         }
       }
       const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
+      if (kind === 'insert' || kind === 'update' || kind === 'delete') {
+        const params = Array.isArray(statement.params) ? statement.params : [];
+        const byId = /\bWHERE\s+id\s*=\s*\?\s*$/iu.test(statement.sql.trim());
+        if (kind !== 'insert' && !byId) throw new Error("Alterações a utilizadores têm de indicar o utilizador (WHERE id = ?).");
+        const target: any = kind === 'insert' ? null : await runQuery("get", "SELECT id, role, isOwner FROM users WHERE id = ? LIMIT 1", [params[params.length - 1]]);
+        // A conta da sessão é relida da base: a marca de conta principal nunca vem do renderer.
+        const actorRow: any = await runQuery("get", "SELECT id, isOwner, permissions FROM users WHERE id = ? LIMIT 1", [currentUser.id]);
+        const verdict = checkUserMutation({ kind, sql: statement.sql, params, actor: actorRow || currentUser, target });
+        if (verdict.error) {
+          await writeAuthAudit(currentUser, "permission_denied", verdict.error, { targetUserId: target?.id || null, sql: statement.sql.slice(0, 120) });
+          throw new Error(verdict.error);
+        }
+        if (verdict.changesPrivileges) {
+          pendingPrivilegeAudits.push({ actor: currentUser, kind, targetId: target?.id || String(params[0] || ''), sql: statement.sql, params });
+        }
+      }
       if (kind === 'update' && !userUpdateTouchesPrivileges(statement.sql) && /\bWHERE\s+id\s*=\s*\?\s*$/iu.test(statement.sql.trim())) {
         const params = Array.isArray(statement.params) ? statement.params : [];
         if (String(params[params.length - 1] || '') === String(currentUser.id)) continue;
@@ -2874,9 +2905,43 @@ app.whenReady().then(async () => {
     ["username", "TEXT"], ["status", "TEXT DEFAULT 'active'"], ["failedAttempts", "INTEGER DEFAULT 0"], ["blockedAt", "TEXT"],
     ["lastLogin", "TEXT"], ["lastSeen", "TEXT"], ["ip", "TEXT"], ["permissions", "TEXT"], ["twoFactorEnabled", "INTEGER DEFAULT 0"],
     ["twoFactorSecret", "TEXT"], ["mfaRecoveryCodes", "TEXT"], ["mustChangePassword", "INTEGER DEFAULT 0"],
+    ["isOwner", "INTEGER DEFAULT 0"],
   ];
+  /**
+   * Super Administrador principal: o primeiro Super Administrador criado (a conta do proprietário). Migração única
+   * 2026101301: os administradores que já existiam recebem a lista completa de permissões (deixam de ter acesso total
+   * pelo papel) e todos os utilizadores recebem as permissões das páginas que passaram a ter uma, para ninguém
+   * perder acesso de um dia para o outro. Depois, só o que a conta principal atribuir.
+   */
+  const ensurePrimaryOwner = async () => {
+    const owner: any = await runQuery("get", "SELECT id FROM users WHERE isOwner = 1 LIMIT 1");
+    if (!owner) {
+      const first: any = await runQuery("get", `SELECT id FROM users WHERE role = 'super_admin' AND (status IS NULL OR status <> 'deleted')
+        ORDER BY (createdAt IS NULL), createdAt ASC, rowid ASC LIMIT 1`);
+      if (first?.id) await runQuery("execute", "UPDATE users SET isOwner = 1 WHERE id = ?", [first.id]);
+    }
+    await runQuery("exec", `CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, name TEXT NOT NULL, appliedAt TEXT NOT NULL)`);
+    const done: any = await runQuery("get", "SELECT version FROM schema_migrations WHERE version = 2026101301");
+    if (done) return;
+    const users: any[] = ((await runQuery("query", "SELECT id, role, permissions, isOwner FROM users")) as any[]) || [];
+    for (const row of users) {
+      if (isPrimaryOwner(row)) continue;
+      const current = new Set(parsePermissionList(row.permissions));
+      const grant = ['super_admin', 'admin'].includes(String(row.role)) ? ALL_ASSIGNABLE_PERMISSIONS : PAGE_PERMISSIONS;
+      grant.forEach(permission => current.add(permission));
+      await runQuery("execute", "UPDATE users SET permissions = ? WHERE id = ?", [JSON.stringify([...current]), row.id]);
+    }
+    await runQuery("execute", "INSERT INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)",
+      [2026101301, 'primary-owner-and-page-permissions', new Date().toISOString()]);
+  };
   let userColumnsReadyForPath = "";
   const ensureUserSecurityColumns = async () => {
+    await ensureUserSecurityColumnsOnce();
+    // Em cada login (barato): a conta principal pode ainda não existir no primeiro arranque.
+    try { await ensurePrimaryOwner(); }
+    catch (error) { console.warn("[Auth] Conta principal/permissões:", error instanceof Error ? error.message : error); }
+  };
+  const ensureUserSecurityColumnsOnce = async () => {
     if (userColumnsReadyForPath === dbPath) return;
     const info: any = await runQuery("query", 'PRAGMA table_info("users")');
     const existing = new Set((info || []).map((row: any) => String(row.name)));
@@ -3138,12 +3203,14 @@ app.whenReady().then(async () => {
     const reservedFirstUser = await assertUserSqlAuthorized(event, [request]);
     try {
       const r = await runQuery("execute", request.sql, request.params);
+      await flushPrivilegeAudits();
       if (insertsAccountingEntries([request])) sealAfterWrite("local");
       if (insertsAuditLogs([request])) sealAuditAfterWrite();
       broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
       return r;
     } finally {
       if (reservedFirstUser) firstUserCreationReserved = false;
+      pendingPrivilegeAudits.length = 0;
     }
   });
   // Depois de existir um utilizador nesta conta, as leituras exigem sessão. Contar os utilizadores antes de cada
@@ -3193,12 +3260,14 @@ app.whenReady().then(async () => {
     const reservedFirstUser = await assertUserSqlAuthorized(event, safeStatements);
     try {
       const r = await runTransaction(safeStatements);
+      await flushPrivilegeAudits();
       if (insertsAccountingEntries(safeStatements)) sealAfterWrite("local");
       if (insertsAuditLogs(safeStatements)) sealAuditAfterWrite();
       broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
       return r;
     } finally {
       if (reservedFirstUser) firstUserCreationReserved = false;
+      pendingPrivilegeAudits.length = 0;
     }
   });
   // Operações recebidas da nuvem: já foram autorizadas no dispositivo de origem e chegam cifradas com a
@@ -3287,7 +3356,8 @@ app.whenReady().then(async () => {
     const incomingRows: unknown[] = Array.isArray(roster?.rows) ? roster.rows.slice(0, 2000) : [];
     const deleted: string[] = Array.isArray(roster?.deleted) ? roster.deleted.slice(0, 2000).map(String) : [];
     const allowed = new Set(await sharedUserColumns());
-    const columns = incomingColumns.filter(name => allowed.has(name));
+    // A marca de conta principal nunca chega da web, e a própria conta principal só se altera neste computador.
+    const columns = incomingColumns.filter(name => allowed.has(name) && name !== "isOwner");
     if (!["id", "name", "email", "password", "role"].every(name => columns.includes(name))) return { applied: 0, deleted: 0 };
     const at = (row: unknown[], name: string) => row[incomingColumns.indexOf(name)];
     const statements: Array<{ sql: string; params: unknown[] }> = [];
@@ -3299,6 +3369,8 @@ app.whenReady().then(async () => {
       if (!/^[\w.:-]{1,100}$/.test(id) || !email || email.length > 254) continue;
       if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(String(at(row, "password") || ""))) continue;
       if (!/^[a-z_]{2,40}$/.test(String(at(row, "role") || ""))) continue;
+      const localOwner: any = await runQuery("get", "SELECT isOwner FROM users WHERE id = ? LIMIT 1", [id]).catch(() => null);
+      if (isPrimaryOwner(localOwner)) continue;
       // Email já usado por outro utilizador deste computador: não se sobrepõe.
       const sameEmail: any = await runQuery("get", "SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1", [email, id]);
       if (sameEmail) continue;
@@ -3315,8 +3387,8 @@ app.whenReady().then(async () => {
     let removed = 0;
     for (const id of deleted) {
       if (id === String(currentUser.id)) continue;
-      const target: any = await runQuery("get", "SELECT role FROM users WHERE id = ? LIMIT 1", [id]);
-      if (!target) continue;
+      const target: any = await runQuery("get", "SELECT role, isOwner FROM users WHERE id = ? LIMIT 1", [id]);
+      if (!target || isPrimaryOwner(target)) continue;
       if (target.role === "super_admin") {
         const admins: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users WHERE role = 'super_admin'");
         if (Number(admins?.total || 0) <= 1) continue;

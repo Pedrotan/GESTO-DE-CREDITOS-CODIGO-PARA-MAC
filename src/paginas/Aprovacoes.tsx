@@ -25,6 +25,7 @@ import { ServicoAlcadas, type Escalation, type EscalationApproval } from '@/serv
 import type { InstallmentBalance } from '@/bibliotecas/liquidacao-prestacoes';
 import type { Credit } from '@/tipos/credito';
 import { ReestruturacoesPendentes } from '@/componentes/creditos/ReestruturacoesPendentes';
+import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 
 // Aprovações de crédito: pedidos pendentes e histórico de decisões (quem decidiu, quando e porquê), com filtros
 // por período e estado, detalhes do pedido antes de decidir, exportação e relatórios mensais.
@@ -228,11 +229,11 @@ export default function Approvals() {
         }
     };
 
-    if (!['admin', 'super_admin', 'credit_director'].includes(String(user?.role))) {
+    if (!ServicoControloAcesso.temPermissao(user, 'approve_loans')) {
         return (
             <MainLayout title="Aprovações" subtitle="Acesso restrito">
                 <div className="flex h-[60vh] items-center justify-center">
-                    <p className="text-muted-foreground">Acesso restrito a Administradores do Sistema.</p>
+                    <p className="text-muted-foreground">Não tem permissão para aprovar créditos. Peça-a ao Super Administrador principal.</p>
                 </div>
             </MainLayout>
         );

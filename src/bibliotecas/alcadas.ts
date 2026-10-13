@@ -106,7 +106,7 @@ export type LimitException = {
     decisionReason?: string | null;
 };
 
-export type LimitActor = { id: string; name: string; role: string; branchId?: string | null };
+export type LimitActor = { id: string; name: string; role: string; branchId?: string | null; /** Super Administrador principal: aprova sem alçadas. */ isOwner?: boolean };
 
 // ── Catálogo ─────────────────────────────────────────────────────────────────────
 

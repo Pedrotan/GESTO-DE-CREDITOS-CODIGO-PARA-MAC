@@ -5,6 +5,7 @@
  */
 
 import type { User } from '../tipos/autenticacao.ts';
+import { isPrimaryOwner } from '../bibliotecas/conta-principal.ts';
 import type {
   PerfilAcesso,
   AcaoModulo,
@@ -235,8 +236,19 @@ export class ServicoControloAcesso {
     const perfis = perfisDisponiveis || this.obterPerfis();
     const roleId = utilizador.role || 'manager';
 
-    // Super Administrador tem acesso total a todas as permissões do sistema
-    if (roleId === 'super_admin') {
+    // Só o Super Administrador principal tem acesso total. Os outros Super Administradores têm apenas as permissões
+    // que lhes forem atribuídas (convertidas nas permissões detalhadas de cada módulo).
+    if (roleId === 'super_admin' && !isPrimaryOwner(utilizador)) {
+      const atribuidas = new Set<string>();
+      for (const legado of utilizador.permissions || []) {
+        atribuidas.add(legado);
+        this.resolverLegadoParaGranular(legado).forEach(p => atribuidas.add(p));
+      }
+      const origem: Record<string, any> = {};
+      atribuidas.forEach(p => { origem[p] = { origem: 'perfil' }; });
+      return { permissoes: [...atribuidas], origemPorPermissao: origem, excecoesRevogadas: {}, totalExcecoesAtivas: 0 };
+    }
+    if (isPrimaryOwner(utilizador)) {
       const todas = MODULOS_SISTEMA.flatMap(m => m.acoesDisponiveis.map(a => comporPermissao(m.id, a)));
       const origem: Record<string, any> = {};
       todas.forEach(p => { origem[p] = { origem: 'perfil' }; });
@@ -297,7 +309,7 @@ export class ServicoControloAcesso {
    */
   static temPermissao(utilizador: Partial<User> | null | undefined, permissao: string): boolean {
     if (!utilizador) return false;
-    if (utilizador.role === 'super_admin') return true;
+    if (isPrimaryOwner(utilizador)) return true;
 
     const { permissoes } = this.calcularPermissoesEfetivas(utilizador);
 

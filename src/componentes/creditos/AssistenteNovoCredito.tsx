@@ -138,7 +138,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
         if (!client || !result?.valid || !user) return;
         setBusy(true); setError('');
         try {
-            const canApprove = ServicoControloAcesso.temPermissao(user as any, 'creditos.aprovar') || user.role === 'super_admin' || Boolean(user.permissions?.includes('approve_loans'));
+            const canApprove = ServicoControloAcesso.temPermissao(user as any, 'creditos.aprovar') || ServicoControloAcesso.temPermissao(user as any, 'approve_loans');
             const pending = requiresCreditApproval({ canApprove, principalAmount: form.principal, availableCredit: Number(client.availableCredit) || 0, clientStatus: client.status, riskLevel: calc.riskLevel === 'high' ? 'high' : client.riskLevel });
             const id = `CR-${crypto.randomUUID()}`;
             const start = new Date(`${form.startDate}T12:00:00`);

@@ -98,7 +98,7 @@ const credit = {
     status: 'active', amortizationMethod: 'FLAT', daysOverdue: 0, creditNumber: 1, requestedBy: 'Operador de Caixa', usuario_id: 'u1'
 };
 const operator = { id: 'u1', name: 'Operador de Caixa', role: 'cashier' };
-const director = { id: 'u2', name: 'Director Financeiro', role: 'super_admin' };
+const director = { id: 'u2', name: 'Director Financeiro', role: 'super_admin', isOwner: 1 };
 const settings = { name: 'DIGITAL NORTE - COMÉRCIO E PRESTAÇÃO DE SERVIÇOS, (SU), LDA', nif: '5003207439', currency: 'AOA' };
 
 async function setup() {
@@ -202,7 +202,7 @@ test('K3 · anular: cartões actualizam, recibo ANULADO, estorno na Contabilidad
         const before = M.A.computeKpis(await rowsOf(M), schedule, range, { today: '2026-10-06' });
         assert.equal(before.collected, 135_000);
         // Quem registou não pode anular (segregação de funções).
-        await assert.rejects(M.ServicoPagamentos.cancel('PAG-B', 'Valor registado em duplicado', { ...operator, role: 'super_admin' }), /Segregação|Quatro Olhos/);
+        await assert.rejects(M.ServicoPagamentos.cancel('PAG-B', 'Valor registado em duplicado', { ...operator, role: 'super_admin', isOwner: 1 }), /Segregação|Quatro Olhos/);
         await assert.rejects(M.ServicoPagamentos.cancel('PAG-B', 'curto', director), /justificação/);
         const result = await M.ServicoPagamentos.cancel('PAG-B', 'Valor registado em duplicado', director);
         assert.equal(result.status, 'cancelled');

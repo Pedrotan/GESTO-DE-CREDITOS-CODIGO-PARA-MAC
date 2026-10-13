@@ -198,7 +198,8 @@ export class UserSessionService {
     let permissions: unknown[] = [];
     try { permissions = Array.isArray(record.permissions) ? record.permissions : JSON.parse(record.permissions || '[]'); }
     catch { permissions = []; }
-    const { twoFactorSecret: _secret, ...safe } = record;
+    // Nunca o hash da palavra-passe nem os códigos MFA na sessão (que também chega à interface).
+    const { twoFactorSecret: _secret, password: _password, mfaRecoveryCodes: _codes, ...safe } = record as UserRecord & { password?: string; mfaRecoveryCodes?: string };
     return { ...safe, permissions, twoFactorEnabled: Boolean(record.twoFactorEnabled) };
   }
 }
@@ -254,7 +255,7 @@ export function assertFinancialPermission(user: any, table: string) {
   if (!user) throw new Error('Sessão inexistente ou expirada.');
   if (table === 'credits' || table === 'credit_installments') return;
   const permissions = Array.isArray(user.permissions) ? user.permissions : [];
-  if (!['super_admin', 'admin'].includes(String(user.role)) && !permissions.includes('manage_payments')) {
+  if (!(user.isOwner === 1 || user.isOwner === true) && !permissions.includes('manage_payments')) {
     throw new Error('O utilizador não possui permissão para operações financeiras.');
   }
 }

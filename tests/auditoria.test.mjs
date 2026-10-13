@@ -89,7 +89,7 @@ async function createDatabase(M) {
     return database;
 }
 
-const director = { id: 'u2', name: 'Director Geral', role: 'super_admin' };
+const director = { id: 'u2', name: 'Director Geral', role: 'super_admin', isOwner: 1 };
 const operator = { id: 'u1', name: 'Operador de Caixa', role: 'cashier' };
 const events = (M, rows) => M.A.assignSessions(rows.map(row => M.A.toAuditEvent(row)));
 

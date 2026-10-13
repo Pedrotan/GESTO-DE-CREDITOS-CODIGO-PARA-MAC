@@ -5,6 +5,7 @@ import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
 import { Role } from '@/tipos/autenticacao';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
+import { isPrimaryOwner } from '@/bibliotecas/conta-principal';
 import { validateLicense } from '@/bibliotecas/licenciamento';
 import { CaixaEletronicoIcon } from '@/componentes/ui/CaixaEletronicoIcon';
 import {
@@ -96,9 +97,9 @@ const menuItems: MenuItem[] = [
       { icon: Globe, label: 'Estrangeiros', path: '/estrangeiros' },
     ],
   },
-  { icon: Handshake, label: 'Fornecedores', path: '/fornecedores', moduleKey: 'enableSuppliersModule' },
-  { icon: LineChart, label: 'Mercado', path: '/mercado' },
-  { icon: Calculator, label: 'Simulador', path: '/simulador' },
+  { icon: Handshake, label: 'Fornecedores', path: '/fornecedores', permission: 'manage_suppliers', moduleKey: 'enableSuppliersModule' },
+  { icon: LineChart, label: 'Mercado', path: '/mercado', permission: 'view_market' },
+  { icon: Calculator, label: 'Simulador', path: '/simulador', permission: 'use_simulator' },
   { icon: CreditCard, label: 'Créditos', path: '/creditos', permission: 'view_credits' },
   { icon: CaixaEletronicoIcon, label: 'Pagamentos', path: '/pagamentos', permission: 'manage_payments' },
   { icon: CalendarDays, label: 'Plano Mensal', path: '/plano-mensal', permission: 'view_credits' },
@@ -108,7 +109,7 @@ const menuItems: MenuItem[] = [
   { icon: ScrollText, label: 'Cartas Bancárias', path: '/cartas-transferencia', permission: 'view_credits' },
   { icon: MessageCircle, label: 'Hub de Cobrança', path: '/hub-whatsapp', permission: 'manage_payments' },
   { icon: Bell, label: 'Notificações', path: '/notificacoes' },
-  { icon: MessageSquare, label: 'Chat Interno', path: '/chat' },
+  { icon: MessageSquare, label: 'Chat Interno', path: '/chat', permission: 'view_chat' },
   { icon: FileText, label: 'Relatórios', path: '/relatorios', permission: 'view_reports' },
   { icon: Calculator, label: 'Contabilidade', path: '/contabilidade', permission: 'manage_fiscal' },
   { icon: ReceiptText, label: 'Relatórios Fiscais', path: '/relatorios-fiscais', permission: 'manage_fiscal' },
@@ -199,9 +200,10 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
       if (isAdminOnly && user?.role !== 'admin' && user?.role !== 'super_admin') return false;
     }
 
-    if (user?.role === 'super_admin') return true;
+    // Só a conta principal vê tudo; os outros (incluindo outros Super Administradores) vêem o que lhes for atribuído.
+    if (isPrimaryOwner(user)) return true;
     if (item.roles && !item.roles.includes(user?.role as Role)) return false;
-    if (item.permission) return ServicoControloAcesso.temPermissao(user, item.permission);
+    if (item.permission && !ServicoControloAcesso.temPermissao(user, item.permission)) return false;
 
     const serverRelatedPaths = ['/definicoes?tab=network', '/chat'];
     if (isSingular && (serverRelatedPaths.some(p => item.path.startsWith(p)) || item.label.includes('Chat'))) {

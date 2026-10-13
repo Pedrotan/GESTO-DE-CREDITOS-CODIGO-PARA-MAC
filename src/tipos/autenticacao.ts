@@ -27,6 +27,8 @@ export interface User {
     lastLogin?: string;
     createdAt?: string | Date;
     permissions?: string[];
+    /** Super Administrador principal (proprietário): acesso total, não pode ser alterado por outros. */
+    isOwner?: boolean | number;
     permissionExceptions?: ExcecaoPermissao[];
     status?: 'active' | 'blocked' | 'offline' | 'pending_activation';
     lastSeen?: string;
@@ -127,6 +129,11 @@ export const AVAILABLE_PERMISSIONS = [
     { id: 'generate_fiscal_docs', label: 'Gerar Ficheiros Fiscais', description: 'Capacidade de gerar e baixar ficheiros PDF e XML (SAF-T e Facturas)' },
     { id: 'manage_warranties', label: 'Gestão de Garantias', description: 'Gerir colaterais, avaliações e documentos de garantias reais' },
     { id: 'manage_legal', label: 'Contencioso Jurídico', description: 'Gerir processos de cobrança judicial e interpelações' },
+    // Páginas que antes não tinham permissão própria: sem ela, a página não aparece no menu e o endereço é recusado.
+    { id: 'view_market', label: 'Página Mercado', description: 'Ver cotações, câmbios e indicadores de mercado' },
+    { id: 'use_simulator', label: 'Página Simulador', description: 'Usar o simulador de crédito' },
+    { id: 'view_chat', label: 'Chat Interno', description: 'Usar o chat interno da equipa' },
+    { id: 'manage_suppliers', label: 'Página Fornecedores', description: 'Ver e gerir fornecedores' },
 ];
 
 

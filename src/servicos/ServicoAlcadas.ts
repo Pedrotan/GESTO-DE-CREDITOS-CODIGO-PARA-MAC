@@ -464,9 +464,21 @@ export class ServicoAlcadas {
             ? { index: pending.requiredLevelIndex, dual: pending.dual, name: pending.requiredLevelName }
             : (() => { const level = A.requiredLevelFor(policy, input.amountMinor, { riskLevel: client.riskLevel }); return { index: level.index, dual: level.dual, name: level.name }; })();
         const requester = pending?.requestedById || input.requestedById || null;
-        if (requester && requester === input.actor.id) throw new Error('Quem pediu o crédito não o pode aprovar nem rejeitar.');
         const statements: Statement[] = [];
         const nowIso = now.toISOString();
+        // Super Administrador principal: decisão final em qualquer etapa (sem alçada, dupla aprovação nem volumes).
+        if (input.actor.isOwner) {
+            // O voto só é registado se não foi a própria conta principal a pedir (a base recusa auto-aprovação); a
+            // decisão fica sempre em credit_approvals e na auditoria.
+            if (pending && pending.requestedById !== input.actor.id) statements.push(
+                { sql: `INSERT INTO limit_escalation_approvals (id, escalationId, approverId, approverName, approverRole, decision, notes, decidedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                    params: [crypto.randomUUID(), pending.id, input.actor.id, input.actor.name, input.actor.role, input.approve ? 'approved' : 'rejected', input.notes || 'Decisão do Super Administrador principal', nowIso] });
+            if (pending) statements.push(
+                { sql: `UPDATE limit_escalations SET status = ?, decidedAt = ?, decidedBy = ?, decidedByName = ? WHERE id = ? AND status = 'pending'`,
+                    params: [input.approve ? 'approved' : 'rejected', nowIso, input.actor.id, input.actor.name, pending.id] });
+            return { final: true, statements, required, escalation: pending };
+        }
+        if (requester && requester === input.actor.id) throw new Error('Quem pediu o crédito não o pode aprovar nem rejeitar.');
         if (!input.approve) {
             if (pending) statements.push(
                 { sql: `INSERT INTO limit_escalation_approvals (id, escalationId, approverId, approverName, approverRole, decision, notes, decidedAt) VALUES (?, ?, ?, ?, ?, 'rejected', ?, ?)`, params: [crypto.randomUUID(), pending.id, input.actor.id, input.actor.name, input.actor.role, input.notes || null, nowIso] },

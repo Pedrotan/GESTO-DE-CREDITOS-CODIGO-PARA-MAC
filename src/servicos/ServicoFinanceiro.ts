@@ -15,6 +15,7 @@ import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
 import { reconcileInstallments } from '@/bibliotecas/conciliacao-prestacoes';
 import { planConsecutiveInstallments, type InstallmentBalance } from '@/bibliotecas/liquidacao-prestacoes';
 import { calculateLateInterest, type LateInterestSummary } from '@/bibliotecas/juros-mora';
+import { isPrimaryOwner } from '@/bibliotecas/conta-principal';
 import {
     allocatePaymentByInstallments, allocatePaymentMinor, applyPaymentToBalances, creditBalancesFromRow, revertPaymentFromBalances,
     type AllocationMinor, type CreditBalancesAfter, type CreditBalancesMinor
@@ -675,7 +676,10 @@ export class ServicoFinanceiro {
     }): Promise<{ final: boolean; message?: string }> {
         await assertFinancialConnection(input.decision === 'approved' ? 'aprovar e desembolsar o crédito' : 'rejeitar o crédito');
         if (input.credit.status !== 'pending_approval') throw new Error('Apenas créditos pendentes podem ser decididos.');
-        if (input.credit.requestedBy && input.credit.requestedBy === input.actorId) {
+        // Lido da base (nunca do ecrã): o Super Administrador principal aprova em qualquer etapa.
+        const ownerRow = await db.get<{ isOwner?: number }>('SELECT isOwner FROM users WHERE id = ?', [input.actorId]).catch(() => undefined);
+        const actorIsOwner = isPrimaryOwner(ownerRow);
+        if (!actorIsOwner && input.credit.requestedBy && input.credit.requestedBy === input.actorId) {
             throw new Error('O criador do crédito não pode aprovar ou rejeitar a própria operação.');
         }
         const approved = input.decision === 'approved';
@@ -689,7 +693,7 @@ export class ServicoFinanceiro {
         if (!actual) throw new Error('Crédito não encontrado.');
         const limitDecision = await ServicoAlcadas.creditDecision({
             creditId: input.credit.id, clientId: input.credit.clientId, amountMinor: actual.principalAmountMinor ?? toMinorUnits(actual.principalAmount),
-            actor: { id: input.actorId, name: input.actorName, role: actorRow.role, branchId: actorRow.branchId }, approve: approved, notes: input.notes,
+            actor: { id: input.actorId, name: input.actorName, role: actorRow.role, branchId: actorRow.branchId, isOwner: actorIsOwner }, approve: approved, notes: input.notes,
         });
         if (!limitDecision.final) {
             const when = new Date().toISOString();

@@ -44,6 +44,7 @@ import { validateJustification } from '@/bibliotecas/justificacao';
 import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { formatAuditTimestamp, toAuditEvent, type AuditEvent } from '@/bibliotecas/auditoria-analise';
 import { generateUsersPermissionsMatrixPDF } from '@/bibliotecas/matriz-permissoes-pdf';
+import { isPrimaryOwner } from '@/bibliotecas/conta-principal';
 
 interface PasswordResetRequest {
     id: string;
@@ -802,7 +803,8 @@ export default function Utilizadores() {
                             <TableBody>
                                 {filteredUsersList.map((u) => {
                                     const excecoesCount = (u.permissionExceptions || []).length;
-                                    const isSuperAdmin = u.role === 'super_admin';
+                                    const isSuperAdmin = isPrimaryOwner(u);
+                                    const souContaPrincipal = isPrimaryOwner(currentUser);
                                     const alcadaValor = isSuperAdmin
                                         ? 'Ilimitada'
                                         : `${(u.approvalLimits?.aprovacaoCreditoKz || 0).toLocaleString('pt-AO')} Kz`;
@@ -850,6 +852,11 @@ export default function Utilizadores() {
                                                         <Badge variant="outline" className={ROLES[u.role]?.badgeColor || 'border-slate-200'}>
                                                             {ROLES[u.role]?.label || u.role}
                                                         </Badge>
+                                                        {isSuperAdmin && (
+                                                            <Badge className="border-amber-300 bg-amber-100 text-[10px] text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300">
+                                                                Conta principal
+                                                            </Badge>
+                                                        )}
                                                     </div>
                                                     <div className="text-xs">
                                                         {isSuperAdmin ? (
@@ -906,8 +913,8 @@ export default function Utilizadores() {
                                             {/* Coluna Ações Rápidas */}
                                             <TableCell className="text-right">
                                                 <div className="flex justify-end items-center gap-1">
-                                                    {/* Botão Gerir Permissões (Editor RBAC) */}
-                                                    <Button
+                                                    {/* Botão Gerir Permissões (Editor RBAC): só a conta principal atribui permissões. */}
+                                                    {souContaPrincipal && !isSuperAdmin && <Button
                                                         variant="ghost"
                                                         size="icon"
                                                         className="h-8 w-8 text-primary hover:bg-primary/10"
@@ -915,7 +922,7 @@ export default function Utilizadores() {
                                                         onClick={() => handleOpenPermissions(u)}
                                                     >
                                                         <Lock className="h-4 w-4" />
-                                                    </Button>
+                                                    </Button>}
 
                                                     {/* Ficha PDF */}
                                                     <Button
@@ -930,8 +937,8 @@ export default function Utilizadores() {
                                                         <FileText className="h-4 w-4" />
                                                     </Button>
 
-                                                    {/* Redefinir Palavra-passe */}
-                                                    <Button
+                                                    {/* Redefinir Palavra-passe (a da conta principal só por ela própria) */}
+                                                    {(!isSuperAdmin || souContaPrincipal) && <Button
                                                         variant="ghost"
                                                         size="icon"
                                                         className="h-8 w-8 text-amber-600 hover:bg-amber-50 dark:hover:bg-amber-950/30"
@@ -942,10 +949,10 @@ export default function Utilizadores() {
                                                         }}
                                                     >
                                                         <KeyRound className="h-4 w-4" />
-                                                    </Button>
+                                                    </Button>}
 
-                                                    {/* Bloquear / Desbloquear */}
-                                                    {u.id !== currentUser?.id && u.role !== 'super_admin' && (
+                                                    {/* Bloquear / Desbloquear (a conta principal nunca) */}
+                                                    {u.id !== currentUser?.id && !isSuperAdmin && (
                                                         <Button
                                                             variant="ghost"
                                                             size="icon"
