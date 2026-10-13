@@ -5,7 +5,7 @@ import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOr
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
-import { changeLicensePlan, importLegacyKeys, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
+import { changeLicensePlan, importLegacyKeys, legacyKeyStatuses, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
 import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
 
 const KEY_TOOLS = { generate: generateLicenseKey, parse: parseLicenseKey, hash: licenseKeyHash, prefix: licenseKeyPrefix };
@@ -255,8 +255,11 @@ export default async function handler(req, res) {
     }
 
     // Licenças: lista com dias restantes (calculados no servidor) e fusão das chaves assinadas antigas do Master.
-    if (action === 'licenses-list' || action === 'licenses-import-legacy') {
+    if (action === 'licenses-list' || action === 'licenses-import-legacy' || action === 'licenses-legacy-status') {
       if (!licensesReady) return send(res, 503, { success: false, message: 'As tabelas de licenças não estão disponíveis neste servidor.' });
+      if (action === 'licenses-legacy-status') {
+        return send(res, 200, { success: true, keys: await legacyKeyStatuses(sql, body.jtis) });
+      }
       if (action === 'licenses-import-legacy') {
         if (!Array.isArray(body.keys) || body.keys.length > 5000) {
           return send(res, 400, { success: false, message: 'Lista de chaves inválida.' });

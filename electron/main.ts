@@ -1472,6 +1472,14 @@ const startServerInternal = async (passkey) => {
   });
 };
 // --- Licença da empresa no Desktop (etapa 4): activação com a chave TANGO-…, token cifrado e modo só leitura ---
+// Só em desenvolvimento (nunca no executável instalado): aceitar também a chave pública de um servidor de licenças
+// local de teste (TANGO_DEV_TOKEN_PUBLIC_KEY = SPKI em base64), para testar a activação sem tocar na produção.
+const licenseTokenKeys = () => {
+  const devKey = !app.isPackaged ? String(process.env.TANGO_DEV_TOKEN_PUBLIC_KEY || "").trim() : "";
+  if (!devKey) return LICENSE_TOKEN_PUBLIC_KEYS;
+  const kid = crypto.createHash("sha256").update(Buffer.from(devKey, "base64")).digest("hex").slice(0, 16);
+  return [...LICENSE_TOKEN_PUBLIC_KEYS, { alg: "EdDSA" as const, kid, publicKey: devKey }];
+};
 let cachedMachineFingerprint: string | null = null;
 /** Identificador estável do Windows (MachineGuid), do macOS (IOPlatformUUID) ou do Linux (machine-id). */
 const readMachineGuid = (): string => {
@@ -1514,7 +1522,7 @@ let cloudLicenseReadOnly: CloudLicenseStatus | null = null;
 const cloudLicenseStatusNow = (): CloudLicenseStatus => {
   if (isTangoMaster) return { state: "none" };
   const record = readCloudLicense();
-  const status = evaluateCloudLicense(record, currentMachineFingerprint(), LICENSE_TOKEN_PUBLIC_KEYS);
+  const status = evaluateCloudLicense(record, currentMachineFingerprint(), licenseTokenKeys());
   // Guarda a maior hora local vista (de hora a hora): um relógio que volta atrás é detectado depois.
   if (record && status.state !== "clock" && Date.now() - (Date.parse(record.lastLocalTime) || 0) > 3_600_000) {
     try { writeCloudLicense({ ...record, lastLocalTime: new Date().toISOString() }); } catch { /* cofre indisponível */ }
@@ -1549,11 +1557,11 @@ const cloudLicenseHeartbeat = async (force = false): Promise<CloudLicenseStatus>
   if (isTangoMaster) return { state: "none" };
   const record = readCloudLicense();
   const fingerprint = currentMachineFingerprint();
-  const claims = record ? verifyCloudToken(record.token, LICENSE_TOKEN_PUBLIC_KEYS) : null;
+  const claims = record ? verifyCloudToken(record.token, licenseTokenKeys()) : null;
   if (!record || !claims || claims.machine_hash !== fingerprint || (!force && !heartbeatDue(record, claims))) return cloudLicenseStatusNow();
   try {
     const { ok, data } = await postLicenseServer(record.serverUrl, "heartbeat", { token: record.token, machine_hash: fingerprint });
-    const renewed = ok ? verifyCloudToken(data.token, LICENSE_TOKEN_PUBLIC_KEYS) : null;
+    const renewed = ok ? verifyCloudToken(data.token, licenseTokenKeys()) : null;
     if (renewed && renewed.machine_hash === fingerprint) {
       writeCloudLicense(recordFromToken(data.token, record.serverUrl, renewed, record));
     } else if (!ok && isLicenseRefusal(data.code)) {
@@ -1598,7 +1606,7 @@ function registerCloudLicenseHandlers() {
         : "Não foi possível contactar o servidor de licenças. Verifique a ligação à Internet." };
     }
     if (!result.ok) return { success: false, code: result.data.code || `HTTP_${result.status}`, message: result.data.message || `O servidor de licenças respondeu com erro (${result.status}).` };
-    const claims = verifyCloudToken(result.data.token, LICENSE_TOKEN_PUBLIC_KEYS);
+    const claims = verifyCloudToken(result.data.token, licenseTokenKeys());
     if (!claims || claims.machine_hash !== fingerprint) {
       return { success: false, code: "TOKEN_NAO_CONFIAVEL", message: "A resposta do servidor não tem uma assinatura Tango válida. Confirme o endereço do servidor." };
     }

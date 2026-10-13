@@ -11,6 +11,8 @@ import { ServicoAngolaAPI } from '@/servicos/ServicoAngolaAPI';
 import { exportCompanyCredentialsPDF } from '@/bibliotecas/pdf';
 import { RENEWAL_PERIODS, extendSubscription, parsePaidAmount, subscriptionState, type RenewalPeriod } from '@/bibliotecas/subscricao';
 import { PainelLicencasServidor, mostrarChaveLicenca } from './PainelLicencasServidor';
+import { getMasterPrices, periodPrice, priceInputValue, PRICES_CHANGED_EVENT } from '@/bibliotecas/precos-master';
+import { gerarManualCliente, gerarManualProcesso } from '@/bibliotecas/manuais-ativacao';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 
@@ -109,6 +111,25 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
     const [expiryOption, setExpiryOption] = useState<'1m' | '3m' | '6m' | '1y' | 'lifetime' | 'custom'>('1y');
     const [customExpiry, setCustomExpiry] = useState('');
     const [paidAmount, setPaidAmount] = useState('');
+    // O valor vem da Tabela de Preços do Master; deixa de acompanhar o período se o administrador o alterar.
+    const [paidAmountEdited, setPaidAmountEdited] = useState(false);
+    const [manualBusy, setManualBusy] = useState(false);
+    const runManual = async (generate: () => Promise<void>) => {
+        setManualBusy(true);
+        try { await generate(); }
+        catch (error: any) { notify('error', error?.message || 'Não foi possível gerar o manual em PDF.'); }
+        finally { setManualBusy(false); }
+    };
+    const [pricesVersion, setPricesVersion] = useState(0);
+    useEffect(() => {
+        const onChange = () => setPricesVersion(version => version + 1);
+        window.addEventListener(PRICES_CHANGED_EVENT, onChange);
+        return () => window.removeEventListener(PRICES_CHANGED_EVENT, onChange);
+    }, []);
+    useEffect(() => {
+        if (paidAmountEdited || expiryOption === 'custom') return;
+        setPaidAmount(priceInputValue(periodPrice(getMasterPrices(), expiryOption)));
+    }, [expiryOption, paidAmountEdited, pricesVersion]);
     const [multiTenantOption, setMultiTenantOption] = useState(false);
     const [isSearchingNIF, setIsSearchingNIF] = useState(false);
     const [nifFoundSource, setNifFoundSource] = useState<string | null>(null);
@@ -436,7 +457,8 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
             });
 
             // Reset do formulário
-            setPaidAmount('');
+            setPaidAmountEdited(false);
+            setPaidAmount(priceInputValue(periodPrice(getMasterPrices(), expiryOption)));
             setNewNif('');
             setNewName('');
             setNifFoundSource(null);
@@ -483,13 +505,21 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
 
     const handleRenew = async (tenant: CloudTenant) => {
         const options = RENEWAL_PERIODS.map(item => `<option value="${item.key}"${item.key === '1y' ? ' selected' : ''}>${item.label}</option>`).join('');
+        const tablePrices = getMasterPrices();
         const result = await Swal.fire({
             title: 'Renovar subscrição',
             html: `<p style="font-size:13px;color:#64748b;margin-bottom:12px">${tenant.name.replace(/[<>&"]/g, '')} · validade atual: ${formatDate(tenant.expiresAt)}</p>
                 <label for="renew-period" style="display:block;text-align:left;font-size:12px;font-weight:700;margin:0 4px 4px">Período</label>
                 <select id="renew-period" class="swal2-select" style="width:100%;margin:0 0 12px">${options}</select>
                 <label for="renew-amount" style="display:block;text-align:left;font-size:12px;font-weight:700;margin:0 4px 4px">Valor pago (AOA)</label>
-                <input id="renew-amount" class="swal2-input" inputmode="decimal" placeholder="Ex.: 25 000" style="width:100%;margin:0">`,
+                <input id="renew-amount" class="swal2-input" inputmode="decimal" placeholder="Ex.: 25 000" style="width:100%;margin:0" value="${priceInputValue(periodPrice(tablePrices, '1y'))}">
+                <p style="font-size:11px;color:#94a3b8;margin:6px 4px 0;text-align:left">Valor da Tabela de Preços do Master; pode alterá-lo.</p>`,
+            didOpen: () => {
+                // Ao mudar o período, o valor acompanha a tabela de preços.
+                const select = document.getElementById('renew-period') as HTMLSelectElement;
+                const amount = document.getElementById('renew-amount') as HTMLInputElement;
+                select?.addEventListener('change', () => { amount.value = priceInputValue(periodPrice(tablePrices, select.value)); });
+            },
             showCancelButton: true,
             confirmButtonText: 'Renovar',
             cancelButtonText: 'Cancelar',
@@ -1030,11 +1060,18 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                                 id="paid-amount"
                                 inputMode="decimal"
                                 value={paidAmount}
-                                onChange={(e) => setPaidAmount(e.target.value)}
+                                onChange={(e) => { setPaidAmount(e.target.value); setPaidAmountEdited(true); }}
                                 placeholder="Ex.: 25 000 (0 se gratuita)"
                                 className="h-11 rounded-xl font-bold"
                             />
-                            <p className="text-[11px] text-slate-400">Fica registado na Contabilidade do Tango Master.</p>
+                            <p className="text-[11px] text-slate-400">
+                                Preenchido pela Tabela de Preços do Master (plano do período, escalão Empresarial). Fica registado na Contabilidade.
+                                {paidAmountEdited && (
+                                    <button type="button" className="ml-1 font-bold text-[#F37021] hover:underline" onClick={() => setPaidAmountEdited(false)}>
+                                        Repor preço da tabela
+                                    </button>
+                                )}
+                            </p>
                         </div>
                         <div className="mt-3 space-y-1.5">
                             <Label className="text-xs font-bold text-slate-600 dark:text-slate-300">Modo da Empresa</Label>
@@ -1291,17 +1328,76 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                 }}
             />
 
-            {/* Guia Explicativo do Ecossistema */}
-            <div className="rounded-3xl border border-orange-200 bg-orange-50/60 p-5 text-xs font-semibold leading-relaxed text-slate-700 dark:border-orange-900/50 dark:bg-orange-950/20 dark:text-slate-300">
-                <p className="font-black uppercase tracking-wider text-[#F37021] flex items-center gap-1.5">
-                    <Shield className="h-4 w-4" /> Fluxo de Acesso: Tango Master Gen ⇄ Versão Web
-                </p>
-                <ol className="mt-2.5 list-decimal space-y-1 pl-4">
-                    <li><strong>Registo no Master:</strong> O administrador cadastra a empresa aqui informando o NIF, consulta o nome oficial e atribui o Código de Acesso automático.</li>
-                    <li><strong>Entrega de Credenciais:</strong> O administrador envia ao cliente o link da web, o NIF e o Código de Acesso gerado (via WhatsApp ou Ficha PDF).</li>
-                    <li><strong>Validação Obrigatória na Web:</strong> Ao abrir o link, a aplicação web solicita o NIF e o Código de Acesso. Se a empresa não estiver cadastrada no Tango Master, o acesso ao Onboarding e ao sistema é bloqueado.</li>
-                    <li><strong>Comunicação em Tempo Real:</strong> Uma vez validada, a aplicação web comunica com o ecossistema Tango Master, sincronizando movimentações financeiras, relatórios e auditoria.</li>
-                </ol>
+            {/* Guia completo: empresa, chave de licença, activação dos computadores e versão web */}
+            <div className="rounded-3xl border border-orange-200 bg-orange-50/60 p-6 text-xs leading-relaxed text-slate-700 dark:border-orange-900/50 dark:bg-orange-950/20 dark:text-slate-300">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                        <p className="flex items-center gap-1.5 font-black uppercase tracking-wider text-[#F37021]">
+                            <Shield className="h-4 w-4" /> Como funciona a activação
+                        </p>
+                        <p className="mt-1 font-semibold text-slate-600 dark:text-slate-400">
+                            Uma licença por empresa, guardada no servidor. A mesma licença vale para os computadores (Tango ERP) e para a versão web.
+                        </p>
+                    </div>
+                    <div className="flex shrink-0 flex-wrap gap-2">
+                        <Button
+                            variant="outline"
+                            onClick={() => runManual(() => gerarManualProcesso())}
+                            disabled={manualBusy}
+                            className="h-9 gap-2 rounded-xl border-orange-200 bg-white text-xs font-bold text-slate-700 hover:bg-orange-50 dark:bg-slate-900 dark:text-slate-200"
+                        >
+                            {manualBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />} Manual do processo (PDF)
+                        </Button>
+                        <Button
+                            onClick={() => runManual(() => gerarManualCliente())}
+                            disabled={manualBusy}
+                            className="h-9 gap-2 rounded-xl bg-[#F37021] text-xs font-bold text-white hover:bg-orange-600"
+                        >
+                            {manualBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileDown className="h-4 w-4" />} Manual para o cliente (PDF)
+                        </Button>
+                    </div>
+                </div>
+
+                <div className="mt-5 grid gap-5 lg:grid-cols-2">
+                    <div>
+                        <p className="mb-2 font-black text-slate-800 dark:text-slate-100">No Tango Master (administrador)</p>
+                        <ol className="list-decimal space-y-1.5 pl-4 font-medium">
+                            <li><strong>Registar a empresa</strong> acima: NIF, validade e valor (vem da Tabela de Preços).</li>
+                            <li><strong>Guardar a chave TANGO-XXXX-…</strong> mostrada ao cadastrar (só aparece uma vez). Perdeu-a? «Licenças no servidor» → «Nova chave».</li>
+                            <li><strong>Enviar ao cliente</strong> a chave e o «Manual para o cliente». Para a versão web: Código de Acesso (TG-…), NIF e link (WhatsApp ou Ficha PDF).</li>
+                            <li><strong>Confirmar</strong> em «Licenças no servidor» → «Actualizar»: aparecem os computadores activados e o último contacto.</li>
+                            <li><strong>Gerir</strong> cada licença: renovar, suspender, mudar plano, libertar computador e ver o histórico.</li>
+                        </ol>
+                    </div>
+                    <div>
+                        <p className="mb-2 font-black text-slate-800 dark:text-slate-100">No computador do cliente (Tango ERP)</p>
+                        <ol className="list-decimal space-y-1.5 pl-4 font-medium">
+                            <li>Iniciar sessão como administrador, com Internet ligada.</li>
+                            <li>Menu <strong>Configurações → Licença</strong>.</li>
+                            <li>Colar a chave no campo <strong>«Chave de Licença Atual»</strong>.</li>
+                            <li>Clicar em <strong>«Validar e Salvar Licença»</strong>: o estado passa a <strong>«Ativa»</strong>.</li>
+                            <li>Cada computador da empresa activa-se com a mesma chave (até ao máximo do plano).</li>
+                        </ol>
+                        <p className="mt-3 font-semibold text-slate-600 dark:text-slate-400">
+                            <strong>Versão web:</strong> não pede chave. Abre com o NIF e o Código de Acesso e usa a licença da empresa.
+                        </p>
+                    </div>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-2xl bg-white/80 p-3 dark:bg-slate-900/60">
+                        <p className="font-black text-slate-800 dark:text-slate-100">Sem Internet</p>
+                        <p className="mt-1">O ERP trabalha até 7 dias sem validar. Depois fica só de leitura até se ligar; nada é apagado.</p>
+                    </div>
+                    <div className="rounded-2xl bg-white/80 p-3 dark:bg-slate-900/60">
+                        <p className="font-black text-slate-800 dark:text-slate-100">Licença suspensa ou expirada</p>
+                        <p className="mt-1">A sincronização e a versão web param de imediato. «Renovar» ou «Reactivar» volta a abrir tudo.</p>
+                    </div>
+                    <div className="rounded-2xl bg-white/80 p-3 dark:bg-slate-900/60">
+                        <p className="font-black text-slate-800 dark:text-slate-100">Chaves antigas (eyJ…)</p>
+                        <p className="mt-1">Colam-se no mesmo sítio. Para empresas registadas aqui, prefira a chave TANGO-… e use «Juntar chaves antigas».</p>
+                    </div>
+                </div>
             </div>
         </div>
     );

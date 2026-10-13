@@ -88,3 +88,14 @@ export const extractLicenseKeysFromText = (text: string): string[] => {
     }
     return [...new Set(found)];
 };
+
+/** Identificador e NIF de uma chave antiga, lidos da própria chave (sem verificar a assinatura). */
+export const readLegacyKeyFacts = (key: string): { jti: string; nif: string } | null => {
+    try {
+        const wrapper = JSON.parse(atob(normalizeLicenseKey(key)));
+        const data = JSON.parse(decodeLicensePayload(wrapper.payload));
+        return data?.jti ? { jti: String(data.jti).toLowerCase(), nif: String(data.nif || '').replace(/[^0-9A-Za-z]/g, '').toUpperCase() } : null;
+    } catch {
+        return null;
+    }
+};

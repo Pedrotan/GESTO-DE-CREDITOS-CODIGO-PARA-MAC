@@ -531,7 +531,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     const diffMinutes = (now - blockedAt) / (1000 * 60);
                     if (diffMinutes >= 10) {
                         // Cooldown expired! Auto-unlock
-                        await db.run('UPDATE users SET status = "active", failedAttempts = 0, blockedAt = NULL WHERE id = ?', [foundUser.id]);
+                        await db.run("UPDATE users SET status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?", [foundUser.id]);
                         foundUser.status = 'active';
                         foundUser.failedAttempts = 0;
                         (foundUser as any).blockedAt = null;
@@ -901,12 +901,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const getResetRequests = async () => {
-        return await db.all('SELECT * FROM password_reset_requests WHERE status = "pending" ORDER BY timestamp DESC');
+        return await db.all("SELECT * FROM password_reset_requests WHERE status = 'pending' ORDER BY timestamp DESC");
     };
 
     const handleResetRequest = async (requestId: string, newPassword?: string, action: 'complete' | 'cancel' = 'complete') => {
         if (action === 'cancel') {
-            await db.run('UPDATE password_reset_requests SET status = "cancelled" WHERE id = ?', [requestId]);
+            await db.run("UPDATE password_reset_requests SET status = 'cancelled' WHERE id = ?", [requestId]);
             return;
         }
 
@@ -918,7 +918,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             await db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, request.userId]);
         }
 
-        await db.run('UPDATE password_reset_requests SET status = "completed" WHERE id = ?', [requestId]);
+        await db.run("UPDATE password_reset_requests SET status = 'completed' WHERE id = ?", [requestId]);
         console.log(`✅ Solicitação de recuperação ${requestId} processada.`);
     };
 
@@ -1010,7 +1010,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const hashedPassword = bcrypt.hashSync(tempPassword, 10);
             const ip = await getIP();
             await db.run(
-                'UPDATE users SET password = ?, status = "active", failedAttempts = 0, blockedAt = NULL WHERE id = ?',
+                "UPDATE users SET password = ?, status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?",
                 [hashedPassword, existing.id]
             );
 
@@ -1042,7 +1042,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             const currentIp = user.ip || (await getIP().catch(() => 'Local Machine'));
             try {
                 await db.run(
-                    'UPDATE users SET lastSeen = ?, status = "active", ip = COALESCE(NULLIF(ip, ""), ?) WHERE id = ?',
+                    "UPDATE users SET lastSeen = ?, status = 'active', ip = COALESCE(NULLIF(ip, ''), ?) WHERE id = ?",
                     [agoraIso, currentIp, user.id]
                 );
             } catch (e) {

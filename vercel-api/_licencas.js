@@ -577,3 +577,11 @@ export const licenseSummary = async (sql, tenantId) => {
     daysRemaining: license.daysRemaining, maxMachines: license.maxMachines, machines: license.machines,
   };
 };
+
+/** Estado no servidor das chaves antigas (eyJ…) emitidas pelo Master: mantida na licença da empresa ou revogada. */
+export const legacyKeyStatuses = async (sql, jtis) => {
+  const list = (Array.isArray(jtis) ? jtis : []).map(value => String(value || '').toLowerCase()).filter(value => /^[0-9a-f-]{36}$/u.test(value)).slice(0, 5000);
+  if (!list.length) return [];
+  const rows = await sql(`SELECT jti, estado, empresa_id FROM tango_licencas_legado WHERE jti = ANY($1)`, [list]);
+  return rows.map(row => ({ jti: row.jti, state: row.estado, tenantId: row.empresa_id }));
+};

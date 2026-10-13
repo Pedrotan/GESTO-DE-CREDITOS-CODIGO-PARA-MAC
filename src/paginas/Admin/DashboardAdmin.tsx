@@ -80,6 +80,9 @@ import {
     ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts';
 import jsPDF from '@/bibliotecas/pdf-documento';
+import { masterCloudApi, type LegacyKeyServerStatus, type ServerLicenseSummary } from '@/servicos/ServicoMasterCloud';
+import { readLegacyKeyFacts } from '@/bibliotecas/licencas-legado';
+import { getMasterPrices, licensePrice, PRICE_PLAN_ORDER, PRICES_CHANGED_EVENT, saveMasterPrices, type MasterPrices } from '@/bibliotecas/precos-master';
 import autoTable from '@/bibliotecas/pdf-tabela';
 
 interface FinanceRecord {
@@ -129,6 +132,10 @@ export default function DashboardAdmin() {
     const [expirationDate, setExpirationDate] = useState<Date>(addMonths(new Date(), 1));
     const [generatedKeys, setGeneratedKeys] = useState<GeneratedKeyRecord[]>([]);
     const [activations, setActivations] = useState<Record<string, string>>({});
+    // Estado no servidor: licenças das empresas (computadores activados) e chaves antigas juntas/revogadas.
+    const [serverLicenses, setServerLicenses] = useState<ServerLicenseSummary[] | null>(null);
+    const [legacyServer, setLegacyServer] = useState<Record<string, LegacyKeyServerStatus>>({});
+    const [serverError, setServerError] = useState('');
 
     useEffect(() => {
         const fetchActivations = async () => {
@@ -141,6 +148,47 @@ export default function DashboardAdmin() {
         const interval = setInterval(fetchActivations, 30000); // Polling cada 30s
         return () => clearInterval(interval);
     }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        const load = async () => {
+            try {
+                const jtis = generatedKeys.map(record => readLegacyKeyFacts(record.key)?.jti).filter(Boolean);
+                const [list, legacy] = await Promise.all([
+                    masterCloudApi('licenses-list'),
+                    jtis.length ? masterCloudApi('licenses-legacy-status', { jtis }) : Promise.resolve({ keys: [] }),
+                ]);
+                if (cancelled) return;
+                setServerLicenses(list.licenses || []);
+                setLegacyServer(Object.fromEntries((legacy.keys || []).map((item: LegacyKeyServerStatus) => [item.jti, item])));
+                setServerError('');
+            } catch (error: any) {
+                if (!cancelled) setServerError(error?.message || 'Servidor indisponível.');
+            }
+        };
+        void load();
+        const timer = setInterval(load, 60_000);
+        return () => { cancelled = true; clearInterval(timer); };
+    }, [generatedKeys]);
+
+    /** Estado de uma chave emitida: validade, situação no servidor e activação nos computadores da empresa. */
+    const keyState = (record: GeneratedKeyRecord): { label: string; detail: string; tone: 'green' | 'amber' | 'red' | 'slate' } => {
+        if (record.status === 'migrated') return { label: 'Migrada', detail: 'Substituída por uma chave para outra máquina.', tone: 'slate' };
+        const facts = readLegacyKeyFacts(record.key);
+        const server = facts ? legacyServer[facts.jti] : undefined;
+        if (server?.state === 'revogada') return { label: 'Revogada', detail: 'Juntada à licença da empresa: outra chave ficou em uso.', tone: 'red' };
+        if (new Date(record.expirationDate).getTime() <= Date.now()) return { label: 'Expirada', detail: `Terminou a ${new Date(record.expirationDate).toLocaleDateString('pt-AO')}.`, tone: 'red' };
+        const company = facts?.nif ? serverLicenses?.find(item => item.tenantId.toUpperCase() === facts.nif) : undefined;
+        if (company && company.machines > 0) {
+            return { label: 'Activada', detail: `Licença da empresa activa em ${company.machines} de ${company.maxMachines} computador(es).`, tone: 'green' };
+        }
+        if (activations[record.key]) return { label: 'Activada', detail: 'Activada num computador da rede local.', tone: 'green' };
+        return {
+            label: 'Por activar',
+            detail: company ? 'Ainda nenhum computador validou a licença desta empresa.' : 'Válida. A activação desta chave antiga não é comunicada ao servidor.',
+            tone: 'amber',
+        };
+    };
 
     // Contabilidade Persistence
     const [financialRecords, setFinancialRecords] = useState<FinanceRecord[]>(() => {
@@ -160,19 +208,14 @@ export default function DashboardAdmin() {
     const [clientEmail, setClientEmail] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
 
-    // Preços Dinâmicos
-    const [prices, setPrices] = useState<Record<LicenseType, number>>(() => {
-        const saved = localStorage.getItem('tango_master_prices');
-        const defaults = {
-            'monthly': 15000,
-            'quarterly': 40000,
-            'biannual': 75000,
-            'annual': 140000,
-            'lifetime': 1500000,
-            'trial': 0
-        };
-        return saved ? { ...defaults, ...JSON.parse(saved) } : defaults;
-    });
+    // Preços: a mesma tabela em todo o Master (emissão, cadastro e renovação de empresas, licenças no servidor).
+    const [prices, setPrices] = useState<MasterPrices>(getMasterPrices);
+    useEffect(() => {
+        const onChange = () => setPrices(getMasterPrices());
+        window.addEventListener(PRICES_CHANGED_EVENT, onChange);
+        return () => window.removeEventListener(PRICES_CHANGED_EVENT, onChange);
+    }, []);
+    const salePrice = licensePrice(prices, planType, planTier, deviceCount) ?? 0;
 
     // Logos
     const [branding, setBranding] = useState({
@@ -206,7 +249,8 @@ export default function DashboardAdmin() {
     const totalKeys = generatedKeys.length;
     const totalSalesCount = financialRecords.length;
     const averageTicket = totalSalesCount > 0 ? totalRevenue / totalSalesCount : 0;
-    const activeMachinesCount = new Set(generatedKeys.filter(k => k.status !== 'migrated').map(k => k.machineId)).size;
+    // Só contam computadores onde a licença foi introduzida e validada pelo servidor (activações activas).
+    const activeMachinesCount = serverLicenses ? serverLicenses.reduce((total, license) => total + (Number(license.machines) || 0), 0) : null;
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Migração de Licença
@@ -320,7 +364,7 @@ export default function DashboardAdmin() {
     };
 
     // --- STATS & CHARTS DATA ---
-    const chartData = Object.keys(prices).filter(k => k !== 'trial').map(type => {
+    const chartData = PRICE_PLAN_ORDER.filter(k => k !== 'trial').map(type => {
         const count = generatedKeys.filter(k => k.type === type).length;
         const revenue = generatedKeys.filter(k => k.type === type).reduce((acc, curr) => acc + (curr.value || 0), 0);
         return { name: getLicenseTypeName(type as LicenseType).split('-')[1]?.trim() || type, revenue, count };
@@ -468,12 +512,12 @@ export default function DashboardAdmin() {
 
                 // Restaurar localStorage
                 if(config.masterWatermark!==undefined){if(config.masterWatermark)localStorage.setItem('tango_master_watermark',config.masterWatermark);else localStorage.removeItem('tango_master_watermark');}
-                localStorage.setItem('tango_master_prices', JSON.stringify(config.prices));
+                saveMasterPrices({ ...getMasterPrices(), ...(config.prices || {}) });
                 localStorage.setItem('tango_master_logo_system', config.branding.systemLogo);
                 localStorage.setItem('tango_master_logo_invoice', config.branding.invoiceLogo);
                 localStorage.setItem('tango_master_keys', JSON.stringify(config.keys));
                 // Restaurar Estados
-                setPrices(config.prices);
+                setPrices(getMasterPrices());
                 setBranding(config.branding);
                 setGeneratedKeys(config.keys);
                 if (config.finance) {
@@ -515,12 +559,8 @@ export default function DashboardAdmin() {
             return;
         }
 
-        // Calcular Valor
-        let basePrice = prices[planType];
-        if (planTier === 'empresarial') {
-            basePrice = basePrice * 2.5; // Exemplo: Empresarial custa 2.5x mais
-        }
-        const finalValue = basePrice * deviceCount;
+        // Valor pela tabela de preços (plano × escalão × computadores).
+        const finalValue = salePrice;
 
         try {
             // Dados da Licença (Reforçados para Segurança - Campos Curtos para o Validador)
@@ -706,8 +746,8 @@ export default function DashboardAdmin() {
     };
 
     const handleSavePrices = () => {
-        localStorage.setItem('tango_master_prices', JSON.stringify(prices));
-        showModalNotification("Guardado", "A tabela de preços foi atualizada.");
+        setPrices(saveMasterPrices(prices));
+        showModalNotification("Guardado", "A tabela de preços foi atualizada. Os novos valores já são usados na emissão de licenças e no cadastro e renovação das empresas.");
     };
 
     const exportToPDF = () => {
@@ -1109,7 +1149,10 @@ export default function DashboardAdmin() {
                                         <div className="flex justify-between items-start">
                                             <div>
                                                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Máquinas Ativas</p>
-                                                <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-2">{activeMachinesCount}</div>
+                                                <div className="text-2xl font-bold text-purple-600 dark:text-purple-400 mt-2">{activeMachinesCount ?? '—'}</div>
+                                                <p className="mt-1 text-[10px] text-slate-400" title={serverError || undefined}>
+                                                    {activeMachinesCount === null ? 'Sem ligação ao servidor (Empresas)' : 'Licenças introduzidas e validadas nos computadores'}
+                                                </p>
                                             </div>
                                             <div className="bg-purple-500/10 p-2 rounded-lg"><Users className="h-5 w-5 text-purple-600 dark:text-purple-500" /></div>
                                         </div>
@@ -1426,6 +1469,17 @@ export default function DashboardAdmin() {
                                         </div>
                                     </div>
                                     <CardContent className="space-y-6 pt-6 bg-white dark:bg-slate-900">
+                                        <div className="rounded-xl border border-blue-100 bg-blue-50/60 p-3 text-[11px] leading-relaxed text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                                            <p className="font-bold">Onde se cola esta chave?</p>
+                                            <p className="mt-1">
+                                                No <b>Tango ERP</b> do computador do cliente: <b>Configurações → Licença</b>, campo «Chave de Licença Atual»,
+                                                botão <b>«Validar e Salvar Licença»</b>. Esta chave (começa por «eyJ») é a licença antiga, presa a uma máquina.
+                                            </p>
+                                            <p className="mt-1">
+                                                Para empresas registadas em <b>Empresas</b>, prefira a chave <b>TANGO-XXXX-…</b> (Empresas → Licenças no servidor):
+                                                vale para a empresa, conta os computadores activados e a versão web usa-a sem pedir chave.
+                                            </p>
+                                        </div>
                                         <div className="space-y-2">
                                             <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Tipo de Plano</Label>
                                             <select
@@ -1527,7 +1581,7 @@ export default function DashboardAdmin() {
                                             <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Valor da Venda (AOA)</Label>
                                             <Input
                                                 type="number"
-                                                value={(prices[planType] * (planTier === 'empresarial' ? 2.5 : 1)) * deviceCount}
+                                                value={salePrice}
                                                 readOnly
                                                 className="h-11 bg-slate-100/50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-800 font-black text-slate-900 dark:text-white"
                                             />
@@ -1544,7 +1598,7 @@ export default function DashboardAdmin() {
                                                 </p>
                                             </div>
                                             <div className="text-xl font-black text-slate-800 dark:text-white">
-                                                {((prices[planType] * (planTier === 'empresarial' ? 2.5 : 1)) * deviceCount).toLocaleString()} Kz
+                                                {salePrice.toLocaleString('pt-AO')} Kz
                                             </div>
                                         </div>
 
@@ -1599,6 +1653,7 @@ export default function DashboardAdmin() {
                                                     <TableRow>
                                                         <TableHead className="text-[10px] font-black uppercase text-slate-400 pl-6">Cliente</TableHead>
                                                         <TableHead className="text-[10px] font-black uppercase text-slate-400">Tipo / Nível</TableHead>
+                                                        <TableHead className="text-[10px] font-black uppercase text-slate-400">Estado</TableHead>
                                                         <TableHead className="text-[10px] font-black uppercase text-slate-400">Valor</TableHead>
                                                         <TableHead className="text-right text-[10px] font-black uppercase text-slate-400 pr-6">Ações</TableHead>
                                                     </TableRow>
@@ -1630,6 +1685,23 @@ export default function DashboardAdmin() {
                                                                     )}
                                                                 </div>
                                                                 <div className="text-[10px] text-slate-500 mt-1 capitalize">{record.tier}</div>
+                                                            </TableCell>
+                                                            <TableCell className="max-w-[220px]">
+                                                                {(() => {
+                                                                    const state = keyState(record);
+                                                                    const tones = {
+                                                                        green: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900',
+                                                                        amber: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900',
+                                                                        red: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900',
+                                                                        slate: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+                                                                    };
+                                                                    return (
+                                                                        <div>
+                                                                            <span className={`inline-block rounded-md border px-2 py-0.5 text-[10px] font-bold ${tones[state.tone]}`}>{state.label}</span>
+                                                                            <p className="mt-1 text-[10px] leading-snug text-slate-500">{state.detail}</p>
+                                                                        </div>
+                                                                    );
+                                                                })()}
                                                             </TableCell>
                                                             <TableCell className="font-black text-slate-800 dark:text-slate-300">
                                                                 {record.value.toLocaleString()} Kz
@@ -1812,25 +1884,44 @@ export default function DashboardAdmin() {
                         <div className="w-full space-y-6 text-left">
                             <div>
                                 <h2 className="text-2xl font-bold text-slate-800 dark:text-white">Tabela de Preços Global</h2>
-                                <p className="text-slate-500 dark:text-slate-400">Defina os preços base para cada tipo de licença.</p>
+                                <p className="text-slate-500 dark:text-slate-400">Defina os preços base para cada tipo de licença. Estes valores são usados em todo o Tango Master: emissão de licenças, cadastro e renovação de empresas e licenças no servidor.</p>
                             </div>
 
                             <Card className="bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 transition-colors">
                                 <CardContent className="space-y-4 pt-6">
-                                    {Object.entries(prices).map(([key, value]) => (
+                                    {PRICE_PLAN_ORDER.map(key => (
                                         <div key={key} className="flex items-center gap-4">
-                                            <Label className="w-40 capitalize text-slate-700 dark:text-slate-300">{getLicenseTypeName(key as LicenseType)}</Label>
+                                            <Label className="w-40 capitalize text-slate-700 dark:text-slate-300">{getLicenseTypeName(key as LicenseType).replace(/^Licença Pessoal - /, '').replace(/ \(.*\)$/, '')}</Label>
                                             <div className="relative flex-1">
                                                 <span className="absolute left-3 top-2.5 text-slate-500 font-mono">AOA</span>
                                                 <Input
                                                     type="number"
-                                                    value={value}
-                                                    onChange={(e) => setPrices(prev => ({ ...prev, [key]: parseInt(e.target.value) || 0 }))}
+                                                    min={0}
+                                                    value={prices[key]}
+                                                    onChange={(e) => setPrices(prev => ({ ...prev, [key]: Math.max(0, Number(e.target.value) || 0) }))}
                                                     className="bg-slate-50 dark:bg-slate-950 border-slate-300 dark:border-slate-800 pl-12 text-slate-900 dark:text-white font-mono"
                                                 />
                                             </div>
                                         </div>
                                     ))}
+                                    <div className="flex items-center gap-4 border-t border-slate-100 pt-4 dark:border-slate-800">
+                                        <Label className="w-40 text-slate-700 dark:text-slate-300">Multiplicador Empresarial</Label>
+                                        <div className="relative flex-1">
+                                            <span className="absolute left-3 top-2.5 text-slate-500 font-mono">×</span>
+                                            <Input
+                                                type="number"
+                                                min={0.1}
+                                                step={0.1}
+                                                value={prices.enterpriseMultiplier}
+                                                onChange={(e) => setPrices(prev => ({ ...prev, enterpriseMultiplier: Math.max(0.1, Number(e.target.value) || 1) }))}
+                                                className="bg-slate-50 dark:bg-slate-950 border-slate-300 dark:border-slate-800 pl-12 text-slate-900 dark:text-white font-mono"
+                                            />
+                                        </div>
+                                    </div>
+                                    <p className="text-xs text-slate-500">
+                                        Preço de uma licença = preço do plano × multiplicador (só no escalão Empresarial) × número de computadores.
+                                        As empresas da versão web usam o escalão Empresarial.
+                                    </p>
                                     <div className="pt-4 flex justify-end">
                                         <Button onClick={handleSavePrices} className="bg-green-600 hover:bg-green-500 font-bold">
                                             <Save className="mr-2 h-4 w-4" /> Guardar Alterações

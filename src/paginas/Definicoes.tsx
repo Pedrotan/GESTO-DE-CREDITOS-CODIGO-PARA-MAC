@@ -687,8 +687,13 @@ export default function Settings() {
         }
     };
 
-    // Atualizar estado local quando o contexto muda (ex: carregamento inicial)
+    // Atualizar estado local quando o contexto muda (ex: carregamento inicial). Só quando o conteúdo muda de facto:
+    // o contexto recria o objeto com os mesmos valores e isso apagava o que o utilizador estava a escrever.
+    const lastSettingsJson = useRef('');
     useEffect(() => {
+        const settingsJson = companySettings ? JSON.stringify(companySettings) : '';
+        if (settingsJson === lastSettingsJson.current) return;
+        lastSettingsJson.current = settingsJson;
         if (companySettings) {
             setFormData({
                 name: companySettings.name || '',
@@ -854,7 +859,11 @@ export default function Settings() {
                     return;
                 }
                 licenseKeyToSave = activation.key;
-                setLicense(await validateLicense(activation.key));
+                // Mostrar já o estado novo (activa), sem esperar que a página recarregue.
+                const activated = await validateLicense(activation.key);
+                setLicense(activated);
+                setPreviewLicense(activated);
+                setFormData(prev => ({ ...prev, licenseKey: activation.key }));
             } else if (isNewKey && normalizeLicenseKey(formData.licenseKey) !== '') {
                 // 1. Validar estrutura e assinatura
                 const licenseResult = await validateLicense(normalizeLicenseKey(formData.licenseKey));

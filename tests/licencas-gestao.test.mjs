@@ -122,3 +122,13 @@ test('empresa inexistente: as acções respondem 404', async () => {
         assert.equal(response.statusCode, 404, action);
     }
 });
+
+test('estado das chaves antigas: mantida ou revogada depois de juntar', async () => {
+    const kept = { jti: crypto.randomUUID(), nif: NIF, mid: 'TANGO-AAAA', type: 'annual', tier: 'empresarial', exp: new Date(Date.now() + 500 * 86_400_000).toISOString(), devices: 1 };
+    const older = { ...kept, jti: crypto.randomUUID(), exp: new Date(Date.now() + 30 * 86_400_000).toISOString() };
+    await admin({ action: 'licenses-import-legacy', keys: [kept, older] });
+    const status = await admin({ action: 'licenses-legacy-status', jtis: [kept.jti, older.jti, crypto.randomUUID(), 'lixo'] });
+    assert.equal(status.statusCode, 200);
+    const byJti = Object.fromEntries(status.body.keys.map(item => [item.jti, item.state]));
+    assert.deepEqual(byJti, { [kept.jti]: 'mantida', [older.jti]: 'revogada' });
+});

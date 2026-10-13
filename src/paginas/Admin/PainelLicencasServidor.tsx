@@ -4,6 +4,7 @@ import { GerirLicenca, type PlanoServidor } from './GerirLicenca';
 import Swal from 'sweetalert2';
 import { Button } from '@/componentes/ui/button';
 import { cn } from '@/bibliotecas/utils';
+import { gerarManualCliente } from '@/bibliotecas/manuais-ativacao';
 import { extractLicenseKeysFromText, legacyKeysForImport, type LegacyKeyRecord } from '@/bibliotecas/licencas-legado';
 
 // Licenças no servidor (uma por empresa): lista com dias restantes e fusão das chaves antigas deste Master.
@@ -56,12 +57,21 @@ export const mostrarChaveLicenca = async (key: string, companyName: string, repl
             Chave de licença de <b>${escapeHtml(companyName)}</b>, para activar o Tango ERP nos computadores da empresa:
             <div style="margin:14px 0;padding:14px;border-radius:12px;background:#0f1c47;color:#fff;font:700 18px/1.4 Consolas,monospace;text-align:center;letter-spacing:1px">${escapeHtml(key)}</div>
             <b>Guarde-a agora:</b> por segurança, o servidor só guarda uma impressão digital da chave e não a volta a mostrar.
+            Envie-a ao cliente com o <b>Manual do cliente</b> (PDF com o passo a passo e a chave já preenchida).
             ${replaced ? '<br><br>A chave anterior deixou de funcionar para novas activações. Os computadores já activados continuam a funcionar.' : ''}
         </div>`,
         showCancelButton: true,
+        showDenyButton: true,
         confirmButtonText: 'Copiar chave',
+        denyButtonText: 'Manual do cliente (PDF)',
         cancelButtonText: 'Fechar',
         confirmButtonColor: '#F37021',
+        denyButtonColor: '#0f1c47',
+        preDeny: async () => {
+            // Gera o PDF com a chave e o nome da empresa, sem fechar a janela (a chave continua visível).
+            await gerarManualCliente({ companyName, licenseKey: key });
+            return false;
+        },
     });
     if (result.isConfirmed) {
         try { await navigator.clipboard.writeText(key); } catch { /* sem acesso à área de transferência */ }

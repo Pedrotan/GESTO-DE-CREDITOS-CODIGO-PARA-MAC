@@ -4,6 +4,7 @@ import Swal from 'sweetalert2';
 import { Button } from '@/componentes/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { cn } from '@/bibliotecas/utils';
+import { getMasterPrices, licensePrice } from '@/bibliotecas/precos-master';
 
 // Gestão de uma licença no Tango Master: renovar, mudar plano, suspender, libertar computadores e histórico.
 
@@ -211,7 +212,13 @@ export function GerirLicenca({ license, plans, open, onOpenChange, api, notify, 
                             {busy === 'plan' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Guardar
                         </Button>
                     </div>
-                    <p className="mt-2 text-[11px] text-slate-500">A data de fim muda com «Renovar». Os computadores já activados mantêm-se ao mudar o plano.</p>
+                    <p className="mt-2 text-[11px] text-slate-500">
+                        {(() => {
+                            const price = licensePrice(getMasterPrices(), plan, tier, Number(maxMachines) || 1);
+                            return price === null ? null : <><b>Preço pela Tabela de Preços: {price.toLocaleString('pt-AO')} Kz</b> por período. </>;
+                        })()}
+                        A data de fim muda com «Renovar». Os computadores já activados mantêm-se ao mudar o plano.
+                    </p>
                 </section>
 
                 {/* Computadores */}
