@@ -5,7 +5,7 @@ import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOr
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
-import { importLegacyKeys, issueLicenseKey, listLicenses, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
+import { changeLicensePlan, importLegacyKeys, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
 import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
 
 const KEY_TOOLS = { generate: generateLicenseKey, parse: parseLicenseKey, hash: licenseKeyHash, prefix: licenseKeyPrefix };
@@ -267,7 +267,12 @@ export default async function handler(req, res) {
       }
       await migrateTenantsToLicenses(sql);
       const licenses = await listLicenses(sql);
-      return send(res, 200, { success: true, licenses: licenses.map(toPublicLicense) });
+      const plans = await listPlans(sql);
+      return send(res, 200, {
+        success: true,
+        licenses: licenses.map(toPublicLicense),
+        plans: plans.map(plan => ({ id: plan.id, name: plan.nome, months: plan.duracao_meses, days: plan.duracao_dias })),
+      });
     }
 
     if (!tenantId || tenantId.length > 200) {
@@ -346,6 +351,19 @@ export default async function handler(req, res) {
       const issued = await issueLicenseKey(sql, tenantId, KEY_TOOLS, clientIp);
       if (!issued.ok) return send(res, issued.status, { success: false, message: issued.message });
       return send(res, 200, { success: true, licenseKey: issued.key, keyPrefix: issued.prefix, replaced: issued.replaced });
+    }
+
+    // Gestão da licença: mudar plano, libertar um computador, ver computadores e histórico.
+    if (action === 'license-change-plan' || action === 'license-release-machine' || action === 'license-details') {
+      if (!licensesReady) return send(res, 503, { success: false, message: 'As tabelas de licenças não estão disponíveis neste servidor.' });
+      const result = action === 'license-change-plan'
+        ? await changeLicensePlan(sql, tenantId, { plan: body.plan, tier: body.tier, maxMachines: body.maxMachines }, clientIp)
+        : action === 'license-release-machine'
+          ? await releaseMachine(sql, tenantId, body.activationId, clientIp)
+          : await licenseDetails(sql, tenantId);
+      if (!result.ok) return send(res, result.status, { success: false, message: result.message });
+      const { ok, ...data } = result;
+      return send(res, 200, { success: true, ...data });
     }
 
     if (action === 'rotate') {

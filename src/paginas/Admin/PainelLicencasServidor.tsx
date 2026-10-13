@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { BadgeCheck, CloudUpload, KeyRound, Loader2, RefreshCw } from 'lucide-react';
+import { BadgeCheck, CloudUpload, KeyRound, Loader2, RefreshCw, Settings2 } from 'lucide-react';
+import { GerirLicenca, type PlanoServidor } from './GerirLicenca';
 import Swal from 'sweetalert2';
 import { Button } from '@/componentes/ui/button';
 import { cn } from '@/bibliotecas/utils';
@@ -67,11 +68,16 @@ export const mostrarChaveLicenca = async (key: string, companyName: string, repl
     }
 };
 
-export function PainelLicencasServidor({ api, notify }: {
+export function PainelLicencasServidor({ api, notify, onRenew, onToggleStatus }: {
     api: (action: string, payload?: Record<string, any>) => Promise<any>;
     notify: (type: 'success' | 'error', message: string) => void;
+    /** Renovar e suspender usam o fluxo das empresas (regista o pagamento e mantém a empresa alinhada). */
+    onRenew: (tenantId: string) => Promise<void>;
+    onToggleStatus: (tenantId: string) => Promise<void>;
 }) {
     const [licenses, setLicenses] = useState<ServerLicense[] | null>(null);
+    const [plans, setPlans] = useState<PlanoServidor[]>([]);
+    const [managing, setManaging] = useState<string | null>(null);
     const [busy, setBusy] = useState<'list' | 'import' | string | null>(null);
 
     const issueKey = async (license: ServerLicense) => {
@@ -105,10 +111,22 @@ export function PainelLicencasServidor({ api, notify }: {
         try {
             const data = await api('licenses-list');
             setLicenses(data.licenses || []);
+            setPlans(data.plans || []);
         } catch (error: any) {
             notify('error', error?.message || 'Não foi possível obter as licenças do servidor.');
         } finally {
             setBusy(null);
+        }
+    };
+
+    /** Recarrega a lista sem o indicador de carregamento (depois de uma acção na janela de gestão). */
+    const reload = async () => {
+        try {
+            const data = await api('licenses-list');
+            setLicenses(data.licenses || []);
+            setPlans(data.plans || []);
+        } catch (error: any) {
+            notify('error', error?.message || 'Não foi possível actualizar as licenças.');
         }
     };
 
@@ -210,7 +228,7 @@ export function PainelLicencasServidor({ api, notify }: {
 
             {licenses && licenses.length > 0 && (
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[880px] text-left text-xs">
+                    <table className="w-full min-w-[960px] text-left text-xs">
                         <thead className="text-[10px] font-black uppercase tracking-wider text-slate-400">
                             <tr className="border-b border-slate-100 dark:border-slate-800">
                                 <th className="py-2 pr-3">Empresa</th>
@@ -258,6 +276,15 @@ export function PainelLicencasServidor({ api, notify }: {
                                                 {busy === license.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <KeyRound className="h-3 w-3" />}
                                                 {license.keyPrefix ? 'Nova chave' : 'Emitir chave'}
                                             </Button>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => setManaging(license.tenantId)}
+                                                disabled={busy !== null}
+                                                className="h-7 gap-1 rounded-lg px-2 text-[10px] font-bold"
+                                            >
+                                                <Settings2 className="h-3 w-3" /> Gerir
+                                            </Button>
                                         </div>
                                     </td>
                                 </tr>
@@ -266,6 +293,18 @@ export function PainelLicencasServidor({ api, notify }: {
                     </table>
                 </div>
             )}
+
+            <GerirLicenca
+                license={licenses?.find(item => item.tenantId === managing) || null}
+                plans={plans}
+                open={managing !== null}
+                onOpenChange={value => { if (!value) setManaging(null); }}
+                api={api}
+                notify={notify}
+                onRenew={onRenew}
+                onToggleStatus={onToggleStatus}
+                onChanged={reload}
+            />
         </div>
     );
 }

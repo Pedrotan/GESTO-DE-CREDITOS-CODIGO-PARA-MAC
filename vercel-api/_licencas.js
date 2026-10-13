@@ -492,3 +492,69 @@ export const licenseGate = async (sql, tenantId) => {
     return { ok: true, license: null, unavailable: true };
   }
 };
+
+// --- Etapa 5: gestão da licença no painel do Master ---------------------------------------------------------
+
+const findLicense = async (sql, tenantId) => {
+  await migrateTenantsToLicenses(sql);
+  const [license] = await sql(`SELECT * FROM tango_licencas WHERE UPPER(empresa_id) = UPPER($1)`, [tenantId]);
+  return license || null;
+};
+
+export const listPlans = (sql) => sql(`SELECT id, nome, duracao_meses, duracao_dias, max_maquinas FROM tango_planos ORDER BY
+  CASE id WHEN 'trial' THEN 0 WHEN 'monthly' THEN 1 WHEN 'quarterly' THEN 2 WHEN 'biannual' THEN 3 WHEN 'annual' THEN 4
+    WHEN 'lifetime' THEN 5 ELSE 6 END`);
+
+/** Muda o plano, o escalão e o número de computadores. Os computadores já activados mantêm-se. */
+export const changeLicensePlan = async (sql, tenantId, { plan, tier, maxMachines }, ip = null) => {
+  const license = await findLicense(sql, tenantId);
+  if (!license) return { ok: false, status: 404, message: 'A empresa não tem licença no servidor.' };
+  if (license.estado === 'revogada') return { ok: false, status: 409, message: 'A licença desta empresa está revogada.' };
+  const [planRow] = await sql(`SELECT id FROM tango_planos WHERE id = $1`, [String(plan || '')]);
+  if (!planRow) return { ok: false, status: 400, message: 'Plano desconhecido.' };
+  if (!LICENSE_TIERS.includes(tier)) return { ok: false, status: 400, message: 'Escalão inválido (singular ou empresarial).' };
+  const machines = Number(maxMachines);
+  if (!Number.isSafeInteger(machines) || machines < 1 || machines > 10_000) return { ok: false, status: 400, message: 'Número de computadores inválido (1 a 10 000).' };
+  await sql(`UPDATE tango_licencas SET plano_id = $2, escalao = $3, max_maquinas = $4, atualizado_em = NOW() WHERE id = $1`,
+    [license.id, planRow.id, tier, machines]);
+  const [{ total }] = await sql(`SELECT COUNT(*)::int AS total FROM tango_licenca_ativacoes WHERE licenca_id = $1 AND estado = 'ativa'`, [license.id]);
+  await recordLicenseEvent(sql, { licenseId: license.id, tenantId: license.empresa_id, type: 'plano_alterado', ip, detail: {
+    antes: { plano: license.plano_id, escalao: license.escalao, maxMaquinas: license.max_maquinas },
+    depois: { plano: planRow.id, escalao: tier, maxMaquinas: machines },
+  } });
+  return { ok: true, activeMachines: total, overLimit: total > machines };
+};
+
+/** Liberta um computador (troca de computador): deixa de renovar o token e o lugar fica livre. */
+export const releaseMachine = async (sql, tenantId, activationId, ip = null) => {
+  const license = await findLicense(sql, tenantId);
+  if (!license) return { ok: false, status: 404, message: 'A empresa não tem licença no servidor.' };
+  const [released] = await sql(`UPDATE tango_licenca_ativacoes SET estado = 'libertada'
+    WHERE id = $1 AND licenca_id = $2 AND estado = 'ativa' RETURNING id, nome_maquina, machine_hash`, [String(activationId || ''), license.id]);
+  if (!released) return { ok: false, status: 404, message: 'Computador não encontrado ou já libertado.' };
+  await recordLicenseEvent(sql, { licenseId: license.id, tenantId: license.empresa_id, type: 'maquina_libertada', ip,
+    detail: { maquina: released.machine_hash.slice(0, 12), nome: released.nome_maquina } });
+  return { ok: true };
+};
+
+/** Computadores e histórico da licença (mais recente primeiro). */
+export const licenseDetails = async (sql, tenantId) => {
+  const license = await findLicense(sql, tenantId);
+  if (!license) return { ok: false, status: 404, message: 'A empresa não tem licença no servidor.' };
+  const machines = await sql(`SELECT id, nome_maquina, machine_hash, primeira_ativacao, ultimo_heartbeat, estado
+    FROM tango_licenca_ativacoes WHERE licenca_id = $1 ORDER BY (estado = 'ativa') DESC, ultimo_heartbeat DESC NULLS LAST, primeira_ativacao DESC`, [license.id]);
+  const events = await sql(`SELECT id, tipo, detalhe, ip, criado_em FROM tango_licenca_eventos
+    WHERE licenca_id = $1 OR (licenca_id IS NULL AND UPPER(empresa_id) = UPPER($2)) ORDER BY criado_em DESC, id DESC LIMIT 200`, [license.id, license.empresa_id]);
+  return {
+    ok: true,
+    machines: machines.map(row => ({
+      id: row.id,
+      name: row.nome_maquina || null,
+      fingerprint: String(row.machine_hash).slice(0, 12),
+      firstActivatedAt: row.primeira_ativacao,
+      lastHeartbeatAt: row.ultimo_heartbeat,
+      status: row.estado,
+    })),
+    events: events.map(row => ({ id: String(row.id), type: row.tipo, detail: row.detalhe || {}, ip: row.ip || null, at: row.criado_em })),
+  };
+};

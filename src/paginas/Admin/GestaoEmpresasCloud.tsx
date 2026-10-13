@@ -1276,7 +1276,20 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                 )}
             </div>
 
-            <PainelLicencasServidor api={api} notify={notify} />
+            <PainelLicencasServidor
+                api={api}
+                notify={notify}
+                onRenew={async tenantId => {
+                    const tenant = tenants.find(item => item.tenantId.toUpperCase() === tenantId.toUpperCase());
+                    if (tenant) await handleRenew(tenant);
+                    else notify('error', 'Actualize a lista de empresas (Sincronizar Lista) antes de renovar.');
+                }}
+                onToggleStatus={async tenantId => {
+                    const tenant = tenants.find(item => item.tenantId.toUpperCase() === tenantId.toUpperCase());
+                    if (tenant) await handleToggleStatus(tenant);
+                    else notify('error', 'Actualize a lista de empresas (Sincronizar Lista) antes de suspender.');
+                }}
+            />
 
             {/* Guia Explicativo do Ecossistema */}
             <div className="rounded-3xl border border-orange-200 bg-orange-50/60 p-5 text-xs font-semibold leading-relaxed text-slate-700 dark:border-orange-900/50 dark:bg-orange-950/20 dark:text-slate-300">
