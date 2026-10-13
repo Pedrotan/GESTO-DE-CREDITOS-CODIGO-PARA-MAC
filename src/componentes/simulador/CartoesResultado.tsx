@@ -8,7 +8,7 @@ import { effortTone } from './modelo';
 
 type Props = {
     result: SimulationResult;
-    system: 'price' | 'sac';
+    system: 'price' | 'sac' | 'flat';
     rateType: RateType;
     effort: number | null;
     effortLimit: number;
@@ -36,7 +36,7 @@ export function CartoesResultado({ result, system, rateType, effort, effortLimit
 
     return (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-3">
-            <Card tone="card-kpi-sky" icon={<KzIcon />} label={system === 'price' ? 'Prestação Mensal' : '1.ª Prestação'} value={formatCurrency(result.installment)}>
+            <Card tone="card-kpi-sky" icon={<KzIcon />} label={system === 'sac' ? '1.ª Prestação' : 'Prestação Mensal'} value={formatCurrency(result.installment)}>
                 <p className="truncate">sem encargos: {formatCurrency(result.installmentBase)}</p>
                 {system === 'sac' && <p className="truncate opacity-80">Prestações decrescentes</p>}
             </Card>

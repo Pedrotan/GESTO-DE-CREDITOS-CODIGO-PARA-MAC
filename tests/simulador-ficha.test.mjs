@@ -59,7 +59,7 @@ test('termos com o nome da empresa, artigos numerados e base legal conhecida', (
 });
 
 test('ficha de simulação em PDF: número, código, plano, incumprimento, assinaturas e página legal', async () => {
-    const form = { ...mod.defaultForm(config), clientName: 'Cliente Teste', principal: 1_000_000, months: 12, baseRate: 24, applyRiskAdjustment: false, openingFee: { mode: 'percent', value: 0 }, processingFee: 0, insuranceEnabled: false };
+    const form = { ...mod.defaultForm(config), clientName: 'Cliente Teste', principal: 1_000_000, months: 12, system: 'price', baseRate: 24, applyRiskAdjustment: false, openingFee: { mode: 'percent', value: 0 }, processingFee: 0, insuranceEnabled: false };
     const result = mod.simulateCredit({ ...mod.buildInput(form, config, 24), startDate: '2026-10-05T12:00:00', dueDay: 10 });
     const bytes = await mod.generateSimulationSheetPdf({
         number: 'SIM-2026-TESTE1', verificationCode: '4F7K-QM2X', issuedAt: new Date('2026-10-05T10:00:00'), expiresAt: new Date('2026-10-20T10:00:00'),

@@ -14,7 +14,7 @@ export const PAGE_PERMISSIONS = ['view_market', 'use_simulator', 'view_chat', 'm
 export const ALL_ASSIGNABLE_PERMISSIONS = [
     'manage_users', 'manage_clients', 'view_credits', 'approve_loans', 'manage_payments', 'view_reports', 'view_user_reports',
     'manage_settings', 'view_audit_logs', 'manage_limits', 'manage_gateways', 'manage_fiscal', 'generate_fiscal_docs',
-    'manage_warranties', 'manage_legal', ...PAGE_PERMISSIONS,
+    'manage_warranties', 'manage_legal', 'edit_credit_rate', ...PAGE_PERMISSIONS,
 ] as const;
 
 /** Colunas da tabela users que dão ou tiram poder: só a conta principal as altera nos outros utilizadores. */

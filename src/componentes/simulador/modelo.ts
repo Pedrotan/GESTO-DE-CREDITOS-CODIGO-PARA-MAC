@@ -2,7 +2,8 @@
 
 import type { Client, Credit, Payment, Simulation } from '@/tipos/credito';
 import type { Warranty } from '@/tipos/contencioso';
-import type { RiskLevel, RateType, SimulatorConfig, SimulatorProduct } from '@/bibliotecas/config-simulador';
+import { productTermOptions, productTermRate, type RiskLevel, type RateType, type SimulatorConfig, type SimulatorProduct } from '@/bibliotecas/config-simulador';
+import type { InterestTier } from '@/bibliotecas/taxas-juro';
 import { effortRate, simulateCredit, type AmortizationSystem, type FeeMode, type FeePayment, type GraceType, type SimulationInput, type SimulationResult } from '@/bibliotecas/simulador-credito';
 import { assessRisk, type RiskInputs } from '@/bibliotecas/risco-simulacao';
 
@@ -31,6 +32,10 @@ export type SimulatorForm = {
     indexValue: number;
     applyRiskAdjustment: boolean;
     system: AmortizationSystem;
+    /** Sistema flat: taxa total do prazo (%), tirada da tabela do produto para o prazo escolhido. */
+    termRate: number;
+    /** A taxa do prazo foi alterada à mão (exige a permissão «Alterar a taxa do crédito» e fica na auditoria). */
+    termRateManual: boolean;
     openingFee: { mode: FeeMode; value: number };
     processingFee: number;
     insuranceEnabled: boolean;
@@ -60,7 +65,9 @@ export function productFields(product: SimulatorProduct, config: SimulatorConfig
         baseRate: product.annualRate,
         spread: product.spread,
         indexValue: config.indexValue,
-        system: product.system,
+        // Produto com taxa por prazo: juro fixo (FLAT) com a taxa da tabela para o prazo escolhido.
+        system: product.rateMode === 'term' ? 'flat' : product.system,
+        termRateManual: false,
         openingFee: { ...product.openingFee },
         processingFee: product.processingFee,
         insuranceEnabled: product.insuranceRate > 0,
@@ -79,6 +86,7 @@ export function defaultForm(config: SimulatorConfig): SimulatorForm {
         rateType: 'fixed', baseRate: product.annualRate, spread: product.spread, indexValue: config.indexValue,
         applyRiskAdjustment: true, system: product.system, openingFee: { ...product.openingFee }, processingFee: product.processingFee,
         insuranceEnabled: false, insuranceRate: 0.05, feePayment: config.feePayment, riskOverride: null, riskJustification: '',
+        termRate: 0, termRateManual: false,
         ...productFields(product, config),
     };
 }
@@ -91,6 +99,7 @@ export function buildInput(form: SimulatorForm, config: SimulatorConfig, annualR
         principal: form.principal,
         months: form.months,
         annualRate,
+        termRate: form.termRate,
         system: form.system,
         startDate: `${form.startDate}T12:00:00`,
         dueDay: form.dueDay,
@@ -203,12 +212,35 @@ export function formFromSimulation(simulation: Simulation, config: SimulatorConf
         income: Number(simulation.clientIncome) || 0,
         principal: Number(simulation.amount) || 0,
         months: Number(simulation.term) || 0,
-        system: simulation.method === 'sac' ? 'sac' : 'price',
+        system: simulation.method === 'sac' ? 'sac' : simulation.method === 'flat' ? 'flat' : 'price',
+        termRate: simulation.method === 'flat' ? Number(simulation.interestRate) || 0 : 0,
         rateType: 'fixed',
         // O simulador antigo guardava a taxa mensal: a TAN é 12 vezes esse valor.
         baseRate: Number(simulation.interestRate) ? Number(simulation.interestRate) * 12 : base.baseRate,
         applyRiskAdjustment: false,
     };
+}
+
+/** Prazos do produto em modo «taxa por prazo» (vazio nos produtos com TAN). */
+export function termOptionsFor(product: SimulatorProduct | undefined, generalTiers: InterestTier[]) {
+    return product?.rateMode === 'term' ? productTermOptions(product, generalTiers) : [];
+}
+
+/**
+ * Mantém a taxa do prazo do formulário igual à da tabela (produto + prazo), salvo quando foi alterada à mão.
+ * Devolve as alterações a aplicar, ou null se já estiver certa.
+ */
+export function termRatePatch(form: SimulatorForm, config: SimulatorConfig, generalTiers: InterestTier[]): Partial<SimulatorForm> | null {
+    if (form.system !== 'flat' || form.termRateManual) return null;
+    const product = config.products.find(item => item.id === form.productId);
+    const rate = productTermRate(product, generalTiers, form.months) ?? 0;
+    return rate === form.termRate ? null : { termRate: rate };
+}
+
+/** Primeiro prazo da tabela igual ou acima do pedido (ou o último), para quando se muda de produto. */
+export function nearestTerm(options: Array<{ months: number }>, months: number): number {
+    if (!options.length) return months;
+    return (options.find(option => option.months >= months) || options[options.length - 1]).months;
 }
 
 export type Computed = {
@@ -225,7 +257,9 @@ export type Computed = {
 /** Cálculo completo: risco a partir da prestação sem ajuste, depois TAN ajustada ao risco e simulação final. */
 export function computeSimulation(form: SimulatorForm, config: SimulatorConfig, history: ReturnType<typeof clientHistory>): Computed {
     const ready = form.principal > 0 && form.months > 0;
-    const baseRate = baseAnnualRate(form);
+    const flat = form.system === 'flat';
+    // Taxa do prazo: a TAN mostrada é a equivalente simples (taxa × 12 ÷ meses) e não há ajuste ao risco.
+    const baseRate = flat ? (form.months > 0 ? form.termRate * 12 / form.months : 0) : baseAnnualRate(form);
     const baseResult = ready ? simulateCredit(buildInput(form, config, baseRate)) : null;
     const baseEffort = baseResult?.valid ? effortRate(baseResult.maxInstallment, form.otherDebts, form.income) : null;
     const risk = assessRisk({
@@ -234,7 +268,7 @@ export function computeSimulation(form: SimulatorForm, config: SimulatorConfig, 
         activeCredits: history?.activeCredits || 0, defaultedCredits: history?.defaultedCredits || 0, guaranteeCoverage: history?.guaranteeCoverage || 0,
     });
     const riskLevel = form.riskOverride ?? risk.level;
-    const riskAdjustment = form.applyRiskAdjustment ? config.riskSpread[riskLevel] : 0;
+    const riskAdjustment = form.applyRiskAdjustment && !flat ? config.riskSpread[riskLevel] : 0;
     const annualRate = Math.max(0, baseRate + riskAdjustment);
     const result = ready ? simulateCredit(buildInput(form, config, annualRate)) : null;
     const effort = result?.valid ? effortRate(result.maxInstallment, form.otherDebts, form.income) : null;

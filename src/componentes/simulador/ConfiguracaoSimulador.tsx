@@ -12,7 +12,9 @@ import { DecimalInput } from '@/componentes/ui/DecimalInput';
 import { useToast } from '@/componentes/ui/use-toast';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
-import { DEFAULT_SIMULATOR_CONFIG, type SimulatorConfig, type SimulatorProduct } from '@/bibliotecas/config-simulador';
+import { DEFAULT_SIMULATOR_CONFIG, productTermRates, type SimulatorConfig, type SimulatorProduct } from '@/bibliotecas/config-simulador';
+import { MAX_INTEREST_TIERS, tierPeriodLabel, validateInterestTiers, type InterestTier } from '@/bibliotecas/taxas-juro';
+import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { AMORTIZATION_LABELS } from '@/bibliotecas/simulador-credito';
 import { angolaHolidays } from '@/bibliotecas/feriados-angola';
 import { formatDate } from '@/bibliotecas/formatters';
@@ -32,13 +34,14 @@ const slug = (name: string) => name.normalize('NFD').replace(/\p{M}/gu, '').toLo
 /** Definições › Produtos de Crédito: produtos, Imposto do Selo, taxa de esforço, risco, mora e validade. */
 export function ConfiguracaoSimulador() {
     const { user } = useAuth();
-    const { addLog } = useData();
+    const { addLog, interestTiers } = useData();
     const { toast } = useToast();
     const { config: saved, loading } = useConfigSimulador();
     const [draft, setDraft] = useState<SimulatorConfig>(saved);
     const [busy, setBusy] = useState(false);
     const [newHoliday, setNewHoliday] = useState('');
-    const admin = ['admin', 'super_admin'].includes(String(user?.role || ''));
+    // Quem pode alterar os produtos: a conta principal ou quem tem «Configurações de Sistema».
+    const admin = !!user && ServicoControloAcesso.temPermissao(user as any, 'manage_settings');
 
     useEffect(() => { setDraft(saved); }, [saved]);
 
@@ -58,8 +61,25 @@ export function ConfiguracaoSimulador() {
         setDraft(prev => ({ ...prev, products: [...prev.products, { ...base, id, name: 'Novo produto' }] }));
     };
 
+    const setTier = (index: number, tierIndex: number, changes: Partial<InterestTier>) => setProduct(index, {
+        termRates: draft.products[index].termRates.map((tier, position) => position === tierIndex ? { ...tier, ...changes } : tier),
+    });
+    /** Começa a tabela do produto a partir da tabela geral (para depois ajustar só o que muda). */
+    const copyGeneral = (index: number) => setProduct(index, { termRates: interestTiers.map(tier => ({ ...tier, id: crypto.randomUUID() })) });
+    const addTier = (index: number) => {
+        const tiers = draft.products[index].termRates;
+        const start = tiers.length ? Math.max(...tiers.map(tier => tier.maxMonths)) + 1 : 1;
+        setProduct(index, { termRates: [...tiers, { id: crypto.randomUUID(), minMonths: start, maxMonths: start, rate: tiers[tiers.length - 1]?.rate ?? 0 }] });
+    };
+    const tierErrors = draft.products.map(product => product.rateMode === 'term' && product.termRates.length ? validateInterestTiers(product.termRates) : null);
+
     const save = async () => {
         if (!user) return;
+        const invalid = tierErrors.findIndex(Boolean);
+        if (invalid >= 0) {
+            toast({ title: `Tabela de taxas de ${draft.products[invalid].name}`, description: tierErrors[invalid]!, variant: 'destructive' });
+            return;
+        }
         setBusy(true);
         try {
             const products = draft.products.map(product => product.id.startsWith('novo-produto') ? { ...product, id: slug(product.name) } : product);
@@ -111,8 +131,15 @@ export function ConfiguracaoSimulador() {
                             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                                 <Field label="Montante mínimo"><CurrencyInput value={product.minAmount} disabled={!admin} onValueChange={minAmount => setProduct(index, { minAmount })} /></Field>
                                 <Field label="Montante máximo"><CurrencyInput value={product.maxAmount} disabled={!admin} onValueChange={maxAmount => setProduct(index, { maxAmount })} /></Field>
-                                <Field label="Prazo mínimo"><DecimalInput digits={0} suffix="meses" value={product.minMonths} disabled={!admin} min={1} max={600} onValueChange={minMonths => setProduct(index, { minMonths })} /></Field>
-                                <Field label="Prazo máximo"><DecimalInput digits={0} suffix="meses" value={product.maxMonths} disabled={!admin} min={1} max={600} onValueChange={maxMonths => setProduct(index, { maxMonths })} /></Field>
+                                {product.rateMode === 'annual' && <Field label="Prazo mínimo"><DecimalInput digits={0} suffix="meses" value={product.minMonths} disabled={!admin} min={1} max={600} onValueChange={minMonths => setProduct(index, { minMonths })} /></Field>}
+                                {product.rateMode === 'annual' && <Field label="Prazo máximo"><DecimalInput digits={0} suffix="meses" value={product.maxMonths} disabled={!admin} min={1} max={600} onValueChange={maxMonths => setProduct(index, { maxMonths })} /></Field>}
+                                <Field label="Como se calcula a taxa" hint={product.rateMode === 'term' ? 'Taxa total por prazo (ex.: 1 mês = 35%), juro fixo.' : 'TAN com prestações constantes ou amortização constante.'}>
+                                    <Select value={product.rateMode} disabled={!admin} onValueChange={rateMode => setProduct(index, { rateMode: rateMode as SimulatorProduct['rateMode'] })}>
+                                        <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
+                                        <SelectContent><SelectItem value="term">Taxa por prazo (tabela)</SelectItem><SelectItem value="annual">TAN (taxa anual)</SelectItem></SelectContent>
+                                    </Select>
+                                </Field>
+                                {product.rateMode === 'annual' && <>
                                 <Field label="Regime da taxa">
                                     <Select value={product.rateType} disabled={!admin} onValueChange={rateType => setProduct(index, { rateType: rateType as SimulatorProduct['rateType'] })}>
                                         <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
@@ -122,6 +149,7 @@ export function ConfiguracaoSimulador() {
                                 {product.rateType === 'fixed'
                                     ? <Field label="TAN (taxa anual nominal)"><DecimalInput suffix="%" value={product.annualRate} disabled={!admin} min={0} max={500} onValueChange={annualRate => setProduct(index, { annualRate })} /></Field>
                                     : <Field label="Spread sobre o indexante" hint={`TAN = ${draft.indexName} + spread`}><DecimalInput suffix="p.p." value={product.spread} disabled={!admin} min={-100} max={500} onValueChange={spread => setProduct(index, { spread })} /></Field>}
+                                </>}
                                 <Field label="Comissão de abertura">
                                     <div className="flex gap-2">
                                         <Select value={product.openingFee.mode} disabled={!admin} onValueChange={mode => setProduct(index, { openingFee: { ...product.openingFee, mode: mode as 'percent' | 'fixed' } })}>
@@ -137,13 +165,47 @@ export function ConfiguracaoSimulador() {
                                 </Field>
                                 <Field label="Comissão de processamento" hint="Cobrada em cada prestação."><CurrencyInput value={product.processingFee} disabled={!admin} onValueChange={processingFee => setProduct(index, { processingFee })} /></Field>
                                 <Field label="Seguro (opcional)" hint="% mensal sobre o capital em dívida; 0 = sem seguro."><DecimalInput digits={3} suffix="% / mês" value={product.insuranceRate} disabled={!admin} min={0} max={100} onValueChange={insuranceRate => setProduct(index, { insuranceRate })} /></Field>
-                                <Field label="Sistema de amortização por omissão">
+                                {product.rateMode === 'annual' && <Field label="Sistema de amortização por omissão">
                                     <Select value={product.system} disabled={!admin} onValueChange={system => setProduct(index, { system: system as SimulatorProduct['system'] })}>
                                         <SelectTrigger className="h-10"><SelectValue /></SelectTrigger>
                                         <SelectContent><SelectItem value="price">{AMORTIZATION_LABELS.price}</SelectItem><SelectItem value="sac">{AMORTIZATION_LABELS.sac}</SelectItem></SelectContent>
                                     </Select>
-                                </Field>
+                                </Field>}
                             </div>
+                            {product.rateMode === 'term' && (
+                                <div className="space-y-2 rounded-lg border bg-muted/30 p-3">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                        <div>
+                                            <p className="text-sm font-bold">Taxas por prazo — {product.name}</p>
+                                            <p className="text-[11px] text-muted-foreground">
+                                                {product.termRates.length
+                                                    ? 'Ao conceder um crédito deste produto, os prazos são os desta tabela e a taxa preenche-se sozinha. Mudar a tabela não altera créditos já concedidos.'
+                                                    : `Sem tabela própria: usa a tabela geral de taxas (${productTermRates(product, interestTiers).map(tier => `${tierPeriodLabel(tier)} ${tier.rate}%`).join(' · ')}).`}
+                                            </p>
+                                        </div>
+                                        <div className="flex gap-2">
+                                            {!product.termRates.length && <Button type="button" variant="outline" size="sm" disabled={!admin} onClick={() => copyGeneral(index)}>Criar tabela própria</Button>}
+                                            {product.termRates.length > 0 && <Button type="button" variant="ghost" size="sm" disabled={!admin} onClick={() => setProduct(index, { termRates: [] })}>Usar a tabela geral</Button>}
+                                        </div>
+                                    </div>
+                                    {product.termRates.length > 0 && (
+                                        <div className="space-y-1.5">
+                                            <div className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2 text-[11px] font-semibold text-muted-foreground"><span>De (meses)</span><span>Até (meses)</span><span>Taxa do prazo</span><span className="w-9" /></div>
+                                            {product.termRates.map((tier, tierIndex) => (
+                                                <div key={tier.id} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-2">
+                                                    <DecimalInput digits={0} min={1} max={120} value={tier.minMonths} disabled={!admin} onValueChange={minMonths => setTier(index, tierIndex, { minMonths })} />
+                                                    <DecimalInput digits={0} min={1} max={120} value={tier.maxMonths} disabled={!admin} onValueChange={maxMonths => setTier(index, tierIndex, { maxMonths })} />
+                                                    <DecimalInput suffix="%" min={0} max={1000} value={tier.rate} disabled={!admin} onValueChange={rate => setTier(index, tierIndex, { rate })} />
+                                                    <Button type="button" variant="ghost" size="icon" className="text-destructive" disabled={!admin || product.termRates.length <= 1}
+                                                        onClick={() => setProduct(index, { termRates: product.termRates.filter((_, position) => position !== tierIndex) })}><Trash2 className="h-4 w-4" /></Button>
+                                                </div>
+                                            ))}
+                                            <Button type="button" variant="outline" size="sm" className="gap-1" disabled={!admin || product.termRates.length >= MAX_INTEREST_TIERS} onClick={() => addTier(index)}><Plus className="h-4 w-4" /> Adicionar prazo</Button>
+                                            {tierErrors[index] && <p className="text-xs font-semibold text-destructive">{tierErrors[index]}</p>}
+                                        </div>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     ))}
                     <Button variant="outline" className="gap-2" disabled={!admin} onClick={addProduct}><Plus className="h-4 w-4" /> Adicionar produto</Button>

@@ -134,6 +134,7 @@ export const AVAILABLE_PERMISSIONS = [
     { id: 'use_simulator', label: 'Página Simulador', description: 'Usar o simulador de crédito' },
     { id: 'view_chat', label: 'Chat Interno', description: 'Usar o chat interno da equipa' },
     { id: 'manage_suppliers', label: 'Página Fornecedores', description: 'Ver e gerir fornecedores' },
+    { id: 'edit_credit_rate', label: 'Alterar a taxa do crédito', description: 'Mudar à mão a taxa do prazo ao conceder um crédito (fica registado na auditoria)' },
 ];
 
 

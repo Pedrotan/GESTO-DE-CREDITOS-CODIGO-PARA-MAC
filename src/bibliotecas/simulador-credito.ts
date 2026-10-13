@@ -4,7 +4,8 @@
 
 import { angolaHolidays } from './feriados-angola';
 
-export type AmortizationSystem = 'price' | 'sac';
+/** price e sac usam a TAN; flat usa a taxa total do prazo (tabela de taxas por produto e prazo). */
+export type AmortizationSystem = 'price' | 'sac' | 'flat';
 export type GraceType = 'capital' | 'total';
 export type FeeMode = 'percent' | 'fixed';
 export type FeePayment = 'deducted' | 'financed';
@@ -12,6 +13,7 @@ export type FeePayment = 'deducted' | 'financed';
 export const AMORTIZATION_LABELS: Record<AmortizationSystem, string> = {
     price: 'Prestações Constantes',
     sac: 'Amortizações Constantes',
+    flat: 'Taxa do prazo (juro fixo)',
 };
 
 export const GRACE_LABELS: Record<GraceType, string> = {
@@ -38,8 +40,10 @@ export type SimulationInput = {
     principal: number;
     /** Prazo total em meses, incluindo a carência. */
     months: number;
-    /** Taxa Anual Nominal (TAN), em percentagem. */
+    /** Taxa Anual Nominal (TAN), em percentagem (sistemas price e sac). */
     annualRate: number;
+    /** Sistema flat: taxa total do prazo, em percentagem (ex.: 35% para 1 mês). Juro = capital × taxa. */
+    termRate?: number;
     system: AmortizationSystem;
     /** Data do desembolso. */
     startDate: Date | string;
@@ -179,11 +183,14 @@ export function monthlyIrr(flows: number[]): number | null {
 
 export function simulateCredit(input: SimulationInput): SimulationResult {
     const months = Math.max(0, Math.floor(Number(input.months) || 0));
-    const graceMonths = Math.min(Math.max(0, Math.floor(Number(input.graceMonths) || 0)), Math.max(0, months - 1));
+    const flat = input.system === 'flat';
+    const termRate = Math.max(0, Number(input.termRate) || 0);
+    const graceMonths = flat ? 0 : Math.min(Math.max(0, Math.floor(Number(input.graceMonths) || 0)), Math.max(0, months - 1));
     const graceType: GraceType = input.graceType === 'total' ? 'total' : 'capital';
     const stamp = input.stampDuty || DEFAULT_STAMP_DUTY;
     const principalMinor = toMinor(input.principal);
-    const rate = Math.max(0, Number(input.annualRate) || 0);
+    // No sistema flat, a TAN apresentada é a equivalente simples da taxa do prazo.
+    const rate = flat ? (months > 0 ? termRate * 12 / months : 0) : Math.max(0, Number(input.annualRate) || 0);
     const monthlyRate = rate / 1200;
     const extra = input.extraHolidays || [];
     const national = input.useNationalHolidays !== false;
@@ -237,6 +244,16 @@ export function simulateCredit(input: SimulationInput): SimulationResult {
         }
     }
 
+    // Sistema flat (taxa do prazo): juro total = capital × taxa, capital e juro repartidos em partes iguais
+    // (o cêntimo que sobra vai para as primeiras prestações), como os créditos com o método FLAT.
+    const spread = (total: number, count: number) => {
+        const part = Math.floor(total / count);
+        const remainder = total - part * count;
+        return Array.from({ length: count }, (_, index) => part + (index < remainder ? 1 : 0));
+    };
+    const flatInterest = flat ? spread(Math.round(balance * termRate / 100), months) : [];
+    const flatPrincipal = flat ? spread(balance, months) : [];
+
     // Prestações de amortização
     const amortizing = months - graceMonths;
     const base = balance;
@@ -247,8 +264,8 @@ export function simulateCredit(input: SimulationInput): SimulationResult {
     for (let index = 0; index < amortizing; index++) {
         const number = graceMonths + index + 1;
         const last = index === amortizing - 1;
-        const interest = Math.round(balance * monthlyRate);
-        let amortization = input.system === 'sac' ? constantAmortization : constantPayment - interest;
+        const interest = flat ? flatInterest[index] : Math.round(balance * monthlyRate);
+        let amortization = flat ? flatPrincipal[index] : input.system === 'sac' ? constantAmortization : constantPayment - interest;
         if (last || amortization > balance) amortization = balance;
         amortization = Math.max(0, amortization);
         const stampInterest = Math.round(interest * interestStampRate);

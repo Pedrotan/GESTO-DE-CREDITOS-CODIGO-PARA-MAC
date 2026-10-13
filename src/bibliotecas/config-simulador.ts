@@ -3,6 +3,7 @@
 // shared_settings para valer em todos os dispositivos da empresa.
 
 import { DEFAULT_STAMP_DUTY, type AmortizationSystem, type FeeMode, type FeePayment, type StampDutyRates } from './simulador-credito';
+import { normalizeInterestTiers, validateInterestTiers, type InterestTier } from './taxas-juro';
 
 export type RiskLevel = 'low' | 'medium' | 'high';
 export type RateType = 'fixed' | 'variable';
@@ -24,6 +25,13 @@ export type SimulatorProduct = {
     processingFee: number;
     insuranceRate: number;
     system: AmortizationSystem;
+    /**
+     * term: taxa total por prazo (ex.: 1 mês = 35%), tirada da tabela do produto (ou, vazia, da tabela geral de
+     * taxas); o crédito fica com o método FLAT. annual: TAN do produto com prestações constantes ou SAC.
+     */
+    rateMode: 'term' | 'annual';
+    /** Tabela de taxas por prazo do produto; vazia = usa a tabela geral (Créditos › Tabela de Taxas). */
+    termRates: InterestTier[];
 };
 
 export type SimulatorConfig = {
@@ -45,11 +53,11 @@ export type SimulatorConfig = {
 };
 
 export const DEFAULT_PRODUCTS: SimulatorProduct[] = [
-    { id: 'credito-pessoal', name: 'Crédito Pessoal', active: true, minAmount: 50_000, maxAmount: 5_000_000, minMonths: 6, maxMonths: 60, annualRate: 24, rateType: 'fixed', spread: 6, openingFee: { mode: 'percent', value: 2 }, processingFee: 500, insuranceRate: 0, system: 'price' },
-    { id: 'credito-salario', name: 'Crédito Salário', active: true, minAmount: 30_000, maxAmount: 3_000_000, minMonths: 3, maxMonths: 36, annualRate: 20, rateType: 'fixed', spread: 4, openingFee: { mode: 'percent', value: 1.5 }, processingFee: 0, insuranceRate: 0, system: 'price' },
-    { id: 'credito-consumo', name: 'Crédito ao Consumo', active: true, minAmount: 20_000, maxAmount: 2_000_000, minMonths: 3, maxMonths: 48, annualRate: 26, rateType: 'fixed', spread: 8, openingFee: { mode: 'percent', value: 2.5 }, processingFee: 500, insuranceRate: 0, system: 'price' },
-    { id: 'microcredito', name: 'Microcrédito', active: true, minAmount: 10_000, maxAmount: 1_000_000, minMonths: 1, maxMonths: 24, annualRate: 30, rateType: 'fixed', spread: 10, openingFee: { mode: 'percent', value: 3 }, processingFee: 0, insuranceRate: 0, system: 'price' },
-    { id: 'credito-empresa', name: 'Crédito Empresa', active: true, minAmount: 500_000, maxAmount: 50_000_000, minMonths: 6, maxMonths: 60, annualRate: 22, rateType: 'variable', spread: 5, openingFee: { mode: 'percent', value: 2 }, processingFee: 1_000, insuranceRate: 0, system: 'sac' },
+    { id: 'credito-pessoal', name: 'Crédito Pessoal', active: true, minAmount: 50_000, maxAmount: 5_000_000, minMonths: 6, maxMonths: 60, annualRate: 24, rateType: 'fixed', spread: 6, openingFee: { mode: 'percent', value: 2 }, processingFee: 500, insuranceRate: 0, system: 'price', rateMode: 'term', termRates: [] },
+    { id: 'credito-salario', name: 'Crédito Salário', active: true, minAmount: 30_000, maxAmount: 3_000_000, minMonths: 3, maxMonths: 36, annualRate: 20, rateType: 'fixed', spread: 4, openingFee: { mode: 'percent', value: 1.5 }, processingFee: 0, insuranceRate: 0, system: 'price', rateMode: 'term', termRates: [] },
+    { id: 'credito-consumo', name: 'Crédito ao Consumo', active: true, minAmount: 20_000, maxAmount: 2_000_000, minMonths: 3, maxMonths: 48, annualRate: 26, rateType: 'fixed', spread: 8, openingFee: { mode: 'percent', value: 2.5 }, processingFee: 500, insuranceRate: 0, system: 'price', rateMode: 'term', termRates: [] },
+    { id: 'microcredito', name: 'Microcrédito', active: true, minAmount: 10_000, maxAmount: 1_000_000, minMonths: 1, maxMonths: 24, annualRate: 30, rateType: 'fixed', spread: 10, openingFee: { mode: 'percent', value: 3 }, processingFee: 0, insuranceRate: 0, system: 'price', rateMode: 'term', termRates: [] },
+    { id: 'credito-empresa', name: 'Crédito Empresa', active: true, minAmount: 500_000, maxAmount: 50_000_000, minMonths: 6, maxMonths: 60, annualRate: 22, rateType: 'variable', spread: 5, openingFee: { mode: 'percent', value: 2 }, processingFee: 1_000, insuranceRate: 0, system: 'sac', rateMode: 'term', termRates: [] },
 ];
 
 export const DEFAULT_SIMULATOR_CONFIG: SimulatorConfig = {
@@ -93,7 +101,30 @@ export function normalizeProduct(raw: Partial<SimulatorProduct>, fallback: Simul
         processingFee: number(raw.processingFee, fallback.processingFee),
         insuranceRate: number(raw.insuranceRate, fallback.insuranceRate, 0, 100),
         system: raw.system === 'sac' ? 'sac' : 'price',
+        // Produtos guardados antes desta opção passam a usar a taxa por prazo (as «taxas padrão» da empresa).
+        rateMode: raw.rateMode === 'annual' ? 'annual' : 'term',
+        termRates: Array.isArray(raw.termRates) && raw.termRates.length && !validateInterestTiers(raw.termRates as InterestTier[])
+            ? normalizeInterestTiers(raw.termRates) : [],
     };
+}
+
+/** Tabela de taxas por prazo efectiva do produto: a dele ou, se vazia, a tabela geral da empresa. */
+export function productTermRates(product: SimulatorProduct | undefined, generalTiers: InterestTier[]): InterestTier[] {
+    return product?.termRates?.length ? product.termRates : generalTiers;
+}
+
+/** Prazos (meses) disponíveis num produto com taxa por prazo: todos os meses cobertos pela tabela. */
+export function productTermOptions(product: SimulatorProduct | undefined, generalTiers: InterestTier[]): Array<{ months: number; rate: number }> {
+    const options = new Map<number, number>();
+    for (const tier of productTermRates(product, generalTiers)) {
+        for (let months = tier.minMonths; months <= tier.maxMonths; months += 1) options.set(months, tier.rate);
+    }
+    return [...options.entries()].sort((a, b) => a[0] - b[0]).map(([months, rate]) => ({ months, rate }));
+}
+
+/** Taxa do prazo para um produto e um número de meses; null se o prazo não estiver na tabela. */
+export function productTermRate(product: SimulatorProduct | undefined, generalTiers: InterestTier[], months: number): number | null {
+    return productTermOptions(product, generalTiers).find(option => option.months === months)?.rate ?? null;
 }
 
 export function normalizeSimulatorConfig(raw: unknown): SimulatorConfig {
@@ -132,7 +163,10 @@ export function productLimitErrors(product: SimulatorProduct, principal: number,
     const errors: string[] = [];
     if (principal < product.minAmount) errors.push(`O montante mínimo do ${product.name} é ${format(product.minAmount)}.`);
     if (principal > product.maxAmount) errors.push(`O montante máximo do ${product.name} é ${format(product.maxAmount)}.`);
-    if (months < product.minMonths) errors.push(`O prazo mínimo do ${product.name} é de ${product.minMonths} meses.`);
-    if (months > product.maxMonths) errors.push(`O prazo máximo do ${product.name} é de ${product.maxMonths} meses.`);
+    // Com taxa por prazo, os prazos possíveis são os da tabela de taxas (validados à parte).
+    if (product.rateMode !== 'term') {
+        if (months < product.minMonths) errors.push(`O prazo mínimo do ${product.name} é de ${product.minMonths} meses.`);
+        if (months > product.maxMonths) errors.push(`O prazo máximo do ${product.name} é de ${product.maxMonths} meses.`);
+    }
     return errors;
 }

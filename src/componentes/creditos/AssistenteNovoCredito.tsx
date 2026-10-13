@@ -20,7 +20,8 @@ import { STAGES, type PortfolioRow } from '@/bibliotecas/carteira-credito';
 import { clientCreditStanding, newCreditBlockReason, requiresCreditApproval } from '@/bibliotecas/regras-credito';
 import { RISK_LABELS } from '@/bibliotecas/risco-simulacao';
 import { productLimitErrors } from '@/bibliotecas/config-simulador';
-import { activeProducts, clientHistory, computeSimulation, defaultForm, formFromSimulation, parseDetails, productFields, simulationStatus, type SimulatorForm } from '@/componentes/simulador/modelo';
+import { activeProducts, clientHistory, computeSimulation, defaultForm, formFromSimulation, nearestTerm, parseDetails, productFields, simulationStatus, termOptionsFor, termRatePatch, type SimulatorForm } from '@/componentes/simulador/modelo';
+import { DecimalInput } from '@/componentes/ui/DecimalInput';
 import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import type { Credit } from '@/tipos/credito';
@@ -44,7 +45,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
     onCreated: (result: { credit: Credit & { escalationReason?: string }; pending: boolean }) => void;
 }) {
     const { user } = useAuth();
-    const { clients, payments, warranties, simulations, addCredit, addWarranty, updateSimulationStatus, suppliers, companySettings } = useData() as any;
+    const { clients, payments, warranties, simulations, addCredit, addWarranty, updateSimulationStatus, suppliers, companySettings, interestTiers, addLog } = useData() as any;
     const { config, loading: configLoading } = useConfigSimulador();
     const [step, setStep] = useState(0);
     const [clientId, setClientId] = useState(renewal?.clientId || '');
@@ -84,6 +85,15 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
     const calc = useMemo(() => computeSimulation(form, config, history ? { ...history, guaranteeCoverage: form.principal > 0 ? (history.guaranteesValue + extraCoverage) / form.principal : 0 } : null), [form, config, history, extraCoverage]);
     const product = config.products.find(item => item.id === form.productId) || activeProducts(config)[0];
     const limitErrors = product ? productLimitErrors(product, form.principal, form.months, value => formatCurrency(value)) : [];
+    // Taxa por prazo (Configurações › Produtos de Crédito): os prazos vêm da tabela e a taxa preenche-se sozinha.
+    const flat = form.system === 'flat';
+    const termOptions = useMemo(() => termOptionsFor(product, interestTiers || []), [product, interestTiers]);
+    const tableRate = termOptions.find(option => option.months === form.months)?.rate ?? null;
+    const canEditRate = !!user && ServicoControloAcesso.temPermissao(user as any, 'edit_credit_rate');
+    useEffect(() => {
+        const patch = termRatePatch(form, config, interestTiers || []);
+        if (patch) setForm(previous => ({ ...previous, ...patch }));
+    }, [form, config, interestTiers]);
     const savedSimulations = useMemo(() => (simulations || []).filter((item: any) => simulationStatus(item) === 'simulated' && (item.clientId ? item.clientId === clientId : item.clientName === client?.name)), [simulations, clientId, client]);
     const activeSuppliers = (suppliers || []).filter((item: any) => item.status === 'active');
     const showSuppliers = companySettings?.enableSuppliersModule !== false && activeSuppliers.length > 0;
@@ -117,6 +127,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
             if (!(form.principal > 0) || !(form.months > 0)) return 'Indique o montante e o prazo.';
             if (renewal && form.principal < renewal.minAmount) return `O novo crédito tem de ser igual ou superior ao anterior (${formatCurrency(renewal.minAmount)}).`;
             if (limitErrors.length) return limitErrors[0];
+            if (flat && tableRate === null && !form.termRateManual) return `O prazo de ${form.months} ${form.months === 1 ? 'mês' : 'meses'} não tem taxa definida para ${product?.name || 'este produto'} (Configurações › Produtos de Crédito).`;
             if (form.graceMonths > 0) return 'Os pedidos de crédito não suportam carência.';
             if (!result?.valid) return 'A simulação não é válida com estes valores.';
         }
@@ -146,14 +157,19 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
             const own = credits.filter(item => item.clientId === client.id && !['rejected', 'cancelled'].includes(item.status));
             const saved = await addCredit({
                 id, clientId: client.id, clientName: client.name, principalAmount: form.principal, currentBalance: form.principal,
-                interestRate: Math.round(calc.annualRate * 10000) / 10000, lateInterestRate: Number(client.lateInterestRate) || 1, installments: form.months, paidInstallments: 0,
+                // FLAT: guarda a taxa do prazo usada (alterar a tabela depois não mexe neste crédito).
+                interestRate: flat ? form.termRate : Math.round(calc.annualRate * 10000) / 10000, lateInterestRate: Number(client.lateInterestRate) || 1, installments: form.months, paidInstallments: 0,
                 startDate: start, dueDate: due, status: pending ? 'pending_approval' : 'active', requestedBy: user.name || 'Sistema', requestedAt: new Date(),
                 daysOverdue: 0, accruedInterest: result.totalInterest, lateInterest: 0, totalDue: form.principal + result.totalInterest,
-                amortizationMethod: form.system === 'sac' ? 'SAC' : 'PRICE', creditNumber: own.length + 1, createdAt: new Date(), targetMonthId: targetMonth,
+                amortizationMethod: flat ? 'FLAT' : form.system === 'sac' ? 'SAC' : 'PRICE', creditNumber: own.length + 1, createdAt: new Date(), targetMonthId: targetMonth,
                 supplierId: supplierId || undefined, supplierProfitRate: supplierId ? supplierRate : undefined,
                 approvalNotes: notes.trim() || undefined,
             } as any, { id: user.id, name: user.name }, { productId: product?.id || null, effortRate: calc.effort });
             const actor = { id: user.id, name: user.name, role: user.role };
+            if (flat && form.termRateManual && form.termRate !== tableRate) {
+                await addLog?.('update', 'credit', `Taxa do crédito ${id} alterada manualmente: ${tableRate === null ? 'sem taxa na tabela' : `${tableRate}% (tabela de ${product?.name || 'produto'}, ${form.months} meses)`} → ${form.termRate}%.`,
+                    user.id, user.name, { termRate: tableRate }, { termRate: form.termRate, creditId: id, productId: product?.id || null }).catch(() => undefined);
+            }
             // Depois de gravado o crédito: documentos, garantia e simulação convertida (falhas aqui não anulam o pedido).
             const followUp: string[] = [];
             for (const doc of docs) await ServicoCarteira.addDocument({ creditId: id, ...doc }, actor).catch((cause: any) => followUp.push(`${doc.fileName}: ${cause?.message || 'falhou'}`));
@@ -233,19 +249,45 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                                 </label>
                             )}
                             <label className="block space-y-1"><span className="text-xs font-semibold text-muted-foreground">Produto</span>
-                                <Select value={form.productId} onValueChange={id => { const selected = config.products.find(item => item.id === id); if (selected) set(productFields(selected, config)); }}>
+                                <Select value={form.productId} onValueChange={id => {
+                                    const selected = config.products.find(item => item.id === id);
+                                    if (!selected) return;
+                                    const options = termOptionsFor(selected, interestTiers || []);
+                                    set({ ...productFields(selected, config), ...(options.length ? { months: nearestTerm(options, form.months || 1) } : {}) });
+                                }}>
                                     <SelectTrigger><SelectValue /></SelectTrigger>
-                                    <SelectContent>{activeProducts(config).map(item => <SelectItem key={item.id} value={item.id}>{item.name} · {item.minAmount.toLocaleString('pt-AO')}–{item.maxAmount.toLocaleString('pt-AO')} Kz · {item.minMonths}–{item.maxMonths} meses</SelectItem>)}</SelectContent>
+                                    <SelectContent>{activeProducts(config).map(item => {
+                                        const options = termOptionsFor(item, interestTiers || []);
+                                        const terms = options.length ? `${options[0].months}–${options[options.length - 1].months} meses (taxa por prazo)` : `${item.minMonths}–${item.maxMonths} meses`;
+                                        return <SelectItem key={item.id} value={item.id}>{item.name} · {item.minAmount.toLocaleString('pt-AO')}–{item.maxAmount.toLocaleString('pt-AO')} Kz · {terms}</SelectItem>;
+                                    })}</SelectContent>
                                 </Select>
                             </label>
                             <div className="grid grid-cols-2 gap-2">
                                 <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Montante (Kz)</span><Input type="number" min={renewal?.minAmount || 0} value={form.principal || ''} onChange={event => set({ principal: Number(event.target.value) })} /></label>
-                                <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Prazo (meses)</span><Input type="number" min={1} value={form.months || ''} onChange={event => set({ months: Number(event.target.value) })} /></label>
+                                {flat && termOptions.length ? (
+                                    <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Prazo</span>
+                                        <Select value={String(form.months || '')} onValueChange={value => set({ months: Number(value), termRateManual: false })}>
+                                            <SelectTrigger><SelectValue placeholder="Escolha o prazo" /></SelectTrigger>
+                                            <SelectContent>{termOptions.map(option => <SelectItem key={option.months} value={String(option.months)}>{option.months} {option.months === 1 ? 'mês' : 'meses'} · {option.rate.toLocaleString('pt-AO')}%</SelectItem>)}</SelectContent>
+                                        </Select>
+                                    </label>
+                                ) : (
+                                    <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Prazo (meses)</span><Input type="number" min={1} value={form.months || ''} onChange={event => set({ months: Number(event.target.value) })} /></label>
+                                )}
                                 <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Data de início</span><Input type="date" value={form.startDate} onChange={event => { set({ startDate: event.target.value }); setTargetMonth(event.target.value.slice(0, 7)); }} /></label>
                                 <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Dia de vencimento</span><Input type="number" min={1} max={28} value={form.dueDay} onChange={event => set({ dueDay: Math.min(28, Math.max(1, Number(event.target.value) || 1)) })} /></label>
-                                <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Sistema</span>
-                                    <Select value={form.system} onValueChange={value => set({ system: value as any })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="price">Prestação constante (PRICE)</SelectItem><SelectItem value="sac">Amortização constante (SAC)</SelectItem></SelectContent></Select>
-                                </label>
+                                {flat ? (
+                                    <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Taxa do prazo {form.termRateManual ? '(alterada)' : '(automática)'}</span>
+                                        {canEditRate
+                                            ? <DecimalInput suffix="%" min={0} max={1000} value={form.termRate} onValueChange={termRate => set({ termRate, termRateManual: termRate !== tableRate })} className="text-right font-bold" />
+                                            : <div className="flex h-10 items-center justify-end rounded-md border bg-muted/40 px-3 text-sm font-bold" title="Alterar a taxa exige a permissão «Alterar a taxa do crédito».">{tableRate === null ? '—' : `${tableRate.toLocaleString('pt-AO')}%`}</div>}
+                                    </label>
+                                ) : (
+                                    <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Sistema</span>
+                                        <Select value={form.system} onValueChange={value => set({ system: value as any })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="price">Prestação constante (PRICE)</SelectItem><SelectItem value="sac">Amortização constante (SAC)</SelectItem></SelectContent></Select>
+                                    </label>
+                                )}
                                 <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Mês de competência</span><Input type="month" value={targetMonth} onChange={event => setTargetMonth(event.target.value)} /></label>
                             </div>
                             {showSuppliers && (
@@ -264,7 +306,10 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                             <p className="mb-1 text-xs font-bold uppercase text-muted-foreground">Resultado (o mesmo cálculo do Simulador)</p>
                             {result?.valid ? (
                                 <>
-                                    <Row label="TAN" value={`${pct(calc.annualRate)}${calc.riskAdjustment ? ` (base ${pct(calc.baseRate)} + risco ${pct(calc.riskAdjustment)})` : ''}`} />
+                                    {flat
+                                        ? <Row label="Taxa do prazo" value={`${pct(form.termRate)} em ${form.months} ${form.months === 1 ? 'mês' : 'meses'}${form.termRateManual ? ' (alterada manualmente)' : ''}`} />
+                                        : <Row label="TAN" value={`${pct(calc.annualRate)}${calc.riskAdjustment ? ` (base ${pct(calc.baseRate)} + risco ${pct(calc.riskAdjustment)})` : ''}`} />}
+                                    <Row label="Total a pagar (capital + juros)" value={formatCurrency(form.principal + result.totalInterest)} />
                                     <Row label="TAEG" value={pct(result.taeg)} />
                                     <Row label="Prestação" value={formatCurrency(result.installment)} />
                                     <Row label="Juros totais" value={formatCurrency(result.totalInterest)} />

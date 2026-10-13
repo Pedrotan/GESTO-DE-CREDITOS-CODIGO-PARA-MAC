@@ -135,7 +135,8 @@ test('risco calculado a partir da taxa de esforço, do histórico e das garantia
 
 test('limites do produto, configuração e formatação em Kz', () => {
     const config = normalizeSimulatorConfig({});
-    const product = config.products.find(item => item.id === 'microcredito');
+    // Produto com TAN: limites de montante e de prazo (com taxa por prazo, os prazos são os da tabela).
+    const product = { ...config.products.find(item => item.id === 'microcredito'), rateMode: 'annual' };
     const errors = productLimitErrors(product, 2_000_000, 30, formatCurrency);
     assert.equal(errors.length, 2);
     assert.match(errors[0], /montante máximo/);

@@ -43,7 +43,7 @@ import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { ComparadorCenarios, MAX_SCENARIOS, type Scenario } from '@/componentes/simulador/ComparadorCenarios';
 import {
     QUICK_TERMS, activeProducts, baseAnnualRate, buildInput, clientHistory, defaultForm, formFromSimulation, newSimulationNumber,
-    newVerificationCode, parseDetails, productFields, simulationStatus, computeSimulation, type SimulatorForm, type StoredDetails,
+    newVerificationCode, parseDetails, productFields, simulationStatus, computeSimulation, nearestTerm, termOptionsFor, termRatePatch, type SimulatorForm, type StoredDetails,
 } from '@/componentes/simulador/modelo';
 
 type SavedRef = { id: string; number: string; code: string; issuedAt: Date; expiresAt: Date; signature: string; status: 'simulated' | 'converted'; convertedCreditId?: string | null };
@@ -70,7 +70,7 @@ const Section = ({ title, children, className }: { title: string; children: Reac
 const compute = computeSimulation;
 
 export function SimuladorCredito() {
-    const { companySettings, clients, credits, payments, warranties, simulations, addSimulation, deleteSimulation, updateSimulationStatus, addCredit, addLog } = useData();
+    const { companySettings, clients, credits, payments, warranties, simulations, addSimulation, deleteSimulation, updateSimulationStatus, addCredit, addLog, interestTiers } = useData();
     const { user } = useAuth();
     const { toast } = useToast();
     const navigate = useNavigate();
@@ -95,6 +95,14 @@ export function SimuladorCredito() {
     const products = useMemo(() => activeProducts(config), [config]);
     const product = useMemo(() => config.products.find(item => item.id === form.productId) || products[0], [config.products, form.productId, products]);
     const client = useMemo(() => clients.find(item => item.id === form.clientId), [clients, form.clientId]);
+    // Produto com taxa por prazo: os prazos e a taxa vêm da tabela (Configurações › Produtos de Crédito).
+    const flat = form.system === 'flat';
+    const termOptions = useMemo(() => termOptionsFor(product, interestTiers), [product, interestTiers]);
+    const termRange = termOptions.length ? { min: termOptions[0].months, max: termOptions[termOptions.length - 1].months } : { min: product.minMonths, max: product.maxMonths };
+    useEffect(() => {
+        const patch = termRatePatch(form, config, interestTiers);
+        if (patch) setForm(previous => ({ ...previous, ...patch }));
+    }, [form, config, interestTiers]);
     const history = useMemo(() => clientHistory(client, credits, payments, warranties as any, form.principal), [client, credits, payments, warranties, form.principal]);
     const calc = useMemo(() => compute(form, config, history), [form, config, history]);
     const { ready, result, effort, risk, riskLevel, annualRate } = calc;
@@ -107,11 +115,12 @@ export function SimuladorCredito() {
     const errors = useMemo(() => {
         if (!ready) return [] as string[];
         const list = productLimitErrors(product, form.principal, form.months, value => formatCurrency(value));
+        if (flat && termOptions.length && !termOptions.some(option => option.months === form.months)) list.push(`O prazo de ${form.months} meses não tem taxa definida para ${product.name}.`);
         if (form.graceMonths >= form.months) list.push('A carência tem de ser inferior ao prazo do crédito.');
         if (form.dueDay < 1 || form.dueDay > 28) list.push('O dia de vencimento tem de estar entre 1 e 28.');
         if (Number.isNaN(new Date(`${form.startDate}T12:00:00`).getTime())) list.push('Indique uma data de início válida.');
         return list;
-    }, [ready, product, form.principal, form.months, form.graceMonths, form.dueDay, form.startDate]);
+    }, [ready, product, form.principal, form.months, form.graceMonths, form.dueDay, form.startDate, flat, termOptions]);
 
     const overLimit = effort !== null && effort > config.effortLimit;
     const recommendation = useMemo(() => {
@@ -169,7 +178,9 @@ export function SimuladorCredito() {
         const next = config.products.find(item => item.id === id);
         if (!next) return;
         const clamp = (value: number, min: number, max: number) => (value ? Math.min(max, Math.max(min, value)) : value);
-        set({ ...productFields(next, config), principal: clamp(form.principal, next.minAmount, next.maxAmount), months: clamp(form.months, next.minMonths, next.maxMonths) });
+        const options = termOptionsFor(next, interestTiers);
+        set({ ...productFields(next, config), principal: clamp(form.principal, next.minAmount, next.maxAmount),
+            months: options.length ? (form.months ? nearestTerm(options, form.months) : 0) : clamp(form.months, next.minMonths, next.maxMonths) });
     };
 
     // ── Guardar, PDF, partilha e conversão ───────────────────────────────────────────
@@ -197,7 +208,7 @@ export function SimuladorCredito() {
         const expiresAt = addDays(issuedAt, config.validityDays);
         const record: Simulation = {
             id: crypto.randomUUID(), reference: number, date: issuedAt, clientName: form.clientName.trim(), clientIncome: form.income,
-            amount: form.principal, term: form.months, interestRate: Math.round(annualRate * 10000) / 10000, method: form.system, riskProfile: riskLevel,
+            amount: form.principal, term: form.months, interestRate: flat ? form.termRate : Math.round(annualRate * 10000) / 10000, method: form.system, riskProfile: riskLevel,
             totalPayment: result.totalPayments, monthlyPayment: result.installment, createdAt: issuedAt, status: 'simulated',
             clientId: form.clientId, productId: product.id, verificationCode: newVerificationCode(), expiresAt, details: JSON.stringify(buildDetails()), updatedAt: issuedAt,
         };
@@ -315,10 +326,10 @@ export function SimuladorCredito() {
             const due = result.lastDueDate ? new Date(`${result.lastDueDate}T12:00:00`) : addDays(start, form.months * 30);
             await addCredit({
                 id: creditId, clientId: client.id, clientName: client.name, principalAmount: form.principal, currentBalance: form.principal,
-                interestRate: Math.round(annualRate * 10000) / 10000, lateInterestRate: client.lateInterestRate || 1, installments: form.months, paidInstallments: 0,
+                interestRate: flat ? form.termRate : Math.round(annualRate * 10000) / 10000, lateInterestRate: client.lateInterestRate || 1, installments: form.months, paidInstallments: 0,
                 startDate: start, dueDate: due, status: 'pending_approval', requestedBy: user?.name || 'Sistema', requestedAt: new Date(),
                 daysOverdue: 0, accruedInterest: result.totalInterest, lateInterest: 0, totalDue: form.principal + result.totalInterest,
-                amortizationMethod: form.system === 'sac' ? 'SAC' : 'PRICE', creditNumber: ownCredits.length + 1, createdAt: new Date(),
+                amortizationMethod: flat ? 'FLAT' : form.system === 'sac' ? 'SAC' : 'PRICE', creditNumber: ownCredits.length + 1, createdAt: new Date(),
                 targetMonthId: form.startDate.slice(0, 7),
             } as any, user ? { id: user.id, name: user.name } : undefined, { productId: product.id, effortRate: effort });
             await updateSimulationStatus(ref.id, 'converted', creditId);
@@ -393,7 +404,7 @@ export function SimuladorCredito() {
     const openInverse = () => {
         const byEffort = form.income > 0 ? Math.max(0, (config.effortLimit / 100) * form.income - form.otherDebts) : 0;
         setInverseTarget(Math.floor(byEffort || result?.installment || 0));
-        if (!form.months) set({ months: Math.min(product.maxMonths, Math.max(product.minMonths, 12)) });
+        if (!form.months) set({ months: Math.min(termRange.max, Math.max(termRange.min, 12)) });
         setInverseOpen(true);
     };
 
@@ -502,11 +513,11 @@ export function SimuladorCredito() {
                                             <Label>Prazo</Label>
                                             <span className="font-bold text-indigo-600">{form.months ? `${form.months} meses · ${yearsLabel(form.months)}` : 'Escolha o prazo'}</span>
                                         </div>
-                                        <Slider value={[Math.max(product.minMonths, Math.min(product.maxMonths, form.months || product.minMonths))]} min={product.minMonths} max={product.maxMonths} step={1}
+                                        <Slider value={[Math.max(termRange.min, Math.min(termRange.max, form.months || termRange.min))]} min={termRange.min} max={termRange.max} step={1}
                                             onValueChange={([value]) => set({ months: value })} className="py-2" />
                                         <div className="flex flex-wrap gap-1.5">
-                                            {QUICK_TERMS.map(months => {
-                                                const allowed = months >= product.minMonths && months <= product.maxMonths;
+                                            {(flat && termOptions.length ? termOptions.map(option => option.months) : QUICK_TERMS).map(months => {
+                                                const allowed = flat && termOptions.length ? true : months >= product.minMonths && months <= product.maxMonths;
                                                 return (
                                                     <button key={months} type="button" disabled={!allowed} onClick={() => set({ months })}
                                                         className={cn('rounded-md border px-2.5 py-1 text-xs font-bold transition-all',
@@ -545,6 +556,14 @@ export function SimuladorCredito() {
                                     </Section>
 
                                     {/* Taxa */}
+                                    {flat ? (
+                                    <Section title="Taxa do prazo" className="rounded-lg border border-border bg-muted/30 p-4">
+                                        <div className="rounded-md border border-indigo-500/20 bg-indigo-500/5 px-3 py-2">
+                                            <p className="text-2xl font-black text-indigo-600 dark:text-indigo-400">{formatPercent(form.termRate)} <span className="text-xs font-bold text-muted-foreground">em {form.months || '—'} {form.months === 1 ? 'mês' : 'meses'}</span></p>
+                                            <p className="text-xs text-muted-foreground">Taxa da tabela de {product.name} para o prazo escolhido (Configurações › Produtos de Crédito). Juro = capital × taxa, repartido pelas prestações.</p>
+                                        </div>
+                                    </Section>
+                                    ) : (
                                     <Section title="Taxa de juro" className="rounded-lg border border-border bg-muted/30 p-4">
                                         <Tabs value={form.rateType} onValueChange={value => set({ rateType: value as SimulatorForm['rateType'] })}>
                                             <TabsList className="grid w-full grid-cols-2"><TabsTrigger value="fixed">Taxa Fixa</TabsTrigger><TabsTrigger value="variable">Taxa Variável</TabsTrigger></TabsList>
@@ -569,15 +588,17 @@ export function SimuladorCredito() {
                                         </div>
                                     </Section>
 
+                                    )}
+
                                     {/* Sistema */}
-                                    <Section title="Sistema de amortização">
+                                    {!flat && <Section title="Sistema de amortização">
                                         <Tabs value={form.system} onValueChange={value => set({ system: value as SimulatorForm['system'] })} className="w-full">
                                             <TabsList className="grid w-full grid-cols-2">
                                                 <TabsTrigger value="price" className="text-xs">{AMORTIZATION_LABELS.price}</TabsTrigger>
                                                 <TabsTrigger value="sac" className="text-xs">{AMORTIZATION_LABELS.sac}</TabsTrigger>
                                             </TabsList>
                                         </Tabs>
-                                    </Section>
+                                    </Section>}
 
                                     {/* Encargos */}
                                     <Section title="Encargos" className="rounded-lg border border-border bg-muted/30 p-4">

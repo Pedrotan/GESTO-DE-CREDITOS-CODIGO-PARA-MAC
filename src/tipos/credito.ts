@@ -328,7 +328,7 @@ export interface Simulation {
   amount: number;
   term: number;
   interestRate: number;
-  method: 'price' | 'sac';
+  method: 'price' | 'sac' | 'flat';
   riskProfile: 'low' | 'medium' | 'high';
   totalPayment: number;
   monthlyPayment: number;
