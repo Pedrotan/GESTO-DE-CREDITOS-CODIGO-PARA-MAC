@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { toNeonResult } from './vercel-api/_ponte-pg.js';
 
 // Tango Gestão e Créditos ERP - Servidor de Produção VPS (Hostinger / Linux)
 // Suporta execução contínua com Node.js nativo, Docker e PM2.
@@ -94,15 +95,8 @@ const initDatabaseBridge = async () => {
           rowMode: 'array'
         });
 
-        const fields = (result.fields || []).map(f => ({
-          name: f.name,
-          dataTypeID: [1082, 1083, 1114, 1184, 1266].includes(f.dataTypeID) ? 25 : f.dataTypeID
-        }));
-
-        return new Response(JSON.stringify({
-          fields,
-          rows: result.rows || []
-        }), {
+        // Tipos convertidos para o formato que o driver neon espera (datas como texto, JSON como texto JSON).
+        return new Response(JSON.stringify(toNeonResult(result)), {
           status: 200,
           headers: { 'Content-Type': 'application/json' }
         });

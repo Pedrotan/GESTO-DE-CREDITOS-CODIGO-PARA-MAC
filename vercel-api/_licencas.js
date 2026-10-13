@@ -370,8 +370,15 @@ const tokenClaims = (license, plan, activation, now) => {
   };
 };
 
+/** JSON lido como texto: o mesmo resultado com o driver da Neon e com a ponte pg da VPS. */
+const parseJsonText = (value, fallback) => {
+  if (value && typeof value === 'object') return value;
+  try { return value ? JSON.parse(value) : fallback; } catch { return fallback; }
+};
+
 const issueToken = async (sql, license, activation, sign, now) => {
-  const [plan] = await sql(`SELECT nome, funcionalidades FROM tango_planos WHERE id = $1`, [license.plano_id]);
+  const [row] = await sql(`SELECT nome, funcionalidades::text AS funcionalidades FROM tango_planos WHERE id = $1`, [license.plano_id]);
+  const plan = row ? { nome: row.nome, funcionalidades: parseJsonText(row.funcionalidades, {}) } : null;
   const claims = tokenClaims(license, plan, activation, now);
   return { token: sign(claims), claims };
 };
@@ -543,7 +550,7 @@ export const licenseDetails = async (sql, tenantId) => {
   if (!license) return { ok: false, status: 404, message: 'A empresa não tem licença no servidor.' };
   const machines = await sql(`SELECT id, nome_maquina, machine_hash, primeira_ativacao, ultimo_heartbeat, estado
     FROM tango_licenca_ativacoes WHERE licenca_id = $1 ORDER BY (estado = 'ativa') DESC, ultimo_heartbeat DESC NULLS LAST, primeira_ativacao DESC`, [license.id]);
-  const events = await sql(`SELECT id, tipo, detalhe, ip, criado_em FROM tango_licenca_eventos
+  const events = await sql(`SELECT id, tipo, detalhe::text AS detalhe, ip, criado_em FROM tango_licenca_eventos
     WHERE licenca_id = $1 OR (licenca_id IS NULL AND UPPER(empresa_id) = UPPER($2)) ORDER BY criado_em DESC, id DESC LIMIT 200`, [license.id, license.empresa_id]);
   return {
     ok: true,
@@ -555,6 +562,6 @@ export const licenseDetails = async (sql, tenantId) => {
       lastHeartbeatAt: row.ultimo_heartbeat,
       status: row.estado,
     })),
-    events: events.map(row => ({ id: String(row.id), type: row.tipo, detail: row.detalhe || {}, ip: row.ip || null, at: row.criado_em })),
+    events: events.map(row => ({ id: String(row.id), type: row.tipo, detail: parseJsonText(row.detalhe, {}), ip: row.ip || null, at: row.criado_em })),
   };
 };
