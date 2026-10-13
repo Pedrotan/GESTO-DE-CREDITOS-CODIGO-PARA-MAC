@@ -35,6 +35,22 @@ test('operações financeiras exigem sessão e permissão de pagamentos', () => 
     assert.doesNotThrow(() => assertFinancialPermission({ role: 'viewer', permissions: [] }, 'credits'));
 });
 
+test('migrações de arranque (antes do login) não são recusadas e não interrompem as seguintes', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/bibliotecas/adaptador-sqlite.ts', import.meta.url), 'utf8');
+    const statements = [
+        ...[...source.matchAll(/executeSql\(\s*("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*')/g)].map(match => match[1].slice(1, -1)),
+        ...[...source.matchAll(/executeSql\(\s*`([^`$]*)`/g)].flatMap(match => match[1].split(/;\s*\n/)),
+        ...[...source.matchAll(/safeAddColumn\(\s*["'](\w+)["']\s*,\s*["'](\w+)["']\s*,\s*["']([^"']+)["']/g)].map(match => `ALTER TABLE ${match[1]} ADD COLUMN ${match[2]} ${match[3]}`),
+    ].map(sql => sql.trim()).filter(Boolean);
+    assert.ok(statements.length > 150);
+    const refused = statements.filter(sql => financialStatementTarget(sql, true));
+    assert.deepEqual(refused, [], 'cada migração recusada antes do login deixava as seguintes por aplicar');
+    // Fora da janela de arranque continuam a exigir sessão.
+    assert.equal(financialStatementTarget('UPDATE payments SET registeredAt = paymentDate WHERE registeredAt IS NULL'), 'payments');
+    assert.equal(financialStatementTarget('UPDATE payments SET registeredAt = ? WHERE id = ?', true), 'payments');
+});
+
 test('consultas do renderer não podem extrair hashes ou segredos MFA', () => {
     assert.equal(userReadExposesSecrets('SELECT id, name, role FROM users'), false);
     assert.equal(userReadExposesSecrets('SELECT COUNT(*) AS total FROM users'), false);

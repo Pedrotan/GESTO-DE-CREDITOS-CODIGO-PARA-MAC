@@ -216,6 +216,11 @@ export function financialStatementTarget(sql: string, allowMigration = false) {
     /^UPDATE\s+(?:credits|payments)\s+SET\s+[\s\S]*(?:Minor|idempotencyKey)\s*=/i.test(normalized) &&
     /\bWHERE\b[\s\S]*\bIS\s+NULL\b/i.test(normalized) ||
     /^INSERT\s+OR\s+IGNORE\s+INTO\s+credit_installments\b/i.test(normalized) ||
+    // Migração 2026100601 (recibos): hora de registo dos pagamentos antigos. Era recusada antes do login e
+    // interrompia todas as migrações seguintes (créditos sem requestedBy, tabelas de abates e reestruturações).
+    /^UPDATE\s+payments\s+SET\s+registeredAt\s*=\s*paymentDate\s+WHERE\s+registeredAt\s+IS\s+NULL\s*$/i.test(normalized) ||
+    // Reconstrução das tabelas (nova restrição CHECK): a tabela nova é criada depois de renomear a antiga para *_old.
+    /^CREATE\s+TABLE\s+["'`\[]?(?:credits|payments)["'`\]]?\s*\(/i.test(normalized) ||
     /^ALTER\s+TABLE\s+["'`\[]?(?:credits|payments|accounting_entries|ledger_transactions|ledger_lines|credit_installments|credit_reinforcements)["'`\]]?\s+ADD\s+COLUMN\b/i.test(normalized) ||
     /^ALTER\s+TABLE\s+["'`\[]?(credits|payments)["'`\]]?\s+RENAME\s+TO\s+["'`\[]?\1_old["'`\]]?\s*$/i.test(normalized) ||
     /^CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+["'`\[]?(?:credits|payments|accounting_entries|ledger_transactions|ledger_lines|credit_installments|credit_reinforcements)\b/i.test(normalized) ||
