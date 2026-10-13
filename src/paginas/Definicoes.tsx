@@ -110,7 +110,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { appAdapter } from '@/bibliotecas/adaptador-aplicacao';
 import { validateLicense, getLicenseTypeName, getMachineId } from '@/bibliotecas/licenciamento';
 import { normalizeLicenseKey } from '@/bibliotecas/payload-licenca';
-import { isCloudLicenseKey } from '@/bibliotecas/licenca-nuvem-cliente';
+import { CLOUD_LICENSE_EVENT, isCloudLicenseKey } from '@/bibliotecas/licenca-nuvem-cliente';
 import { activateThisComputer } from '@/servicos/ServicoLicencaNuvem';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
@@ -151,6 +151,7 @@ export default function Settings() {
 
     const [license, setLicense] = useState<any>({ tier: 'singular', isValid: false, type: 'trial' });
     const [previewLicense, setPreviewLicense] = useState<any>({ tier: 'singular', isValid: false, type: 'trial' });
+    const isDesktopApp = typeof window !== 'undefined' && !!(window as any).electronAPI;
     const [isSingular, setIsSingular] = useState(true);
     const [machineId, setMachineId] = useState('Carregando...');
 
@@ -375,6 +376,18 @@ export default function Settings() {
         const timer = setTimeout(checkFormLicense, 500);
         return () => clearTimeout(timer);
     }, [formData?.licenseKey]);
+
+    // Licença da empresa vinda do servidor (web) ou do token deste computador: actualizar quando muda.
+    useEffect(() => {
+        const refresh = () => { void validateLicense(companySettings?.licenseKey || '').then(setLicense); };
+        window.addEventListener(CLOUD_LICENSE_EVENT, refresh);
+        return () => window.removeEventListener(CLOUD_LICENSE_EVENT, refresh);
+    }, [companySettings?.licenseKey]);
+
+    // Mostra a chave que está a ser escrita; sem alteração (ou na web), o estado actual da licença.
+    const shownLicense = formData?.licenseKey && normalizeLicenseKey(formData.licenseKey) !== (companySettings?.licenseKey || '').trim()
+        ? previewLicense
+        : license;
 
     const isSuperAdmin = user?.role === 'super_admin';
     const isAdmin = user?.role === 'admin' || user?.role === 'super_admin';
@@ -3482,6 +3495,15 @@ export default function Settings() {
                         <CardContent className="space-y-6">
                             <div className="grid gap-6 md:grid-cols-2">
                                 <div className="space-y-4">
+                                    {!isDesktopApp ? (
+                                        <div className="rounded-lg border border-blue-100 bg-blue-50/60 p-4 text-sm text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200">
+                                            <p className="font-semibold">Na versão web não é preciso introduzir chave.</p>
+                                            <p className="mt-1 text-xs text-blue-800/80 dark:text-blue-200/80">
+                                                A versão web usa a licença da empresa, gerida no servidor Tango (a mesma do Tango ERP instalado).
+                                                A chave TANGO-XXXX-… só se introduz no Tango ERP do computador.
+                                            </p>
+                                        </div>
+                                    ) : (
                                     <div className="flex flex-col gap-1">
                                         <Label className="text-sm font-semibold">Chave de Licença Atual</Label>
                                         <div className="relative">
@@ -3507,12 +3529,14 @@ export default function Settings() {
                                                 )}
                                             </Button>
                                         </div>
+                                        <p className="text-[11px] text-muted-foreground">Cole a chave TANGO-XXXX-XXXX-XXXX-XXXX recebida do Tango Master e carregue em «Validar e Salvar Licença» com a Internet ligada.</p>
                                     </div>
+                                    )}
 
                                     <div className="space-y-1 bg-muted/20 p-4 rounded-lg border border-dashed">
                                         <div className="flex items-center justify-between">
                                             <span className="text-sm font-medium">Estado da Licença:</span>
-                                            {previewLicense?.isValid ? (
+                                            {shownLicense?.isValid && !shownLicense?.readOnly ? (
                                                 <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Ativa</Badge>
                                             ) : (
                                                 <Badge variant="destructive">Inválida / Expirada</Badge>
@@ -3520,26 +3544,25 @@ export default function Settings() {
                                         </div>
                                         <div className="flex items-center justify-between">
                                             <span className="text-sm font-medium">Plano:</span>
-                                            <span className="text-sm font-bold capitalize">{getLicenseTypeName(previewLicense?.type)}</span>
+                                            <span className="text-sm font-bold capitalize">{getLicenseTypeName(shownLicense?.type, shownLicense?.tier, shownLicense?.maxDevices)}</span>
                                         </div>
-                                        {previewLicense?.expiration && previewLicense?.expiration !== 'lifetime' && (
+                                        {shownLicense?.isValid && shownLicense?.expirationDate && (
                                             <div className="flex items-center justify-between">
                                                 <span className="text-sm font-medium">Válida até:</span>
                                                 <span className="text-sm font-bold">
-                                                    {formatDateSafe(previewLicense.expiration)}
+                                                    {shownLicense.type === 'lifetime' ? 'Vitalícia' : `${formatDateSafe(shownLicense.expirationDate)} (${shownLicense.daysRemaining} dias)`}
                                                 </span>
                                             </div>
                                         )}
-                                        {previewLicense?.expiration === 'lifetime' && (
-                                            <div className="flex items-center justify-between">
-                                                <span className="text-sm font-medium">Válida até:</span>
-                                                <span className="text-sm font-bold text-primary">Vitalícia</span>
-                                            </div>
+                                        {shownLicense?.message && (!shownLicense?.isValid || shownLicense?.readOnly) && (
+                                            <p className="pt-1 text-xs text-red-600">{shownLicense.message}</p>
                                         )}
+                                        {isDesktopApp && (
                                         <div className="flex items-center justify-between">
                                             <span className="text-sm font-medium">ID da Máquina:</span>
                                             <span className="text-xs font-mono text-muted-foreground break-all max-w-[200px] text-right">{machineId}</span>
                                         </div>
+                                        )}
                                     </div>
                                 </div>
                                 <div className="space-y-4">
@@ -3562,7 +3585,7 @@ export default function Settings() {
                             </div>
                         </CardContent>
                         <CardFooter className="justify-end border-t px-6 py-4 bg-slate-50/50">
-                            {isAdmin && (
+                            {isAdmin && isDesktopApp && (
                                 <Button onClick={handleSaveGeneral}>
                                     <Save className="mr-2 h-4 w-4" />
                                     Validar e Salvar Licença

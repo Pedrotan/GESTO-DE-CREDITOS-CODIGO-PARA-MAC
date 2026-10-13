@@ -565,3 +565,15 @@ export const licenseDetails = async (sql, tenantId) => {
     events: events.map(row => ({ id: String(row.id), type: row.tipo, detail: parseJsonText(row.detalhe, {}), ip: row.ip || null, at: row.criado_em })),
   };
 };
+
+/** Resumo da licença para a versão web (que não pede chave: herda a licença da empresa). */
+export const licenseSummary = async (sql, tenantId) => {
+  const rows = await listLicenses(sql);
+  const row = rows.find(item => String(item.empresa_id).toUpperCase() === String(tenantId).toUpperCase());
+  if (!row) return null;
+  const license = toPublicLicense(row);
+  return {
+    plan: license.plan, planName: license.planName, tier: license.tier, status: license.status, endsAt: license.endsAt,
+    daysRemaining: license.daysRemaining, maxMachines: license.maxMachines, machines: license.machines,
+  };
+};

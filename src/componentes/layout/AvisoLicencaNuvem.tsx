@@ -21,7 +21,8 @@ export function AvisoLicencaNuvem() {
         return () => { cancelled = true; window.removeEventListener(CLOUD_LICENSE_EVENT, onChange); };
     }, []);
 
-    if (!status || status.state === 'none') return null;
+    // Só no Desktop: na versão web, o bloqueio por licença é o ecrã de subscrição (GuardaSubscricaoWeb).
+    if (!status || status.state === 'none' || !(window as any).electronAPI) return null;
     const readOnly = isCloudLicenseReadOnly(status);
     const refusal = !readOnly && status.refusal ? status.refusal : null;
     if (!readOnly && !refusal) return null;

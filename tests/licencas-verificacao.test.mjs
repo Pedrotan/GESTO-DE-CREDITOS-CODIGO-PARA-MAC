@@ -72,7 +72,10 @@ test('licença activa: sincronização, versão web e estado da empresa funciona
     assert.equal(created.statusCode, 200, JSON.stringify(created.body));
     accessCode = created.body.accessCode;
     assert.equal((await doSync()).statusCode, 200);
-    assert.equal((await doVerify()).body.code, 'AUTHORIZED');
+    const web = await doVerify();
+    assert.equal(web.body.code, 'AUTHORIZED');
+    assert.equal(web.body.license.status, 'ativa', 'a versão web recebe a licença da empresa');
+    assert.equal(web.body.license.daysRemaining, 90);
     assert.equal((await doStatus()).body.status, 'ACTIVE');
 });
 

@@ -7,7 +7,7 @@ import {
     CLOCK_TOLERANCE_MS, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, legacyMachineHash, machineFingerprint,
     recordFromToken, verifyCloudToken, type CloudLicenseRecord,
 } from '../electron/licenca-nuvem.ts';
-import { cloudStatusToLicenseInfo } from '../src/bibliotecas/licenca-nuvem-cliente.ts';
+import { cloudStatusToLicenseInfo, webLicenseToStatus } from '../src/bibliotecas/licenca-nuvem-cliente.ts';
 
 // Etapa 4: o Desktop verifica o token do servidor offline, entra em só leitura sem token válido e detecta o
 // relógio a andar para trás. O token é assinado pelo mesmo código do servidor (vercel-api/_token-licenca.js).
@@ -104,4 +104,16 @@ test('o resto da aplicação vê a licença da nuvem como válida (ou só leitur
     const readonly = cloudStatusToLicenseInfo(evaluateCloudLicense(record(token()), MACHINE, KEYS, NOW + 8 * DAY) as any, now)!;
     assert.equal(readonly.readOnly, true);
     assert.equal(cloudStatusToLicenseInfo({ state: 'none' }), null);
+});
+
+test('versão web: a licença da empresa recebida do servidor conta como licença válida', () => {
+    const summary = { plan: 'annual', planName: 'Anual', tier: 'empresarial', status: 'ativa' as const,
+        endsAt: new Date(NOW + 90 * DAY).toISOString(), daysRemaining: 90, maxMachines: 2, machines: 1 };
+    const info = cloudStatusToLicenseInfo(webLicenseToStatus(summary), new Date(NOW))!;
+    assert.equal(info.isValid, true);
+    assert.equal(info.readOnly, false);
+    assert.equal(info.daysRemaining, 90);
+    const expired = cloudStatusToLicenseInfo(webLicenseToStatus({ ...summary, status: 'expirada' }), new Date(NOW))!;
+    assert.equal(expired.readOnly, true);
+    assert.equal(webLicenseToStatus(null).state, 'none');
 });

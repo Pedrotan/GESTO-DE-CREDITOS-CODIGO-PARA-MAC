@@ -37,6 +37,50 @@ export const formatCloudLicenseKey = (value: string) => {
 
 const api = () => (typeof window !== 'undefined' ? (window as any).electronAPI : null);
 
+// --- Versão web: não pede chave; herda a licença da empresa, que o servidor envia ao validar o acesso. ---
+const WEB_LICENSE_KEY = 'tango_web_company_license';
+
+export type WebCompanyLicense = {
+    plan: string;
+    planName: string;
+    tier: string;
+    status: 'ativa' | 'suspensa' | 'expirada' | 'revogada';
+    endsAt: string | null;
+    daysRemaining: number | null;
+    maxMachines: number;
+    machines: number;
+};
+
+export const webLicenseToStatus = (license: WebCompanyLicense | null): CloudLicenseStatus => {
+    if (!license) return { state: 'none' };
+    return {
+        state: license.status === 'ativa' ? 'active' : 'readonly',
+        licenca: {
+            empresaId: '', plano: license.plan, planoNome: license.planName, escalao: license.tier,
+            dataFim: license.endsAt, validoAte: license.endsAt || '', maxMaquinas: license.maxMachines,
+        },
+        message: license.status === 'ativa' ? undefined : `A licença da empresa está ${license.status}. Contacte o suporte Tango: +244 941 537 486.`,
+    };
+};
+
+export const getWebCompanyLicense = (): WebCompanyLicense | null => {
+    try {
+        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem(WEB_LICENSE_KEY) : null;
+        return raw ? JSON.parse(raw) : null;
+    } catch {
+        return null;
+    }
+};
+
+/** Guarda a licença da empresa recebida do servidor (null apaga) e avisa quem mostra o estado. */
+export const storeWebCompanyLicense = (license: WebCompanyLicense | null | undefined) => {
+    try {
+        if (license) localStorage.setItem(WEB_LICENSE_KEY, JSON.stringify(license));
+        else localStorage.removeItem(WEB_LICENSE_KEY);
+    } catch { /* armazenamento indisponível */ }
+    if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent(CLOUD_LICENSE_EVENT, { detail: webLicenseToStatus(license || null) }));
+};
+
 let cached: { at: number; status: CloudLicenseStatus } | null = null;
 let listening = false;
 
@@ -54,6 +98,7 @@ const listen = () => {
 
 /** Estado da licença deste computador (fora do Desktop, ou sem activação, é "none"). */
 export const getCloudLicenseStatus = async (maxAgeMs = 30_000): Promise<CloudLicenseStatus> => {
+    if (!api()) return webLicenseToStatus(getWebCompanyLicense());
     if (!api()?.cloudLicenseStatus) return { state: 'none' };
     listen();
     if (cached && Date.now() - cached.at < maxAgeMs) return cached.status;

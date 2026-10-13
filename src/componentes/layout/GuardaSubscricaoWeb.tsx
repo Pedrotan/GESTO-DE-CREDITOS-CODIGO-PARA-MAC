@@ -6,6 +6,7 @@ import { subscriptionState } from '@/bibliotecas/subscricao';
 import { storeWebMultiTenant } from '@/servicos/ServicoIdentidadeEmpresa';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
+import { storeWebCompanyLicense } from '@/bibliotecas/licenca-nuvem-cliente';
 
 // Confirma periodicamente, no Tango Master, se a empresa ligada a este navegador continua autorizada.
 // Empresa eliminada ou código alterado: desliga o navegador. Bloqueada ou expirada: bloqueia o uso até
@@ -63,6 +64,8 @@ export const GuardaSubscricaoWeb = () => {
                     window.dispatchEvent(new Event('tango_tenant_sync_key_changed'));
                 }
                 setExpiresAt(data.expiresAt || null);
+                // Licença da empresa (a mesma do Desktop): mostrada nas Definições; a web não pede chave.
+                storeWebCompanyLicense(data.license || null);
                 return;
             }
             // Erros temporários do servidor não devem bloquear quem trabalha offline.
