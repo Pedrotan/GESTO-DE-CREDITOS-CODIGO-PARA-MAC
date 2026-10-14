@@ -14,7 +14,8 @@ import { SplashScreen } from "@/componentes/layout/SplashScreen";
 import { isPublicWebBuild } from "@/bibliotecas/ambiente";
 
 import Entrar from "./paginas/Entrar";
-import Utilizadores from "./paginas/Utilizadores";
+// Páginas grandes carregadas só quando são abertas (arranque mais rápido).
+const Utilizadores = lazyWithReload(() => import("./paginas/Utilizadores"));
 
 // --- Lazy Loading Routes for Performance ---
 const Inicio = lazyWithReload(() => import("./paginas/Inicio"));
@@ -58,8 +59,8 @@ const NaoEncontrado = lazyWithReload(() => import("./paginas/NaoEncontrado"));
 
 import { LicenseGuard } from "./componentes/LicenseGuard";
 import Ativacao from "./paginas/Ativacao";
-import LoginAdmin from "./paginas/Admin/LoginAdmin";
-import DashboardAdmin from "./paginas/Admin/DashboardAdmin";
+const LoginAdmin = lazyWithReload(() => import("./paginas/Admin/LoginAdmin"));
+const DashboardAdmin = lazyWithReload(() => import("./paginas/Admin/DashboardAdmin"));
 import { MasterProtectedRoute } from "./admin/MasterProtectedRoute";
 
 const suspenseFallback = <SplashScreen />;

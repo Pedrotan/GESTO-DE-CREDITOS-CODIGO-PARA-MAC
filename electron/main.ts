@@ -725,8 +725,14 @@ function createWindow() {
       mainWindow.loadFile(erpPath);
     }
   }
-  mainWindow.maximize();
-  mainWindow.show();
+  // A janela só aparece quando o conteúdo já está pintado (sem ecrã vazio); salvaguarda de 4 s.
+  const showWhenReady = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return;
+    mainWindow.maximize();
+    mainWindow.show();
+  };
+  mainWindow.once("ready-to-show", showWhenReady);
+  setTimeout(showWhenReady, 4_000);
   mainWindow.on("closed", () => {
     mainWindow = null;
   });

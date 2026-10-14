@@ -828,7 +828,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
 
       <ProfileModal isOpen={isProfileOpen} onClose={() => setIsProfileOpen(false)} />
       <ModulesModal isOpen={isModulesOpen} onClose={() => setIsModulesOpen(false)} />
-      <ActivityModal isOpen={isActivityOpen} onClose={() => setIsActivityOpen(false)} />
+      {isActivityOpen && <ActivityModal isOpen={isActivityOpen} onClose={() => setIsActivityOpen(false)} />}
     </header>
   );
 }

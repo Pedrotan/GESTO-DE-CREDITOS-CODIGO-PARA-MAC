@@ -59,18 +59,19 @@ export const formatCurrencyCompact = (value: number): string => {
   return `${new Intl.NumberFormat('pt-AO', { notation: 'compact', maximumFractionDigits: 1 }).format(value)} ${KWANZA_SYMBOL}`;
 };
 
+const dateOnly = new Intl.DateTimeFormat('pt-AO', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Africa/Luanda' });
+const dateTime = new Intl.DateTimeFormat('pt-AO', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'Africa/Luanda' });
+const dateTimeFull = new Intl.DateTimeFormat('pt-AO', {
+  day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Africa/Luanda',
+});
+
 export const formatDate = (date: Date | string | undefined | null): string => {
   if (!date) return 'N/A';
   const d = typeof date === 'string' ? new Date(date) : date;
   // Verificar se a data é válida
   if (isNaN(d.getTime())) return 'Data Inválida';
 
-  return new Intl.DateTimeFormat('pt-AO', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    timeZone: 'Africa/Luanda',
-  }).format(d);
+  return dateOnly.format(d);
 };
 
 export const formatDateTime = (date: Date | string | undefined | null): string => {
@@ -78,14 +79,7 @@ export const formatDateTime = (date: Date | string | undefined | null): string =
   const d = typeof date === 'string' ? new Date(date) : date;
   if (isNaN(d.getTime())) return 'Data Inválida';
 
-  return new Intl.DateTimeFormat('pt-AO', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Africa/Luanda',
-  }).format(d);
+  return dateTime.format(d);
 };
 
 export const formatDateTimeFull = (date: Date | string | undefined | null): string => {
@@ -93,15 +87,7 @@ export const formatDateTimeFull = (date: Date | string | undefined | null): stri
   const d = typeof date === 'string' ? new Date(date) : date;
   if (isNaN(d.getTime())) return 'Data Inválida';
 
-  return new Intl.DateTimeFormat('pt-AO', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    timeZone: 'Africa/Luanda',
-  }).format(d);
+  return dateTimeFull.format(d);
 };
 
 export const formatPercentage = (value: number): string => {

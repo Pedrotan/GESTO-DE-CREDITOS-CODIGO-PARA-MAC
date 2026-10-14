@@ -73,6 +73,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [users, setUsers] = useState<User[]>([]);
     const [hasUsers, setHasUsers] = useState(false);
     const pendingTwoFactorUser = useRef<User | null>(null);
+    /** Fecho da sessão anterior ainda em curso (o logout não espera por ele). */
+    const pendingLogout = useRef<Promise<void> | null>(null);
     const [idleTimeout, setIdleTimeout] = useState<number>(20); // Default 20 minutes (sincronizado com ContextoDados)
 
     useEffect(() => {
@@ -230,26 +232,37 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
+    /**
+     * Terminar sessão é imediato: o ecrã muda logo para o login e o fecho (estado offline, auditoria e fim da
+     * sessão no processo principal, por esta ordem, porque as duas primeiras ainda precisam da sessão) corre em
+     * segundo plano. Um novo login espera que esse fecho termine.
+     */
     const logout = useCallback(async () => {
-        if (user) {
-            // Update status to offline on explicit logout
-            try {
-                await db.run('UPDATE users SET status = ? WHERE id = ?', ['offline', user.id]);
-                setUsers(prev => prev.map(u => (u.id === user.id ? { ...u, status: 'offline' } : u)));
-            } catch (e) {
-                console.warn("Could not update user offline status during logout", e);
+        const leaving = user;
+        const background = (async () => {
+            await pendingLogout.current?.catch(() => undefined);
+            if (leaving) {
+                try {
+                    await db.run('UPDATE users SET status = ? WHERE id = ?', ['offline', leaving.id]);
+                    setUsers(prev => prev.map(u => (u.id === leaving.id ? { ...u, status: 'offline' } : u)));
+                } catch (e) {
+                    console.warn("Could not update user offline status during logout", e);
+                }
+                // Fim de sessão também fica na auditoria (fecha a sessão na linha do tempo).
+                await ServicoAuditoria.addLog('logout', 'user', `Logout de ${leaving.name}`, leaving.id, leaving.name).catch(() => undefined);
+                ServicoAuditoria.endSession();
             }
-            // Fim de sessão também fica na auditoria (fecha a sessão na linha do tempo).
-            await ServicoAuditoria.addLog('logout', 'user', `Logout de ${user.name}`, user.id, user.name).catch(() => undefined);
-            ServicoAuditoria.endSession();
-        }
+            if (window.electronAPI?.userAuthLogout) await window.electronAPI.userAuthLogout();
+        })();
+        const tracked = background.catch(error => console.warn('[Auth] Fecho da sessão em segundo plano:', error));
+        pendingLogout.current = tracked;
+        void tracked.finally(() => { if (pendingLogout.current === tracked) pendingLogout.current = null; });
 
         // Save session recovery items before clearing
         const sessionExpired = sessionStorage.getItem('sessionExpired');
         const expiredEmail = sessionStorage.getItem('expiredUserEmail');
         const returnUrl = sessionStorage.getItem('returnUrl');
 
-        if (window.electronAPI?.userAuthLogout) await window.electronAPI.userAuthLogout();
         setUser(null);
         sessionStorage.clear(); // Limpeza 
 
@@ -392,6 +405,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     }, [reloadUsers]);
 
     const login = async (emailOrUsername: string, password: string): Promise<boolean> => {
+        // Não abrir a sessão nova antes de o fecho da anterior terminar no processo principal.
+        await pendingLogout.current?.catch(() => undefined);
         try {
             const cleanInput = emailOrUsername.trim().toLowerCase();
             const cleanPassword = password.trim();

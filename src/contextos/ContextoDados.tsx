@@ -380,6 +380,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         return legacyRemote ? 'remote' : 'local';
     });
     const [isDataLoading, setIsDataLoading] = useState(true);
+    /** Tentativas extra quando a base ainda vem vazia (ex.: servidor da rede a arrancar); no máximo 3. */
+    const emptyReloads = useRef(0);
     const retryCount = React.useRef(0);
 
     const [deletedClients, setDeletedClients] = useState<Client[]>([]);
@@ -878,7 +880,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 } catch (e) { }
             }
 
-            if (clients.length === 0) {
+            // Base ainda vazia: tenta de novo algumas vezes (ex.: servidor da rede local a arrancar). Uma empresa
+            // nova sem clientes não fica a recarregar tudo de 5 em 5 segundos para sempre.
+            if (clients.length === 0 && emptyReloads.current < 3) {
+                emptyReloads.current += 1;
                 setIsDataLoading(false);
                 setTimeout(refreshData, 5000);
             }

@@ -24,7 +24,12 @@
 </head>
 
 <body>
-  <div id="root"></div>
+  <!-- Ecrã de carregamento leve (só HTML/CSS): o React substitui-o quando arranca. -->
+  <div id="root"><div style="position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#020617;color:#e2e8f0;font-family:system-ui,'Segoe UI',sans-serif">
+    <div style="width:40px;height:40px;border-radius:50%;border:4px solid #1e293b;border-top-color:#f59e0b;animation:tango-spin 0.9s linear infinite"></div>
+    <div style="font-size:13px;letter-spacing:.08em;text-transform:uppercase;opacity:.8">Tango Gestão de Créditos</div>
+    <style>@keyframes tango-spin{to{transform:rotate(360deg)}}</style>
+  </div></div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 
