@@ -86,23 +86,45 @@ export const identifyBankFromIBAN = (iban: string): typeof ANGOLAN_BANKS[number]
     return ANGOLAN_BANKS.find(bank => bank.code === bankCode) || null;
 };
 
-/**
- * Valida se um IBAN angolano está completo
- */
-export const validateAngolanIBAN = (iban: string): boolean => {
+/** Resto da divisão por 97 do IBAN reorganizado (ISO 13616): 1 quando o dígito de controlo está certo. */
+export const ibanMod97 = (iban: string): number => {
     const clean = iban.replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    const rearranged = (clean.slice(4) + clean.slice(0, 4)).replace(/[A-Z]/g, letter => String(letter.charCodeAt(0) - 55));
+    let rest = 0;
+    for (const digit of rearranged) rest = (rest * 10 + Number(digit)) % 97;
+    return rest;
+};
 
-    // Deve ter exatamente 25 caracteres
-    if (clean.length !== 25) return false;
+/**
+ * Problema do IBAN angolano, ou null se for válido: começa por AO, 25 caracteres, só algarismos depois de AO e
+ * dígito de controlo certo (mod 97). O código do banco tem de estar na lista de bancos autorizados.
+ */
+export const angolanIbanProblem = (iban: string): string | null => {
+    const clean = String(iban || '').replace(/[^A-Z0-9]/gi, '').toUpperCase();
+    if (!clean) return 'Introduza o IBAN.';
+    if (!clean.startsWith('AO')) return 'O IBAN angolano começa por AO.';
+    if (!/^AO\d+$/.test(clean)) return 'Depois de AO o IBAN só tem algarismos.';
+    if (clean.length !== 25) return `O IBAN angolano tem 25 caracteres (tem ${clean.length}).`;
+    if (ibanMod97(clean) !== 1) return 'O dígito de controlo do IBAN não confere: verifique se há algum algarismo trocado.';
+    if (!identifyBankFromIBAN(clean)) return `O código de banco ${clean.slice(4, 8)} não corresponde a nenhum banco autorizado em Angola.`;
+    return null;
+};
 
-    // Deve começar com AO
-    if (!clean.startsWith('AO')) return false;
+/** O IBAN angolano é válido (formato, dígito de controlo e banco conhecido)? */
+export const validateAngolanIBAN = (iban: string): boolean => angolanIbanProblem(iban) === null;
 
-    // Os próximos 23 caracteres devem ser dígitos
-    const digits = clean.slice(2);
-    if (!/^\d{23}$/.test(digits)) return false;
+const nameWords = (value: string) => String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toUpperCase()
+    .replace(/[^A-Z ]/g, ' ').split(/\s+/).filter(word => word.length > 2 && !['DOS', 'DAS', 'DES'].includes(word));
 
-    return true;
+/**
+ * O titular indicado parece ser o cliente? Compara as palavras do nome sem acentos: o primeiro e o último nome do
+ * titular têm de aparecer no nome do cliente (os bancos costumam abreviar os nomes do meio).
+ */
+export const holderMatchesClient = (holder: string, clientName: string): boolean => {
+    const holderWords = nameWords(holder);
+    const clientWords = new Set(nameWords(clientName));
+    if (!holderWords.length || !clientWords.size) return true;
+    return clientWords.has(holderWords[0]) && clientWords.has(holderWords[holderWords.length - 1]);
 };
 
 

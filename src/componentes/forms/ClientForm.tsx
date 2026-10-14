@@ -61,7 +61,7 @@ import {
 import { Client, ClientDocument, BankCoordinate } from '@/tipos/credito';
 import { ScannerModal } from '@/componentes/modals/ScannerModal';
 import { AlertModal } from '@/componentes/ui/AlertModal';
-import { ANGOLAN_BANKS, formatAngolanIBAN, identifyBankFromIBAN, getBankLogoUrl, validateAngolanIBAN } from '@/bibliotecas/ibanHelper';
+import { ANGOLAN_BANKS, angolanIbanProblem, formatAngolanIBAN, holderMatchesClient, identifyBankFromIBAN, getBankLogoUrl, validateAngolanIBAN } from '@/bibliotecas/ibanHelper';
 import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
@@ -604,7 +604,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
             setGenericAlert({
                 isOpen: true,
                 title: 'IBAN Inválido',
-                description: 'O IBAN introduzido não é válido. Verifique o formato.',
+                description: angolanIbanProblem(newIban.iban) || 'O IBAN introduzido não é válido. Verifique o formato.',
                 type: 'error',
             });
             return;
@@ -2233,6 +2233,9 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                         </div>
                                     )}
 
+                                    {newIban.iban.replace(/s/g, '').length >= 25 && angolanIbanProblem(newIban.iban) && (
+                                        <p className="text-xs font-semibold text-red-600">{angolanIbanProblem(newIban.iban)}</p>
+                                    )}
                                     <p className="text-[10px] text-muted-foreground">
                                         Formato: AO + 2 dígitos + código banco (4) + agência (4) + conta (9) + controle (2)
                                     </p>
@@ -2245,6 +2248,15 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                     value={newIban.holder}
                                     onChange={e => setNewIban(prev => ({ ...prev, holder: e.target.value }))}
                                 />
+                                {newIban.holder.trim() && form.watch('name') && !holderMatchesClient(newIban.holder, form.watch('name')) && (
+                                    <p className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">
+                                        O titular indicado não coincide com o nome do cliente ({form.watch('name')}). Confirme que a conta pertence ao cliente.
+                                    </p>
+                                )}
+                                <p className="text-[10px] text-muted-foreground">
+                                    Os serviços públicos de IBAN validam o formato, o dígito de controlo e o banco, mas não devolvem o nome do titular:
+                                    confirme-o com o comprovativo bancário do cliente.
+                                </p>
                             </div>
                         </div>
                         <Button className="w-full gap-2" onClick={addIban}>
