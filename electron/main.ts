@@ -1530,7 +1530,7 @@ const cloudLicenseStatusNow = (): CloudLicenseStatus => {
   if (record && status.state !== "clock" && Date.now() - (Date.parse(record.lastLocalTime) || 0) > 3_600_000) {
     try { writeCloudLicense({ ...record, lastLocalTime: new Date().toISOString() }); } catch { /* cofre indisponível */ }
   }
-  cloudLicenseReadOnly = status.state === "readonly" || status.state === "clock" ? status : null;
+  cloudLicenseReadOnly = status.state === "readonly" || status.state === "clock" || status.state === "trial_ended" ? status : null;
   return status;
 };
 const notifyCloudLicense = (status: CloudLicenseStatus) => {
@@ -1577,7 +1577,39 @@ const cloudLicenseHeartbeat = async (force = false): Promise<CloudLicenseStatus>
   notifyCloudLicense(status);
   return status;
 };
+/**
+ * Demonstração de 3 dias sem chave: o servidor regista este computador (pelo hash) e devolve um token assinado com o
+ * fim. Só é pedida pela interface quando não há nenhuma licença válida, e nunca substitui um token já guardado.
+ */
+let lastTrialRequestAt = 0;
+const cloudLicenseStartTrial = async (): Promise<{ success: boolean; status: CloudLicenseStatus; message?: string }> => {
+  if (isTangoMaster) return { success: false, status: { state: "none" } };
+  const current = cloudLicenseStatusNow();
+  if (current.state !== "none") return { success: current.state === "active", status: current };
+  if (Date.now() - lastTrialRequestAt < 60_000) return { success: false, status: current, message: "Aguarde um momento antes de tentar de novo." };
+  lastTrialRequestAt = Date.now();
+  const fingerprint = currentMachineFingerprint();
+  try {
+    const { ok, data } = await postLicenseServer(DEFAULT_LICENSE_SERVER, "teste", { machine_hash: fingerprint, nome_maquina: os.hostname().slice(0, 120) });
+    const claims = ok ? verifyCloudToken(data.token, licenseTokenKeys()) : null;
+    if (!claims || claims.machine_hash !== fingerprint || claims.plano !== "trial") {
+      return { success: false, status: current, message: data?.message || "O servidor de licenças não confirmou a demonstração." };
+    }
+    writeCloudLicense(recordFromToken(data.token, DEFAULT_LICENSE_SERVER, claims, null));
+  } catch (error) {
+    return { success: false, status: current, message: (error as Error)?.name === "TimeoutError"
+      ? "O servidor de licenças demorou muito a responder."
+      : "Sem ligação ao servidor de licenças." };
+  }
+  const status = cloudLicenseStatusNow();
+  notifyCloudLicense(status);
+  return { success: status.state === "active", status };
+};
 function registerCloudLicenseHandlers() {
+  ipcMain.handle("cloud-license-trial", async (event) => {
+    assertTrustedIpcSender(event);
+    return cloudLicenseStartTrial();
+  });
   ipcMain.handle("cloud-license-status", async (event) => {
     assertTrustedIpcSender(event);
     return cloudLicenseStatusNow();

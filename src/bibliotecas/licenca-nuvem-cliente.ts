@@ -4,7 +4,14 @@ import type { LicenseInfo, LicenseType } from './licenciamento';
 // Licença da empresa no Desktop, vista do lado da interface: o processo principal guarda e verifica o token
 // assinado pelo servidor; aqui só se pede o estado, se activa a chave TANGO-… e se acompanham as mudanças.
 
-export type CloudLicenseState = 'none' | 'active' | 'readonly' | 'clock';
+export type CloudLicenseState = 'none' | 'active' | 'readonly' | 'clock' | 'trial_ended';
+
+/** Contactos do suporte Tango mostrados nos avisos de licença. */
+export const SUPPORT_CONTACTS = {
+    phone: '+244 941 537 486',
+    whatsapp: 'https://wa.me/244941537486',
+    email: 'suporte@tangogestao.ao',
+};
 
 export type CloudLicenseStatus = {
     state: CloudLicenseState;
@@ -13,6 +20,7 @@ export type CloudLicenseStatus = {
         plano: string;
         planoNome: string;
         escalao: string;
+        dataInicio?: string | null;
         dataFim: string | null;
         validoAte: string;
         maxMaquinas: number;
@@ -116,6 +124,37 @@ export const refreshCloudLicense = async (): Promise<CloudLicenseStatus> => {
     return remember(await api().cloudLicenseRefresh());
 };
 
+/** Pede ao servidor a demonstração de 3 dias deste computador (só quando não há licença nenhuma). */
+export const startCloudTrial = async (): Promise<{ success: boolean; status: CloudLicenseStatus; message?: string }> => {
+    if (!api()?.cloudLicenseStartTrial) return { success: false, status: { state: 'none' } };
+    listen();
+    const result = await api().cloudLicenseStartTrial();
+    if (result?.status) remember(result.status);
+    return result;
+};
+
+/**
+ * Aviso de fim de licença: demonstração no 2.º dia (falta 1 dia ou menos) e licenças pagas nos últimos 7 dias.
+ * null quando não há nada a avisar.
+ */
+export const licenseExpiryNotice = (status: CloudLicenseStatus | null | undefined, now = Date.now()) => {
+    if (status?.state !== 'active' || !status.licenca?.dataFim) return null;
+    const msLeft = Date.parse(status.licenca.dataFim) - now;
+    if (!Number.isFinite(msLeft) || msLeft <= 0) return null;
+    const trial = status.licenca.plano === 'trial';
+    if (msLeft > (trial ? 2 : 7) * 86_400_000) return null;
+    const days = Math.floor(msLeft / 86_400_000);
+    const hours = Math.ceil(msLeft / 3_600_000);
+    const when = msLeft < 86_400_000 ? (hours <= 1 ? 'daqui a menos de 1 hora' : `daqui a ${hours} horas`) : `daqui a ${days} ${days === 1 ? 'dia' : 'dias'}`;
+    return {
+        trial,
+        msLeft,
+        message: trial
+            ? `A sua licença de teste expira ${when}. Contacte o suporte para mais detalhes.`
+            : `A licença ${status.licenca.planoNome || ''} da empresa expira ${when}. Contacte o suporte para a renovar.`.replace('  ', ' '),
+    };
+};
+
 /** Activa este computador com a chave TANGO-…; `legacyMachineId` liga-o à máquina de uma licença antiga. */
 export const activateCloudLicense = async (key: string, options: { serverUrl?: string; legacyMachineId?: string } = {}) => {
     if (!api()?.cloudLicenseActivate) {
@@ -129,7 +168,7 @@ export const activateCloudLicense = async (key: string, options: { serverUrl?: s
 
 /** O sistema deve recusar alterações (o processo principal também as recusa)? */
 export const isCloudLicenseReadOnly = (status: CloudLicenseStatus | null | undefined) =>
-    status?.state === 'readonly' || status?.state === 'clock';
+    status?.state === 'readonly' || status?.state === 'clock' || status?.state === 'trial_ended';
 
 const CLOUD_PLAN_TYPES: LicenseType[] = ['monthly', 'quarterly', 'biannual', 'annual', 'lifetime', 'trial'];
 
@@ -139,6 +178,11 @@ export const cloudStatusToLicenseInfo = (status: CloudLicenseStatus, now = new D
     const { licenca } = status;
     const end = licenca.dataFim ? new Date(licenca.dataFim) : new Date(now.getFullYear() + 99, 11, 31);
     const type = CLOUD_PLAN_TYPES.includes(licenca.plano as LicenseType) ? licenca.plano as LicenseType : 'annual';
+    // Demonstração terminada: não é válida (o LicenseGuard mostra só o ecrã de activação).
+    if (status.state === 'trial_ended') {
+        return { isValid: false, isCloud: true, readOnly: true, type, tier: 'singular', expirationDate: end, maxDevices: licenca.maxMaquinas,
+            status: 'expired', daysRemaining: 0, message: status.message };
+    }
     const readOnly = status.state === 'readonly' || status.state === 'clock';
     return {
         isValid: true,

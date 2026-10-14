@@ -15,6 +15,8 @@ export type CloudLicenseClaims = {
     escalao: string;
     max_maquinas: number;
     machine_hash: string;
+    /** Demonstração: início registado no servidor. */
+    data_inicio?: string;
     data_fim: string | null;
     valido_ate: string;
     hora_servidor: string;
@@ -39,7 +41,8 @@ export type CloudLicenseState =
     | 'none'        // computador não activado com uma chave TANGO
     | 'active'      // token válido
     | 'readonly'    // token expirado: mais de 7 dias sem ligação, ou licença sem renovação
-    | 'clock';      // relógio do computador atrasado em relação ao já visto: exige validação online
+    | 'clock'       // relógio do computador atrasado em relação ao já visto: exige validação online
+    | 'trial_ended'; // a demonstração de 3 dias terminou: só o ecrã de activação (os dados ficam guardados)
 
 export type CloudLicenseStatus = {
     state: CloudLicenseState;
@@ -48,6 +51,7 @@ export type CloudLicenseStatus = {
         plano: string;
         planoNome: string;
         escalao: string;
+        dataInicio?: string | null;
         dataFim: string | null;
         validoAte: string;
         maxMaquinas: number;
@@ -100,6 +104,7 @@ const describe = (claims: CloudLicenseClaims): NonNullable<CloudLicenseStatus['l
     plano: claims.plano,
     planoNome: claims.plano_nome || claims.plano,
     escalao: claims.escalao,
+    dataInicio: claims.data_inicio || null,
     dataFim: claims.data_fim,
     validoAte: claims.valido_ate,
     maxMaquinas: Number(claims.max_maquinas),
@@ -120,6 +125,14 @@ export const evaluateCloudLicense = (
     const lastSeen = Math.max(Date.parse(record.lastServerTime) || 0, Date.parse(record.lastLocalTime) || 0);
     if (now + CLOCK_TOLERANCE_MS < lastSeen) {
         return { ...base, state: 'clock', message: 'O relógio deste computador está atrasado. Acerte a data e a hora e ligue o computador à Internet para validar a licença.' };
+    }
+    // Demonstração: o fim vem do servidor; conta a hora mais adiantada já vista (atrasar o relógio não a prolonga).
+    if (claims.plano === 'trial' && claims.data_fim && Math.max(now, lastSeen) >= Date.parse(claims.data_fim)) {
+        return {
+            ...base,
+            state: 'trial_ended',
+            message: 'O período de demonstração de 3 dias terminou. Introduza a chave de licença para continuar: os dados registados ficam guardados.',
+        };
     }
     if (now >= claims.exp * 1000) {
         const ended = claims.data_fim && Date.parse(claims.data_fim) <= now;

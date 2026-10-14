@@ -227,3 +227,27 @@ test('chave pública e servidor sem chave de assinatura', async () => {
         process.env.TANGO_LICENSE_SIGNING_KEY = saved;
     }
 });
+
+test('demonstração de 3 dias: decidida no servidor, uma por computador, e não recomeça', async () => {
+    const pc = machine('pc-demonstracao');
+    const first = await invoke(licencas, { url: '/api/licencas/teste', body: { machine_hash: pc, nome_maquina: 'PC Demo' } });
+    assert.equal(first.statusCode, 200, JSON.stringify(first.body));
+    const claims = T.verifyLicenseToken(first.body.token, publicKeys());
+    assert.equal(claims.plano, 'trial');
+    assert.equal(claims.machine_hash, pc);
+    assert.ok(claims.licenca_id.startsWith('teste:'));
+    const days = (Date.parse(claims.data_fim) - Date.parse(claims.data_inicio)) / 86_400_000;
+    assert.equal(Math.round(days), 3);
+    // Reinstalar / pedir de novo devolve o mesmo fim (o servidor lembra-se da máquina).
+    await sql(`UPDATE tango_testes SET inicio = NOW() - INTERVAL '4 days', fim = NOW() - INTERVAL '1 day' WHERE machine_hash = $1`, [pc]);
+    const again = await invoke(licencas, { url: '/api/licencas/teste', body: { machine_hash: pc } });
+    const ended = T.verifyLicenseToken(again.body.token, publicKeys());
+    assert.ok(Date.parse(ended.data_fim) < Date.now(), 'o fim continua no passado');
+    assert.ok(ended.exp * 1000 <= Date.now(), 'token já expirado: o Desktop mostra a activação');
+    // O heartbeat de um token de demonstração renova a partir do registo do servidor.
+    const beat = await heartbeat({ token: first.body.token, machine_hash: pc });
+    assert.equal(beat.statusCode, 200);
+    assert.equal(T.verifyLicenseToken(beat.body.token, publicKeys()).data_fim, ended.data_fim);
+    const bad = await invoke(licencas, { url: '/api/licencas/teste', body: { machine_hash: 'xyz' } });
+    assert.equal(bad.statusCode, 400);
+});

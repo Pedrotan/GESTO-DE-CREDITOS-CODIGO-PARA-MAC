@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useData } from '@/contextos/ContextoDados';
 import { validateLicense } from '@/bibliotecas/licenciamento';
+import { getCloudLicenseStatus, startCloudTrial } from '@/bibliotecas/licenca-nuvem-cliente';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { SplashScreen } from '@/componentes/layout/SplashScreen';
 import { differenceInDays, parseISO, isValid, isBefore, addMonths, addYears, format } from 'date-fns';
@@ -62,6 +63,27 @@ export const LicenseGuard = ({ children }: LicenseGuardProps) => {
                 if (validation.isValid) {
                     setIsChecking(false);
                     return;
+                }
+
+                // Demonstração do servidor terminada (token assinado): só o ecrã de activação. Os dados ficam guardados.
+                if (validation.isCloud && validation.type === 'trial') {
+                    navigate('/ativacao', { replace: true });
+                    return;
+                }
+
+                // Sem licença nenhuma: a demonstração de 3 dias é pedida ao servidor de licenças, que regista este
+                // computador e decide a data de fim (reinstalar ou mexer no relógio não a prolonga).
+                if ((await getCloudLicenseStatus(0)).state === 'none') {
+                    const trial = await startCloudTrial().catch(() => null);
+                    if (trial?.status.state === 'active') {
+                        setIsChecking(false);
+                        return;
+                    }
+                    if (trial?.status.state === 'trial_ended') {
+                        navigate('/ativacao', { replace: true });
+                        return;
+                    }
+                    // Sem ligação ao servidor no primeiro arranque: segue o período de teste local abaixo.
                 }
 
                 // If license is invalid, check if we are still within the 3-day trial period

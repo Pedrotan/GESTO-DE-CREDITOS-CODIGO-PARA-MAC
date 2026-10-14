@@ -287,6 +287,7 @@ const api = Object.freeze({
     // Licença da empresa (chave TANGO-…): estado, activação, renovação e avisos de mudança.
     cloudLicenseStatus: () => ipcRenderer.invoke('cloud-license-status'),
     cloudLicenseRefresh: () => ipcRenderer.invoke('cloud-license-refresh'),
+    cloudLicenseStartTrial: () => ipcRenderer.invoke('cloud-license-trial'),
     cloudLicenseActivate: (payload: { key: string; serverUrl?: string; legacyMachineId?: string }) => ipcRenderer.invoke('cloud-license-activate', {
         key: ensureText(payload?.key, 'Chave de licença', 64),
         serverUrl: payload?.serverUrl ? ensureText(payload.serverUrl, 'Servidor', 300) : undefined,

@@ -227,7 +227,18 @@ export const getMachineId = async (): Promise<string> => {
 export const validateLicense = async (key: string, companyNif: string = activeCompanyNif): Promise<LicenseInfo> => {
     // Computador activado com a chave da empresa (TANGO-…): o token do servidor manda sobre as chaves antigas.
     const cloud = cloudStatusToLicenseInfo(await getCloudLicenseStatus());
-    if (cloud) return cloud;
+    if (cloud && cloud.type !== 'trial') return cloud;
+    // Demonstração do servidor: uma chave antiga válida neste computador vale mais do que o teste.
+    if (cloud) {
+        if (!normalizeLicenseKey(key) || isCloudLicenseKey(key)) return cloud;
+        const legacy = await validateLegacyLicense(key, companyNif);
+        return legacy.isValid ? legacy : cloud;
+    }
+    return validateLegacyLicense(key, companyNif);
+};
+
+/** Chaves assinadas antigas (eyJ…/JSON) e a chave global, verificadas neste computador. */
+const validateLegacyLicense = async (key: string, companyNif: string): Promise<LicenseInfo> => {
     if (isCloudLicenseKey(key)) {
         return {
             isValid: false, type: 'trial', tier: 'singular', expirationDate: new Date(), status: 'invalid', daysRemaining: 0,

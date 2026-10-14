@@ -7,7 +7,7 @@ import {
     CLOCK_TOLERANCE_MS, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, legacyMachineHash, machineFingerprint,
     recordFromToken, verifyCloudToken, type CloudLicenseRecord,
 } from '../electron/licenca-nuvem.ts';
-import { cloudStatusToLicenseInfo, webLicenseToStatus } from '../src/bibliotecas/licenca-nuvem-cliente.ts';
+import { cloudStatusToLicenseInfo, isCloudLicenseReadOnly, licenseExpiryNotice, webLicenseToStatus } from '../src/bibliotecas/licenca-nuvem-cliente.ts';
 
 // Etapa 4: o Desktop verifica o token do servidor offline, entra em só leitura sem token válido e detecta o
 // relógio a andar para trás. O token é assinado pelo mesmo código do servidor (vercel-api/_token-licenca.js).
@@ -116,4 +116,33 @@ test('versão web: a licença da empresa recebida do servidor conta como licenç
     const expired = cloudStatusToLicenseInfo(webLicenseToStatus({ ...summary, status: 'expirada' }), new Date(NOW))!;
     assert.equal(expired.readOnly, true);
     assert.equal(webLicenseToStatus(null).state, 'none');
+});
+
+test('demonstração: aviso no 2.º dia, bloqueio ao fim de 3 dias, e o relógio atrasado não a prolonga', () => {
+    const start = NOW - 1.2 * DAY;
+    const end = start + 3 * DAY;
+    const trial = token({ licenca_id: `teste:${MACHINE}`, plano: 'trial', plano_nome: 'Demonstração (3 dias)', escalao: 'singular', max_maquinas: 1,
+        data_inicio: new Date(start).toISOString(), data_fim: new Date(end).toISOString(), valido_ate: new Date(end).toISOString(), exp: Math.floor(end / 1000) });
+    const dayTwo = evaluateCloudLicense(record(trial), MACHINE, KEYS, NOW);
+    assert.equal(dayTwo.state, 'active');
+    const notice = licenseExpiryNotice(dayTwo, NOW);
+    assert.equal(notice?.trial, true);
+    assert.equal(notice?.message, 'A sua licença de teste expira daqui a 1 dia. Contacte o suporte para mais detalhes.');
+    assert.equal(licenseExpiryNotice(evaluateCloudLicense(record(trial), MACHINE, KEYS, start + 0.5 * DAY), start + 0.5 * DAY), null, 'no 1.º dia ainda não avisa');
+
+    const after = evaluateCloudLicense(record(trial), MACHINE, KEYS, end + 1000);
+    assert.equal(after.state, 'trial_ended');
+    assert.equal(isCloudLicenseReadOnly(after), true, 'o processo principal recusa escritas');
+    const info = cloudStatusToLicenseInfo(after, new Date(end + 1000));
+    assert.equal(info?.isValid, false, 'o LicenseGuard mostra só a activação');
+    assert.equal(info?.type, 'trial');
+
+    // Relógio atrasado depois de o servidor já ter visto uma hora posterior ao fim: continua bloqueado.
+    const seenLate = record(trial, { lastServerTime: new Date(end + DAY).toISOString(), lastLocalTime: new Date(end + DAY).toISOString() });
+    assert.notEqual(evaluateCloudLicense(seenLate, MACHINE, KEYS, NOW).state, 'active');
+
+    // Licença paga: avisa nos últimos 7 dias.
+    const paid = evaluateCloudLicense(record(token({ data_fim: new Date(NOW + 5.5 * DAY).toISOString() })), MACHINE, KEYS, NOW);
+    assert.match(licenseExpiryNotice(paid, NOW)?.message || '', /expira daqui a 5 dias/);
+    assert.equal(licenseExpiryNotice(evaluateCloudLicense(record(token()), MACHINE, KEYS, NOW), NOW), null);
 });

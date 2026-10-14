@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Clock, Loader2, LockKeyhole, RefreshCw, TriangleAlert } from 'lucide-react';
+import { CalendarClock, Clock, Loader2, LockKeyhole, Mail, MessageCircle, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button } from '@/componentes/ui/button';
-import { CLOUD_LICENSE_EVENT, getCloudLicenseStatus, isCloudLicenseReadOnly, refreshCloudLicense, type CloudLicenseStatus } from '@/bibliotecas/licenca-nuvem-cliente';
+import { CLOUD_LICENSE_EVENT, getCloudLicenseStatus, isCloudLicenseReadOnly, licenseExpiryNotice, refreshCloudLicense, SUPPORT_CONTACTS, type CloudLicenseStatus } from '@/bibliotecas/licenca-nuvem-cliente';
 
 /**
  * Faixa no topo do Tango ERP quando a licença da empresa (chave TANGO-…) precisa de atenção: modo só leitura
  * (mais de 7 dias sem validar, licença terminada), relógio atrasado, ou recusa do servidor ainda dentro dos 7 dias.
+ * Também avisa antes do fim: a demonstração no 2.º dia e as licenças pagas nos últimos 7 dias, com os contactos.
  */
 export function AvisoLicencaNuvem() {
     const [status, setStatus] = useState<CloudLicenseStatus | null>(null);
@@ -21,7 +22,25 @@ export function AvisoLicencaNuvem() {
         return () => { cancelled = true; window.removeEventListener(CLOUD_LICENSE_EVENT, onChange); };
     }, []);
 
-    // Só no Desktop: na versão web, o bloqueio por licença é o ecrã de subscrição (GuardaSubscricaoWeb).
+    // Aviso de fim próximo (Desktop e web); o resto só no Desktop (na web o bloqueio é o GuardaSubscricaoWeb).
+    const notice = licenseExpiryNotice(status);
+    if (notice) {
+        return (
+            <div role="status" className="flex flex-wrap items-center gap-3 border-b border-amber-200 bg-amber-50 px-4 py-2.5 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+                <CalendarClock className="h-4 w-4 shrink-0" />
+                <p className="min-w-0 flex-1"><strong className="font-bold">{notice.trial ? 'Licença de teste: ' : 'Licença: '}</strong>{notice.message}</p>
+                <div className="flex shrink-0 flex-wrap gap-2 text-xs font-semibold">
+                    <a href={SUPPORT_CONTACTS.whatsapp} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white/70 px-2.5 py-1.5 hover:bg-white dark:border-amber-800 dark:bg-transparent">
+                        <MessageCircle className="h-3.5 w-3.5" /> {SUPPORT_CONTACTS.phone}
+                    </a>
+                    <a href={`mailto:${SUPPORT_CONTACTS.email}`} className="inline-flex items-center gap-1 rounded-md border border-amber-300 bg-white/70 px-2.5 py-1.5 hover:bg-white dark:border-amber-800 dark:bg-transparent">
+                        <Mail className="h-3.5 w-3.5" /> {SUPPORT_CONTACTS.email}
+                    </a>
+                    {(window as any).electronAPI && <Link to="/ativacao" className="inline-flex items-center rounded-md border border-amber-300 bg-white/70 px-2.5 py-1.5 hover:bg-white dark:border-amber-800 dark:bg-transparent">Introduzir chave</Link>}
+                </div>
+            </div>
+        );
+    }
     if (!status || status.state === 'none' || !(window as any).electronAPI) return null;
     const readOnly = isCloudLicenseReadOnly(status);
     const refusal = !readOnly && status.refusal ? status.refusal : null;

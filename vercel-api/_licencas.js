@@ -80,6 +80,15 @@ export const ensureLicenseTables = async (sql) => {
     criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
   await sql(`CREATE INDEX IF NOT EXISTS tango_licenca_eventos_licenca_idx ON tango_licenca_eventos (licenca_id, criado_em DESC)`);
+  // Demonstração sem chave: uma por computador (pelo hash da máquina). Reinstalar não recomeça os 3 dias.
+  await sql(`CREATE TABLE IF NOT EXISTS tango_testes (
+    machine_hash TEXT PRIMARY KEY,
+    inicio TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    fim TIMESTAMPTZ NOT NULL,
+    nome_maquina TEXT,
+    ultimo_contacto TIMESTAMPTZ,
+    ip TEXT
+  )`);
   await sql(`CREATE TABLE IF NOT EXISTS tango_licencas_legado (
     jti TEXT PRIMARY KEY,
     licenca_id TEXT REFERENCES tango_licencas(id) ON DELETE CASCADE,
@@ -441,6 +450,50 @@ export const activateLicense = async (sql, { key, machineHash: machine, legacyMa
   return { ok: true, token, claims };
 };
 
+// --- Demonstração de 3 dias sem chave ---------------------------------------------------------------------
+
+export const TRIAL_DAYS = 3;
+/** Identificador da «licença» de demonstração de um computador (vai no token; não existe em tango_licencas). */
+export const trialLicenseId = (machine) => `teste:${machine}`;
+
+/**
+ * POST /api/licencas/teste: começa (ou retoma) a demonstração deste computador e devolve um token assinado com
+ * plano «trial» e o fim calculado no servidor (início + 3 dias). Depois do fim o token continua a ser entregue,
+ * já expirado, para o Desktop mostrar o ecrã de activação mesmo que apaguem os ficheiros locais.
+ */
+export const startTrial = async (sql, { machineHash: machine, machineName, ip = null }, { sign }, now = new Date()) => {
+  if (!/^[0-9a-f]{64}$/u.test(String(machine || ''))) return { ok: false, status: 400, code: 'MAQUINA_INVALIDA', message: 'Identificação da máquina inválida.' };
+  const name = String(machineName || '').trim().slice(0, 120) || null;
+  const ends = new Date(now.getTime() + TRIAL_DAYS * 86_400_000).toISOString();
+  const [created] = await sql(`INSERT INTO tango_testes (machine_hash, inicio, fim, nome_maquina, ultimo_contacto, ip)
+    VALUES ($1, $2, $3, $4, $2, $5) ON CONFLICT (machine_hash) DO NOTHING RETURNING machine_hash`, [machine, now.toISOString(), ends, name, ip]);
+  const [trial] = await sql(`UPDATE tango_testes SET ultimo_contacto = $2, nome_maquina = COALESCE($3, nome_maquina)
+    WHERE machine_hash = $1 RETURNING inicio::text AS inicio, fim::text AS fim`, [machine, now.toISOString(), name]);
+  if (created) await recordLicenseEvent(sql, { licenseId: trialLicenseId(machine).slice(0, 18), type: 'teste_iniciado', ip, detail: { maquina: machine.slice(0, 12), nome: name, fim: ends } });
+  const end = new Date(trial.fim).getTime();
+  const validUntil = Math.min(now.getTime() + TOKEN_VALIDITY_MS, end);
+  const claims = {
+    iss: 'tango-master',
+    sub: trialLicenseId(machine),
+    jti: crypto.randomUUID(),
+    empresa_id: '',
+    licenca_id: trialLicenseId(machine),
+    plano: 'trial',
+    plano_nome: `Demonstração (${TRIAL_DAYS} dias)`,
+    escalao: 'singular',
+    funcionalidades: {},
+    max_maquinas: 1,
+    machine_hash: machine,
+    data_inicio: new Date(trial.inicio).toISOString(),
+    data_fim: new Date(end).toISOString(),
+    valido_ate: new Date(validUntil).toISOString(),
+    hora_servidor: now.toISOString(),
+    iat: Math.floor(now.getTime() / 1000),
+    exp: Math.floor(validUntil / 1000),
+  };
+  return { ok: true, token: sign(claims), claims };
+};
+
 /**
  * POST /api/licencas/heartbeat: com o token anterior (mesmo expirado há menos de 90 dias) e a mesma máquina,
  * confirma que a licença continua activa e devolve um token renovado. `verify(token)` devolve as reivindicações.
@@ -454,6 +507,8 @@ export const licenseHeartbeat = async (sql, { token, machineHash: machine, ip = 
   if (Number(claims.exp) * 1000 + HEARTBEAT_GRACE_MS < now.getTime()) {
     return { ok: false, status: 401, code: 'TOKEN_ANTIGO', message: 'Este computador esteve muito tempo sem ligação. Active-o de novo com a chave de licença.' };
   }
+  // Demonstração: renova a partir do registo do servidor (o fim nunca muda).
+  if (String(claims.licenca_id || '').startsWith('teste:')) return startTrial(sql, { machineHash: machine, ip }, { sign }, now);
   const [license] = await sql(`SELECT * FROM tango_licencas WHERE id = $1`, [claims.licenca_id]);
   if (!license) return { ok: false, status: 404, code: 'LICENCA_DESCONHECIDA', message: 'A licença deste computador já não existe.' };
   const state = await effectiveState(sql, license, now);

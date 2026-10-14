@@ -1,13 +1,14 @@
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clientIp, lockoutRemaining, recordRejectedOrigin, registerAuthFailure } from './_alertas.js';
-import { activateLicense, licenseHeartbeat, prepareLicenses } from './_licencas.js';
+import { activateLicense, licenseHeartbeat, prepareLicenses, startTrial } from './_licencas.js';
 import { licenseKeyHash, parseLicenseKey } from './_chave-licenca.js';
 import { loadSigningKey, publicKeyInfo, signLicenseToken, verifyLicenseToken } from './_token-licenca.js';
 
 // Licenças do Desktop:
 //   POST /api/licencas/ativar        { chave, machine_hash, nome_maquina }  → token assinado
 //   POST /api/licencas/heartbeat     { token, machine_hash }                → token renovado
+//   POST /api/licencas/teste         { machine_hash, nome_maquina }         → token da demonstração (3 dias)
 //   GET  /api/licencas/chave-publica                                        → chave pública Ed25519 (kid)
 // A decisão é sempre do servidor; o Desktop só verifica a assinatura do token para trabalhar offline.
 
@@ -23,7 +24,7 @@ const send = (res, status, body) => {
 const routeOf = (req) => {
   const path = String(req.url || '').split('?')[0].replace(/\/+$/, '');
   const fromPath = path.split('/').pop();
-  return ['ativar', 'heartbeat', 'chave-publica'].includes(fromPath) ? fromPath : String(req.query?.acao || req.body?.acao || '');
+  return ['ativar', 'heartbeat', 'teste', 'chave-publica'].includes(fromPath) ? fromPath : String(req.query?.acao || req.body?.acao || '');
 };
 
 export default async function handler(req, res) {
@@ -44,7 +45,7 @@ export default async function handler(req, res) {
     return send(res, 200, { success: true, ...publicKeyInfo(signingKey) });
   }
   if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
-  if (route !== 'ativar' && route !== 'heartbeat') return send(res, 404, { success: false, message: 'Rota de licenças desconhecida.' });
+  if (!['ativar', 'heartbeat', 'teste'].includes(route)) return send(res, 404, { success: false, message: 'Rota de licenças desconhecida.' });
 
   const databaseUrl = process.env.DATABASE_URL;
   if (!databaseUrl) return send(res, 503, { success: false, message: 'Servidor central ainda não configurado.' });
@@ -72,7 +73,9 @@ export default async function handler(req, res) {
 
     const result = route === 'ativar'
       ? await activateLicense(sql, { key: body.chave ?? body.key, machineHash, legacyMachineHash: String(body.legacy_machine_hash || '').toLowerCase() || null, machineName: body.nome_maquina ?? body.machineName, ip }, tools)
-      : await licenseHeartbeat(sql, { token: body.token, machineHash, ip }, tools);
+      : route === 'teste'
+        ? await startTrial(sql, { machineHash, machineName: body.nome_maquina ?? body.machineName, ip }, tools)
+        : await licenseHeartbeat(sql, { token: body.token, machineHash, ip }, tools);
 
     if (!result.ok) {
       if (result.failure) {

@@ -8,7 +8,7 @@ import { validateLicense, getLicenseTypeName, getMachineId, resolveLicenseKey, s
 import { ShieldCheck, Key, Lock, Phone, Copy, Check } from 'lucide-react';
 import { toast } from '@/ganchos/usar-toast';
 import { differenceInDays, parseISO, isValid } from 'date-fns';
-import { isCloudLicenseKey } from '@/bibliotecas/licenca-nuvem-cliente';
+import { getCloudLicenseStatus, isCloudLicenseKey, SUPPORT_CONTACTS } from '@/bibliotecas/licenca-nuvem-cliente';
 import { activateThisComputer } from '@/servicos/ServicoLicencaNuvem';
 
 export default function Ativacao() {
@@ -20,6 +20,7 @@ export default function Ativacao() {
     const [licenseInfo, setLicenseInfo] = useState<any>(null);
     const [machineId, setMachineId] = useState<string>('Carregando ID...');
     const [copied, setCopied] = useState(false);
+    const [trialEnded, setTrialEnded] = useState('');
 
     useEffect(() => {
         getMachineId().then(id => setMachineId(id));
@@ -46,18 +47,22 @@ export default function Ativacao() {
                 return;
             }
 
-            // Check if already valid
+            // Já tem licença válida (chave ou demonstração do servidor ainda a decorrer)?
             const currentLicenseKey = resolveLicenseKey(companySettings?.licenseKey);
-            if (currentLicenseKey) {
-                const info = await validateLicense(currentLicenseKey);
-                if (info.isValid) {
-                    navigate('/', { replace: true });
-                    return;
-                }
+            const info = await validateLicense(currentLicenseKey || '');
+            // Durante a demonstração fica-se aqui para poder introduzir a chave definitiva.
+            if (info.isValid && !(info.isCloud && info.type === 'trial')) {
+                navigate('/', { replace: true });
+                return;
+            }
+            const cloud = await getCloudLicenseStatus(0);
+            if (cloud.state === 'trial_ended') {
+                setTrialEnded(cloud.message || 'O período de demonstração terminou.');
+                return;
             }
 
-            // Check if in 3-day trial period
-            if (companySettings?.installDate) {
+            // Período de teste local: só quando o servidor de licenças ainda não respondeu neste computador.
+            if (cloud.state === 'none' && companySettings?.installDate) {
                 try {
                     const installDate = parseISO(companySettings.installDate);
                     if (isValid(installDate)) {
@@ -158,6 +163,12 @@ export default function Ativacao() {
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-6 pt-4">
+                    {trialEnded && status !== 'valid' && (
+                        <div role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200">
+                            <p className="font-bold">Demonstração terminada</p>
+                            <p>{trialEnded}</p>
+                        </div>
+                    )}
                     {status === 'invalid' && (
                         <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2 border border-red-100">
                             <ShieldCheck className="h-4 w-4" />
@@ -216,7 +227,8 @@ export default function Ativacao() {
                             Entre em contacto com o suporte técnico para adquirir uma nova chave ou renovar a sua subscrição mensal, trimestral ou anual.
                         </p>
                         <p className="text-xs font-bold text-blue-700 dark:text-blue-300 pt-1">
-                            WhatsApp: +244 941 537 486
+                            Telefone / WhatsApp: <a className="underline" href={SUPPORT_CONTACTS.whatsapp} target="_blank" rel="noreferrer">{SUPPORT_CONTACTS.phone}</a>
+                            {' · '}E-mail: <a className="underline" href={`mailto:${SUPPORT_CONTACTS.email}`}>{SUPPORT_CONTACTS.email}</a>
                         </p>
                     </div>
                 </CardContent>
