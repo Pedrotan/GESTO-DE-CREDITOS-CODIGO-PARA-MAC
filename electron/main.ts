@@ -1605,7 +1605,21 @@ const cloudLicenseStartTrial = async (): Promise<{ success: boolean; status: Clo
   notifyCloudLicense(status);
   return { success: status.state === "active", status };
 };
+/** Há Internet de verdade? Pedido leve ao servidor Tango (qualquer resposta HTTP conta) com alternativa. */
+const internetReachable = async () => {
+  for (const url of [`${DEFAULT_LICENSE_SERVER}/api/health`, "https://www.gstatic.com/generate_204"]) {
+    try {
+      await fetch(url, { method: "GET", headers: { "Cache-Control": "no-cache" }, signal: AbortSignal.timeout(5_000) });
+      return true;
+    } catch { /* tenta o seguinte */ }
+  }
+  return false;
+};
 function registerCloudLicenseHandlers() {
+  ipcMain.handle("net-check", async (event) => {
+    assertTrustedIpcSender(event);
+    return internetReachable();
+  });
   ipcMain.handle("cloud-license-trial", async (event) => {
     assertTrustedIpcSender(event);
     return cloudLicenseStartTrial();

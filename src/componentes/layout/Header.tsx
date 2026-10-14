@@ -1,3 +1,6 @@
+import { useInternetStatus, useLicenseInfo } from '@/ganchos/usar-estado-rede';
+import { licenseAllowsFeature } from '@/bibliotecas/licenciamento';
+import { IndicadorIntranet } from './IndicadorIntranet';
 import { useState, useEffect } from 'react';
 import { getLastCloudSyncStatus, isCloudSyncUrl, type CloudSyncStatus } from '@/servicos/ServicoSincronizacaoCloud';
 import { OPEN_CLOUD_LINK_EVENT } from '@/componentes/layout/LigacaoNuvemDesktop';
@@ -62,7 +65,9 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
     payments: typeof payments;
   }>({ clients: [], credits: [], payments: [] });
   const [showResults, setShowResults] = useState(false);
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  // Internet real: pedido leve de 20 em 20 segundos (o Wi-Fi pode estar ligado sem Internet).
+  const internetState = useInternetStatus();
+  const isOnline = internetState !== 'offline';
   const [cloudStatus, setCloudStatus] = useState<CloudSyncStatus>(getLastCloudSyncStatus);
   useEffect(() => {
     const handler = (event: Event) => setCloudStatus((event as CustomEvent<CloudSyncStatus>).detail);
@@ -70,6 +75,9 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
     return () => window.removeEventListener('tango-cloud-sync-status', handler);
   }, []);
   const webMultiTenant = useWebMultiTenant();
+  // Multi-Empresas: só com a licença que o inclui (o servidor também o decide na versão web).
+  const licenseInfo = useLicenseInfo(companySettings?.licenseKey);
+  const multiTenantAllowed = licenseAllowsFeature(licenseInfo, 'multi_empresa');
   const cloudLinked = Boolean(companySettings?.syncEnabled && isCloudSyncUrl(companySettings?.syncUrl));
   const pendingLabel = cloudStatus.pending ? `${cloudStatus.pending} pendente${cloudStatus.pending === 1 ? '' : 's'}` : '';
   const cloudStatusLabel = cloudStatus.state === 'synced' ? 'Sincronizado'
@@ -147,29 +155,6 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
       localStorage.setItem('theme', 'light');
     }
   };
-
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    // Check periodically (every 5s) and on focus
-    const interval = setInterval(() => {
-      setIsOnline(navigator.onLine);
-    }, 5000);
-
-    const handleFocus = () => setIsOnline(navigator.onLine);
-    window.addEventListener('focus', handleFocus);
-
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-      window.removeEventListener('focus', handleFocus);
-      clearInterval(interval);
-    };
-  }, []);
 
   const handleSearch = (term: string) => {
     setSearchTerm(term);
@@ -406,7 +391,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           )}
         </div>
 
-        {(webMultiTenant ?? companySettings?.enableMultiTenant !== false) && (
+        {multiTenantAllowed && (webMultiTenant ?? companySettings?.enableMultiTenant !== false) && (
           <div className="hidden lg:block">
             <AccountSwitcher compact />
           </div>
@@ -489,7 +474,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
         {/* Indicadores de Estado */}
         <div className="hidden items-center gap-2 xl:flex 2xl:gap-3">
           {/* Indicador de Internet */}
-          <div className={cn(
+          <div title={internetState === 'checking' ? 'A verificar a ligação à Internet…' : isOnline ? 'Ligado à Internet (verificado de 20 em 20 segundos)' : 'Sem acesso à Internet: os dados continuam a ser gravados neste computador.'} className={cn(
             "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 2xl:px-3",
             isOnline
               ? 'bg-green-50 border-green-300 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400'
@@ -497,9 +482,12 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           )}>
             {isOnline ? <Wifi className="h-5 w-5 2xl:h-6 2xl:w-6" /> : <WifiOff className="h-5 w-5 2xl:h-6 2xl:w-6" />}
             <span className="hidden whitespace-nowrap text-[10px] font-semibold 2xl:inline">
-              {isOnline ? 'Internet Online' : 'Internet Offline'}
+              {internetState === 'checking' ? 'A verificar…' : isOnline ? 'Internet Online' : 'Offline'}
             </span>
           </div>
+
+          {/* Indicador de Intranet (só com licença que permite a rede local) */}
+          <IndicadorIntranet />
 
           {/* Indicador de Sincronização */}
           <div

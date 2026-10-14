@@ -1,3 +1,4 @@
+import { useLicenseInfo } from '@/ganchos/usar-estado-rede';
 import React, { useState, useRef, useEffect } from 'react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useSearchParams } from 'react-router-dom';
@@ -108,7 +109,7 @@ import { sqlite } from '@/bibliotecas/adaptador-sqlite';
 import { formatAngolanIBAN, identifyBankFromIBAN, validateAngolanIBAN, ANGOLAN_BANKS } from '@/bibliotecas/ibanHelper';
 import { v4 as uuidv4 } from 'uuid';
 import { appAdapter } from '@/bibliotecas/adaptador-aplicacao';
-import { validateLicense, getLicenseTypeName, getMachineId } from '@/bibliotecas/licenciamento';
+import { validateLicense, getLicenseTypeName, getMachineId, licenseAllowsFeature } from '@/bibliotecas/licenciamento';
 import { normalizeLicenseKey } from '@/bibliotecas/payload-licenca';
 import { CLOUD_LICENSE_EVENT, isCloudLicenseKey } from '@/bibliotecas/licenca-nuvem-cliente';
 import { activateThisComputer } from '@/servicos/ServicoLicencaNuvem';
@@ -148,6 +149,9 @@ export default function Settings() {
         syncData, messageTemplates, updateMessageTemplate, addMessageTemplate,
         deleteMessageTemplate, serverInfo, toggleServerMode, connectedClients, refreshData
     } = useData();
+    // Multi-Empresas só aparece nos Módulos quando a licença o inclui.
+    const multiTenantLicense = useLicenseInfo(companySettings?.licenseKey);
+    const multiTenantAllowed = licenseAllowsFeature(multiTenantLicense, 'multi_empresa');
 
     const [license, setLicense] = useState<any>({ tier: 'singular', isValid: false, type: 'trial' });
     const [previewLicense, setPreviewLicense] = useState<any>({ tier: 'singular', isValid: false, type: 'trial' });
@@ -2081,7 +2085,7 @@ export default function Settings() {
                                 </div>
                             </div>
 
-                            <div className="flex flex-row items-center justify-between rounded-lg border p-4">
+                            {multiTenantAllowed && <div className="flex flex-row items-center justify-between rounded-lg border p-4">
                                 <div className="space-y-0.5">
                                     <div className="flex items-center gap-2">
                                         <Building2 className="h-4 w-4 text-primary" />
@@ -2099,7 +2103,7 @@ export default function Settings() {
                                     }}
                                     disabled={!isSuperAdmin}
                                 />
-                            </div>
+                            </div>}
                         </CardContent>
                     </Card>
                 </TabsContent>

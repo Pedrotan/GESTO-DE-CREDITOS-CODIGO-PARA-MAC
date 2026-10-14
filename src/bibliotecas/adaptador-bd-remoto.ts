@@ -105,6 +105,32 @@ async function executeRemoteSql(sql: string, params: any[] = [], method: 'all' |
     }
 }
 
+/** Endereço do servidor da rede local a que este posto está ligado (vazio se não houver). */
+export const remoteServerAddress = () => {
+    const url = remoteSyncUrl || getInitialUrl();
+    return url ? url.replace(/\/$/, '').replace(/\/sync$/, '') : '';
+};
+
+/**
+ * O servidor da rede local responde? Qualquer resposta HTTP conta (o servidor está lá); só a falta de resposta
+ * (rede desligada, servidor parado) conta como desligado. Usa a chave do posto, para não parecer um ataque.
+ */
+export async function pingRemoteServer(): Promise<boolean> {
+    const base = remoteServerAddress();
+    if (!base) return false;
+    try {
+        await fetch(`${base}/api/sql`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-sync-passkey': remoteSyncPasskey || getStoredPasskey() },
+            body: JSON.stringify({ sql: 'SELECT 1 AS ok', params: [], method: 'get' }),
+            signal: AbortSignal.timeout(5_000),
+        });
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export const remoteSql = {
     get: async <T>(sql: string, params: any[] = []): Promise<T | null> => {
         return executeRemoteSql(sql, params, 'get');

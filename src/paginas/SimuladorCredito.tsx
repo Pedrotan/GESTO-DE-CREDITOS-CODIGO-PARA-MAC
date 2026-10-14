@@ -492,7 +492,7 @@ export function SimuladorCredito() {
                                             <SelectContent>{products.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}</SelectContent>
                                         </Select>
                                         <p className="text-[11px] text-muted-foreground">
-                                            {formatCurrency(product.minAmount)} a {formatCurrency(product.maxAmount)} · {product.minMonths} a {product.maxMonths} meses · {product.rateType === 'variable' ? `${config.indexName} + ${formatDecimal(product.spread, 2)} p.p.` : `TAN ${formatPercent(product.annualRate)}`}
+                                            {formatCurrency(product.minAmount)} a {formatCurrency(product.maxAmount)} · {termOptions.length ? `${termRange.min} a ${termRange.max} meses · taxa por prazo (tabela)` : `${product.minMonths} a ${product.maxMonths} meses · ${product.rateType === 'variable' ? `${config.indexName} + ${formatDecimal(product.spread, 2)} p.p.` : `TAN ${formatPercent(product.annualRate)}`}`}
                                         </p>
                                     </Section>
 
@@ -740,7 +740,7 @@ export function SimuladorCredito() {
 
                                     <GraficosSimulacao result={result} />
                                     <TabelaCronograma result={result} title={`Cronograma ${isSaved && saved ? saved.number : 'da simulação'}`}
-                                        subtitle={`${form.clientName || 'Cliente'} · ${product.name} · ${formatCurrency(form.principal)} · ${form.months} meses · TAN ${formatPercent(annualRate)} · ${AMORTIZATION_LABELS[form.system]}`} />
+                                        subtitle={`${form.clientName || 'Cliente'} · ${product.name} · ${formatCurrency(form.principal)} · ${form.months} meses · ${flat ? `taxa do prazo ${formatPercent(form.termRate)}` : `TAN ${formatPercent(annualRate)}`} · ${AMORTIZATION_LABELS[form.system]}`} />
                                 </>
                             )}
                         </div>

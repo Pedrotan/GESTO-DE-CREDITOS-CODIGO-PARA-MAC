@@ -251,3 +251,18 @@ test('demonstração de 3 dias: decidida no servidor, uma por computador, e não
     const bad = await invoke(licencas, { url: '/api/licencas/teste', body: { machine_hash: 'xyz' } });
     assert.equal(bad.statusCode, 400);
 });
+
+test('Multi-Empresas e intranet: o servidor decide pelo plano (funcionalidades) ou pelo escalão', async () => {
+    const L = await import(pathToFileURL(path.join(ROOT, 'vercel-api/_licencas.js')).href);
+    const [row] = await sql(`SELECT empresa_id, plano_id FROM tango_licencas LIMIT 1`);
+    assert.ok(row, 'há uma licença criada nos testes anteriores');
+    await sql(`UPDATE tango_licencas SET escalao = 'singular' WHERE empresa_id = $1`, [row.empresa_id]);
+    await sql(`UPDATE tango_planos SET funcionalidades = '{}'::jsonb WHERE id = $1`, [row.plano_id]);
+    assert.equal(await L.tenantAllowsFeature(sql, row.empresa_id, 'multi_empresa'), false, 'singular sem o módulo no plano');
+    await sql(`UPDATE tango_licencas SET escalao = 'empresarial' WHERE empresa_id = $1`, [row.empresa_id]);
+    assert.equal(await L.tenantAllowsFeature(sql, row.empresa_id, 'multi_empresa'), true, 'empresarial inclui');
+    await sql(`UPDATE tango_planos SET funcionalidades = '{"multi_empresa": false}'::jsonb WHERE id = $1`, [row.plano_id]);
+    assert.equal(await L.tenantAllowsFeature(sql, row.empresa_id, 'multi_empresa'), false, 'o plano pode retirar o módulo');
+    assert.equal(await L.tenantAllowsFeature(sql, 'EMPRESA-SEM-LICENCA', 'multi_empresa'), true, 'empresas antigas mantêm o que tinham');
+    await sql(`UPDATE tango_planos SET funcionalidades = '{}'::jsonb WHERE id = $1`, [row.plano_id]);
+});

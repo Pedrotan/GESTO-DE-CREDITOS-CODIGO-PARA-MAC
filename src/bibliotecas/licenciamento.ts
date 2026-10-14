@@ -183,7 +183,20 @@ export interface LicenseInfo {
     isCloud?: boolean;
     /** Sem token válido (mais de 7 dias sem ligação, licença terminada ou relógio atrasado): só leitura. */
     readOnly?: boolean;
+    /** Módulos do plano no servidor (ex.: intranet, multi_empresa). */
+    features?: Record<string, unknown>;
 }
+
+/**
+ * A licença inclui o módulo? O plano no servidor pode dizê-lo explicitamente (funcionalidades); sem isso:
+ * a rede local (intranet) vem com o escalão empresarial e o Multi-Empresas só quando o plano o inclui.
+ */
+export const licenseAllowsFeature = (info: LicenseInfo | null | undefined, feature: 'intranet' | 'multi_empresa'): boolean => {
+    if (!info?.isValid) return false;
+    const explicit = info.features?.[feature];
+    if (typeof explicit === 'boolean') return explicit;
+    return feature === 'intranet' ? info.tier === 'empresarial' : false;
+};
 
 /**
  * Gets the secure Machine ID via Electron IPC

@@ -14,6 +14,8 @@ export type CloudLicenseClaims = {
     plano_nome?: string;
     escalao: string;
     max_maquinas: number;
+    /** Módulos incluídos no plano (ex.: { intranet: true, multi_empresa: true }). */
+    funcionalidades?: Record<string, unknown>;
     machine_hash: string;
     /** Demonstração: início registado no servidor. */
     data_inicio?: string;
@@ -55,6 +57,7 @@ export type CloudLicenseStatus = {
         dataFim: string | null;
         validoAte: string;
         maxMaquinas: number;
+        funcionalidades?: Record<string, unknown>;
     };
     lastCheckAt?: string;
     refusal?: CloudLicenseRecord['refusal'];
@@ -108,6 +111,7 @@ const describe = (claims: CloudLicenseClaims): NonNullable<CloudLicenseStatus['l
     dataFim: claims.data_fim,
     validoAte: claims.valido_ate,
     maxMaquinas: Number(claims.max_maquinas),
+    funcionalidades: claims.funcionalidades && typeof claims.funcionalidades === 'object' ? claims.funcionalidades : {},
 });
 
 /** Estado da licença deste computador a partir do registo guardado (puro, para testes). */

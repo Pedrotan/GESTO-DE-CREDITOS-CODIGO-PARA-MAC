@@ -621,15 +621,31 @@ export const licenseDetails = async (sql, tenantId) => {
   };
 };
 
+/**
+ * A licença da empresa inclui o módulo? O plano pode dizê-lo (funcionalidades.<módulo> = true/false); sem isso,
+ * os módulos de rede e Multi-Empresas vêm com o escalão empresarial. Empresas sem licença no servidor (antigas)
+ * mantêm o que tinham.
+ */
+export const tenantAllowsFeature = async (sql, tenantId, feature) => {
+  const [row] = await sql(`SELECT l.escalao, p.funcionalidades::text AS funcionalidades FROM tango_licencas l
+    JOIN tango_planos p ON p.id = l.plano_id WHERE UPPER(l.empresa_id) = UPPER($1)`, [tenantId]);
+  if (!row) return true;
+  const explicit = parseJsonText(row.funcionalidades, {})[feature];
+  return typeof explicit === 'boolean' ? explicit : row.escalao === 'empresarial';
+};
+
 /** Resumo da licença para a versão web (que não pede chave: herda a licença da empresa). */
 export const licenseSummary = async (sql, tenantId) => {
   const rows = await listLicenses(sql);
   const row = rows.find(item => String(item.empresa_id).toUpperCase() === String(tenantId).toUpperCase());
   if (!row) return null;
   const license = toPublicLicense(row);
+  const [plan] = await sql(`SELECT funcionalidades::text AS funcionalidades FROM tango_planos WHERE id = $1`, [license.plan]);
   return {
     plan: license.plan, planName: license.planName, tier: license.tier, status: license.status, endsAt: license.endsAt,
     daysRemaining: license.daysRemaining, maxMachines: license.maxMachines, machines: license.machines,
+    // Módulos do plano (ex.: multi_empresa): a versão web mostra-os só quando a licença os inclui.
+    features: parseJsonText(plan?.funcionalidades, {}),
   };
 };
 

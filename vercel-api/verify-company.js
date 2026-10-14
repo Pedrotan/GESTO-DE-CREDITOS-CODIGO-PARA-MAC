@@ -3,7 +3,7 @@ import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
-import { licenseGate, licenseSummary } from './_licencas.js';
+import { licenseGate, licenseSummary, tenantAllowsFeature } from './_licencas.js';
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -164,6 +164,10 @@ export default async function handler(req, res) {
     // Licença da empresa para mostrar na versão web (não bloqueia se não estiver disponível).
     let licenseInfo = null;
     try { licenseInfo = license.license ? await licenseSummary(sql, tenantId) : null; } catch { licenseInfo = null; }
+    // Multi-Empresas só se a licença o incluir (decidido aqui, no servidor). Sem o módulo, o seletor de contas
+    // desaparece mas os dados das outras empresas ficam guardados.
+    let multiTenantAllowed = true;
+    try { multiTenantAllowed = await tenantAllowsFeature(sql, tenantId, 'multi_empresa'); } catch { multiTenantAllowed = true; }
 
     // Empresa aprovada com sucesso!
     return send(res, 200, {
@@ -176,7 +180,8 @@ export default async function handler(req, res) {
       status: tenant.status,
       expiresAt: tenant.expires_at,
       // Layout da versão web: true/false conforme configurado na empresa; null = ainda desconhecido.
-      multiTenant: typeof tenant.multi_tenant === 'boolean' ? tenant.multi_tenant : null,
+      multiTenant: !multiTenantAllowed ? false : typeof tenant.multi_tenant === 'boolean' ? tenant.multi_tenant : null,
+      multiTenantAllowed,
       license: licenseInfo,
       message: 'Empresa verificada e autorizada com sucesso!'
     });

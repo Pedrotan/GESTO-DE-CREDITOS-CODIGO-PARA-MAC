@@ -24,6 +24,7 @@ export type CloudLicenseStatus = {
         dataFim: string | null;
         validoAte: string;
         maxMaquinas: number;
+        funcionalidades?: Record<string, unknown>;
     };
     lastCheckAt?: string;
     refusal?: { code: string; message: string; at: string } | null;
@@ -49,6 +50,7 @@ const api = () => (typeof window !== 'undefined' ? (window as any).electronAPI :
 const WEB_LICENSE_KEY = 'tango_web_company_license';
 
 export type WebCompanyLicense = {
+    features?: Record<string, unknown>;
     plan: string;
     planName: string;
     tier: string;
@@ -66,6 +68,7 @@ export const webLicenseToStatus = (license: WebCompanyLicense | null): CloudLice
         licenca: {
             empresaId: '', plano: license.plan, planoNome: license.planName, escalao: license.tier,
             dataFim: license.endsAt, validoAte: license.endsAt || '', maxMaquinas: license.maxMachines,
+            funcionalidades: license.features || {},
         },
         message: license.status === 'ativa' ? undefined : `A licença da empresa está ${license.status}. Contacte o suporte Tango: +244 941 537 486.`,
     };
@@ -192,6 +195,7 @@ export const cloudStatusToLicenseInfo = (status: CloudLicenseStatus, now = new D
         tier: licenca.escalao === 'singular' ? 'singular' : 'empresarial',
         expirationDate: end,
         maxDevices: licenca.maxMaquinas,
+        features: licenca.funcionalidades || {},
         status: readOnly ? 'expired' : 'active',
         daysRemaining: Math.max(0, differenceInDays(end, now)),
         message: readOnly ? status.message : undefined,
