@@ -15,6 +15,8 @@ import { formatCurrency, formatDate } from '@/bibliotecas/formatters';
 import { generateClientProfilePDF, generateClientGeneralPaymentHistoryPDF, generateReceiptPDF } from '@/bibliotecas/pdf';
 import { useToast } from '@/ganchos/usar-toast';
 import { useData } from '@/contextos/ContextoDados';
+import { CLIENT_STATUS_LABELS, clientDisplayStatus } from '@/bibliotecas/estado-cliente';
+import { SPOUSE_STATUS_LABELS, spouseDataStatus } from '@/bibliotecas/conjuge';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import { PaymentSlipModal } from './PaymentSlipModal';
@@ -144,7 +146,7 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
                             <DialogDescription className="flex items-center gap-2 mt-1 flex-wrap">
                                 <span>ID: {client.id}</span>
                                 <Badge variant={client.status === 'active' ? 'success' : client.status === 'blocked' ? 'destructive' : 'warning'}>
-                                    {client.status === 'active' ? 'Ativo' : client.status === 'blocked' ? 'Bloqueado' : 'Suspenso'}
+                                    {CLIENT_STATUS_LABELS[clientDisplayStatus(client, safeCredits)]}
                                 </Badge>
                                 <Badge variant={
                                     client.riskLevel === 'low' ? 'success' :
@@ -234,6 +236,20 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
                                         <span className="font-medium min-w-[80px]">Registo:</span>
                                         <span>{formatDate(client.createdAt)}</span>
                                     </div>
+                                    {spouseDataStatus(client) !== 'not_applicable' && (
+                                        <div className="flex items-start gap-3">
+                                            <FileText className="mt-0.5 h-4 w-4 text-muted-foreground" />
+                                            <span className="font-medium min-w-[80px]">Cônjuge:</span>
+                                            <span>
+                                                <span className={spouseDataStatus(client) === 'provided' ? 'font-semibold text-emerald-700' : 'font-semibold text-amber-700'}>
+                                                    Dados do cônjuge: {SPOUSE_STATUS_LABELS[spouseDataStatus(client)]}
+                                                </span>
+                                                {spouseDataStatus(client) === 'provided' && <span className="block text-muted-foreground">{[client.spouseName, client.spouseBi && `BI ${client.spouseBi}`, client.spousePhone, client.spouseOccupation].filter(Boolean).join(' · ')}</span>}
+                                                {spouseDataStatus(client) === 'refused' && client.spouseDataRefusedAt && <span className="block text-muted-foreground">Recusa registada em {formatDate(client.spouseDataRefusedAt)} por {client.spouseDataRefusedBy || '—'}. Pode preencher mais tarde ao editar a ficha.</span>}
+                                                {spouseDataStatus(client) === 'missing' && <span className="block text-muted-foreground">Edite a ficha para preencher ou registar a recusa.</span>}
+                                            </span>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
 

@@ -60,6 +60,17 @@ export interface Client {
   spouseNif?: string;
   spousePhone?: string;
   spouseEmail?: string;
+  spouseBirthDate?: string;
+  /** Profissão / entidade empregadora do cônjuge. */
+  spouseOccupation?: string;
+  spouseIncome?: number;
+  /** O cliente recusou fornecer os dados do cônjuge («Ignorar»): quando e por quem foi registado. */
+  spouseDataRefused?: boolean;
+  spouseDataRefusedAt?: string;
+  spouseDataRefusedBy?: string;
+  /** Consentimento para o tratamento dos dados do cônjuge (registado quando são preenchidos). */
+  spouseConsentAt?: string;
+  spouseConsentBy?: string;
   // Campos exclusivos de pessoa colectiva
   foundationDate?: string;
   legalForm?: string;

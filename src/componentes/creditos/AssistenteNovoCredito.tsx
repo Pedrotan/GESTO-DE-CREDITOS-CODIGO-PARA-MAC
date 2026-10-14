@@ -23,6 +23,7 @@ import { RISK_LABELS } from '@/bibliotecas/risco-simulacao';
 import { productLimitErrors } from '@/bibliotecas/config-simulador';
 import { activeProducts, clientHistory, computeSimulation, defaultForm, formFromSimulation, nearestTerm, parseDetails, productFields, simulationStatus, termOptionsFor, termRatePatch, type SimulatorForm } from '@/componentes/simulador/modelo';
 import { DecimalInput } from '@/componentes/ui/DecimalInput';
+import { CLIENT_STATUS_LABELS, clientDisplayStatus } from '@/bibliotecas/estado-cliente';
 import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import type { Credit } from '@/tipos/credito';
@@ -220,7 +221,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                                     <Row label="Rendimento mensal" value={client.monthlyIncome ? formatCurrency(Number(client.monthlyIncome)) : 'Não indicado'} />
                                     <Row label="Limite disponível" value={formatCurrency(Number(client.availableCredit) || 0)} />
                                     <Row label="Risco" value={RISK_LABELS[client.riskLevel as 'low'] || client.riskLevel} tone={client.riskLevel === 'high' ? 'red' : undefined} />
-                                    <Row label="Estado" value={client.status === 'active' ? 'Ativo' : client.status === 'blocked' ? 'Bloqueado' : 'Inativo'} tone={client.status === 'active' ? 'green' : 'red'} />
+                                    <Row label="Estado" value={CLIENT_STATUS_LABELS[clientDisplayStatus(client, credits)]} tone={client.status === 'active' ? 'green' : client.status === 'blocked' ? 'red' : undefined} />
                                 </div>
                                 <div className="rounded-xl border p-3">
                                     <p className="mb-1 text-xs font-bold uppercase text-muted-foreground">Créditos do cliente ({clientRows.length})</p>

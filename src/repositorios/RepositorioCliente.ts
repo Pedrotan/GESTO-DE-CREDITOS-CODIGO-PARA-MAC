@@ -15,7 +15,7 @@ export class RepositorioCliente extends RepositorioBase {
     }
 
     static async insert(client: Client): Promise<void> {
-        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         const params = [
             client.id, client.name, client.nif, client.phone, client.email, client.address,
             client.creditLimit, client.usedCredit, client.availableCredit, client.monthlyIncome || 0,
@@ -41,7 +41,15 @@ export class RepositorioCliente extends RepositorioBase {
             client.spousePhone || null,
             client.spouseEmail || null,
             client.legalRepresentative || null,
-            client.legalRepRole || null
+            client.legalRepRole || null,
+            client.spouseBirthDate || null,
+            client.spouseOccupation || null,
+            client.spouseIncome ?? null,
+            client.spouseDataRefused ? 1 : 0,
+            client.spouseDataRefusedAt || null,
+            client.spouseDataRefusedBy || null,
+            client.spouseConsentAt || null,
+            client.spouseConsentBy || null
         ];
         await this.execute(sql, params);
     }
@@ -85,7 +93,15 @@ export class RepositorioCliente extends RepositorioBase {
             spousePhone = COALESCE(?, spousePhone),
             spouseEmail = COALESCE(?, spouseEmail),
             legalRepresentative = COALESCE(?, legalRepresentative),
-            legalRepRole = COALESCE(?, legalRepRole)
+            legalRepRole = COALESCE(?, legalRepRole),
+            spouseBirthDate = COALESCE(?, spouseBirthDate),
+            spouseOccupation = COALESCE(?, spouseOccupation),
+            spouseIncome = COALESCE(?, spouseIncome),
+            spouseDataRefused = COALESCE(?, spouseDataRefused),
+            spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt),
+            spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy),
+            spouseConsentAt = COALESCE(?, spouseConsentAt),
+            spouseConsentBy = COALESCE(?, spouseConsentBy)
             WHERE id = ?`;
         const params = [
             updates.name, updates.nif, updates.phone, updates.email, updates.address,
@@ -112,6 +128,14 @@ export class RepositorioCliente extends RepositorioBase {
             updates.spouseEmail ?? null,
             updates.legalRepresentative ?? null,
             updates.legalRepRole ?? null,
+            updates.spouseBirthDate ?? null,
+            updates.spouseOccupation ?? null,
+            updates.spouseIncome ?? null,
+            updates.spouseDataRefused === undefined ? null : (updates.spouseDataRefused ? 1 : 0),
+            updates.spouseDataRefusedAt ?? null,
+            updates.spouseDataRefusedBy ?? null,
+            updates.spouseConsentAt ?? null,
+            updates.spouseConsentBy ?? null,
             id
         ];
         await this.execute(sql, params);

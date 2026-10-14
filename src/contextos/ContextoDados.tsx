@@ -1,3 +1,4 @@
+import { automaticStatusChangeText } from '@/bibliotecas/estado-cliente';
 import { formatCurrency } from '@/bibliotecas/formatters';
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
 
@@ -401,6 +402,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const updatedClient = { ...client, ...nextLimitState, usuario_id: targetUserId };
         await ServicoCliente.update(client.id, updatedClient);
         setClients(prev => prev.map(c => c.id === client.id ? { ...c, ...nextLimitState, usuario_id: targetUserId } : c));
+        const statusText = automaticStatusChangeText(client.name, client.status, nextLimitState.status);
+        if (statusText) {
+            await ServicoAuditoria.addLog('update', 'client', statusText, user?.id || authUser?.id, user?.name || authUser?.name || 'Sistema',
+                { status: client.status }, { status: nextLimitState.status }, { clientId: client.id, automatic: true }).catch(() => undefined);
+        }
     };
 
     const hydrateLogos = async (settings: any) => {
@@ -792,6 +798,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                         ServicoCliente.update(c.id, c).catch(err =>
                             console.warn("[ContextoDados] Falha ao persistir limite recalculado:", err)
                         );
+                        const before = (loadedClients || []).find(original => original.id === c.id)?.status;
+                        const statusText = automaticStatusChangeText(c.name, before, c.status);
+                        if (statusText) {
+                            void ServicoAuditoria.addLog('update', 'client', statusText, authUser?.id, authUser?.name || 'Sistema',
+                                { status: before }, { status: c.status }, { clientId: c.id, automatic: true }).catch(() => undefined);
+                        }
                     });
 
                 setClients(normalizedClients);

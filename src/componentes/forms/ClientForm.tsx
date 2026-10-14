@@ -64,6 +64,8 @@ import { AlertModal } from '@/componentes/ui/AlertModal';
 import { ANGOLAN_BANKS, formatAngolanIBAN, identifyBankFromIBAN, getBankLogoUrl, validateAngolanIBAN } from '@/bibliotecas/ibanHelper';
 import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
+import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { needsSpouse, spouseFieldsToSave } from '@/bibliotecas/conjuge';
 import { cn } from '@/bibliotecas/utils';
 import { formatAngolanPhone } from '@/bibliotecas/formatters';
 import { analisarTelefoneAngola, telefoneOpcionalValido } from '@/bibliotecas/operadoras-telefone';
@@ -98,6 +100,10 @@ const clientSchema = z.object({
     spousePhone: z.string().optional()
         .refine(value => telefoneOpcionalValido(value), value => ({ message: analisarTelefoneAngola(value || '').mensagem })),
     spouseEmail: z.string().email('Email do cônjuge inválido').or(z.literal('')).optional(),
+    spouseBirthDate: z.string().optional(),
+    spouseOccupation: z.string().optional(),
+    spouseIncome: z.coerce.number().min(0).optional(),
+    spouseDataRefused: z.boolean().optional(),
     // --- Campos exclusivos da carteira de Aposentados ---
     workInstitution: z.string().optional(),
     socialSecurityNumber: z.string().optional(),
@@ -218,6 +224,7 @@ function isPdfDocument(doc: ClientDocument): boolean {
 }
 
 export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Guardar', category = 'COMUM' }: ClientFormProps) {
+    const { user: authUser } = useAuth();
     const [applyInterest, setApplyInterest] = useState(
         initialData ? (initialData.defaultInterestRate > 0 || initialData.lateInterestRate > 0) : false
     );
@@ -283,6 +290,10 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 spouseNif: initialData.spouseNif || '',
                 spousePhone: initialData.spousePhone || '',
                 spouseEmail: initialData.spouseEmail || '',
+                spouseBirthDate: initialData.spouseBirthDate || '',
+                spouseOccupation: initialData.spouseOccupation || '',
+                spouseIncome: Number(initialData.spouseIncome) || 0,
+                spouseDataRefused: Boolean(initialData.spouseDataRefused),
                 workInstitution: initialData.workInstitution || '',
                 socialSecurityNumber: initialData.socialSecurityNumber || '',
                 clientType: initialData.clientType || detectClientType(initialData.nif),
@@ -340,7 +351,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
         form.setValue('clientType', next, { shouldDirty: true });
         const limpar = next === 'EMPRESA'
             ? ['birthDate', 'age', 'gender', 'maritalStatus', 'issueDate', 'expiryDate',
-               'spouseName', 'spouseBi', 'spouseNif', 'spousePhone', 'spouseEmail',
+               'spouseName', 'spouseBi', 'spouseNif', 'spousePhone', 'spouseEmail', 'spouseBirthDate', 'spouseOccupation',
                'workInstitution', 'socialSecurityNumber'] as const
             : ['foundationDate', 'legalForm', 'businessSector', 'commercialRegistry', 'legalRepresentative', 'legalRepRole'] as const;
         limpar.forEach((campo) => {
@@ -616,6 +627,8 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
         clearDraft();
         onSubmit({
             ...data,
+            // Cônjuge: só para casados/união de facto; a recusa e o consentimento ficam registados.
+            ...spouseFieldsToSave(data, initialData, authUser?.name || 'Sistema'),
             clientType,
             documentType,
             documents,
@@ -1221,13 +1234,38 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
 
                                 {/* Linha 2b: Cônjuge — só aparece para casados ou união de facto,
                                     porque em comunhão de bens responde solidariamente pela dívida */}
-                                {['CASADO', 'UNIAO_DE_FACTO'].includes(form.watch('maritalStatus') || '') && (
-                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 pt-1 bg-blue-50/50 p-3.5 rounded-xl border border-blue-100">
+                                {needsSpouse(form.watch('maritalStatus')) && form.watch('spouseDataRefused') && (
+                                    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 animate-in fade-in slide-in-from-top-2 duration-300">
+                                        <Users className="h-4 w-4 shrink-0 text-amber-600" />
+                                        <p className="min-w-0 flex-1 text-xs text-slate-700">
+                                            <span className="font-bold">Dados do cônjuge: Não fornecidos pelo cliente.</span>{' '}
+                                            {initialData?.spouseDataRefused && initialData.spouseDataRefusedAt
+                                                ? `Recusa registada em ${new Date(initialData.spouseDataRefusedAt).toLocaleDateString('pt-AO')} por ${initialData.spouseDataRefusedBy || '—'}.`
+                                                : 'A recusa fica registada com a data e o utilizador ao guardar.'}
+                                        </p>
+                                        <Button type="button" size="sm" variant="outline" className="h-8 rounded-lg text-xs"
+                                            onClick={() => form.setValue('spouseDataRefused', false, { shouldDirty: true })}>
+                                            Preencher dados do cônjuge
+                                        </Button>
+                                    </div>
+                                )}
+                                {needsSpouse(form.watch('maritalStatus')) && !form.watch('spouseDataRefused') && (
+                                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 pt-1 bg-blue-50/50 p-3.5 rounded-xl border border-blue-100 animate-in fade-in slide-in-from-top-2 duration-300">
                                         <div className="lg:col-span-3 flex items-center gap-1.5">
                                             <Users className="h-3.5 w-3.5 text-blue-600 shrink-0" />
                                             <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">
                                                 Dados do Cônjuge
                                             </p>
+                                            <Button type="button" size="sm" variant="ghost" className="ml-auto h-7 rounded-lg text-xs text-slate-600"
+                                                title="O cliente não aceita fornecer os dados do cônjuge"
+                                                onClick={() => {
+                                                    (['spouseName', 'spouseBi', 'spouseNif', 'spousePhone', 'spouseEmail', 'spouseBirthDate', 'spouseOccupation'] as const)
+                                                        .forEach(campo => form.setValue(campo, '', { shouldDirty: true }));
+                                                    form.setValue('spouseIncome', 0, { shouldDirty: true });
+                                                    form.setValue('spouseDataRefused', true, { shouldDirty: true });
+                                                }}>
+                                                Ignorar
+                                            </Button>
                                         </div>
 
                                         <FormField
@@ -1325,6 +1363,48 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                 </FormItem>
                                             )}
                                         />
+                                                <FormField
+                                                    control={form.control}
+                                                    name="spouseBirthDate"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel className="text-xs font-bold text-slate-700">Data de Nascimento do Cônjuge</FormLabel>
+                                                            <FormControl>
+                                                                <Input type="date" {...field} value={field.value || ''}
+                                                                    className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                                <FormField
+                                                    control={form.control}
+                                                    name="spouseOccupation"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel className="text-xs font-bold text-slate-700">Profissão / Entidade Empregadora</FormLabel>
+                                                            <FormControl>
+                                                                <Input placeholder="Ex.: Professora — Escola n.º 123" {...field} value={field.value || ''}
+                                                                    className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                                <FormField
+                                                    control={form.control}
+                                                    name="spouseIncome"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel className="text-xs font-bold text-slate-700">Rendimento Mensal do Cônjuge (opcional)</FormLabel>
+                                                            <FormControl>
+                                                                <CurrencyInput value={Number(field.value) || 0} onValueChange={field.onChange}
+                                                                    className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
                                     </div>
                                 )}
 

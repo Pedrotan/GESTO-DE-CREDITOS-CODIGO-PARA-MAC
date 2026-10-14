@@ -1309,6 +1309,14 @@ const createTables = async () => {
     await safeAddColumn("clients", "spouseNif", "TEXT");
     await safeAddColumn("clients", "spousePhone", "TEXT");
     await safeAddColumn("clients", "spouseEmail", "TEXT");
+    await safeAddColumn("clients", "spouseBirthDate", "TEXT");
+    await safeAddColumn("clients", "spouseOccupation", "TEXT");
+    await safeAddColumn("clients", "spouseIncome", "REAL");
+    await safeAddColumn("clients", "spouseDataRefused", "INTEGER DEFAULT 0");
+    await safeAddColumn("clients", "spouseDataRefusedAt", "TEXT");
+    await safeAddColumn("clients", "spouseDataRefusedBy", "TEXT");
+    await safeAddColumn("clients", "spouseConsentAt", "TEXT");
+    await safeAddColumn("clients", "spouseConsentBy", "TEXT");
     await safeAddColumn("clients", "legalRepresentative", "TEXT");
     await safeAddColumn("clients", "legalRepRole", "TEXT");
 

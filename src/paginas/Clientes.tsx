@@ -2,6 +2,7 @@ import { InvestigacaoAuditoria } from '@/componentes/auditoria/InvestigacaoAudit
 import type { InvestigationTarget } from '@/componentes/auditoria/DetalheAuditoria';
 import { FileClock } from 'lucide-react';
 import { useState, useEffect, useMemo } from 'react';
+import { CLIENT_STATUS_LABELS, clientDisplayStatus, type ClientDisplayStatus } from '@/bibliotecas/estado-cliente';
 import { clientCreditStanding, newCreditBlockReason, requiresCreditApproval } from '@/bibliotecas/regras-credito';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
@@ -86,10 +87,11 @@ import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 
 type BadgeVariant = 'default' | 'primary' | 'secondary' | 'destructive' | 'success' | 'warning' | 'info' | 'outline';
 
-const statusConfig: Record<string, { label: string; variant: BadgeVariant }> = {
-    active: { label: 'Activo', variant: 'success' },
-    blocked: { label: 'Bloqueado', variant: 'destructive' },
-    inactive: { label: 'Suspenso', variant: 'warning' },
+const statusConfig: Record<ClientDisplayStatus, { label: string; variant: BadgeVariant }> = {
+    active: { label: CLIENT_STATUS_LABELS.active, variant: 'success' },
+    blocked: { label: CLIENT_STATUS_LABELS.blocked, variant: 'destructive' },
+    inactive: { label: CLIENT_STATUS_LABELS.inactive, variant: 'secondary' },
+    no_active_credit: { label: CLIENT_STATUS_LABELS.no_active_credit, variant: 'warning' },
 };
 
 const riskConfig: Record<string, { label: string; variant: BadgeVariant }> = {
@@ -131,6 +133,8 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
     const [selectedClient, setSelectedClient] = useState<Client | undefined>(undefined);
     const [isLimitsModalOpen, setIsLimitsModalOpen] = useState(false);
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked'>('all');
+    // Filtro da tabela: Activo / Inactivo / Sem crédito activo / Bloqueado.
+    const [tableStatus, setTableStatus] = useState<'all' | ClientDisplayStatus>('all');
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
 
@@ -270,9 +274,10 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
             (client) =>
                 ((client.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
                     (client.nif || '').includes(searchTerm)) &&
-                (statusFilter === 'all' ? true : client.status === statusFilter)
+                (statusFilter === 'all' ? true : client.status === statusFilter) &&
+                (tableStatus === 'all' ? true : clientDisplayStatus(client, credits) === tableStatus)
         );
-    }, [categoryClients, searchTerm, statusFilter]);
+    }, [categoryClients, searchTerm, statusFilter, tableStatus, credits]);
 
     const totalPages = Math.max(1, Math.ceil(filteredClients.length / itemsPerPage));
     const paginatedClients = useMemo(() => {
@@ -282,7 +287,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, statusFilter]);
+    }, [searchTerm, statusFilter, tableStatus]);
 
     // Calcular estatísticas estritas da categoria atual (Normal, Aposentado, Estrangeiro)
     const totalClients = categoryClients.length;
@@ -645,6 +650,15 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                         className="pl-10"
                     />
                 </div>
+                <select
+                    aria-label="Filtrar por estado"
+                    value={tableStatus}
+                    onChange={(e) => setTableStatus(e.target.value as typeof tableStatus)}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm sm:w-56"
+                >
+                    <option value="all">Todos os estados</option>
+                    {(Object.keys(CLIENT_STATUS_LABELS) as ClientDisplayStatus[]).map(key => <option key={key} value={key}>{CLIENT_STATUS_LABELS[key]}</option>)}
+                </select>
                 <div className="flex gap-2">
                     <Button variant="outline" className="gap-2" onClick={handleDownloadTemplate}>
                         <Download className="h-4 w-4" />
@@ -1052,7 +1066,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                                 <TableCell className="text-right font-medium">{formatCurrency(client.creditLimit)}</TableCell>
                                 <TableCell className="text-right">{formatCurrency(client.usedCredit)}</TableCell>
                                 <TableCell className="text-right font-medium text-success">{formatCurrency(client.availableCredit)}</TableCell>
-                                <TableCell><Badge variant={statusConfig[client.status]?.variant || 'default'}>{statusConfig[client.status]?.label || client.status}</Badge></TableCell>
+                                <TableCell>{(() => { const shown = clientDisplayStatus(client, credits); return <Badge variant={statusConfig[shown].variant}>{statusConfig[shown].label}</Badge>; })()}</TableCell>
                                 <TableCell><Badge variant={riskConfig[client.riskLevel]?.variant || 'default'}>{riskConfig[client.riskLevel]?.label || client.riskLevel}</Badge></TableCell>
                                 {companySettings.enableScoringModule !== false && (
                                     <TableCell className="text-right">

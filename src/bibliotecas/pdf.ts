@@ -1425,6 +1425,9 @@ export const buildClientProfileDoc = (
         const spouseText = `${client.spouseName}${spouseDoc ? ` (NIF/BI: ${spouseDoc})` : ''}${client.spousePhone ? ` - Tel: ${client.spousePhone}` : ''}`;
         identificationRows.push(['Cônjuge:', spouseText, 'Regime:', 'Comunhão de Bens']);
     }
+    else if (client.spouseDataRefused && ['CASADO', 'UNIAO_DE_FACTO'].includes(String(client.maritalStatus || '').toUpperCase())) {
+        identificationRows.push(['Cônjuge:', 'Dados não fornecidos pelo cliente', 'Registo:', client.spouseDataRefusedAt ? formatDate(client.spouseDataRefusedAt) : '—']);
+    }
 
     // Dados Profissionais / Entidade Empregadora / Representante
     if (client.workInstitution || client.socialSecurityNumber || client.legalRepresentative) {
@@ -1461,7 +1464,8 @@ export const buildClientProfileDoc = (
     // ─────────────────────────────────────────────────────────────────────────────
     currentY = drawSectionHeader("2. Enquadramento e Condições de Crédito", currentY);
 
-    const statusLabel = client.status === 'active' ? 'ATIVO' : client.status === 'blocked' ? 'BLOQUEADO' : 'INATIVO';
+    const statusLabel = client.status === 'active' ? 'ATIVO' : client.status === 'blocked' ? 'BLOQUEADO'
+        : (credits || []).some((credit: any) => credit.clientId === client.id && credit.status === 'paid') ? 'SEM CRÉDITO ATIVO' : 'INATIVO';
     const riskLabel = translateRiskLevel(client.riskLevel || 'medium');
     const creditScoreText = client.creditScore ? `${client.creditScore} pts` : 'Padrão';
     const creditLimitVal = client.creditLimit || 0;
