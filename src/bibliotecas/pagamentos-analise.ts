@@ -273,11 +273,11 @@ export function activeFilterChips(filters: PaymentFilters, labels: { client?: st
     return chips;
 }
 
-/** Valor em Kz com espaço nos milhares e vírgula decimal (igual nos PDF, no Excel e no ecrã). */
+/** Valor em Kz com ponto nos milhares e vírgula decimal (igual nos PDF, no Excel e no ecrã). */
 export const formatKz = (value: number) => {
     const fixed = (Math.round((Number(value) || 0) * 100) / 100).toFixed(2);
     const [int, dec] = fixed.replace('-', '').split('.');
-    return `${Number(value) < 0 ? '-' : ''}${int.replace(/\B(?=(\d{3})+(?!\d))/g, ' ')},${dec} Kz`;
+    return `${Number(value) < 0 ? '-' : ''}${int.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${dec} Kz`;
 };
 
 // ── Totais e indicadores ─────────────────────────────────────────────────────────────

@@ -35,7 +35,7 @@ function Variation({ change, inverse, points }: { change: number | null; inverse
                         : 'bg-red-700/15 text-red-900 dark:bg-red-400/15 dark:text-red-300')}
             title="Variação face ao período anterior"
         >
-            {flat ? '■' : up ? '▲' : '▼'} {Math.abs(change).toLocaleString('pt-AO', { maximumFractionDigits: 1 })}{points ? ' p.p.' : '%'}
+            {flat ? '■' : up ? '▲' : '▼'} {Math.abs(change).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}{points ? ' p.p.' : '%'}
         </span>
     );
 }
@@ -57,7 +57,7 @@ export function CartoesPagamentos({ kpis, previous, periodLabel, active, onSelec
             change: change(kpis.collected, previous?.collected), hint: 'Mostrar só os pagamentos confirmados' },
         { key: 'expected', css: 'card-kpi-sky', icon: CalendarClock, overline: 'Plano de prestações', title: 'Previsto no Período', value: formatCurrency(kpis.expected),
             footer: 'Prestações que venciam no período', change: change(kpis.expected, previous?.expected), hint: 'Ver as prestações em falta do período' },
-        { key: 'rate', css: 'card-kpi-flow', icon: Gauge, overline: 'Eficácia', title: 'Taxa de Cobrança', value: kpis.rate === null ? 'n.d.' : `${kpis.rate.toLocaleString('pt-AO', { maximumFractionDigits: 1 })}%`,
+        { key: 'rate', css: 'card-kpi-flow', icon: Gauge, overline: 'Eficácia', title: 'Taxa de Cobrança', value: kpis.rate === null ? 'n.d.' : `${kpis.rate.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`,
             footer: 'Arrecadado ÷ previsto', change: previous && kpis.rate !== null && previous.rate !== null ? Math.round((kpis.rate - previous.rate) * 10) / 10 : null, points: true,
             hint: 'Verde ≥ 95% · amarelo 80–94% · vermelho < 80%' },
         { key: 'interest', css: 'card-kpi-amber', icon: CreditCard, overline: 'Rendimento', title: 'Juros Cobrados', value: formatCurrency(kpis.interest),

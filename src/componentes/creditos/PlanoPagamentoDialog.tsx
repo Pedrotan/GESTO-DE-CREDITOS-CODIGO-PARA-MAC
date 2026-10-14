@@ -263,7 +263,7 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
                                 {progress ? (
                                     <p className="text-sm">
                                         <strong>{client.name}</strong> já pagou <strong>{money(progress.paidMinor)}</strong> de{' '}
-                                        <strong>{money(plan.totalMinor)}</strong> ({progress.percent.toLocaleString('pt-AO')}%):{' '}
+                                        <strong>{money(plan.totalMinor)}</strong> ({progress.percent.toLocaleString('pt-BR')}%):{' '}
                                         <strong>{progress.paidCount} de {plan.months}</strong> prestações pagas.
                                         {progress.remainingMinor > 0
                                             ? <> Faltam <strong>{money(progress.remainingMinor)}</strong>{progress.nextDue && <>; próxima: nº {progress.nextDue.number} a {dateLabel(progress.nextDue.dueDate)}</>}.</>

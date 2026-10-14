@@ -1,3 +1,4 @@
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
@@ -54,7 +55,7 @@ export function CobrancaOperacional({installments,from,to}:{installments:any[];f
             <label>Ação<select className="w-full rounded border bg-background p-2" value={kind} onChange={e=>setKind(e.target.value as CollectionKind)}>{Object.entries(labels).filter(([key])=>admin || !['assignment','target'].includes(key)).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label>
             {kind!=='target' && <label>Crédito<select className="w-full rounded border bg-background p-2" value={selected} onChange={e=>{setSelected(e.target.value);setRelated('');}}><option value="">Selecione um crédito</option>{active.map(c=><option key={c.id} value={c.id}>{c.clientName} · {c.id}</option>)}</select></label>}
             {['assignment','target'].includes(kind) && <label>Gestor<select className="w-full rounded border bg-background p-2" value={agent} onChange={e=>setAgent(e.target.value)}><option value="">Selecione um gestor</option>{users.map(u=><option key={u.id} value={u.id}>{u.name}</option>)}</select></label>}
-            {['promise','target'].includes(kind) && <label>Valor (AOA)<Input type="number" min="0" step="0.01" value={amount} onChange={e=>setAmount(e.target.value)} /></label>}
+            {['promise','target'].includes(kind) && <label>Valor (AOA)<MoneyInput value={amount} onChange={e=>setAmount(e.target.value)} /></label>}
             {kind==='promise' && <label>Data prometida<Input type="date" value={date} onChange={e=>setDate(e.target.value)} /></label>}
             {kind==='target' && <label>Mês da meta<Input type="month" value={month} onChange={e=>setMonth(e.target.value)} /></label>}
             {['promise_kept','promise_broken'].includes(kind) && <label>Promessa<select className="w-full rounded border bg-background p-2" value={related} onChange={e=>setRelated(e.target.value)}><option value="">Selecione uma promessa</option>{pendingPromises.filter(e=>e.creditId===selected).map(e=><option key={e.id} value={e.id}>{e.promisedDate} · {formatCurrency((e.amountMinor || 0)/100)}</option>)}</select></label>}

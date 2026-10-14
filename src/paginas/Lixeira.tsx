@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { formatCurrency } from '@/bibliotecas/formatters';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/componentes/ui/tabs';
 import { Button } from '@/componentes/ui/button';
@@ -105,10 +106,6 @@ const Lixeira = () => {
     const getUserName = (userId: string) => {
         const u = users.find(u => u.id === userId);
         return u ? u.name : 'Sistema/Desconhecido';
-    };
-
-    const formatCurrency = (val: number) => {
-        return new Intl.NumberFormat('pt-AO', { style: 'currency', currency: 'AOA' }).format(val);
     };
 
     return (

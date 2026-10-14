@@ -29,7 +29,7 @@ export function CartoesAlcadas({ state, onSelect }: { state: AlcadasState; onSel
                         </div>
                         <div className="my-2">
                             {state.loading && !state.data ? <div className="h-8 w-16 animate-pulse rounded-md bg-black/10 dark:bg-white/10" />
-                                : <p className="font-display text-3xl font-black tracking-tight text-slate-950 dark:text-white">{card.value.toLocaleString('pt-AO')}</p>}
+                                : <p className="font-display text-3xl font-black tracking-tight text-slate-950 dark:text-white">{card.value.toLocaleString('pt-BR')}</p>}
                         </div>
                         <p className="line-clamp-2 text-xs font-semibold text-slate-900/75 dark:text-slate-400">{card.footer}</p>
                     </button>

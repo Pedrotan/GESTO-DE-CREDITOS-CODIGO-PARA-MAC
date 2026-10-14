@@ -425,7 +425,7 @@ export class ServicoControloAcesso {
     else if (tipo === 'abate_credito') limite = alcadas.abateCreditoKz;
 
     if (montanteKz > limite) {
-      const msg = `O montante solicitado (${montanteKz.toLocaleString('pt-AO')} Kz) excede a sua alçada autorizada (${limite.toLocaleString('pt-AO')} Kz). O pedido foi encaminhado para o nível seguinte (Diretor de Crédito).`;
+      const msg = `O montante solicitado (${montanteKz.toLocaleString('pt-BR')} Kz) excede a sua alçada autorizada (${limite.toLocaleString('pt-BR')} Kz). O pedido foi encaminhado para o nível seguinte (Diretor de Crédito).`;
       const erro = new Error(msg) as any;
       erro.status = 403;
       erro.excedeAlcada = true;
@@ -509,7 +509,7 @@ export class ServicoControloAcesso {
   }
 
   static mascararValorMonetario(valor?: number | string, podeVer = false): string {
-    if (podeVer) return typeof valor === 'number' ? `${valor.toLocaleString('pt-AO')} Kz` : String(valor || '0 Kz');
+    if (podeVer) return typeof valor === 'number' ? `${valor.toLocaleString('pt-BR')} Kz` : String(valor || '0 Kz');
     return '*** *** Kz';
   }
 

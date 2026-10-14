@@ -85,7 +85,7 @@ export default function AuditLogs() {
         try {
             const result = await data.verifyNow();
             toast(result.ok
-                ? { title: 'Cadeia de auditoria íntegra', description: `${result.checked.toLocaleString('pt-AO')} registo(s) verificados${result.hmac ? ` · ${result.hmac.detail}` : ''}.` }
+                ? { title: 'Cadeia de auditoria íntegra', description: `${result.checked.toLocaleString('pt-BR')} registo(s) verificados${result.hmac ? ` · ${result.hmac.detail}` : ''}.` }
                 : { title: 'Falha de integridade detectada', description: `${result.message}. Foi criado um alerta crítico no Centro de Alertas.`, variant: 'destructive' });
         } catch (error) {
             toast({ title: 'Não foi possível verificar', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
@@ -209,7 +209,7 @@ export default function AuditLogs() {
 
             <p className="mt-3 text-xs text-muted-foreground">
                 Registos só de inserção: ninguém (incluindo o Super Administrador) os pode alterar ou apagar. Cada registo está encadeado ao anterior (SHA-256){typeof (window as any).electronAPI?.auditSealVerify === 'function' ? ' e selado com HMAC no aplicativo desktop' : ''}.
-                Período: {range?.label || 'todo o histórico'} · {shown.length.toLocaleString('pt-AO')} registo(s){data.integrity ? ` · última verificação ${formatAuditTimestamp(data.integrity.verifiedAt)}` : ''}.
+                Período: {range?.label || 'todo o histórico'} · {shown.length.toLocaleString('pt-BR')} registo(s){data.integrity ? ` · última verificação ${formatAuditTimestamp(data.integrity.verifiedAt)}` : ''}.
             </p>
 
             <DetalheAuditoria event={selected} events={data.events} brokenSeq={brokenSeq} onClose={() => setSelected(null)} onOpen={setSelected}

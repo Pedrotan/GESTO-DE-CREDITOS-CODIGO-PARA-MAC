@@ -278,22 +278,22 @@ export function nextResets(now: Date = new Date()) {
 
 // ── Formatação ───────────────────────────────────────────────────────────────────
 
-/** "1 000 000,00 Kz" (espaços normais, para PDF e texto). */
+/** "1.000.000,00 Kz" (ponto nos milhares, vírgula decimal; igual no PDF e no texto). */
 export function formatKz(minor: number | null | undefined, withUnit = true): string {
     if (minor === null || minor === undefined || !Number.isFinite(minor)) return 'Sem teto';
     const negative = minor < 0;
     const abs = Math.abs(Math.round(minor));
-    const whole = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    const whole = String(Math.floor(abs / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
     const cents = String(abs % 100).padStart(2, '0');
     return `${negative ? '-' : ''}${whole},${cents}${withUnit ? ' Kz' : ''}`;
 }
-export const formatShortKz = (minor: number) => String(Math.round(minor / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+export const formatShortKz = (minor: number) => String(Math.round(minor / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 
 export function formatLimitValue(field: LimitField, value: number | null | undefined): string {
     if (value === null || value === undefined) return 'Sem teto';
     if (isMoneyField(field)) return formatKz(value);
     if (field === 'maxPercent') return `${String(value).replace('.', ',')}%`;
-    return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return String(value).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
 }
 
 /** Cor da barra de consumo: verde abaixo de 70%, amarelo de 70% a 90%, vermelho acima de 90%. */

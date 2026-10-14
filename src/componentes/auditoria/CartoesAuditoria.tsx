@@ -14,7 +14,7 @@ function Variation({ current, previous, inverse }: { current: number; previous: 
         <span title="Variação face ao período anterior" className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold',
             good === null ? 'bg-black/10 text-slate-900/70 dark:bg-white/10 dark:text-slate-300'
                 : good ? 'bg-emerald-700/15 text-emerald-900 dark:text-emerald-300' : 'bg-red-700/15 text-red-900 dark:text-red-300')}>
-            {change === 0 ? '■' : change > 0 ? '▲' : '▼'} {Math.abs(change).toLocaleString('pt-AO', { maximumFractionDigits: 1 })}%
+            {change === 0 ? '■' : change > 0 ? '▲' : '▼'} {Math.abs(change).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%
         </span>
     );
 }
@@ -29,12 +29,12 @@ export function CartoesAuditoria({ kpis, previous, openAlerts, integrity, active
     loading?: boolean;
 }) {
     const cards: Array<{ key: AuditCard; css: string; icon: ComponentType<{ className?: string }>; title: string; value: string; footer: string; current?: number; before?: number | null; inverse?: boolean }> = [
-        { key: 'all', css: 'card-kpi-sky', icon: ListChecks, title: 'Total de Registos', value: kpis.total.toLocaleString('pt-AO'), footer: 'Ações auditadas no período', current: kpis.total, before: previous?.total ?? null },
-        { key: 'criticalHigh', css: 'card-kpi-coral', icon: ShieldAlert, title: 'Eventos Críticos e Altos', value: kpis.criticalHigh.toLocaleString('pt-AO'), footer: 'Gravidade crítica ou alta', current: kpis.criticalHigh, before: previous?.criticalHigh ?? null, inverse: true },
-        { key: 'alerts', css: 'card-kpi-amber', icon: BellRing, title: 'Alertas Abertos', value: openAlerts.toLocaleString('pt-AO'), footer: 'Abertos ou em análise no Centro de Alertas' },
-        { key: 'loginFailed', css: 'card-kpi-purple', icon: KeyRound, title: 'Logins Falhados', value: kpis.loginFailed.toLocaleString('pt-AO'), footer: 'Palavra-passe ou código errados', current: kpis.loginFailed, before: previous?.loginFailed ?? null, inverse: true },
-        { key: 'accessDenied', css: 'card-kpi-flow', icon: ShieldX, title: 'Acessos Negados', value: kpis.accessDenied.toLocaleString('pt-AO'), footer: 'Operações recusadas por permissão', current: kpis.accessDenied, before: previous?.accessDenied ?? null, inverse: true },
-        { key: 'activeToday', css: 'card-kpi-mint', icon: Users, title: 'Utilizadores Ativos Hoje', value: kpis.activeUsersToday.toLocaleString('pt-AO'), footer: 'Com pelo menos uma ação hoje' },
+        { key: 'all', css: 'card-kpi-sky', icon: ListChecks, title: 'Total de Registos', value: kpis.total.toLocaleString('pt-BR'), footer: 'Ações auditadas no período', current: kpis.total, before: previous?.total ?? null },
+        { key: 'criticalHigh', css: 'card-kpi-coral', icon: ShieldAlert, title: 'Eventos Críticos e Altos', value: kpis.criticalHigh.toLocaleString('pt-BR'), footer: 'Gravidade crítica ou alta', current: kpis.criticalHigh, before: previous?.criticalHigh ?? null, inverse: true },
+        { key: 'alerts', css: 'card-kpi-amber', icon: BellRing, title: 'Alertas Abertos', value: openAlerts.toLocaleString('pt-BR'), footer: 'Abertos ou em análise no Centro de Alertas' },
+        { key: 'loginFailed', css: 'card-kpi-purple', icon: KeyRound, title: 'Logins Falhados', value: kpis.loginFailed.toLocaleString('pt-BR'), footer: 'Palavra-passe ou código errados', current: kpis.loginFailed, before: previous?.loginFailed ?? null, inverse: true },
+        { key: 'accessDenied', css: 'card-kpi-flow', icon: ShieldX, title: 'Acessos Negados', value: kpis.accessDenied.toLocaleString('pt-BR'), footer: 'Operações recusadas por permissão', current: kpis.accessDenied, before: previous?.accessDenied ?? null, inverse: true },
+        { key: 'activeToday', css: 'card-kpi-mint', icon: Users, title: 'Utilizadores Ativos Hoje', value: kpis.activeUsersToday.toLocaleString('pt-BR'), footer: 'Com pelo menos uma ação hoje' },
         { key: 'integrity', css: integrity.ok === false ? 'card-kpi-coral' : 'card-kpi-mint', icon: integrity.ok === false ? Fingerprint : ShieldCheck, title: 'Estado da Integridade', value: integrity.label, footer: integrity.detail },
     ];
     return (

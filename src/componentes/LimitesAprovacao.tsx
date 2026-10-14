@@ -6,7 +6,7 @@ import { ServicoLimitesAprovacao } from '@/servicos/ServicoLimitesAprovacao';
 import type { ApprovalLimits } from '@/bibliotecas/limites-aprovacao';
 
 const formatKz = (minor: number) => {
-    return new Intl.NumberFormat('pt-AO', {
+    return new Intl.NumberFormat('pt-BR', {
         style: 'currency',
         currency: 'AOA',
         maximumFractionDigits: 0,

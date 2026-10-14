@@ -73,7 +73,7 @@ test('ficha de simulação em PDF: número, código, plano, incumprimento, assin
     for (const text of ['SIM-2026-TESTE1', '4F7K-QM2X', 'FICHA DE INFORMA', 'TERMOS, POL', 'Lei n.', '14/21', 'Aviso n.', '12/2016', 'TAEG', 'MTIC', 'O Cliente', `Página 1 de ${pages}`]) {
         assert.ok(pdf.includes(text), `o PDF contém «${text}»`);
     }
-    assert.ok(pdf.includes('94 559,60') || pdf.includes('94\xa0559,60'), 'prestação do teste obrigatório no plano');
+    assert.ok(pdf.includes('94.559,60'), 'prestação do teste obrigatório no plano');
     assert.ok(pdf.includes('/Subtype /Image'), 'QR code incluído');
 });
 

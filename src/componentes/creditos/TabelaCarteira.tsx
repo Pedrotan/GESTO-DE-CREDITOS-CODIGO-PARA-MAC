@@ -110,7 +110,7 @@ export function TabelaCarteira({ state, renderActions, onOpen, clientsById, curr
             case 'manager': return <span className="text-xs">{row.managerName}</span>;
             case 'granted': return kz(row.grantedMinor);
             case 'outstanding': return <span className="font-semibold">{kz(row.outstandingMinor)}</span>;
-            case 'rate': return `${row.rate.toLocaleString('pt-AO')}%`;
+            case 'rate': return `${row.rate.toLocaleString('pt-BR')}%`;
             case 'installment': return row.installmentMinor ? kz(row.installmentMinor) : '—';
             case 'progress': {
                 const value = row.totalCount ? Math.round((row.paidCount / row.totalCount) * 100) : 0;

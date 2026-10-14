@@ -207,7 +207,7 @@ export class ServicoPagamentos {
         if (!(amountMinor > 0)) errors.push('O valor tem de ser maior que zero.');
         if (credit && amountMinor > 0 && /^\d{4}-\d{2}-\d{2}$/.test(draft.valueDateKey)) {
             const preview = await this.previewImputation(draft.creditId, draft.valueDateKey).catch(() => null);
-            if (preview && amountMinor > preview.totalDueMinor) errors.push(`O valor excede a dívida total do contrato na data-valor (${(preview.totalDueMinor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz).`);
+            if (preview && amountMinor > preview.totalDueMinor) errors.push(`O valor excede a dívida total do contrato na data-valor (${(preview.totalDueMinor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz).`);
         }
         if (!PAYMENT_METHODS[draft.method]) errors.push('Escolha o método de pagamento.');
         // Alçada de recebimento em numerário (o mesmo controlo é repetido na transacção do registo).

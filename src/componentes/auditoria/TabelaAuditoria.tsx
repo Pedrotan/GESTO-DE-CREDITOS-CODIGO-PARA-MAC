@@ -144,7 +144,7 @@ export function TabelaAuditoria({ events, loading, onOpen }: { events: AuditEven
             </div>
             <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-4 py-3">
                 <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                    <span>Mostrando <b>{sorted.length ? start + 1 : 0}</b> a <b>{Math.min(sorted.length, start + pageSize)}</b> de <b>{sorted.length.toLocaleString('pt-AO')}</b> registos</span>
+                    <span>Mostrando <b>{sorted.length ? start + 1 : 0}</b> a <b>{Math.min(sorted.length, start + pageSize)}</b> de <b>{sorted.length.toLocaleString('pt-BR')}</b> registos</span>
                     <Select value={String(pageSize)} onValueChange={value => setPageSize(Number(value))}>
                         <SelectTrigger className="h-8 w-[150px] bg-background"><SelectValue /></SelectTrigger>
                         <SelectContent>{[10, 25, 50, 100].map(size => <SelectItem key={size} value={String(size)}>{size} por página</SelectItem>)}</SelectContent>

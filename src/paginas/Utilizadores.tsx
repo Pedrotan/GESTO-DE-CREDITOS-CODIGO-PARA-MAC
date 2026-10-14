@@ -1,3 +1,4 @@
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { cn, getFileUrl } from '@/bibliotecas/utils';
@@ -807,7 +808,7 @@ export default function Utilizadores() {
                                     const souContaPrincipal = isPrimaryOwner(currentUser);
                                     const alcadaValor = isSuperAdmin
                                         ? 'Ilimitada'
-                                        : `${(u.approvalLimits?.aprovacaoCreditoKz || 0).toLocaleString('pt-AO')} Kz`;
+                                        : `${(u.approvalLimits?.aprovacaoCreditoKz || 0).toLocaleString('pt-BR')} Kz`;
 
                                     const isOnline = (u.id === currentUser?.id) || (u.status === 'active' && !!u.lastSeen && (new Date().getTime() - new Date(u.lastSeen).getTime() < 5 * 60 * 1000));
 
@@ -1191,8 +1192,7 @@ export default function Utilizadores() {
                                 <div className="grid gap-4 sm:grid-cols-2">
                                     <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                                         <Label className="text-xs font-bold">Alçada Máxima de Aprovação de Crédito (Kz)</Label>
-                                        <Input
-                                            type="number"
+                                        <MoneyInput
                                             value={alcadasAtuais.aprovacaoCreditoKz}
                                             onChange={(e) => setAlcadasAtuais({ ...alcadasAtuais, aprovacaoCreditoKz: Number(e.target.value) || 0 })}
                                         />
@@ -1201,8 +1201,7 @@ export default function Utilizadores() {
 
                                     <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                                         <Label className="text-xs font-bold">Exigir Dupla Aprovação Acima de (Kz)</Label>
-                                        <Input
-                                            type="number"
+                                        <MoneyInput
                                             value={alcadasAtuais.requerDuplaAprovacaoAcimaKz || 5_000_000}
                                             onChange={(e) => setAlcadasAtuais({ ...alcadasAtuais, requerDuplaAprovacaoAcimaKz: Number(e.target.value) || 0 })}
                                         />
@@ -1211,8 +1210,7 @@ export default function Utilizadores() {
 
                                     <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                                         <Label className="text-xs font-bold">Limite de Desembolso Financeiro (Kz)</Label>
-                                        <Input
-                                            type="number"
+                                        <MoneyInput
                                             value={alcadasAtuais.desembolsoKz}
                                             onChange={(e) => setAlcadasAtuais({ ...alcadasAtuais, desembolsoKz: Number(e.target.value) || 0 })}
                                         />
@@ -1220,8 +1218,7 @@ export default function Utilizadores() {
 
                                     <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                                         <Label className="text-xs font-bold">Limite de Perdão de Juros e Mora (Kz)</Label>
-                                        <Input
-                                            type="number"
+                                        <MoneyInput
                                             value={alcadasAtuais.perdaoJurosKz}
                                             onChange={(e) => setAlcadasAtuais({ ...alcadasAtuais, perdaoJurosKz: Number(e.target.value) || 0 })}
                                         />
@@ -1229,8 +1226,7 @@ export default function Utilizadores() {
 
                                     <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                                         <Label className="text-xs font-bold">Limite de Anulação de Pagamentos (Kz)</Label>
-                                        <Input
-                                            type="number"
+                                        <MoneyInput
                                             value={alcadasAtuais.anulacaoPagamentoKz}
                                             onChange={(e) => setAlcadasAtuais({ ...alcadasAtuais, anulacaoPagamentoKz: Number(e.target.value) || 0 })}
                                         />
@@ -1238,8 +1234,7 @@ export default function Utilizadores() {
 
                                     <div className="space-y-1.5 p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900">
                                         <Label className="text-xs font-bold">Limite de Abate de Crédito / Write-Off (Kz)</Label>
-                                        <Input
-                                            type="number"
+                                        <MoneyInput
                                             value={alcadasAtuais.abateCreditoKz}
                                             onChange={(e) => setAlcadasAtuais({ ...alcadasAtuais, abateCreditoKz: Number(e.target.value) || 0 })}
                                         />

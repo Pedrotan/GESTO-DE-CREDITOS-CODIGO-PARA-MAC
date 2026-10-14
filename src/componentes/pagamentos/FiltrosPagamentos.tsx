@@ -1,3 +1,4 @@
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useMemo, useState } from 'react';
 import { Bookmark, Check, ChevronsUpDown, FilterX, Save, Trash2, X } from 'lucide-react';
 import { Badge } from '@/componentes/ui/badge';
@@ -123,12 +124,12 @@ export function FiltrosPagamentos({ open, filters, onChange, options, saved, onA
                         </div>
                         <div className="space-y-1.5">
                             <Label className="text-xs font-semibold text-muted-foreground">Valor mínimo (Kz)</Label>
-                            <Input type="number" min={0} inputMode="decimal" className="h-9 bg-background" value={filters.minAmount ?? ''}
+                            <MoneyInput inputMode="decimal" className="h-9 bg-background" value={filters.minAmount ?? ''}
                                 onChange={event => onChange({ minAmount: event.target.value === '' ? null : Number(event.target.value) })} placeholder="0,00" />
                         </div>
                         <div className="space-y-1.5">
                             <Label className="text-xs font-semibold text-muted-foreground">Valor máximo (Kz)</Label>
-                            <Input type="number" min={0} inputMode="decimal" className="h-9 bg-background" value={filters.maxAmount ?? ''}
+                            <MoneyInput inputMode="decimal" className="h-9 bg-background" value={filters.maxAmount ?? ''}
                                 onChange={event => onChange({ maxAmount: event.target.value === '' ? null : Number(event.target.value) })} placeholder="Sem limite" />
                         </div>
                         <div className="space-y-1.5 md:col-span-2">

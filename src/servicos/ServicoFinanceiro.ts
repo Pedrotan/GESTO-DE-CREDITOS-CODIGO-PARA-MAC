@@ -1152,7 +1152,7 @@ export class ServicoFinanceiro {
     }
 
     private static formatMinor(minor: number) {
-        return (minor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        return (minor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
     private static async assertCashAvailable(amountMinor: number, purpose: string) {

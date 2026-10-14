@@ -80,10 +80,10 @@ export const generateInvoicePDF = async (data: EInvoiceData): Promise<void> => {
             [
                 `Crédito Financeiro (Ref: ${credit.id})`,
                 '1',
-                `${netTotal.toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz`,
+                `${netTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz`,
                 '0.00%',
                 'Isento',
-                `${netTotal.toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz`
+                `${netTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz`
             ]
         ],
         theme: 'striped',

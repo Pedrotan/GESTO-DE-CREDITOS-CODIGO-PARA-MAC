@@ -158,7 +158,7 @@ test('K1 · Outubro de 2026: 2 linhas com referências diferentes e 135 000 Kz i
         };
         const def = M.R.buildReport('lista-mensal', input);
         const pdf = pdfText(M.R.renderReportPdf(def, settings, 'Director Financeiro', 'none').doc);
-        for (const text of ['135 000,00 Kz', '35 000,00 Kz', '100 000,00 Kz', 'RC 2026/000001', 'RC 2026/000002', 'Gerado por Director Financeiro', 'gina 1 de']) {
+        for (const text of ['135.000,00 Kz', '35.000,00 Kz', '100.000,00 Kz', 'RC 2026/000001', 'RC 2026/000002', 'Gerado por Director Financeiro', 'gina 1 de']) {
             assert.ok(pdf.includes(text), `o PDF mostra «${text}»`);
         }
         const book = M.R.buildReportWorkbook(def, settings, 'Director Financeiro');

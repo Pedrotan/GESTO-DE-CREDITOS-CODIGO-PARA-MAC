@@ -49,7 +49,7 @@ export function JurosMoraDialog({ credit, open, onOpenChange }: { credit: Credit
                         <AlarmClock className="h-5 w-5 text-secondary" /> Juros de Mora
                     </DialogTitle>
                     <DialogDescription className="mt-1 text-sm text-white/75">
-                        {credit ? `${credit.clientName} · ${credit.id}` : ''} — juro diário de {rate.toLocaleString('pt-AO')}% sobre o valor em atraso de cada prestação,
+                        {credit ? `${credit.clientName} · ${credit.id}` : ''} — juro diário de {rate.toLocaleString('pt-BR')}% sobre o valor em atraso de cada prestação,
                         a partir do dia seguinte ao vencimento e até ao pagamento.
                     </DialogDescription>
                 </DialogHeader>

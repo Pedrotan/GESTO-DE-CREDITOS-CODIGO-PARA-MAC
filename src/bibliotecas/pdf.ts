@@ -912,7 +912,7 @@ export const fillContractPlaceholders = (text: string, contract: any, settings?:
         '{{NIF_CLIENTE}}': contract?.clientNif || 'N/A',
         '{{VALOR}}': formatCurrency(contract?.principalAmount || contract?.value || 0, config.currency),
         '{{PRESTACOES}}': String(contract?.installments || 1),
-        '{{TAXA}}': Number.isFinite(rate) ? `${rate.toLocaleString('pt-AO')}%` : '—',
+        '{{TAXA}}': Number.isFinite(rate) ? `${rate.toLocaleString('pt-BR')}%` : '—',
         '{{DATA_INICIO}}': contract?.startDate ? formatDate(contract.startDate) : '—',
         '{{DATA_FIM}}': contract?.endDate || contract?.dueDate ? formatDate(contract.endDate || contract.dueDate) : '—',
         '{{EMPRESA}}': config.name || '',
@@ -3804,7 +3804,7 @@ export const generatePaymentPlanPDF = (
     doc.setFontSize(8);
     doc.setTextColor(100, 116, 139);
     const labels = progress
-        ? ['VALOR CONCEDIDO', 'TOTAL A PAGAR', `JÁ PAGO (${progress.percent.toLocaleString('pt-AO')}%)`, 'EM FALTA']
+        ? ['VALOR CONCEDIDO', 'TOTAL A PAGAR', `JÁ PAGO (${progress.percent.toLocaleString('pt-BR')}%)`, 'EM FALTA']
         : ['VALOR CONCEDIDO', `JUROS (${plan.ratePercent}%)`, 'TOTAL A PAGAR', `${plan.months} PRESTAÇÕES DE`];
     const values = progress
         ? [money(plan.principalMinor), money(plan.totalMinor), money(progress.paidMinor), money(progress.remainingMinor)]
@@ -4147,7 +4147,7 @@ export const generateApprovalsReportPDF = (
             row.clientName,
             row.creditId,
             formatCurrency(row.amount, config.currency),
-            `${Number(row.rate || 0).toLocaleString('pt-AO')}%`,
+            `${Number(row.rate || 0).toLocaleString('pt-BR')}%`,
             String(row.installments || '—'),
             statusText[row.status],
             row.decidedBy || '—',

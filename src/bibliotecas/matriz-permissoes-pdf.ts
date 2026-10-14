@@ -20,7 +20,7 @@ const safe = (value: string) => Array.from(String(value ?? ''), char => {
     if (code === 0x2192) return '->';
     return code > 0xFF ? '' : char;
 }).join('');
-const kz = (value: number) => `${Math.round(value).toLocaleString('pt-AO').replace(/\s/g, ' ')} Kz`;
+const kz = (value: number) => `${Math.round(value).toLocaleString('pt-BR').replace(/\s/g, ' ')} Kz`;
 
 export function generateUsersPermissionsMatrixPDF(users: User[], effectiveOf: EffectivePermissions, settings: any, userName?: string, output: 'save' | 'none' = 'save') {
     const doc = new jsPDF({ orientation: 'landscape' });

@@ -54,7 +54,7 @@ const Trend = ({ value }: { value: number | null }) => {
     const Icon = up ? TrendingUp : TrendingDown;
     return (
         <span className={`inline-flex items-center gap-1 text-xs font-bold ${up ? 'text-emerald-600' : 'text-red-500'}`}>
-            <Icon className="h-3.5 w-3.5" /> {up ? '+' : ''}{value.toLocaleString('pt-AO')}% vs mês anterior
+            <Icon className="h-3.5 w-3.5" /> {up ? '+' : ''}{value.toLocaleString('pt-BR')}% vs mês anterior
         </span>
     );
 };
@@ -169,12 +169,12 @@ export default function VolumeNegocioSaas() {
                 <Kpi icon={Wallet} label="Carteira activa" value={formatKz(summary.portfolioMinor)}
                     detail={`${summary.activeCredits} créditos activos`} />
                 <Kpi icon={AlertTriangle} label="Em atraso" tone={overdueRate(summary) > 15 ? 'red' : 'amber'} value={formatKz(summary.overdueMinor)}
-                    detail={`${summary.overdueCredits} créditos · ${overdueRate(summary).toLocaleString('pt-AO')}% da carteira`} />
+                    detail={`${summary.overdueCredits} créditos · ${overdueRate(summary).toLocaleString('pt-BR')}% da carteira`} />
                 <Kpi icon={TrendingUp} label="Juros recebidos" tone="emerald" value={formatKz(summary.interestReceivedMinor)}
                     detail={`Juros contratados: ${formatKz(summary.expectedInterestMinor)}`} />
-                <Kpi icon={Users} label="Clientes finais" value={summary.totalClients.toLocaleString('pt-AO')}
+                <Kpi icon={Users} label="Clientes finais" value={summary.totalClients.toLocaleString('pt-BR')}
                     detail={`+${summary.newClients} novos · ${summary.users} utilizadores do sistema`} />
-                <Kpi icon={Activity} label="Actividade" value={`${summary.syncOperations.toLocaleString('pt-AO')} operações`}
+                <Kpi icon={Activity} label="Actividade" value={`${summary.syncOperations.toLocaleString('pt-BR')} operações`}
                     detail={<span className="inline-flex items-center gap-1"><Smartphone className="h-3 w-3" /> {summary.activeDevices} dispositivos nos últimos 30 dias</span>} />
             </div>
 
@@ -256,7 +256,7 @@ export default function VolumeNegocioSaas() {
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <div className={`font-mono ${overdueRate(m) > 15 ? 'font-bold text-red-600' : ''}`}>{formatKz(m.overdueMinor)}</div>
-                                                    <div className="text-xs text-slate-500">{overdueRate(m).toLocaleString('pt-AO')}% · {m.overdueCredits} créd.</div>
+                                                    <div className="text-xs text-slate-500">{overdueRate(m).toLocaleString('pt-BR')}% · {m.overdueCredits} créd.</div>
                                                 </TableCell>
                                                 <TableCell className="text-right">
                                                     <div className="font-mono">{m.totalClients}</div>
@@ -267,7 +267,7 @@ export default function VolumeNegocioSaas() {
                                             <TableCell colSpan={5} className="text-center text-sm italic text-slate-400">Sem relatório neste mês</TableCell>
                                         )}
                                         <TableCell className="text-right">
-                                            <div className="font-mono">{company.syncOperations.toLocaleString('pt-AO')}</div>
+                                            <div className="font-mono">{company.syncOperations.toLocaleString('pt-BR')}</div>
                                             <div className="text-xs text-slate-500">{company.activeDevices} dispositivos</div>
                                         </TableCell>
                                         <TableCell className="text-xs text-slate-500">

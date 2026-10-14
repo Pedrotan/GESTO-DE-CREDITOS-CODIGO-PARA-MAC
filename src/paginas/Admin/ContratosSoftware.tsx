@@ -902,9 +902,9 @@ export default function ContratosSoftware({ logo }: { logo?: string }) {
                                 />
                                 <div className="mt-2 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground border-t pt-2">
                                     <div className="flex items-center gap-2.5">
-                                        <span><strong>{(section.body || '').length.toLocaleString('pt-AO')}</strong> caracteres</span>
+                                        <span><strong>{(section.body || '').length.toLocaleString('pt-BR')}</strong> caracteres</span>
                                         <span>·</span>
-                                        <span><strong>{((section.body || '').trim() ? (section.body || '').trim().split(/\s+/).length : 0).toLocaleString('pt-AO')}</strong> palavras</span>
+                                        <span><strong>{((section.body || '').trim() ? (section.body || '').trim().split(/\s+/).length : 0).toLocaleString('pt-BR')}</strong> palavras</span>
                                         <span>·</span>
                                         <span><strong>{(section.body ? (section.body.split('\n').length) : 0)}</strong> linhas</span>
                                     </div>

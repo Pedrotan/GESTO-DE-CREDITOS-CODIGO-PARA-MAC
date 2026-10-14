@@ -277,7 +277,7 @@ export default function Approvals() {
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     {[
                         { status: 'pending' as const, css: 'card-kpi-amber', icon: Hourglass, title: 'Pendentes', value: `${summary.pending}`, foot: `${formatCurrency(summary.pendingValue)}${summary.overdue ? ` · ${summary.overdue} há mais de 48 h` : ''}` },
-                        { status: 'approved' as const, css: 'card-kpi-mint', icon: ThumbsUp, title: 'Aprovados', value: `${summary.approved}`, foot: summary.approvalRate !== null ? `Taxa de aprovação: ${summary.approvalRate.toLocaleString('pt-AO')}%` : 'Sem decisões no período' },
+                        { status: 'approved' as const, css: 'card-kpi-mint', icon: ThumbsUp, title: 'Aprovados', value: `${summary.approved}`, foot: summary.approvalRate !== null ? `Taxa de aprovação: ${summary.approvalRate.toLocaleString('pt-BR')}%` : 'Sem decisões no período' },
                         { status: 'rejected' as const, css: 'card-kpi-coral', icon: ThumbsDown, title: 'Rejeitados', value: `${summary.rejected}`, foot: formatCurrency(summary.rejectedValue) },
                         { status: 'all' as const, css: 'card-kpi-sky', icon: CheckCircle, title: 'Valor Total Aprovado', value: formatCurrency(summary.approvedValue), foot: summary.avgHours !== null ? `Tempo médio de decisão: ${waitLabel(summary.avgHours)}` : range.label },
                     ].map(card => {
@@ -351,7 +351,7 @@ export default function Approvals() {
                                             </td>
                                             <td className="p-3"><p className="font-semibold">{row.clientName}</p><p className="font-mono text-[11px] text-muted-foreground">{row.creditId}</p></td>
                                             <td className="p-3 text-right font-bold">{formatCurrency(row.amount)}</td>
-                                            <td className="p-3 text-xs">{row.rate.toLocaleString('pt-AO')}% · {row.installments || '—'} prest.</td>
+                                            <td className="p-3 text-xs">{row.rate.toLocaleString('pt-BR')}% · {row.installments || '—'} prest.</td>
                                             <td className="p-3 text-xs">{row.requestedBy || '—'}</td>
                                             <td className="p-3">
                                                 <Badge variant={STATUS_VARIANT[row.status]}>{STATUS_LABEL[row.status]}</Badge>
@@ -430,7 +430,7 @@ export default function Approvals() {
                             {decision?.kind === 'approve' ? 'Aprovar crédito' : 'Rejeitar crédito'}
                         </DialogTitle>
                         <DialogDescription>
-                            {decision ? `${decision.row.clientName} — ${formatCurrency(decision.row.amount)} (${decision.row.rate.toLocaleString('pt-AO')}%, ${decision.row.installments} prestações).` : ''}
+                            {decision ? `${decision.row.clientName} — ${formatCurrency(decision.row.amount)} (${decision.row.rate.toLocaleString('pt-BR')}%, ${decision.row.installments} prestações).` : ''}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-2">
@@ -503,10 +503,10 @@ function ApprovalDetailsDialog({ row, credits, clients, history, onClose, onDeci
                     <section className="grid grid-cols-2 gap-4 rounded-xl border p-4 md:grid-cols-4">
                         <h3 className="col-span-full text-sm font-bold">Crédito pedido</h3>
                         {field('Valor', formatCurrency(row.amount))}
-                        {field('Taxa de juro', `${row.rate.toLocaleString('pt-AO')}%`)}
+                        {field('Taxa de juro', `${row.rate.toLocaleString('pt-BR')}%`)}
                         {field('Prazo', `${row.installments || '—'} prestações`)}
                         {field('Total a pagar', totalDue ? money(totalDue) : '—')}
-                        {field('Juro de mora', credit ? `${Number(credit.lateInterestRate || 0).toLocaleString('pt-AO')}% / dia` : '—')}
+                        {field('Juro de mora', credit ? `${Number(credit.lateInterestRate || 0).toLocaleString('pt-BR')}% / dia` : '—')}
                         {field('Início', credit?.startDate ? formatDate(credit.startDate) : '—')}
                         {field('Vencimento final', credit?.dueDate ? formatDate(credit.dueDate) : '—')}
                         {field('Solicitado por', `${row.requestedBy || '—'}${row.requestedAt ? ` · ${formatDate(row.requestedAt)}` : ''}`)}

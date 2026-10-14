@@ -38,7 +38,7 @@ export function buildCreditReport(key: CreditReportKey, input: CreditReportInput
     let sections: Section[] = [];
     let orientation: ReportDef['orientation'] = 'landscape';
     const book = input.rows.filter(row => IN_PORTFOLIO.includes(row.stage));
-    const money = (minor: number) => `${kz(minor).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz`;
+    const money = (minor: number) => `${kz(minor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz`;
     switch (key) {
         case 'carteira': {
             const date = input.dateKey || input.todayKey;
@@ -143,7 +143,7 @@ export function buildCreditReport(key: CreditReportKey, input: CreditReportInput
             orientation = 'portrait';
             const plan = input.installments.filter(item => item.creditId === row.id && real(item)).sort((a, b) => a.installmentNumber - b.installmentNumber);
             const paid = input.payments.filter(payment => payment.creditId === row.id && payment.status === 'confirmed' && !payment.deletedAt).sort((a, b) => String(a.paymentDate).localeCompare(String(b.paymentDate)));
-            summary = [['Capital concedido', money(row.grantedMinor)], ['TAN', `${row.rate.toLocaleString('pt-AO')}%`], ['Capital em dívida', money(row.outstandingMinor)],
+            summary = [['Capital concedido', money(row.grantedMinor)], ['TAN', `${row.rate.toLocaleString('pt-BR')}%`], ['Capital em dívida', money(row.outstandingMinor)],
                 ['Próxima prestação', row.nextDueKey ? `${label(row.nextDueKey)} · ${money(row.nextDueMinor)}` : '—'], ['Dias de atraso', String(row.daysOverdue)], ['Mora por pagar', money(row.moraMinor)], ['Estado', STAGES[row.stage].label]];
             sections = [
                 { heading: 'Plano de prestações', head: ['N.º', 'Vencimento', 'Capital', 'Juros', 'Prestação', 'Pago', 'Situação'], numeric: [0], money: [2, 3, 4, 5],
@@ -168,7 +168,7 @@ export function buildCreditReport(key: CreditReportKey, input: CreditReportInput
 export function annualReportDef(state: { annual: ReturnType<typeof annualTable>; year: number; today: string }): ReportDef {
     const { months, total } = state.annual;
     const MONTHS_LONG = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-    const formatCurrency = (value: number) => `${value.toLocaleString('pt-AO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
+    const formatCurrency = (value: number) => `${value.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
     const money = (minor: number) => minor / 100;
     return {
         key: 'creditos-anual', title: `Visão Anual de Créditos ${state.year}`, subtitle: `Meses × indicadores · situação em ${state.today.split('-').reverse().join('/')}`,

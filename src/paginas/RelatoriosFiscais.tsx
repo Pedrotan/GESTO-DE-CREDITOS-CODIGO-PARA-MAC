@@ -1,3 +1,4 @@
+import { formatCurrency } from '@/bibliotecas/formatters';
 import { useState } from 'react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
@@ -475,7 +476,7 @@ export default function FiscalReports() {
                                         const client = clients.find(c => c.id === credit.clientId);
                                         return (
                                             <SelectItem key={credit.id} value={credit.id}>
-                                                {client?.name} - {credit.principalAmount.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' })}
+                                                {client?.name} - {formatCurrency(credit.principalAmount)}
                                             </SelectItem>
                                         );
                                     })}
@@ -495,7 +496,7 @@ export default function FiscalReports() {
                                         <div className="space-y-1 text-sm">
                                             <p><span className="font-medium">Cliente:</span> {client.name}</p>
                                             <p><span className="font-medium">NIF:</span> {client.nif || 'N/A'}</p>
-                                            <p><span className="font-medium">Valor:</span> {credit.principalAmount.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' })}</p>
+                                            <p><span className="font-medium">Valor:</span> {formatCurrency(credit.principalAmount)}</p>
                                             <p><span className="font-medium">Data:</span> {formatDate(credit.startDate)}</p>
                                             <Badge variant={credit.status === 'active' ? 'success' : credit.status === 'overdue' ? 'destructive' : 'default'} className="mt-2">
                                                 {credit.status === 'active' ? 'Activo' : credit.status === 'overdue' ? 'Em Atraso' : 'Pago'}

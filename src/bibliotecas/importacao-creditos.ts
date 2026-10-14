@@ -64,7 +64,7 @@ export function validateCreditImport(rows: Array<Record<string, unknown>>, conte
             if (existing || seen.has(key)) { status = 'duplicate'; errors.push(existing ? 'Já existe um crédito igual (cliente, montante e data).' : 'Linha repetida no ficheiro.'); }
             seen.add(key);
             if (status === 'ok') {
-                const blocked = newCreditBlockReason(clientCreditStanding(client.id, context.credits), value => `${value.toLocaleString('pt-AO')} Kz`);
+                const blocked = newCreditBlockReason(clientCreditStanding(client.id, context.credits), value => `${value.toLocaleString('pt-BR')} Kz`);
                 if (blocked) { status = 'error'; errors.push(blocked); }
                 else if (clientsInFile.has(client.id)) { status = 'error'; errors.push('O ficheiro tem mais do que um crédito para este cliente: só é permitido um de cada vez.'); }
                 clientsInFile.add(client.id);

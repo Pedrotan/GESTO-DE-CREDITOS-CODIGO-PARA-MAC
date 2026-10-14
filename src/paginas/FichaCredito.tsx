@@ -2,6 +2,7 @@
 // garantias, documentos, cobrança, contabilidade e histórico) e as ações permitidas pelo estado, pelas permissões e
 // pelas alçadas. Os valores vêm da mesma biblioteca da página de Créditos (a linha da carteira) e dos serviços
 // existentes; nada é recalculado com fórmulas próprias.
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Area, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
@@ -211,7 +212,7 @@ export default function FichaCredito() {
                 <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
                     <Stat label="Capital concedido" value={kz(row.grantedMinor)} />
                     <Stat label="Capital em dívida" value={kz(row.outstandingMinor)} tone={row.outstandingMinor ? undefined : 'green'} />
-                    <Stat label="TAN / TAEG" value={`${row.rate.toLocaleString('pt-AO')}% / ${taeg === null ? '—' : `${taeg.toLocaleString('pt-AO')}%`}`} hint="TAEG calculada pelos fluxos do plano de prestações" />
+                    <Stat label="TAN / TAEG" value={`${row.rate.toLocaleString('pt-BR')}% / ${taeg === null ? '—' : `${taeg.toLocaleString('pt-BR')}%`}`} hint="TAEG calculada pelos fluxos do plano de prestações" />
                     <Stat label="Próxima prestação" value={row.nextDueKey ? `${dateLabel(row.nextDueKey)} · ${kz(row.nextDueMinor)}` : '—'} />
                     <Stat label="Dias de atraso" value={String(row.daysOverdue)} tone={row.daysOverdue ? 'red' : 'green'} />
                     <Stat label="Mora por cobrar" value={kz(row.moraMinor)} tone={row.moraMinor ? 'red' : undefined} />
@@ -256,7 +257,7 @@ export default function FichaCredito() {
                         <Info label="Prestações" value={`${row.paidCount} pagas de ${row.totalCount}`} />
                         <Info label="Juros contratados" value={kz(row.contractedInterestMinor)} />
                         <Info label="Juros por receber" value={kz(row.interestOutstandingMinor)} />
-                        <Info label="Taxa de mora" value={`${num(credit.lateInterestRate).toLocaleString('pt-AO')}% ao dia`} />
+                        <Info label="Taxa de mora" value={`${num(credit.lateInterestRate).toLocaleString('pt-BR')}% ao dia`} />
                         <Info label="Pedido por" value={credit.requestedBy || '—'} />
                         <Info label="Aprovado por" value={credit.approvedBy || '—'} />
                         {row.paidOffKey && <Info label="Liquidado em" value={dateLabel(row.paidOffKey)} />}
@@ -297,7 +298,7 @@ export default function FichaCredito() {
                         <table className="w-full text-sm">
                             <thead className="bg-muted/50 text-xs uppercase text-muted-foreground">
                                 <tr><th className="p-3 text-left">N.º</th><th className="p-3 text-left">Vencimento</th><th className="p-3 text-right">Capital</th><th className="p-3 text-right">Juros</th>
-                                    <th className="p-3 text-right" title={`Informativo: ${stampRate.toLocaleString('pt-AO')}% sobre os juros (taxa do Simulador); não está incluído no valor da prestação.`}>Imposto do Selo*</th>
+                                    <th className="p-3 text-right" title={`Informativo: ${stampRate.toLocaleString('pt-BR')}% sobre os juros (taxa do Simulador); não está incluído no valor da prestação.`}>Imposto do Selo*</th>
                                     <th className="p-3 text-right">Prestação</th><th className="p-3 text-right">Pago</th><th className="p-3 text-left">Estado</th><th className="p-3 text-left">Pago em</th><th className="p-3 text-right">Mora</th></tr>
                             </thead>
                             <tbody>
@@ -331,7 +332,7 @@ export default function FichaCredito() {
                             </tfoot>
                         </table>
                     </div>
-                    <p className="text-xs text-muted-foreground">* Imposto do Selo sobre os juros, à taxa configurada no Simulador ({stampRate.toLocaleString('pt-AO')}%): valor informativo, não incluído nas prestações deste contrato. A mora usa o mesmo cálculo da página de Pagamentos ({num(credit.lateInterestRate).toLocaleString('pt-AO')}% ao dia sobre a prestação em atraso).</p>
+                    <p className="text-xs text-muted-foreground">* Imposto do Selo sobre os juros, à taxa configurada no Simulador ({stampRate.toLocaleString('pt-BR')}%): valor informativo, não incluído nas prestações deste contrato. A mora usa o mesmo cálculo da página de Pagamentos ({num(credit.lateInterestRate).toLocaleString('pt-BR')}% ao dia sobre a prestação em atraso).</p>
                 </TabsContent>
 
                 {/* 3. Pagamentos */}
@@ -547,7 +548,7 @@ function Cobranca({ creditId, events, actor, onChanged, phone, onOpenHub }: {
             <div className="space-y-2 rounded-2xl border bg-card p-4">
                 <p className="text-sm font-bold">Registar contacto ou promessa</p>
                 <Select value={kind} onValueChange={value => setKind(value as any)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="contact">Contacto realizado</SelectItem><SelectItem value="promise">Promessa de pagamento</SelectItem></SelectContent></Select>
-                {kind === 'promise' && <div className="grid grid-cols-2 gap-2"><Input type="date" value={promisedDate} onChange={event => setPromisedDate(event.target.value)} aria-label="Data prometida" /><Input type="number" min={0} value={amount} onChange={event => setAmount(event.target.value)} placeholder="Valor (Kz)" /></div>}
+                {kind === 'promise' && <div className="grid grid-cols-2 gap-2"><Input type="date" value={promisedDate} onChange={event => setPromisedDate(event.target.value)} aria-label="Data prometida" /><MoneyInput value={amount} onChange={event => setAmount(event.target.value)} placeholder="Valor (Kz)" /></div>}
                 <Textarea rows={3} value={notes} onChange={event => setNotes(event.target.value)} placeholder="Ex.: liguei ao cliente; promete pagar na sexta-feira depois do salário." />
                 {error && <p className="text-sm text-destructive">{error}</p>}
                 <Button className="w-full" disabled={busy || !actor || notes.trim().length < 5} onClick={() => void record({ creditId, kind, notes, promisedDate: kind === 'promise' ? promisedDate : undefined, amount: kind === 'promise' ? Number(amount) : undefined })}>{busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}Registar</Button>

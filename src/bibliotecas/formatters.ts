@@ -1,31 +1,30 @@
 /** Símbolo do Kwanza usado em todo o sistema. */
 export const KWANZA_SYMBOL = 'Kz';
 const KWANZA_CODES = new Set(['', 'AOA', 'KZ', 'KWANZA', 'KWANZAS']);
-const kwanzaFormatter = new Intl.NumberFormat('pt-AO', { style: 'currency', currency: 'AOA', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+/**
+ * Locale dos números: ponto nos milhares e vírgula nas casas decimais ("1.000.000,00"), o formato pedido
+ * para o Kwanza. O 'pt-AO' do Intl usa espaço nos milhares; o 'pt-BR' tem exactamente este formato
+ * (e agrupa desde os 4 dígitos: "1.500,50"). As datas continuam em 'pt-AO'.
+ */
+export const NUMBER_LOCALE = 'pt-BR';
 const decimalFormatters = new Map<number, Intl.NumberFormat>();
 const decimalFormatter = (digits: number) => {
-  if (!decimalFormatters.has(digits)) decimalFormatters.set(digits, new Intl.NumberFormat('pt-AO', { minimumFractionDigits: digits, maximumFractionDigits: digits }));
+  if (!decimalFormatters.has(digits)) decimalFormatters.set(digits, new Intl.NumberFormat(NUMBER_LOCALE, { minimumFractionDigits: digits, maximumFractionDigits: digits }));
   return decimalFormatters.get(digits)!;
 };
 
 /**
- * Formatação monetária única do sistema: "1 000 000,00 Kz" (espaço nos milhares, vírgula decimal),
- * igual a Intl.NumberFormat('pt-AO', { style: 'currency', currency: 'AOA' }). Outras moedas usam o
- * formato angolano com o respectivo símbolo.
+ * Formatação monetária única do sistema (ecrãs, relatórios, recibos e PDFs): "1.000.000,00 Kz" — ponto nos
+ * milhares, vírgula decimal, sempre duas casas. Outras moedas: o mesmo número com o código (ex.: "1.000,00 USD").
  */
 export const formatCurrency = (value: number | string | undefined | null, currency: string = 'AOA'): string => {
   const num = Number(value ?? 0);
   const safe = Number.isFinite(num) ? num : 0;
   const code = String(currency || 'AOA').trim().toUpperCase();
-  if (KWANZA_CODES.has(code)) return kwanzaFormatter.format(safe);
-  try {
-    return new Intl.NumberFormat('pt-AO', { style: 'currency', currency: code, minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(safe);
-  } catch {
-    return `${decimalFormatter(2).format(safe)} ${currency}`;
-  }
+  return `${decimalFormatter(2).format(safe)} ${KWANZA_CODES.has(code) ? KWANZA_SYMBOL : code}`;
 };
 
-/** Número com vírgula decimal e espaço nos milhares (ex.: 1 234,50). */
+/** Número com vírgula decimal e ponto nos milhares (ex.: 1.234,50). */
 export const formatDecimal = (value: number | string | undefined | null, digits = 2): string => {
   const num = Number(value ?? 0);
   return decimalFormatter(digits).format(Number.isFinite(num) ? num : 0);
@@ -35,8 +34,8 @@ export const formatDecimal = (value: number | string | undefined | null, digits 
 export const formatPercent = (value: number | string | undefined | null, digits = 2): string => `${formatDecimal(value, digits)}%`;
 
 /**
- * Lê um número escrito à maneira angolana: aceita "1 000 000,50", "1000000,5", "1.000.000,50" ou "24.5".
- * Devolve NaN quando o texto não é um número.
+ * Lê um número escrito à maneira angolana: aceita "1.000.000,50", "1 000 000,50", "1000000,5", "1.500"
+ * (ponto seguido de 3 dígitos = milhares) ou "24.5". Devolve NaN quando o texto não é um número.
  */
 export const parseDecimalInput = (text: string | number | null | undefined): number => {
   if (typeof text === 'number') return text;
@@ -49,7 +48,7 @@ export const parseDecimalInput = (text: string | number | null | undefined): num
     normalized = lastComma > lastDot ? raw.replace(/\./g, '').replace(',', '.') : raw.replace(/,/g, '');
   } else if (lastComma > -1) {
     normalized = raw.replace(/\./g, '').replace(',', '.');
-  } else if ((raw.match(/\./g) || []).length > 1) {
+  } else if ((raw.match(/\./g) || []).length > 1 || /^-?\d{1,3}\.\d{3}$/.test(raw)) {
     normalized = raw.replace(/\./g, '');
   }
   const value = Number(normalized);
@@ -57,12 +56,7 @@ export const parseDecimalInput = (text: string | number | null | undefined): num
 };
 
 export const formatCurrencyCompact = (value: number): string => {
-  return new Intl.NumberFormat('pt-AO', {
-    style: 'currency',
-    currency: 'AOA',
-    notation: 'compact',
-    maximumFractionDigits: 1,
-  }).format(value);
+  return `${new Intl.NumberFormat('pt-AO', { notation: 'compact', maximumFractionDigits: 1 }).format(value)} ${KWANZA_SYMBOL}`;
 };
 
 export const formatDate = (date: Date | string | undefined | null): string => {
@@ -115,7 +109,7 @@ export const formatPercentage = (value: number): string => {
 };
 
 export const formatNumber = (value: number): string => {
-  return new Intl.NumberFormat('pt-AO').format(value);
+  return new Intl.NumberFormat(NUMBER_LOCALE).format(value);
 };
 
 /**
@@ -166,7 +160,7 @@ export const getAdaptiveDonutValue = (value: number | string | undefined | null,
 
   // Triliões (>= 1.000.000.000.000)
   if (abs >= 1_000_000_000_000) {
-    const formatted = (num / 1_000_000_000_000).toLocaleString('pt-AO', {
+    const formatted = (num / 1_000_000_000_000).toLocaleString('pt-BR', {
       minimumFractionDigits: 1,
       maximumFractionDigits: 2,
     });
@@ -183,7 +177,7 @@ export const getAdaptiveDonutValue = (value: number | string | undefined | null,
 
   // Biliões / Mil Milhões (>= 1.000.000.000) - Ex: 67 600 000 000 -> 67,60 Bi
   if (abs >= 1_000_000_000) {
-    const formatted = (num / 1_000_000_000).toLocaleString('pt-AO', {
+    const formatted = (num / 1_000_000_000).toLocaleString('pt-BR', {
       minimumFractionDigits: 1,
       maximumFractionDigits: 2,
     });
@@ -200,7 +194,7 @@ export const getAdaptiveDonutValue = (value: number | string | undefined | null,
 
   // Milhões (>= 1.000.000) - Ex: 15 600 000 -> 15,60 Mi
   if (abs >= 1_000_000) {
-    const formatted = (num / 1_000_000).toLocaleString('pt-AO', {
+    const formatted = (num / 1_000_000).toLocaleString('pt-BR', {
       minimumFractionDigits: 1,
       maximumFractionDigits: 2,
     });
@@ -217,7 +211,7 @@ export const getAdaptiveDonutValue = (value: number | string | undefined | null,
 
   // Centenas de Milhares (>= 100.000) - Ex: 450 000 -> 450 mil
   if (abs >= 100_000) {
-    const formatted = (num / 1_000).toLocaleString('pt-AO', {
+    const formatted = (num / 1_000).toLocaleString('pt-BR', {
       minimumFractionDigits: 0,
       maximumFractionDigits: 1,
     });
@@ -233,7 +227,7 @@ export const getAdaptiveDonutValue = (value: number | string | undefined | null,
   }
 
   // Menor que 100.000 (Ex: 25 000 ou 1 500)
-  const formatted = num.toLocaleString('pt-AO', {
+  const formatted = num.toLocaleString('pt-BR', {
     minimumFractionDigits: num % 1 === 0 ? 0 : 2,
     maximumFractionDigits: 2,
   });

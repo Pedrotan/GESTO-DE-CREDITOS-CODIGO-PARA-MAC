@@ -5,7 +5,7 @@ import { formatKz, formatShortKz, usageTone, type UsageMeter } from '@/bibliotec
 import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { Textarea } from '@/componentes/ui/textarea';
 
-/** Converte "1 000 000,50" (ou "1000000.5") em cêntimos; vazio = null (sem teto). */
+/** Converte "1.000.000,50" (ou "1000000.5") em cêntimos; vazio = null (sem teto). */
 function parseKzText(text: string): number | null | 'invalid' {
     const raw = text.replace(/\s|kz/gi, '').trim();
     if (!raw) return null;
@@ -18,7 +18,7 @@ function parseKzText(text: string): number | null | 'invalid' {
     return Number.isSafeInteger(value) ? value : 'invalid';
 }
 
-/** Campo de valor em Kz com máscara "1 000 000,00"; vazio significa "sem teto" quando permitido. */
+/** Campo de valor em Kz com máscara "1.000.000,00"; vazio significa "sem teto" quando permitido. */
 export function MoneyCell({ value, onChange, invalid, title, disabled, allowEmpty = true, className, ariaLabel, emptyLabel = 'Sem teto' }: {
     value: number | null | undefined; onChange: (value: number | null) => void; invalid?: string | null; title?: string; disabled?: boolean;
     allowEmpty?: boolean; className?: string; ariaLabel?: string; emptyLabel?: string;

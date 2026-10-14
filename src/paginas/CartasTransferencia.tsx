@@ -1,3 +1,4 @@
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { KzIcon } from '@/componentes/ui/KzIcon';
 import { BankLogo } from '@/componentes/BankLogo';
 import { ANGOLAN_BANKS } from '@/bibliotecas/ibanHelper';
@@ -622,8 +623,7 @@ export function CartasTransferencia() {
                                     <KzIcon className="h-3.5 w-3.5 text-primary" />
                                     Prestação ({companySettings.currency})
                                 </Label>
-                                <Input
-                                    type="number"
+                                <MoneyInput
                                     value={installmentAmount}
                                     onChange={(e) => setInstallmentAmount(Number(e.target.value))}
                                     className="h-9 text-xs font-black text-emerald-600 bg-background rounded-xl"

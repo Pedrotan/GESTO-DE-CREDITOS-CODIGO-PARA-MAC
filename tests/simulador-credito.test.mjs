@@ -140,7 +140,11 @@ test('limites do produto, configuração e formatação em Kz', () => {
     const errors = productLimitErrors(product, 2_000_000, 30, formatCurrency);
     assert.equal(errors.length, 2);
     assert.match(errors[0], /montante máximo/);
-    assert.equal(formatCurrency(1_000_000).replace(/ /g, ' '), '1 000 000,00 Kz');
+    assert.equal(formatCurrency(1_000_000), '1.000.000,00 Kz');
+    assert.equal(formatCurrency(25_000), '25.000,00 Kz');
+    assert.equal(formatCurrency(1500.5), '1.500,50 Kz');
+    assert.equal(parseDecimalInput('1.000.000,00'), 1_000_000);
+    assert.equal(parseDecimalInput('1.500'), 1500);
     assert.equal(parseDecimalInput('1 000 000,50'), 1_000_000.5);
     assert.equal(parseDecimalInput('2,5'), 2.5);
     assert.equal(parseDecimalInput('24.5'), 24.5);

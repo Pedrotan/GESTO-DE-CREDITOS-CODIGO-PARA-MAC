@@ -15,7 +15,7 @@ function Variation({ current, previous, inverse, title = 'Variação face ao per
     return (
         <span title={title} className={cn('rounded-full px-2 py-0.5 text-[10px] font-bold',
             good === null ? 'bg-black/10 text-slate-900/70 dark:bg-white/10 dark:text-slate-300' : good ? 'bg-emerald-700/15 text-emerald-900 dark:text-emerald-300' : 'bg-red-700/15 text-red-900 dark:text-red-300')}>
-            {change === 0 ? '■' : change > 0 ? '▲' : '▼'} {Math.abs(change).toLocaleString('pt-AO', { maximumFractionDigits: 1 })}%
+            {change === 0 ? '■' : change > 0 ? '▲' : '▼'} {Math.abs(change).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%
         </span>
     );
 }
@@ -38,7 +38,7 @@ export function CartoesCarteira({ state, onDetails, cashFlowCard }: {
     const show = (value: string) => hidden ? HIDDEN : value;
     const { kpis, figures, previousFigures, kpiTrend } = state;
     const trend = (key: 'activeMinor' | 'overdueMinor' | 'futureInterestMinor' | 'defaultRate', inverse?: boolean) => ({ current: Number(kpiTrend.current[key] || 0), previous: Number(kpiTrend.previous[key] || 0), inverse, title: `Variação face a ${kpiTrend.previousEnd.split('-').reverse().join('/')} (fim do mês anterior)` });
-    const pct = (value: number | null) => value === null ? '—' : `${value.toLocaleString('pt-AO', { maximumFractionDigits: 1 })}%`;
+    const pct = (value: number | null) => value === null ? '—' : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`;
     const cards: CardDef[] = state.view === 'carteira' ? [
         { key: 'carteira', css: 'card-kpi-sky', icon: Briefcase, group: 'Carteira', title: 'Carteira Ativa', value: show(kz(kpis.activeMinor)), footer: `${kpis.activeCount} crédito(s) em curso · capital em dívida`, detail: 'outstanding', variation: trend('activeMinor') },
         { key: 'atraso', css: 'card-kpi-coral', icon: AlertTriangle, group: 'Risco', title: 'Em Atraso', value: show(kz(kpis.overdueMinor)), footer: <>{kpis.overdueCount} crédito(s) · <strong>PAR30 {pct(kpis.par30)}</strong> da carteira</>, detail: 'overdue', variation: trend('overdueMinor', true) },

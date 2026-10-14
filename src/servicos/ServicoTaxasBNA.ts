@@ -116,7 +116,7 @@ function paraNumero(v: unknown): number | null {
 function formatarNumero(v: unknown): string {
     const n = paraNumero(v);
     if (n === null) return String(v ?? '—');
-    return n.toLocaleString('pt-AO', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
+    return n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 });
 }
 
 function tendenciaDe(variacao: string): 'up' | 'down' | null {

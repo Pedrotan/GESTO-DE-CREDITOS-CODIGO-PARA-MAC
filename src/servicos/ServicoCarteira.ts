@@ -122,7 +122,7 @@ export class ServicoCarteira {
             { sql: `INSERT INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, createdAt, updatedAt, usuario_id)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                 params: [id, input.credit.clientId, input.credit.id, 'interpellated', input.priority, input.debtMinor / 100, 'Enviado para contencioso a partir da ficha do crédito', input.reason.trim(), when, when, input.credit.usuario_id || input.actor.id], expectChanges: 1 },
-            audit(input.actor, 'create', `Enviou o crédito ${input.credit.id} de ${input.credit.clientName} para contencioso (dívida ${(input.debtMinor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz)`,
+            audit(input.actor, 'create', `Enviou o crédito ${input.credit.id} de ${input.credit.clientName} para contencioso (dívida ${(input.debtMinor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz)`,
                 { creditId: input.credit.id, legalCaseId: id, reason: input.reason, justification: input.reason, from: input.credit.status, to: 'contencioso' }, when),
         ]);
         return id;
@@ -272,7 +272,7 @@ export class ServicoCarteira {
                         VALUES (?, ?, 'early_settlement', ?, ?, 'approved', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     params: [id, input.credit.id, sim.mode, input.reason.trim(), JSON.stringify(original), JSON.stringify(plan), JSON.stringify({ kind: sim.kind, capitalMinor: sim.capitalMinor, interestSavedMinor: sim.interestSavedMinor }),
                         sim.payNowMinor, input.actor.id, input.actor.name, when, input.actor.id, input.actor.name, when], expectChanges: 1 },
-                audit(input.actor, 'update', `Liquidação antecipada ${label} do crédito ${input.credit.id} de ${input.credit.clientName}: a pagar hoje ${(sim.payNowMinor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz`,
+                audit(input.actor, 'update', `Liquidação antecipada ${label} do crédito ${input.credit.id} de ${input.credit.clientName}: a pagar hoje ${(sim.payNowMinor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz`,
                     { creditId: input.credit.id, restructuringId: id, payNowMinor: sim.payNowMinor, interestSavedMinor: sim.interestSavedMinor, reason: input.reason, justification: input.reason }, when),
             ],
         });

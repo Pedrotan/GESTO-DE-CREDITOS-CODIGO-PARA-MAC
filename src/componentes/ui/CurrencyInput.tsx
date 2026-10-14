@@ -12,8 +12,9 @@ interface CurrencyInputProps extends Omit<React.InputHTMLAttributes<HTMLInputEle
 const symbolFor = (currency?: string) => ['', 'AOA', 'KZ'].includes(String(currency || '').toUpperCase()) ? KWANZA_SYMBOL : String(currency);
 
 /**
- * Campo monetário com máscara angolana: o utilizador escreve 1000000 e vê "1 000 000"; a vírgula separa
- * as casas decimais (o ponto também é aceite e convertido). Ao sair do campo fica "1 000 000,00".
+ * Campo monetário com máscara do Kwanza: o utilizador escreve 25000 e vê "25.000"; a vírgula separa as casas
+ * decimais (o ponto escrito no fim, como no teclado numérico, passa a vírgula). Ao sair do campo fica
+ * "25.000,00 Kz". Letras e outros caracteres são ignorados; o valor entregue é sempre um número.
  */
 export function CurrencyInput({
     value,
@@ -32,14 +33,15 @@ export function CurrencyInput({
     }, [value]);
 
     const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        // Aceita dígitos e um separador decimal (vírgula; o ponto escrito no fim também conta como vírgula).
+        // Aceita dígitos e um separador decimal: a vírgula, ou o ponto acabado de escrever no fim. Os outros
+        // pontos são os separadores de milhares da própria máscara e são ignorados.
         let raw = event.target.value.replace(/\s/g, "");
-        if (!raw.includes(",") && /\.\d{0,2}$/.test(raw)) raw = raw.replace(/\.(\d{0,2})$/, ",$1");
+        if (!raw.includes(",") && raw.endsWith(".")) raw = `${raw.slice(0, -1)},`;
         raw = raw.replace(/[^\d,]/g, "");
         const [integerPart, ...rest] = raw.split(",");
         const decimals = rest.join("").slice(0, 2);
         const digits = integerPart.replace(/^0+(?=\d)/, "");
-        const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+        const grouped = digits.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
         setText(raw.includes(",") ? `${grouped || "0"},${decimals}` : grouped);
         const numeric = Number(`${digits || "0"}.${decimals || "0"}`);
         onValueChange(Number.isFinite(numeric) ? numeric : 0);
@@ -59,5 +61,32 @@ export function CurrencyInput({
             />
             <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-bold text-muted-foreground">{symbolFor(currency)}</span>
         </div>
+    );
+}
+
+type MoneyInputProps = Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type' | 'min' | 'step'> & {
+    value: string | number | null | undefined;
+    /** Recebe o valor como um <input type="number">: event.target.value é o número em texto ("25000.5") ou "" se vazio. */
+    onChange?: (event: { target: { value: string }; currentTarget: { value: string } }) => void;
+    min?: number | string;
+    step?: number | string;
+    currency?: string;
+};
+
+/**
+ * Substituto directo de <Input type="number"> para valores em Kz: a mesma API (value/onChange com
+ * event.target.value) mas com a máscara "25.000,00 Kz". O número entregue nunca tem formatação.
+ */
+export function MoneyInput({ value, onChange, min: _min, step: _step, ...props }: MoneyInputProps) {
+    const numeric = Number(value);
+    return (
+        <CurrencyInput
+            {...props}
+            value={Number.isFinite(numeric) ? numeric : 0}
+            onValueChange={next => {
+                const text = next ? String(next) : '';
+                onChange?.({ target: { value: text }, currentTarget: { value: text } });
+            }}
+        />
     );
 }

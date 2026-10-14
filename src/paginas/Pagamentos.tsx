@@ -1,3 +1,4 @@
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { AlertTriangle, Filter, Hourglass, MessageCircle, Plus, Search, Settings2, Upload } from 'lucide-react';
@@ -377,7 +378,7 @@ export default function Payments() {
                     </DialogHeader>
                     <div className="space-y-1.5">
                         <Label htmlFor="threshold">Anulações acima deste valor exigem aprovação de outro administrador (Kz)</Label>
-                        <Input id="threshold" type="number" min={0} value={threshold} onChange={event => setThreshold(event.target.value)} />
+                        <MoneyInput id="threshold" value={threshold} onChange={event => setThreshold(event.target.value)} />
                     </div>
                     <div className="flex justify-end gap-2">
                         <Button variant="ghost" onClick={() => setSettingsOpen(false)}>Cancelar</Button>

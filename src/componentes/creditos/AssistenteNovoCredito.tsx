@@ -3,6 +3,7 @@
 // classificação), 4) documentos e garantias, 5) submissão. O pedido segue as alçadas (Limites): dentro da alçada
 // de quem submete é aprovado e desembolsado na mesma transação (contrato e lançamento), só se houver saldo em
 // Caixa/Banco; acima dela, ou quando a regra do cliente o exige, fica na fila de Aprovações.
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Check, CheckCircle2, ChevronLeft, ChevronRight, FileUp, Loader2, Lock, Trash2 } from 'lucide-react';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
@@ -30,7 +31,7 @@ const STEPS = ['Cliente', 'Simulação', 'Análise de risco', 'Documentos e gara
 const DOC_KINDS: Record<string, string> = { contrato: 'Contrato', livranca: 'Livrança', bi: 'Bilhete de Identidade', comprovativo: 'Comprovativo de rendimento', outro: 'Outro' };
 type StagedDoc = { kind: string; fileName: string; mimeType: string; dataUrl: string };
 type Warranty = { type: 'Veículo' | 'Imóvel' | 'Equipamento' | 'Outro'; description: string; marketValue: string; location: string };
-const pct = (value: number | null) => value === null ? '—' : `${value.toLocaleString('pt-AO', { maximumFractionDigits: 2 })}%`;
+const pct = (value: number | null) => value === null ? '—' : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
 
 function Row({ label, value, tone }: { label: string; value: React.ReactNode; tone?: 'red' | 'green' }) {
     return (
@@ -259,17 +260,17 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                                     <SelectContent>{activeProducts(config).map(item => {
                                         const options = termOptionsFor(item, interestTiers || []);
                                         const terms = options.length ? `${options[0].months}–${options[options.length - 1].months} meses (taxa por prazo)` : `${item.minMonths}–${item.maxMonths} meses`;
-                                        return <SelectItem key={item.id} value={item.id}>{item.name} · {item.minAmount.toLocaleString('pt-AO')}–{item.maxAmount.toLocaleString('pt-AO')} Kz · {terms}</SelectItem>;
+                                        return <SelectItem key={item.id} value={item.id}>{item.name} · {item.minAmount.toLocaleString('pt-BR')}–{item.maxAmount.toLocaleString('pt-BR')} Kz · {terms}</SelectItem>;
                                     })}</SelectContent>
                                 </Select>
                             </label>
                             <div className="grid grid-cols-2 gap-2">
-                                <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Montante (Kz)</span><Input type="number" min={renewal?.minAmount || 0} value={form.principal || ''} onChange={event => set({ principal: Number(event.target.value) })} /></label>
+                                <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Montante (Kz)</span><MoneyInput min={renewal?.minAmount || 0} value={form.principal || ''} onChange={event => set({ principal: Number(event.target.value) })} /></label>
                                 {flat && termOptions.length ? (
                                     <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Prazo</span>
                                         <Select value={String(form.months || '')} onValueChange={value => set({ months: Number(value), termRateManual: false })}>
                                             <SelectTrigger><SelectValue placeholder="Escolha o prazo" /></SelectTrigger>
-                                            <SelectContent>{termOptions.map(option => <SelectItem key={option.months} value={String(option.months)}>{option.months} {option.months === 1 ? 'mês' : 'meses'} · {option.rate.toLocaleString('pt-AO')}%</SelectItem>)}</SelectContent>
+                                            <SelectContent>{termOptions.map(option => <SelectItem key={option.months} value={String(option.months)}>{option.months} {option.months === 1 ? 'mês' : 'meses'} · {option.rate.toLocaleString('pt-BR')}%</SelectItem>)}</SelectContent>
                                         </Select>
                                     </label>
                                 ) : (
@@ -281,7 +282,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                                     <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Taxa do prazo {form.termRateManual ? '(alterada)' : '(automática)'}</span>
                                         {canEditRate
                                             ? <DecimalInput suffix="%" min={0} max={1000} value={form.termRate} onValueChange={termRate => set({ termRate, termRateManual: termRate !== tableRate })} className="text-right font-bold" />
-                                            : <div className="flex h-10 items-center justify-end rounded-md border bg-muted/40 px-3 text-sm font-bold" title="Alterar a taxa exige a permissão «Alterar a taxa do crédito».">{tableRate === null ? '—' : `${tableRate.toLocaleString('pt-AO')}%`}</div>}
+                                            : <div className="flex h-10 items-center justify-end rounded-md border bg-muted/40 px-3 text-sm font-bold" title="Alterar a taxa exige a permissão «Alterar a taxa do crédito».">{tableRate === null ? '—' : `${tableRate.toLocaleString('pt-BR')}%`}</div>}
                                     </label>
                                 ) : (
                                     <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Sistema</span>
@@ -335,8 +336,8 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                 {step === 2 && (
                     <div className="grid gap-4 md:grid-cols-2">
                         <div className="rounded-xl border p-3">
-                            <Row label="Rendimento mensal" value={<Input type="number" min={0} className="h-8 w-40 text-right" value={form.income || ''} onChange={event => set({ income: Number(event.target.value) })} />} />
-                            <Row label="Outros encargos mensais" value={<Input type="number" min={0} className="h-8 w-40 text-right" value={form.otherDebts || ''} onChange={event => set({ otherDebts: Number(event.target.value) })} />} />
+                            <Row label="Rendimento mensal" value={<MoneyInput className="h-8 w-40 text-right" value={form.income || ''} onChange={event => set({ income: Number(event.target.value) })} />} />
+                            <Row label="Outros encargos mensais" value={<MoneyInput className="h-8 w-40 text-right" value={form.otherDebts || ''} onChange={event => set({ otherDebts: Number(event.target.value) })} />} />
                             <Row label="Nova prestação (máxima)" value={result?.valid ? formatCurrency(result.maxInstallment) : '—'} />
                             <Row label="Taxa de esforço" value={`${pct(calc.effort)} (limite ${pct(config.effortLimit)})`} tone={calc.effort !== null && calc.effort > config.effortLimit ? 'red' : 'green'} />
                             <Row label="Classificação de risco" value={RISK_LABELS[calc.riskLevel]} tone={calc.riskLevel === 'high' ? 'red' : calc.riskLevel === 'low' ? 'green' : undefined} />
@@ -372,7 +373,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                             <Select value={warranty.type} onValueChange={value => setWarranty(previous => ({ ...previous, type: value as Warranty['type'] }))}><SelectTrigger className="h-9"><SelectValue /></SelectTrigger><SelectContent>{['Veículo', 'Imóvel', 'Equipamento', 'Outro'].map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select>
                             <Input value={warranty.description} onChange={event => setWarranty(previous => ({ ...previous, description: event.target.value }))} placeholder="Descrição (ex.: Toyota Hilux, matrícula LD-00-00-AA)" />
                             <div className="grid grid-cols-2 gap-2">
-                                <Input type="number" min={0} value={warranty.marketValue} onChange={event => setWarranty(previous => ({ ...previous, marketValue: event.target.value }))} placeholder="Valor de mercado (Kz)" />
+                                <MoneyInput value={warranty.marketValue} onChange={event => setWarranty(previous => ({ ...previous, marketValue: event.target.value }))} placeholder="Valor de mercado (Kz)" />
                                 <Input value={warranty.location} onChange={event => setWarranty(previous => ({ ...previous, location: event.target.value }))} placeholder="Localização" />
                             </div>
                             {history && <p className="text-xs text-muted-foreground">Garantias ativas do cliente: {formatCurrency(history.guaranteesValue)}. Cobertura com esta: {pct(form.principal ? Math.round(((history.guaranteesValue + extraCoverage) / form.principal) * 1000) / 10 : null)}.</p>}

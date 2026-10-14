@@ -1,4 +1,5 @@
 
+import { formatCurrency } from '@/bibliotecas/formatters';
 import React, { useState } from 'react';
 import { useData } from '@/contextos/ContextoDados';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/componentes/ui/card';
@@ -116,7 +117,7 @@ export function PendingPaymentsList() {
                             </div>
                             <div className="text-right">
                                 <span className="block font-bold text-lg text-primary">
-                                    {new Intl.NumberFormat('pt-AO', { style: 'currency', currency: 'AOA' }).format(ref.amount)}
+                                    {formatCurrency(ref.amount)}
                                 </span>
                                 <span className="text-xs text-muted-foreground">
                                     {new Date(ref.createdAt).toLocaleDateString()}

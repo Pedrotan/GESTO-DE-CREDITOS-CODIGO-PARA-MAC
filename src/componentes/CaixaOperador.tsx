@@ -1,3 +1,4 @@
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { ServicoCaixa, type CashSession } from '@/servicos/ServicoCaixa';
@@ -33,7 +34,7 @@ export function CaixaOperador() {
     return <div className="space-y-4">
         <p className="text-sm text-muted-foreground">Caixa de {user.name}. A abertura regista o dinheiro contado, sem criar receita. O movimento esperado usa apenas lançamentos em caixa atribuídos ao operador após a abertura.</p>
         {error && <p role="alert" className="text-destructive">{error}</p>}
-        {!session && <div className="flex flex-wrap gap-3"><Input type="number" min="0" step="0.01" aria-label="Saldo inicial de caixa" placeholder="Saldo inicial contado (AOA)" value={opening} onChange={e=>setOpening(e.target.value)} className="max-w-xs" />
+        {!session && <div className="flex flex-wrap gap-3"><MoneyInput aria-label="Saldo inicial de caixa" placeholder="Saldo inicial contado (AOA)" value={opening} onChange={e=>setOpening(e.target.value)} className="max-w-xs" />
             <Button disabled={busy || !opening} onClick={()=>void run(async()=>{
                 const now=new Date(),day=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
                 await ServicoCaixa.open(user.id,user.name,Number(opening),day);

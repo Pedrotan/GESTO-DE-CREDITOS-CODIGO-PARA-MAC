@@ -1,3 +1,4 @@
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useMemo, useState } from 'react';
 import { Bookmark, Save, Trash2 } from 'lucide-react';
 import { AGING_LABELS, type AgingBucket } from '@/bibliotecas/carteira-credito';
@@ -45,8 +46,8 @@ export function FiltrosCarteira({ state, open, onClose }: { state: CarteiraState
                     {pick('Nível de risco', f.risk, risk => set({ risk }), [['low', 'Baixo'], ['medium', 'Médio'], ['high', 'Alto']])}
                     {pick('Escalão de atraso', f.aging, aging => set({ aging }), (Object.keys(AGING_LABELS) as AgingBucket[]).map(key => [key, AGING_LABELS[key]]))}
                     <div className="grid grid-cols-2 gap-2">
-                        <div><p className="mb-1 text-xs font-semibold">Capital de (Kz)</p><Input type="number" min={0} value={f.minAmount} onChange={event => set({ minAmount: event.target.value })} /></div>
-                        <div><p className="mb-1 text-xs font-semibold">Até (Kz)</p><Input type="number" min={0} value={f.maxAmount} onChange={event => set({ maxAmount: event.target.value })} /></div>
+                        <div><p className="mb-1 text-xs font-semibold">Capital de (Kz)</p><MoneyInput value={f.minAmount} onChange={event => set({ minAmount: event.target.value })} /></div>
+                        <div><p className="mb-1 text-xs font-semibold">Até (Kz)</p><MoneyInput value={f.maxAmount} onChange={event => set({ maxAmount: event.target.value })} /></div>
                         <div><p className="mb-1 text-xs font-semibold">Concedido de</p><Input type="date" value={f.grantedFrom} onChange={event => set({ grantedFrom: event.target.value })} /></div>
                         <div><p className="mb-1 text-xs font-semibold">Até</p><Input type="date" value={f.grantedTo} onChange={event => set({ grantedTo: event.target.value })} /></div>
                         <div><p className="mb-1 text-xs font-semibold">Vencimento de</p><Input type="date" value={f.dueFrom} onChange={event => set({ dueFrom: event.target.value })} /></div>

@@ -2,6 +2,7 @@
 // de confirmar), reestruturação (novo plano com aprovação de outra pessoa), contencioso, abate (pedido aprovado na
 // Contabilidade), transferência de gestor e envio do extrato. Todas usam os serviços existentes; nenhuma fórmula
 // nova de juros: o plano vem do gerador de prestações e a mora do cálculo de juros de mora.
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useMemo, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { formatCurrency } from '@/bibliotecas/formatters';
@@ -102,7 +103,7 @@ export function LiquidacaoAntecipadaDialog({ open, onClose, credit, row, install
                         </div>
                         {kind === 'partial' && (
                             <>
-                                <Field label="Capital a antecipar (Kz)"><Input type="number" min={0} step="0.01" value={amount} onChange={event => setAmount(event.target.value)} placeholder="Ex.: 300000" /></Field>
+                                <Field label="Capital a antecipar (Kz)"><MoneyInput value={amount} onChange={event => setAmount(event.target.value)} placeholder="Ex.: 300000" /></Field>
                                 <Field label="Depois da antecipação">
                                     <Select value={mode} onValueChange={value => setMode(value as EarlyMode)}>
                                         <SelectTrigger><SelectValue /></SelectTrigger>

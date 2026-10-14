@@ -504,7 +504,7 @@ export function SimuladorCredito() {
                                         </div>
                                         <Slider value={[Math.max(product.minAmount, Math.min(product.maxAmount, form.principal || product.minAmount))]} min={product.minAmount} max={product.maxAmount} step={amountStep}
                                             onValueChange={([value]) => set({ principal: value })} className="py-2" />
-                                        <CurrencyInput value={form.principal} onValueChange={principal => set({ principal })} className="text-right font-mono font-bold" placeholder="Ex.: 1 000 000,00" />
+                                        <CurrencyInput value={form.principal} onValueChange={principal => set({ principal })} className="text-right font-mono font-bold" placeholder="Ex.: 1.000.000,00" />
                                     </div>
 
                                     {/* Prazo */}
@@ -871,7 +871,7 @@ export function SimuladorCredito() {
 function GuiaSimulador({ config, onTerms }: { config: SimulatorConfig; onTerms: () => void }) {
     const items: Array<[string, string]> = [
         ['Produto', 'Escolha o produto: os limites de montante e prazo, a TAN, as comissões e o sistema de amortização vêm de Configurações › Produtos de Crédito.'],
-        ['Montante e prazo', 'Use o cursor ou escreva o valor (ex.: 1000000 aparece como 1 000 000,00 Kz). O prazo é escolhido em meses, com atalhos de 6 a 60 meses.'],
+        ['Montante e prazo', 'Use o cursor ou escreva o valor (ex.: 1000000 aparece como 1.000.000,00 Kz). O prazo é escolhido em meses, com atalhos de 6 a 60 meses.'],
         ['Datas e carência', 'A data de início é a do desembolso. As prestações vencem no dia escolhido (1 a 28); se calhar num fim-de-semana ou feriado, passa para o dia útil seguinte. A carência pode ser só de capital (paga juros) ou de capital e juros (juros capitalizados).'],
         ['TAN e TAEG', 'A TAN é a taxa anual nominal (a mensal é TAN ÷ 12). A TAEG junta juros, comissões, Imposto do Selo e seguros e é calculada pela TIR dos fluxos reais.'],
         ['Imposto do Selo', `${formatPercent(config.stampDuty.upToOneYear)} (até 1 ano), ${formatPercent(config.stampDuty.overOneYear)} (mais de 1 ano) ou ${formatPercent(config.stampDuty.fiveYearsOrMore)} (5 anos ou mais) sobre a utilização, e ${formatPercent(config.stampDuty.interest)} sobre os juros de cada prestação.`],

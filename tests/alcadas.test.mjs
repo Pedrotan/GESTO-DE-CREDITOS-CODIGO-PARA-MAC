@@ -178,9 +178,9 @@ test('J3 · Gravar um limite por operação maior do que o diário é bloqueado 
         changed.profiles.manager.ops.credit_approval.perOperationMinor = 300_000_000;
         const issues = M.L.validatePolicy(changed, id => ({ manager: 'Gestor de Crédito' }[id] || id));
         assert.ok(issues.length > 0);
-        assert.match(issues[0].message, /Gestor de Crédito — Aprovação de crédito: o limite por operação \(3 000 000,00 Kz\) não pode ser maior do que o volume diário \(2 000 000,00 Kz\)\./);
+        assert.match(issues[0].message, /Gestor de Crédito — Aprovação de crédito: o limite por operação \(3.000.000,00 Kz\) não pode ser maior do que o volume diário \(2.000.000,00 Kz\)\./);
         await assert.rejects(M.ServicoAlcadas.propose({ policy: changed, reason: JUSTIFICATION, actor: USERS.admin, profileName: id => ({ manager: 'Gestor de Crédito' }[id] || id) }),
-            /o limite por operação \(3 000 000,00 Kz\) não pode ser maior do que o volume diário/);
+            /o limite por operação \(3.000.000,00 Kz\) não pode ser maior do que o volume diário/);
         assert.equal(database.prepare('SELECT COUNT(*) AS n FROM limit_policy_versions').get().n, 0, 'nada foi gravado');
         // Um nível inferior não pode ter limites maiores do que o nível superior.
         const inverted = M.L.clonePolicy(policy);

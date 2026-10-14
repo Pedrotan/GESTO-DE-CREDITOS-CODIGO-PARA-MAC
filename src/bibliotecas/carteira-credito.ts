@@ -392,14 +392,14 @@ export function creditAlerts(rows: PortfolioRow[], installments: InstallmentRow[
         const owed = (num(item.principalMinor) + num(item.interestMinor)) - (num(item.paidPrincipalMinor) + num(item.paidInterestMinor));
         if (owed <= 0) continue;
         const due = luandaDateKey(item.dueDate);
-        if (due === today) alerts.push({ id: `today:${item.id}`, kind: 'due_today', row, label: 'Vence hoje', detail: `${item.installmentNumber}.ª prestação · ${(owed / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz` });
-        else if (due > today && due <= in3) alerts.push({ id: `soon:${item.id}`, kind: 'due_soon', row, label: `Vence a ${due.split('-').reverse().join('/')}`, detail: `${item.installmentNumber}.ª prestação · ${(owed / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz` });
+        if (due === today) alerts.push({ id: `today:${item.id}`, kind: 'due_today', row, label: 'Vence hoje', detail: `${item.installmentNumber}.ª prestação · ${(owed / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz` });
+        else if (due > today && due <= in3) alerts.push({ id: `soon:${item.id}`, kind: 'due_soon', row, label: `Vence a ${due.split('-').reverse().join('/')}`, detail: `${item.installmentNumber}.ª prestação · ${(owed / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz` });
     }
     for (const row of rows) {
         if (!IN_PORTFOLIO.includes(row.stage)) continue;
-        if (row.daysOverdue === 1) alerts.push({ id: `late:${row.id}`, kind: 'overdue_today', row, label: 'Entrou em atraso hoje', detail: `${(row.overdueMinor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz em atraso` });
+        if (row.daysOverdue === 1) alerts.push({ id: `late:${row.id}`, kind: 'overdue_today', row, label: 'Entrou em atraso hoje', detail: `${(row.overdueMinor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz em atraso` });
         for (const [days, kind] of [[31, 'aging_30'], [61, 'aging_60'], [91, 'aging_90']] as const) {
-            if (row.daysOverdue === days) alerts.push({ id: `${kind}:${row.id}`, kind, row, label: `Passou ${days - 1} dias de atraso`, detail: `${row.daysOverdue} dias · mora ${(row.moraMinor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2 })} Kz` });
+            if (row.daysOverdue === days) alerts.push({ id: `${kind}:${row.id}`, kind, row, label: `Passou ${days - 1} dias de atraso`, detail: `${row.daysOverdue} dias · mora ${(row.moraMinor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz` });
         }
     }
     for (const promise of brokenPromises) {

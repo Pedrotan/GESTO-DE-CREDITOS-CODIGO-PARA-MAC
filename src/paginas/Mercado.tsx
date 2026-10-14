@@ -66,7 +66,7 @@ type Coluna = 'codigo' | 'nome' | 'porAoa' | 'variacao';
 type Tendencia = 'todas' | 'alta' | 'baixa';
 
 const fmt = (n: number) =>
-    n.toLocaleString('pt-AO', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 6 : 3 });
+    n.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: n < 1 ? 6 : 3 });
 
 export default function Mercado() {
     const cacheInicial = ServicoMercadoCambio.obterCache();
@@ -564,7 +564,7 @@ export default function Mercado() {
                                 <div key={t.rotulo} className="card-elevated p-5">
                                     <p className="text-sm font-semibold text-muted-foreground">{t.rotulo}</p>
                                     <p className={cn('font-display text-4xl font-black tracking-tight tabular-nums', t.cor)}>
-                                        {t.valor.toLocaleString('pt-AO')}
+                                        {t.valor.toLocaleString('pt-BR')}
                                     </p>
                                 </div>
                             ))}

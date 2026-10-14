@@ -1,3 +1,4 @@
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -804,13 +805,13 @@ export default function DashboardAdmin() {
 
         doc.setFontSize(9); doc.setFont("helvetica", "normal"); doc.setTextColor(...colors.dark);
         doc.text(`Gerado em: ${new Date().toLocaleString()}`, 20, 58);
-        doc.text(`Total Faturado: ${totalRevenue.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' })}`, 20, 64);
+        doc.text(`Total Faturado: ${formatCurrency(totalRevenue)}`, 20, 64);
 
         const tableData = generatedKeys.slice(0, 50).map(k => [
             formatDateSafe(k.createdAt),
             k.clientName || 'N/A',
             getLicenseTypeName(k.type).toUpperCase(),
-            k.value.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' }),
+            formatCurrency(k.value),
             k.machineId.substring(0, 15) + '...'
         ]);
 
@@ -1126,7 +1127,7 @@ export default function DashboardAdmin() {
                                             <div>
                                                 <p className="text-xs font-medium text-slate-500 uppercase tracking-wider">Faturação Total</p>
                                                 <div className="text-2xl font-bold text-green-600 dark:text-green-400 mt-2">
-                                                    {totalRevenue.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' })}
+                                                    {formatCurrency(totalRevenue)}
                                                 </div>
                                             </div>
                                             <div className="bg-green-500/10 p-2 rounded-lg"><TrendingUp className="h-5 w-5 text-green-600 dark:text-green-500" /></div>
@@ -1404,7 +1405,7 @@ export default function DashboardAdmin() {
                                                         </div>
                                                     </TableCell>
                                                     <TableCell className="text-green-600 dark:text-green-400 font-mono">
-                                                        {record.value?.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' })}
+                                                        {(record.value == null ? undefined : formatCurrency(record.value))}
                                                     </TableCell>
                                                     <TableCell className="text-slate-500 dark:text-slate-400 text-sm">
                                                         {formatDateSafe(record.createdAt)}
@@ -1579,8 +1580,7 @@ export default function DashboardAdmin() {
 
                                         <div className="space-y-2">
                                             <Label className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Valor da Venda (AOA)</Label>
-                                            <Input
-                                                type="number"
+                                            <MoneyInput
                                                 value={salePrice}
                                                 readOnly
                                                 className="h-11 bg-slate-100/50 dark:bg-slate-800/30 border-slate-200 dark:border-slate-800 font-black text-slate-900 dark:text-white"
@@ -1598,7 +1598,7 @@ export default function DashboardAdmin() {
                                                 </p>
                                             </div>
                                             <div className="text-xl font-black text-slate-800 dark:text-white">
-                                                {salePrice.toLocaleString('pt-AO')} Kz
+                                                {salePrice.toLocaleString('pt-BR')} Kz
                                             </div>
                                         </div>
 
@@ -1827,7 +1827,7 @@ export default function DashboardAdmin() {
                                                             </TableCell>
                                                             <TableCell className="font-mono text-xs text-slate-500">{record.machineId}</TableCell>
                                                             <TableCell className="font-mono text-green-600 dark:text-green-400">
-                                                                {record.value?.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' })}
+                                                                {(record.value == null ? undefined : formatCurrency(record.value))}
                                                             </TableCell>
                                                             <TableCell>
                                                                 <div className="flex flex-col gap-1">
@@ -1894,9 +1894,7 @@ export default function DashboardAdmin() {
                                             <Label className="w-40 capitalize text-slate-700 dark:text-slate-300">{getLicenseTypeName(key as LicenseType).replace(/^Licença Pessoal - /, '').replace(/ \(.*\)$/, '')}</Label>
                                             <div className="relative flex-1">
                                                 <span className="absolute left-3 top-2.5 text-slate-500 font-mono">AOA</span>
-                                                <Input
-                                                    type="number"
-                                                    min={0}
+                                                <MoneyInput
                                                     value={prices[key]}
                                                     onChange={(e) => setPrices(prev => ({ ...prev, [key]: Math.max(0, Number(e.target.value) || 0) }))}
                                                     className="bg-slate-50 dark:bg-slate-950 border-slate-300 dark:border-slate-800 pl-12 text-slate-900 dark:text-white font-mono"
@@ -2238,7 +2236,7 @@ export default function DashboardAdmin() {
                                     <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-6 py-2 shadow-sm">
                                         <p className="text-[10px] text-slate-500 uppercase font-black">Saldo Total</p>
                                         <p className="text-xl font-bold text-green-600">
-                                            {totalRevenue.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' })}
+                                            {formatCurrency(totalRevenue)}
                                         </p>
                                     </div>
                                     <Button onClick={exportToPDF} className="bg-slate-900 dark:bg-slate-800 hover:bg-slate-800 text-white font-bold h-12 px-6">
@@ -2316,7 +2314,7 @@ export default function DashboardAdmin() {
                                                                         </Badge>
                                                                     </TableCell>
                                                                     <TableCell className="text-right font-black text-green-600 dark:text-green-400">
-                                                                        {record.value.toLocaleString('pt-AO', { style: 'currency', currency: 'AOA' })}
+                                                                        {formatCurrency(record.value)}
                                                                     </TableCell>
                                                                     <TableCell className="text-center">
                                                                         <span className="text-[9px] font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded text-slate-400">

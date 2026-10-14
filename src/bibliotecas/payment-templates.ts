@@ -187,7 +187,7 @@ Obrigado!
 
 // Funções auxiliares
 function formatCurrency(amount: number): string {
-    return new Intl.NumberFormat('pt-AO', {
+    return new Intl.NumberFormat('pt-BR', {
         style: 'currency',
         currency: 'AOA',
         minimumFractionDigits: 0

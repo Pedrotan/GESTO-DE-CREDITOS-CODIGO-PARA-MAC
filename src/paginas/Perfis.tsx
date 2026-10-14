@@ -336,7 +336,7 @@ export default function Perfis() {
                                         <div className="flex justify-between items-center text-muted-foreground">
                                             <span>Alçada de Aprovação:</span>
                                             <span className="font-bold text-slate-900 dark:text-white">
-                                                {temAlcada ? `${perfil.alcadasPadrao.aprovacaoCreditoKz.toLocaleString('pt-AO')} Kz` : 'Sem alçada'}
+                                                {temAlcada ? `${perfil.alcadasPadrao.aprovacaoCreditoKz.toLocaleString('pt-BR')} Kz` : 'Sem alçada'}
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-center text-muted-foreground">

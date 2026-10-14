@@ -145,7 +145,7 @@ const GROUPS_BY_KIND: Record<AuditKind, AuditGroup[]> = {
 
 const DISBURSED_STATUSES = new Set(['active', 'overdue', 'paid', 'renegotiated', 'defaulted']);
 const minorOf = (minor: unknown, legacy: unknown) => minor !== null && minor !== undefined && minor !== '' ? Number(minor) : Math.round(Number(legacy || 0) * 100);
-const money = (minor: number) => `${(minor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
+const money = (minor: number) => `${(minor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
 
 export async function runAccountingAudit(data: AuditDataset, kind: AuditKind = 'full'): Promise<AuditResult> {
     const groups = GROUPS_BY_KIND[kind];

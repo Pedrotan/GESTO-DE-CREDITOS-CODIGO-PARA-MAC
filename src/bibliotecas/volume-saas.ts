@@ -84,7 +84,7 @@ export const overdueRate = (metrics: Pick<UsageMetrics, 'overdueMinor' | 'portfo
     metrics.portfolioMinor > 0 ? Math.round((metrics.overdueMinor / metrics.portfolioMinor) * 1000) / 10 : 0;
 
 export const formatKz = (minor: number) =>
-    `${(minor / 100).toLocaleString('pt-AO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
+    `${(minor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
 
 const csvCell = (value: string | number) => {
     const text = String(value);

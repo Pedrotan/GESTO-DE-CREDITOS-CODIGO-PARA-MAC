@@ -138,12 +138,12 @@ const formatValue = (key: string, value: unknown): string => {
     if (key === 'days') return describeSchedule(value);
     if (typeof value === 'boolean') return value ? 'Sim' : 'Não';
     if (typeof value === 'number') {
-        if (/rate|taxa/i.test(key)) return `${value.toLocaleString('pt-AO', { maximumFractionDigits: 4 })}%`;
+        if (/rate|taxa/i.test(key)) return `${value.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}%`;
         if (/amount|balance|interest|due|limit|minor|kz/i.test(key)) {
             const amount = /minor/i.test(key) ? value / 100 : value;
-            return `${amount.toLocaleString('pt-AO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
+            return `${amount.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} Kz`;
         }
-        return value.toLocaleString('pt-AO');
+        return value.toLocaleString('pt-BR');
     }
     if (typeof value === 'string') {
         if (key === 'status' && STATUS_VALUES[value]) return STATUS_VALUES[value];
@@ -487,7 +487,7 @@ export function detectAlerts(input: AuditEvent[], options: {
             add('mass_export', event.id, [event], `${event.userName} exportou ${event.metadata.count} registos (limite ${config.exportThreshold}).`);
         // 8 (valor): anulação ou estorno acima do limite.
         if ((event.action === 'cancel' || event.action === 'reversal') && Number(event.metadata.amountMinor) / 100 > config.cancelAmountThreshold)
-            add('cancellations', `${event.id}:valor`, [event], `${event.userName}: ${ACTION_LABELS[event.action].toLowerCase()} de ${(Number(event.metadata.amountMinor) / 100).toLocaleString('pt-AO')} Kz (limite ${config.cancelAmountThreshold.toLocaleString('pt-AO')} Kz).`);
+            add('cancellations', `${event.id}:valor`, [event], `${event.userName}: ${ACTION_LABELS[event.action].toLowerCase()} de ${(Number(event.metadata.amountMinor) / 100).toLocaleString('pt-BR')} Kz (limite ${config.cancelAmountThreshold.toLocaleString('pt-BR')} Kz).`);
         // 9: actividade financeira ao fim de semana, feriado ou de madrugada.
         if (isFinancial(event)) {
             const holidays = angolaHolidays(Number(event.dateKey.slice(0, 4)));

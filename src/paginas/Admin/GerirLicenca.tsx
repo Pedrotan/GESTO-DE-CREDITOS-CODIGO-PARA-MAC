@@ -215,7 +215,7 @@ export function GerirLicenca({ license, plans, open, onOpenChange, api, notify, 
                     <p className="mt-2 text-[11px] text-slate-500">
                         {(() => {
                             const price = licensePrice(getMasterPrices(), plan, tier, Number(maxMachines) || 1);
-                            return price === null ? null : <><b>Preço pela Tabela de Preços: {price.toLocaleString('pt-AO')} Kz</b> por período. </>;
+                            return price === null ? null : <><b>Preço pela Tabela de Preços: {price.toLocaleString('pt-BR')} Kz</b> por período. </>;
                         })()}
                         A data de fim muda com «Renovar». Os computadores já activados mantêm-se ao mudar o plano.
                     </p>

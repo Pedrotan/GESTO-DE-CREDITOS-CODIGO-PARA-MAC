@@ -1,4 +1,6 @@
 
+import { MoneyInput } from '@/componentes/ui/CurrencyInput';
+import { formatCurrency } from '@/bibliotecas/formatters';
 import React, { useState, useEffect, useMemo } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/componentes/ui/dialog';
 import { Button } from '@/componentes/ui/button';
@@ -154,7 +156,7 @@ export function GeneratePaymentModal({
             if (client?.phone) phone = client.phone;
         }
 
-        const message = `Olá! Segue os dados para pagamento:\n\nReferência: *${generatedRef.reference}*\nValor: *${new Intl.NumberFormat('pt-AO', { style: 'currency', currency: 'AOA' }).format(generatedRef.amount)}*\n\nPor favor, envie o comprovativo após pagamento.`;
+        const message = `Olá! Segue os dados para pagamento:\n\nReferência: *${generatedRef.reference}*\nValor: *${formatCurrency(generatedRef.amount)}*\n\nPor favor, envie o comprovativo após pagamento.`;
         openWhatsApp(phone, message);
     };
 
@@ -235,8 +237,7 @@ export function GeneratePaymentModal({
 
                         <div className="space-y-2">
                             <Label>Valor a Pagar (AOA)</Label>
-                            <Input
-                                type="number"
+                            <MoneyInput
                                 value={amount}
                                 onChange={(e) => setAmount(parseFloat(e.target.value))}
                                 min={0}
@@ -257,7 +258,7 @@ export function GeneratePaymentModal({
                                         .filter(c => (!selectedClientId || c.clientId === selectedClientId) && (c.status === 'active' || c.status === 'overdue'))
                                         .map(c => (
                                             <SelectItem key={c.id} value={c.id}>
-                                                {c.clientName} - {new Intl.NumberFormat('pt-AO', { style: 'currency', currency: 'AOA' }).format(c.totalDue)}
+                                                {c.clientName} - {formatCurrency(c.totalDue)}
                                             </SelectItem>
                                         ))}
                                 </SelectContent>
@@ -313,6 +314,6 @@ export function GeneratePaymentModal({
 }
 
 function formattedCurrency(value: number) {
-    return new Intl.NumberFormat('pt-AO', { style: 'currency', currency: 'AOA' }).format(value);
+    return formatCurrency(value);
 }
 
