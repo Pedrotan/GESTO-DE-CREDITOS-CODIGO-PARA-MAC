@@ -1,5 +1,4 @@
 import crypto from 'node:crypto';
-import nodemailer from 'nodemailer';
 
 export const EMAIL_VERIFICATION_TTL_MS = 30 * 60 * 1000;
 export const EMAIL_VERIFICATION_RESEND_MIN_MS = 60 * 1000;
@@ -61,6 +60,9 @@ export const sendVerificationEmail = async ({ email, token, requestId, nif, appU
     return { sent: false, status: config.reason };
   }
 
+  // nodemailer só é carregado quando há envio (nome em variável: os bundles dos testes não o incluem).
+  const mailerModule = 'nodemailer';
+  const nodemailer = globalThis.__TANGO_TEST_TRANSPORT__ ? null : (await import(mailerModule)).default;
   const transporter = globalThis.__TANGO_TEST_TRANSPORT__ || nodemailer.createTransport({
     host: process.env.MAIL_HOST,
     port: Number(process.env.MAIL_PORT || 587),
@@ -111,6 +113,8 @@ export const ensureCompanyEmailVerificationTable = async (sql) => {
 
   try { await db(`CREATE INDEX IF NOT EXISTS idx_company_email_verification_request ON tango_company_email_verifications (request_id, nif);`); } catch {}
   try { await db(`CREATE INDEX IF NOT EXISTS idx_company_email_verification_expiry ON tango_company_email_verifications (expires_at, used);`); } catch {}
+  try { await db(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE`); } catch {}
+  try { await db(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ`); } catch {}
 };
 
 export const issueCompanyEmailVerification = async ({

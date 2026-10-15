@@ -147,6 +147,8 @@ const initDatabaseBridge = async () => {
         ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
         ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS handled_at TIMESTAMPTZ;
         ALTER TABLE tango_registration_requests ALTER COLUMN email DROP NOT NULL;
+        ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE;
+        ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
       `);
 
       // As empresas só existem quando cadastradas no Tango Master (sem empresas nem códigos fixos no código).
@@ -190,6 +192,7 @@ await loadHandler('auth-reset-password', path.join(apiBaseDir, 'auth-reset-passw
 await loadHandler('auth-login', path.join(apiBaseDir, 'auth-login.js'));
 await loadHandler('verify-company', path.join(apiBaseDir, 'verify-company.js'));
 await loadHandler('registration-request', path.join(apiBaseDir, 'registration-request.js'));
+await loadHandler('company-email-verification', path.join(apiBaseDir, 'company-email-verification.js'));
 await loadHandler('sync', path.join(apiBaseDir, 'sync.js'));
 await loadHandler('tenants', path.join(apiBaseDir, 'tenants.js'));
 await loadHandler('usage-report', path.join(apiBaseDir, 'usage-report.js'));

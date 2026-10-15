@@ -374,3 +374,47 @@ export const authenticateCentralLogin = async (credentials: {
 
   return data;
 };
+
+// --- Verificação do e-mail da empresa (pedido de cadastro na versão web) ---
+export type CompanyEmailVerificationResult = { verified: boolean; emailVerified?: boolean; email?: string; message?: string };
+
+/**
+ * Confirma o e-mail com o token do link. O pedido vai ao servidor que serviu a página (o mesmo que enviou o
+ * link) e o token segue no corpo do pedido, nunca no endereço.
+ */
+export const verifyCompanyEmailWithToken = async (input: { token: string; requestId: string; nif: string }): Promise<CompanyEmailVerificationResult> => {
+  const response = await fetch('/api/company-email-verification', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: input.token, requestId: input.requestId, nif: input.nif }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    const byCode: Record<string, string> = {
+      expired: 'Este link expirou (é válido durante 30 minutos). Peça um novo na página de cadastro.',
+      used: 'Este link já foi utilizado. O e-mail já está confirmado.',
+      invalid: 'Link de confirmação inválido. Peça um novo na página de cadastro.',
+      wrong_request: 'Este link não pertence a este pedido de cadastro.',
+      rejected_or_processed: 'Este pedido de cadastro já foi tratado pelo administrador.',
+    };
+    throw new Error(byCode[data.code] || data.message || 'Não foi possível confirmar o endereço de e-mail.');
+  }
+  return { verified: true, emailVerified: true, email: data.email, message: data.message };
+};
+
+/** Pede um novo link de confirmação (ao mesmo servidor que recebeu o pedido de cadastro). */
+export const requestCompanyEmailVerification = async (input: { requestId: string; nif: string; email: string; serverUrl?: string }) => {
+  const base = (input.serverUrl || '').replace(/\/+$/, '');
+  const response = await fetch(`${base}/api/company-email-verification`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ requestId: input.requestId, nif: input.nif, email: input.email }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) {
+    throw new Error(data.code === 'rate_limited' ? 'Já foi enviado um link há menos de 1 minuto. Aguarde um pouco antes de pedir outro.' : data.message || 'Não foi possível enviar um novo link.');
+  }
+  return { status: (data.emailVerification?.status || 'pending') as 'sent' | 'pending', expiresAt: data.expiresAt as string | undefined };
+};

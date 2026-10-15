@@ -25,6 +25,9 @@ export const ensureRegistrationRequestsTable = async (sql) => {
   try { await sql(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS handled_at TIMESTAMPTZ`); } catch {}
   try { await sql(`ALTER TABLE tango_registration_requests ALTER COLUMN email DROP NOT NULL`); } catch {}
   try { await sql('CREATE INDEX IF NOT EXISTS idx_tango_registration_requests_status ON tango_registration_requests (status, created_at DESC)'); } catch {}
+  // Verificação do e-mail da empresa (link enviado ao pedir o cadastro).
+  try { await sql(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE`); } catch {}
+  try { await sql(`ALTER TABLE tango_registration_requests ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ`); } catch {}
 };
 
 const text = (value, max) => String(value ?? '').normalize('NFKC').replace(/[\u0000-\u001f\u007f]/gu, ' ').trim().slice(0, max + 1);
@@ -59,5 +62,7 @@ export const toPublicRequest = (row) => ({
   message: row.message,
   status: row.status,
   createdAt: row.created_at,
-  handledAt: row.handled_at
+  handledAt: row.handled_at,
+  emailVerified: row.email_verified === true || row.email_verified === 't',
+  emailVerifiedAt: row.email_verified_at || null,
 });

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { recordRejectedOrigin } from './_alertas.js';
+import { ensureRegistrationRequestsTable } from './_pedidos-cadastro.js';
 import {
   ensureCompanyEmailVerificationTable,
   issueCompanyEmailVerification,
@@ -24,6 +25,7 @@ const normalizeRows = (result) => {
 };
 
 const ensureRegistrationRequest = async (sql, requestId, nif) => {
+  await ensureRegistrationRequestsTable(sql);
   const rows = await sql(`SELECT id, nif, email, status FROM tango_registration_requests WHERE id = $1 AND nif = $2 LIMIT 1`, [requestId, nif]);
   return normalizeRows(rows)[0] || null;
 };
@@ -44,6 +46,35 @@ export default async function handler(req, res) {
 
   try {
     await ensureCompanyEmailVerificationTable(sql);
+
+    // Confirmação: POST { token, requestId, nif } (também aceita GET com os mesmos parâmetros).
+    const confirmation = req.method === 'POST' && req.body?.token ? req.body : req.method === 'GET' ? (req.query || {}) : null;
+    if (confirmation) {
+      const token = String(confirmation.token || '').trim();
+      const normalizedRequestId = String(confirmation.requestId || confirmation.request || '').trim();
+      const nif = String(confirmation.nif || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+      if (!token || !normalizedRequestId || !nif) {
+        return send(res, 400, { success: false, message: 'Link de confirmação incompleto.' });
+      }
+      if (!await enforceDistributedRateLimit(sql, req, res, { limit: 30, windowMs: 15 * 60_000, scope: 'company_email_confirm' })) return;
+      const result = await verifyCompanyEmailToken({ sql, token, requestId: normalizedRequestId, nif });
+      if (!result.success) {
+        return send(res, ['used', 'invalid', 'expired', 'wrong_request'].includes(result.reason) ? 400 : 409, {
+          success: false,
+          code: result.reason,
+          message: result.message,
+        });
+      }
+      return send(res, 200, {
+        success: true,
+        verified: true,
+        emailVerified: true,
+        requestId: result.requestId,
+        nif: result.nif,
+        email: result.email,
+        message: result.message,
+      });
+    }
 
     if (req.method === 'POST') {
       const body = req.body || {};
@@ -95,31 +126,6 @@ export default async function handler(req, res) {
           expiresAt: result.expiresAt,
           message: result.delivery?.sent ? 'Link de confirmação preparado e entregue pelo serviço de e-mail configurado.' : 'O envio de e-mail está desativado ou não configurado; o pedido continua pendente de confirmação operacional.'
         }
-      });
-    }
-
-    if (req.method === 'GET') {
-      const { token, requestId, request, nif } = req.query || {};
-      const normalizedRequestId = String(requestId || request || '').trim();
-      if (!token || !normalizedRequestId || !nif) {
-        return send(res, 400, { success: false, message: 'Parâmetros inválidos.' });
-      }
-      const result = await verifyCompanyEmailToken({ sql, token, requestId: normalizedRequestId, nif });
-      if (!result.success) {
-        return send(res, result.reason === 'used' || result.reason === 'invalid' || result.reason === 'expired' ? 400 : 409, {
-          success: false,
-          code: result.reason,
-          message: result.message,
-        });
-      }
-      return send(res, 200, {
-        success: true,
-        verified: true,
-        emailVerified: true,
-        requestId: result.requestId,
-        nif: result.nif,
-        email: result.email,
-        message: result.message,
       });
     }
 

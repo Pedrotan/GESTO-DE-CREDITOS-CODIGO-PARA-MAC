@@ -6,13 +6,13 @@ import { Textarea } from '@/componentes/ui/textarea';
 import { useData } from '@/contextos/ContextoDados';
 import { scopedStorageKey } from '@/bibliotecas/contas';
 import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
-import { checkCompanyStatus, isCompanyActiveLocally, storeWebMultiTenant } from '@/servicos/ServicoIdentidadeEmpresa';
+import { checkCompanyStatus, isCompanyActiveLocally, requestCompanyEmailVerification, storeWebMultiTenant } from '@/servicos/ServicoIdentidadeEmpresa';
 import { getKnownCloudServers } from '@/servicos/ServicoLigacaoNuvem';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import {
     Building2, KeyRound, Loader2, ShieldCheck, Eye, EyeOff, ArrowLeft, ArrowRight, ShieldAlert,
     Shield, LogIn, ClipboardList, CheckCircle2, Cloud, Send, Lock, Info, CheckCircle,
-    PhoneCall, X, ExternalLink, Sparkles
+    PhoneCall, X, ExternalLink, Sparkles, MailCheck, RefreshCw
 } from 'lucide-react';
 import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
@@ -101,6 +101,20 @@ export const LigacaoEmpresaWeb = () => {
     const [errorMessage, setErrorMessage] = useState('');
     const [infoModal, setInfoModal] = useState<InfoModal>(null);
     const [request, setRequest] = useState({ companyName: '', contactName: '', phone: '', email: '', message: '' });
+    // Pedido enviado: para mostrar o estado da confirmação do e-mail e pedir um novo link ao mesmo servidor.
+    const [sentRequest, setSentRequest] = useState<{ requestId: string; email: string; serverUrl: string; status: 'sent' | 'pending' | 'verified' } | null>(null);
+    const [resendState, setResendState] = useState<{ busy: boolean; message: string; error: boolean }>({ busy: false, message: '', error: false });
+    const resendEmail = async () => {
+        if (!sentRequest) return;
+        setResendState({ busy: true, message: '', error: false });
+        try {
+            const result = await requestCompanyEmailVerification({ requestId: sentRequest.requestId, nif: cleanNif, email: sentRequest.email, serverUrl: sentRequest.serverUrl });
+            setSentRequest(previous => previous ? { ...previous, status: result.status } : previous);
+            setResendState({ busy: false, error: false, message: result.status === 'sent' ? 'Enviámos um novo link de confirmação.' : 'Pedido registado; o envio de e-mails ainda não está activo no servidor.' });
+        } catch (error: any) {
+            setResendState({ busy: false, error: true, message: error?.message || 'Não foi possível enviar um novo link.' });
+        }
+    };
 
     const cleanNif = nif.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
 
@@ -249,7 +263,7 @@ export const LigacaoEmpresaWeb = () => {
         setIsBusy(true);
         setErrorMessage('');
         try {
-            const { ok, data } = await postJson('/api/registration-request', { nif: cleanNif, ...request });
+            const { ok, data, serverUrl } = await postJson('/api/registration-request', { nif: cleanNif, ...request });
             if (!ok) {
                 if (data.code === 'ALREADY_REGISTERED') {
                     goTo('access');
@@ -258,6 +272,10 @@ export const LigacaoEmpresaWeb = () => {
                 setErrorMessage(data.message || 'Não foi possível enviar o pedido.');
                 return;
             }
+            setResendState({ busy: false, message: '', error: false });
+            setSentRequest(data.requestId && data.email
+                ? { requestId: String(data.requestId), email: String(data.email), serverUrl, status: data.emailVerification?.status === 'verified' ? 'verified' : data.emailVerification?.status === 'sent' ? 'sent' : 'pending' }
+                : null);
             goTo('requestSent');
         } catch (err) {
             setErrorMessage(networkMessage(err));
@@ -273,6 +291,7 @@ export const LigacaoEmpresaWeb = () => {
     if (typeof window !== 'undefined' && (
         window.location.hash.includes('tango-master') ||
         window.location.hash.includes('reset-password') ||
+        window.location.hash.includes('verify-company-email') ||
         (window.location.hash.includes('onboarding') && (localStorage.getItem('tango_company_status') === 'NOT_FOUND' || localStorage.getItem('tango_company_status') === 'PENDING'))
     )) return null;
 
@@ -864,6 +883,29 @@ export const LigacaoEmpresaWeb = () => {
                                                 A solicitação para o NIF <strong className="font-mono text-slate-900">{cleanNif}</strong> foi recebida. Entraremos em contacto brevemente com os dados de acesso.
                                             </p>
                                         </div>
+
+                                        {sentRequest && (
+                                            <div className={`rounded-2xl border p-3.5 text-left text-xs space-y-2 ${sentRequest.status === 'verified' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-blue-200 bg-blue-50 text-blue-900'}`}>
+                                                <p className="flex items-center gap-1.5 font-bold">
+                                                    <MailCheck className="h-4 w-4" />
+                                                    {sentRequest.status === 'verified' ? 'E-mail já confirmado' : 'Confirme o e-mail da empresa'}
+                                                </p>
+                                                {sentRequest.status === 'verified' ? (
+                                                    <p><strong>{sentRequest.email}</strong> já foi confirmado.</p>
+                                                ) : sentRequest.status === 'sent' ? (
+                                                    <p>Enviámos um link para <strong>{sentRequest.email}</strong>. Abra-o nos próximos 30 minutos para confirmar o endereço (veja também a pasta de spam).</p>
+                                                ) : (
+                                                    <p>O pedido ficou registado com o e-mail <strong>{sentRequest.email}</strong>. O envio automático de e-mails ainda não está activo: o administrador confirma o contacto consigo.</p>
+                                                )}
+                                                {sentRequest.status !== 'verified' && (
+                                                    <button type="button" onClick={resendEmail} disabled={resendState.busy}
+                                                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-2.5 py-1.5 font-bold text-blue-800 hover:bg-blue-100 disabled:opacity-60">
+                                                        {resendState.busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />} Reenviar link
+                                                    </button>
+                                                )}
+                                                {resendState.message && <p className={resendState.error ? 'font-semibold text-red-700' : 'font-semibold'}>{resendState.message}</p>}
+                                            </div>
+                                        )}
 
                                         <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 text-xs text-slate-600 text-left space-y-1.5">
                                             <p className="font-bold text-slate-800 flex items-center gap-1.5">

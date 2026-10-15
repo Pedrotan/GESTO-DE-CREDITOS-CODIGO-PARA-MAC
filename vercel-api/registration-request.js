@@ -1,3 +1,4 @@
+import { ensureCompanyEmailVerificationTable, issueCompanyEmailVerification } from './_email-verification.js';
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
@@ -49,17 +50,48 @@ export default async function handler(req, res) {
     }
 
     // Um pedido pendente por NIF: um novo envio atualiza os dados em vez de duplicar.
-    const pending = await sql(`SELECT id FROM tango_registration_requests WHERE nif = $1 AND status = 'pending' LIMIT 1`, [request.nif]);
+    const pending = await sql(`SELECT id, email, email_verified FROM tango_registration_requests WHERE nif = $1 AND status = 'pending' LIMIT 1`, [request.nif]);
     const values = [request.nif, request.companyName, request.contactName, request.phone, request.email, request.message];
+    let requestId;
+    let alreadyVerified = false;
     if (pending.length) {
+      requestId = pending[0].id;
+      // Mudar o e-mail obriga a confirmar o novo endereço.
+      const sameEmail = String(pending[0].email || '').toLowerCase() === String(request.email || '').toLowerCase();
+      alreadyVerified = sameEmail && (pending[0].email_verified === true || pending[0].email_verified === 't');
       await sql(`UPDATE tango_registration_requests SET company_name = $3, contact_name = $4, phone = $5,
-                 email = $6, message = $7, updated_at = NOW() WHERE id = $1 AND nif = $2`, [pending[0].id, ...values]);
+                 email = $6, message = $7, updated_at = NOW(),
+                 email_verified = CASE WHEN LOWER(COALESCE(email, '')) = LOWER(COALESCE($6, '')) THEN email_verified ELSE FALSE END,
+                 email_verified_at = CASE WHEN LOWER(COALESCE(email, '')) = LOWER(COALESCE($6, '')) THEN email_verified_at ELSE NULL END
+                 WHERE id = $1 AND nif = $2`, [requestId, ...values]);
     } else {
+      requestId = crypto.randomUUID();
       await sql(`INSERT INTO tango_registration_requests (id, nif, company_name, contact_name, phone, email, message)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7)`, [crypto.randomUUID(), ...values]);
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)`, [requestId, ...values]);
+    }
+
+    // Com e-mail: envia logo o link de confirmação (o pedido fica gravado mesmo que o envio falhe).
+    let emailVerification = request.email ? { status: alreadyVerified ? 'verified' : 'pending' } : null;
+    if (request.email && !alreadyVerified) {
+      try {
+        await ensureCompanyEmailVerificationTable(sql);
+        const issued = await issueCompanyEmailVerification({
+          sql, requestId, nif: request.nif, email: request.email,
+          appUrl: process.env.APP_URL || 'https://tangogestaoecreditos.tech',
+        });
+        emailVerification = {
+          status: issued.success && issued.delivery?.sent ? 'sent' : issued.reason === 'rate_limited' ? 'sent' : 'pending',
+          expiresAt: issued.expiresAt || null,
+        };
+      } catch (error) {
+        console.error('[registration-request][email]', error?.message || error);
+      }
     }
     return send(res, 200, {
       success: true,
+      requestId,
+      email: request.email || null,
+      emailVerification,
       message: 'Pedido de cadastro enviado. O administrador irá contactá-lo com o Código de Acesso da sua empresa.'
     });
   } catch (error) {

@@ -45,6 +45,15 @@ services:
       - VPS_IP_URL=${VPS_IP_URL:-http://191.215.45.104}
       - TANGO_LICENSE_SIGNING_KEY=${TANGO_LICENSE_SIGNING_KEY:-}
       - VPS_DOMAIN_URL=${VPS_DOMAIN_URL:-http://tangogestaoecreditos.tech}
+      # E-mail (verificação do e-mail das empresas). Desligado até MAIL_ENABLED=true no .env da VPS.
+      - APP_URL=${APP_URL:-https://tangogestaoecreditos.tech}
+      - MAIL_ENABLED=${MAIL_ENABLED:-false}
+      - MAIL_HOST=${MAIL_HOST:-}
+      - MAIL_PORT=${MAIL_PORT:-587}
+      - MAIL_USERNAME=${MAIL_USERNAME:-}
+      - MAIL_PASSWORD=${MAIL_PASSWORD:-}
+      - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-}
+      - MAIL_ENCRYPTION=${MAIL_ENCRYPTION:-starttls}
     volumes:
       - ./server.mjs:/app/server.mjs:ro
       - ./vercel-api:/app/vercel-api:ro

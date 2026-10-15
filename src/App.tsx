@@ -38,6 +38,7 @@ const Guia = lazyWithReload(() => import("./paginas/Guia"));
 const PortaisPagamento = lazyWithReload(() => import("./paginas/PortaisPagamento"));
 const EsqueciSenha = lazyWithReload(() => import("./paginas/EsqueciSenha"));
 const RedefinirSenha = lazyWithReload(() => import("./paginas/RedefinirSenha"));
+const ConfirmarEmail = lazyWithReload(() => import("./paginas/ConfirmarEmail"));
 import { isCompanyActiveLocally } from "@/servicos/ServicoIdentidadeEmpresa";
 const Aprovacoes = lazyWithReload(() => import("./paginas/Aprovacoes"));
 const LimitesUtilizador = lazyWithReload(() => import("./paginas/LimitesUtilizador"));
@@ -223,6 +224,7 @@ const AppContent = () => {
             />
             <Route path="/esqueci-senha" element={<EsqueciSenha />} />
             <Route path="/reset-password" element={<RedefinirSenha />} />
+            <Route path="/verify-company-email" element={<ConfirmarEmail />} />
             <Route
               path="/ativacao"
               element={

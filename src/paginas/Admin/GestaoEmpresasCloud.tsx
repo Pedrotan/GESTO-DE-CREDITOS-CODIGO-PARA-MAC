@@ -44,6 +44,8 @@ export type RegistrationRequest = {
     status: 'pending' | 'approved' | 'rejected';
     createdAt: string;
     handledAt: string | null;
+    emailVerified?: boolean;
+    emailVerifiedAt?: string | null;
 };
 
 const URL_KEY = 'tango_master_cloud_url';
@@ -901,6 +903,9 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                                         <span>{request.contactName}</span>
                                         <span className="inline-flex items-center gap-1"><Phone className="h-3 w-3" /> {request.phone}</span>
                                         {request.email && <span className="inline-flex items-center gap-1"><Mail className="h-3 w-3" /> {request.email}</span>}
+                                        {request.email && (request.emailVerified
+                                            ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700" title={request.emailVerifiedAt ? `Confirmado em ${new Date(request.emailVerifiedAt).toLocaleString('pt-PT')}` : undefined}>E-mail confirmado</span>
+                                            : <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">E-mail por confirmar</span>)}
                                         <span className="text-slate-400">{new Date(request.createdAt).toLocaleString('pt-PT')}</span>
                                     </p>
                                     {request.message && <p className="text-xs italic text-slate-500">“{request.message}”</p>}
