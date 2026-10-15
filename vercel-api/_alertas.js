@@ -138,10 +138,14 @@ export const nextLockoutState = (row, now, policy) => {
 
 const lockKey = (scope, kind, value) => sha256(`${scope}:${kind}:${String(value).toUpperCase()}`);
 
-/** Segundos de bloqueio restantes para este IP (e assunto, se indicado); 0 quando livre. */
-export const lockoutRemaining = async (sql, req, { scope, subject = '' }) => {
+/**
+ * Segundos de bloqueio restantes para este IP (e assunto, se indicado); 0 quando livre.
+ * `trusted`: cliente que já se autenticou para este assunto (ver isTrustedClient) — o bloqueio do assunto não
+ * se lhe aplica, só o do seu IP. Assim um atacante que bloqueia um NIF não tira o acesso à própria empresa.
+ */
+export const lockoutRemaining = async (sql, req, { scope, subject = '', trusted = false }) => {
   await ensureSecurityTables(sql);
-  const keys = [lockKey(scope, 'ip', clientIp(req)), ...(subject ? [lockKey(scope, 'subject', subject)] : [])];
+  const keys = [lockKey(scope, 'ip', clientIp(req)), ...(subject && !trusted ? [lockKey(scope, 'subject', subject)] : [])];
   const rows = await sql('SELECT EXTRACT(EPOCH FROM (locked_until - NOW()))::int AS remaining FROM security_lockouts WHERE key_hash = ANY($1) AND locked_until > NOW()', [keys]);
   return rows.reduce((max, row) => Math.max(max, Number(row.remaining) || 0), 0);
 };
@@ -179,11 +183,52 @@ export const registerAuthFailure = async (sql, req, { scope, subject = '', type,
   }
 };
 
-/** Depois de uma autenticação correcta, o contador do assunto volta a zero. */
+/**
+ * Depois de uma autenticação correcta, o contador do assunto volta a zero — excepto se estiver bloqueado:
+ * um cliente de confiança a entrar durante um ataque não pode devolver tentativas ao atacante.
+ */
 export const clearAuthFailures = async (sql, { scope, subject }) => {
   if (!subject) return;
-  try { await sql('DELETE FROM security_lockouts WHERE key_hash = $1', [lockKey(scope, 'subject', subject)]); }
+  try { await sql('DELETE FROM security_lockouts WHERE key_hash = $1 AND (locked_until IS NULL OR locked_until <= NOW())', [lockKey(scope, 'subject', subject)]); }
   catch { /* sem tabela ainda */ }
+};
+
+// ---- Clientes de confiança por empresa ----
+// IP que se autenticou com sucesso para uma empresa nos últimos 30 dias. Durante um bloqueio do NIF (ataque),
+// estes clientes continuam a entrar e as suas falhas não contam para bloquear o NIF (ex.: computadores ainda
+// com o código antigo depois de o administrador o mudar). O IP vem do proxy (nginx/Vercel), não do cliente.
+const TRUSTED_CLIENT_DAYS = 30;
+const trustedKey = (subject, req) => sha256(`trusted:${String(subject).toUpperCase()}:${clientIp(req)}`);
+
+const ensureTrustedClientsTable = async (sql) => {
+  await sql(`CREATE TABLE IF NOT EXISTS security_trusted_clients (
+    key_hash TEXT PRIMARY KEY,
+    last_seen TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+};
+
+export const isTrustedClient = async (sql, req, subject) => {
+  if (!subject || clientIp(req) === 'unknown') return false;
+  try {
+    await ensureTrustedClientsTable(sql);
+    const rows = await sql(`SELECT 1 FROM security_trusted_clients WHERE key_hash = $1
+      AND last_seen > NOW() - ($2 * INTERVAL '1 day')`, [trustedKey(subject, req), TRUSTED_CLIENT_DAYS]);
+    return rows.length > 0;
+  } catch (error) {
+    console.error('[security][trusted]', error?.message || error);
+    return false;
+  }
+};
+
+export const rememberTrustedClient = async (sql, req, subject) => {
+  if (!subject || clientIp(req) === 'unknown') return;
+  try {
+    await ensureTrustedClientsTable(sql);
+    await sql(`INSERT INTO security_trusted_clients (key_hash, last_seen) VALUES ($1, NOW())
+      ON CONFLICT (key_hash) DO UPDATE SET last_seen = NOW()`, [trustedKey(subject, req)]);
+  } catch (error) {
+    console.error('[security][trusted]', error?.message || error);
+  }
 };
 
 export const ORIGIN_REJECTED = {

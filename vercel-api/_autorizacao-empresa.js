@@ -1,6 +1,8 @@
 import crypto from 'node:crypto';
-import { clearAuthFailures, lockoutRemaining, registerAuthFailure } from './_alertas.js';
+import { clearAuthFailures, isTrustedClient, lockoutRemaining, registerAuthFailure, rememberTrustedClient } from './_alertas.js';
 import { licenseGate } from './_licencas.js';
+import { isCompromisedSecret } from './_security.js';
+import { companySessionTenant, sameCompany } from './_sessao-empresa.js';
 
 // Autorização de uma empresa (tenant) pelo seu código de acesso. Partilhada pela sincronização e
 // pelo envio dos relatórios de utilização.
@@ -48,17 +50,21 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
   await ensureTenantProfileColumns(sql);
 
   // Quem falhou a chave demasiadas vezes fica bloqueado (por IP e por empresa) antes de qualquer comparação.
+  // Os clientes que já sincronizaram esta empresa não ficam presos ao bloqueio da empresa (só ao do seu IP).
+  const trusted = req ? await isTrustedClient(sql, req, tenantId) : false;
   if (req) {
-    const remaining = await lockoutRemaining(sql, req, { scope: 'tenant_key', subject: tenantId });
+    const remaining = await lockoutRemaining(sql, req, { scope: 'tenant_key', subject: tenantId, trusted });
     if (remaining > 0) return { ok: false, status: 429, message: `Acesso bloqueado por tentativas falhadas. Tente novamente em ${Math.ceil(remaining / 60)} minuto(s).` };
   }
   const fail = async (result, details) => {
-    if (req) await registerAuthFailure(sql, req, { scope: 'tenant_key', subject: tenantId, type: 'tenant_key_failed', title: 'Chave de sincronização de empresa errada', details });
+    if (req) await registerAuthFailure(sql, req, { scope: 'tenant_key', subject: trusted ? '' : tenantId, type: 'tenant_key_failed', title: 'Chave de sincronização de empresa errada', details });
     return result;
   };
   const rows = await sql('SELECT key_hash, status, expires_at, access_code FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
   // Chave global de administração: apenas a configurada no servidor, nunca um valor fixo no código.
-  const globalSecret = String(process.env.TANGO_SYNC_SECRET || '').trim();
+  // Uma chave global que já foi exposta é ignorada (como se não estivesse configurada).
+  const configuredGlobal = String(process.env.TANGO_SYNC_SECRET || '').trim();
+  const globalSecret = isCompromisedSecret(configuredGlobal) ? '' : configuredGlobal;
   const isGlobalSecretValid = Boolean(globalSecret && safeEqual(providedKey, globalSecret));
 
   if (!rows.length) {
@@ -74,8 +80,10 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
   }
 
   const tenant = rows[0];
+  // Versão web: sem código no pedido, vale a sessão HttpOnly da empresa (o navegador já não guarda o código).
+  const sessionTenant = !String(providedKey || '').trim() && req ? await companySessionTenant(sql, req) : null;
   const normProvided = normalizeCode(providedKey);
-  const isTenantKeyValid = 
+  const isTenantKeyValid = Boolean(sessionTenant && sameCompany(sessionTenant, tenantId)) ||
     safeEqual(sha256(providedKey), tenant.key_hash) ||
     safeEqual(sha256(normProvided), tenant.key_hash) ||
     (tenant.access_code && (
@@ -96,6 +104,9 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
   const license = await licenseGate(sql, tenantId);
   if (!license.ok) return { ok: false, status: license.status, code: license.code, message: license.message };
   await sql('UPDATE tango_tenants SET last_sync_at = NOW() WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
-  if (req) await clearAuthFailures(sql, { scope: 'tenant_key', subject: tenantId });
+  if (req) {
+    await clearAuthFailures(sql, { scope: 'tenant_key', subject: tenantId });
+    await rememberTrustedClient(sql, req, tenantId);
+  }
   return { ok: true };
 };

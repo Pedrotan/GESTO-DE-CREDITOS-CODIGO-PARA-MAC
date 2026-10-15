@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react';
+import { apagarChavesSincronizacao, apagarSegredo, guardarChavesSincronizacao, guardarSegredo, lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGREDO_CODIGO_EMPRESA } from '@/bibliotecas/cofre-segredos';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
 import { Textarea } from '@/componentes/ui/textarea';
 import { useData } from '@/contextos/ContextoDados';
 import { scopedStorageKey } from '@/bibliotecas/contas';
-import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { CLOUD_SYNC_BOOTSTRAP_KEY, deriveWebSyncKeys, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { checkCompanyStatus, isCompanyActiveLocally, requestCompanyEmailVerification, storeWebMultiTenant } from '@/servicos/ServicoIdentidadeEmpresa';
 import { getKnownCloudServers } from '@/servicos/ServicoLigacaoNuvem';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
@@ -67,7 +68,7 @@ const networkMessage = (err: any) => err?.name === 'TimeoutError'
 
 // Navegadores ligados só com o NIF (versão anterior) ficaram sem Código de Acesso e a cloud recusa a
 // sincronização: voltar a pedir o código. Corre antes da primeira renderização da App.
-if (isPublicWebBuild && typeof localStorage !== 'undefined' && !localStorage.getItem('tango_active_tenant_code') &&
+if (isPublicWebBuild && typeof localStorage !== 'undefined' && !lerSegredo(SEGREDO_CODIGO_EMPRESA) && !lerChavesSincronizacao() &&
     (localStorage.getItem('tango_company_status') === 'ACTIVE' || localStorage.getItem('tango_active_tenant_authorized') === 'true')) {
     localStorage.removeItem('tango_company_status');
     localStorage.removeItem('tango_active_tenant_authorized');
@@ -208,9 +209,26 @@ export const LigacaoEmpresaWeb = () => {
             localStorage.setItem('tango_active_tenant_authorized', 'true');
             localStorage.setItem('tango_active_tenant_id', verifiedTenantId);
             localStorage.setItem('tango_active_tenant_name', verifiedName);
-            localStorage.setItem('tango_active_tenant_code', cleanCode);
-            // Código como está guardado no servidor: é com ele que o computador da empresa cifra os dados.
-            localStorage.setItem('tango_active_tenant_sync_key', verifiedPasskey);
+            // Servidor desta mesma origem: abriu uma sessão num cookie HttpOnly, por isso o código NÃO fica no
+            // navegador — só as chaves de cifra da sincronização (derivadas da forma guardada no servidor, com que o
+            // computador da empresa cifra os dados), não exportáveis. Noutro servidor o cookie não serve e o código
+            // fica no cofre cifrado.
+            const sessionAuth = new URL(effectiveSyncUrl).origin === window.location.origin;
+            let syncConfig: Parameters<typeof startCloudSync>[0];
+            if (sessionAuth) {
+                const cryptoKeys = await deriveWebSyncKeys(verifiedTenantId, [verifiedPasskey, cleanCode]);
+                await guardarChavesSincronizacao(cryptoKeys);
+                apagarSegredo(SEGREDO_CODIGO_EMPRESA);
+                apagarSegredo(SEGREDO_CHAVE_SINCRONIZACAO);
+                syncConfig = { url: effectiveSyncUrl, apiKey: '', tenantId: verifiedTenantId, sessionAuth: true, cryptoKeys };
+            } else {
+                await apagarChavesSincronizacao();
+                await Promise.all([
+                    guardarSegredo(SEGREDO_CODIGO_EMPRESA, cleanCode),
+                    guardarSegredo(SEGREDO_CHAVE_SINCRONIZACAO, verifiedPasskey),
+                ]);
+                syncConfig = { url: effectiveSyncUrl, apiKey: verifiedPasskey, tenantId: verifiedTenantId, extraKeys: [cleanCode] };
+            }
             localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
             // Layout conforme a empresa foi configurada (multi-empresa ou não).
             storeWebMultiTenant(data.multiTenant);
@@ -220,13 +238,14 @@ export const LigacaoEmpresaWeb = () => {
                 name: verifiedName,
                 syncEnabled: true,
                 syncUrl: effectiveSyncUrl,
-                syncPasskey: verifiedPasskey,
+                // Com sessão, o código também não fica nas definições da empresa (guardadas neste navegador).
+                syncPasskey: sessionAuth ? '' : verifiedPasskey,
                 ...(typeof data.multiTenant === 'boolean' ? { enableMultiTenant: data.multiTenant } : {})
             });
 
             let pulled = 0;
             try {
-                startCloudSync({ url: effectiveSyncUrl, apiKey: verifiedPasskey, tenantId: verifiedTenantId, extraKeys: [cleanCode] });
+                startCloudSync(syncConfig);
                 pulled = (await syncCloudNow()).pulled || 0;
             } catch (syncErr) {
                 console.warn('[LigacaoEmpresaWeb] Sincronização inicial:', syncErr);

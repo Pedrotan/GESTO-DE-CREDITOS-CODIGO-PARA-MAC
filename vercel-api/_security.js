@@ -21,13 +21,12 @@ export const allowedOrigins = (req) => {
   const vercelHosts = [process.env.VERCEL_PROJECT_PRODUCTION_URL, process.env.VERCEL_URL, process.env.VERCEL_BRANCH_URL]
     .filter(Boolean).map(host => `https://${host}`);
   const host = String(req?.headers?.host || '').trim();
-  const sameHost = host && !/[\s/]/.test(host) ? [`https://${host}`, `http://${host}`] : [];
+  // HTTP só para a própria máquina (desenvolvimento); na Internet, apenas HTTPS.
+  const localHost = /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host);
+  const sameHost = host && !/[\s/]/.test(host) ? [`https://${host}`, ...(localHost ? [`http://${host}`] : [])] : [];
   return new Set([
     ...configured, ...vercelHosts, ...sameHost,
     'https://tango-gestao-creditos.vercel.app',
-    'http://191.215.45.104',
-    'http://191.215.45.104:3000',
-    'http://tangogestaoecreditos.tech',
     'https://tangogestaoecreditos.tech',
     'null',
     'http://localhost:8081', 'http://localhost:8082', 'http://localhost:5173', 'http://localhost:4173', 'http://127.0.0.1:8081', 'http://localhost:3000',
@@ -51,14 +50,15 @@ export const applyCors = (req, res) => {
   const origin = String(req.headers.origin || '');
   const allowed = !origin ||
     allowedOrigins(req).has(origin) ||
-    /^https?:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin) ||
-    /^https?:\/\/(191\.215\.45\.104|tangogestaoecreditos\.tech)(:\d+)?$/i.test(origin);
+    // Só as pré-visualizações deste projeto na Vercel (qualquer pessoa pode criar outro site em *.vercel.app).
+    /^https:\/\/tango-gestao-creditos(-[a-z0-9-]+)?\.vercel\.app$/i.test(origin) ||
+    /^https:\/\/(www\.)?tangogestaoecreditos\.tech$/i.test(origin);
 
   if (origin && allowed) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret, x-tenant-id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret, x-master-session, x-tenant-id');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   return allowed;
 };
@@ -126,8 +126,22 @@ export const enforceDistributedRateLimit = async (sql, req, res, { limit, window
   return true;
 };
 
+// Segredos que já estiveram publicados (código-fonte, bundle web ou ficheiros .env no git). Mesmo que ainda
+// estejam configurados num servidor, nunca são aceites: quem os viu teria acesso total. Só os hashes ficam aqui.
+const COMPROMISED_SECRET_HASHES = new Set([
+  '757e385cb0d1ce6b46a98d37577d7f1ac3032a2979e999cd3121e1777eeed7c7',
+  '2079e8cc5733ba3c294c2c4537529546a0d924dace2a839abd6db05feea2bd2a',
+  '53a773c1d48233d381a20aeb8bbe876b1729f156ed6a696ed4f07c694c37dd91',
+  '80fd577b61f3bc5e7f1e2497334bede06ee9a0cf6bea35b5f05bc3747727cc96',
+  '35574a7acd5d91ca90053c1b547afe6108f4ef1aca97435e0ba91cca136a879e',
+  '42e176773064b57748020c9f06c52b35b1c30be18631808e476707c2fd53bf53',
+]);
+
+export const isCompromisedSecret = (value) =>
+  COMPROMISED_SECRET_HASHES.has(crypto.createHash('sha256').update(String(value || '').trim()).digest('hex'));
+
 export const requireSecret = (req, configuredSecret, headerName = 'x-api-key') => {
-  if (!configuredSecret) return false;
+  if (!configuredSecret || isCompromisedSecret(configuredSecret)) return false;
   const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   return safeEqual(bearer || req.headers[headerName], configuredSecret);
 };

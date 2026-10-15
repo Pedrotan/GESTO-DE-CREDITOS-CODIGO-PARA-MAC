@@ -104,7 +104,9 @@ export const reportUsageIfDue = async (config: {
         const reports = await Promise.all(periods.map(period => buildUsageReport(config.query, period)));
         const response = await fetch(`${config.url}/api/usage-report`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
+            // Sem chave (versão web com sessão), o servidor reconhece a empresa pelo cookie HttpOnly.
+            headers: { 'Content-Type': 'application/json', ...(config.apiKey ? { 'x-sync-passkey': config.apiKey } : {}) },
+            credentials: 'same-origin',
             body: JSON.stringify({ tenantId: config.tenantId, deviceId: config.deviceId, appVersion: config.appVersion, reports }),
             signal: AbortSignal.timeout(15_000),
         });

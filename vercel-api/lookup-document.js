@@ -44,8 +44,9 @@ export default async function handler(req, res) {
     await registerAuthFailure(sql, req, { scope: 'master', type: 'master_secret_failed', title: 'Chave errada na consulta de documentos',
       details: 'Pedido à consulta de BI/NIF com uma chave de API ou chave mestra inválida.', ipPolicy: LOCKOUT_POLICIES.master });
   }
-  if (!authorized && req.headers['x-tenant-id'] && req.headers['x-sync-passkey']) {
-    const access = await authorizeTenant(sql, String(req.headers['x-tenant-id']), String(req.headers['x-sync-passkey']), req);
+  // Empresa ligada: pelo Código de Acesso (computador) ou pela sessão HttpOnly (versão web, sem cabeçalho).
+  if (!authorized && req.headers['x-tenant-id'] && (req.headers['x-sync-passkey'] || req.headers.cookie)) {
+    const access = await authorizeTenant(sql, String(req.headers['x-tenant-id']), String(req.headers['x-sync-passkey'] || ''), req);
     if (!access.ok) return send(res, access.status, { success: false, code: access.code, message: access.message });
     authorized = true;
   }

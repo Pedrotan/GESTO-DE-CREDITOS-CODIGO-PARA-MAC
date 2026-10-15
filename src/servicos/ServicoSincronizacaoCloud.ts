@@ -1,4 +1,6 @@
 import { getScopedLocalStorageItem, scopedStorageKey } from '@/bibliotecas/contas';
+import { lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGREDO_CODIGO_EMPRESA } from '@/bibliotecas/cofre-segredos';
+import { secureCloudUrl } from '@/servicos/ServicoLigacaoNuvem';
 import { setFinancialConnectionProbe } from '@/bibliotecas/ligacao-financeira';
 import { sqlite, type SqlTransactionStatement } from '@/bibliotecas/adaptador-sqlite';
 import { RENDERER_SQL_BY_ID, RENDERER_SQL_ID_BY_STATEMENT } from '../../electron/renderer-sql-allowlist.ts';
@@ -31,8 +33,18 @@ type CloudSyncConfig = {
      * ler o que outro dispositivo cifrou; o envio usa sempre `apiKey`.
      */
     extraKeys?: Array<string | null | undefined>;
+    /**
+     * Versão web ligada na mesma origem: o servidor reconhece o navegador pela sessão HttpOnly (sem cabeçalho
+     * com o código) e a cifra usa chaves já derivadas e não exportáveis — o código não existe no navegador.
+     */
+    sessionAuth?: boolean;
+    cryptoKeys?: { write: CryptoKey; read: CryptoKey[] };
     onRemoteApplied?: () => void | Promise<void>;
 };
+
+/** Autenticação de cada pedido: o Código de Acesso no cabeçalho, ou nada (o cookie HttpOnly da sessão vai sozinho). */
+const authHeaders = (config: CloudSyncConfig): Record<string, string> =>
+    config.sessionAuth ? {} : { 'x-sync-passkey': config.apiKey };
 
 const DB_NAME = 'TangoCloudSyncQueue';
 const STORE_NAME = 'operations';
@@ -121,7 +133,8 @@ export const isCloudSyncUrl = (url?: string | null) => {
 };
 
 const normalizeBaseUrl = (url: string) => {
-    let value = url.trim().replace(/\/+$/, '');
+    // Servidores na Internet só por HTTPS (o Código de Acesso segue em cada pedido).
+    let value = secureCloudUrl(url);
     value = value.replace(/\/api\/sync$/i, '').replace(/\/sync$/i, '');
     return value;
 };
@@ -313,8 +326,24 @@ const accessCodeVariants = (values: Array<string | null | undefined>) => {
 };
 
 /** Chaves para ler: a de envio primeiro, depois as outras formas conhecidas do código. */
-const readKeysFor = async (config: CloudSyncConfig) =>
+const readKeysFor = async (config: CloudSyncConfig) => config.cryptoKeys?.read ||
     Promise.all(accessCodeVariants([config.apiKey, ...(config.extraKeys || [])]).map(secret => deriveKey(secret, config.tenantId)));
+
+const writeKeyFor = async (config: CloudSyncConfig) => config.cryptoKeys?.write || deriveKey(config.apiKey, config.tenantId);
+
+/**
+ * Versão web: deriva, uma única vez ao ligar a empresa, as chaves de cifra (não exportáveis) a partir das formas
+ * do Código de Acesso. Depois disto o código pode ser esquecido; as chaves ficam no cofre (cofre-segredos.ts).
+ */
+export const deriveWebSyncKeys = async (tenantId: string, codes: Array<string | null | undefined>) => {
+    const sendCode = codes.find(Boolean);
+    if (!sendCode) throw new Error('Código de Acesso em falta.');
+    const write = await deriveKey(sendCode, tenantId);
+    const read = await Promise.all(accessCodeVariants([sendCode, ...codes]).map(secret => deriveKey(secret, tenantId)));
+    // O código não fica na cache em memória (a chave da cache é o próprio código).
+    for (const secret of accessCodeVariants([sendCode, ...codes])) derivedKeys.delete(`${tenantId}\n${secret}`);
+    return { tenantId, write, read };
+};
 
 const sameTenant = (left?: string, right?: string) =>
     String(left || '').replace(/[^a-z0-9]/giu, '').toUpperCase() === String(right || '').replace(/[^a-z0-9]/giu, '').toUpperCase();
@@ -678,7 +707,7 @@ export const syncCloudNow = async () => {
             if (config) emitStatus({ state: 'error', message: 'Sem ligação à Internet.', pending: await getPendingSyncCount().catch(() => 0) });
             return { success: false, message: 'Sem ligação à Internet.' };
         }
-        if (!config.apiKey || config.apiKey.length < 8) return { success: false, message: 'Configure uma chave de sincronização com pelo menos 8 caracteres.' };
+        if (config.sessionAuth ? !config.cryptoKeys : !config.apiKey || config.apiKey.length < 8) return { success: false, message: 'Configure uma chave de sincronização com pelo menos 8 caracteres.' };
         emitStatus({ state: 'syncing' });
         try {
             // Os dados vão cifrados com o Código de Acesso: se mudou, o histórico antigo deixa de ser legível
@@ -693,7 +722,7 @@ export const syncCloudNow = async () => {
                 }
             }
             await createBootstrapOperations();
-            const key = await deriveKey(config.apiKey, config.tenantId);
+            const key = await writeKeyFor(config);
             const readKeys = await readKeysFor(config);
             let cursor = Number(localStorage.getItem(scopedStorageKey(CURSOR_KEY)) || '0');
             let totalPushed = 0;
@@ -732,7 +761,8 @@ export const syncCloudNow = async () => {
                 });
                 const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
+                    headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+                credentials: 'same-origin',
                     body: requestBody,
                     signal: AbortSignal.timeout(requestTimeout(requestBody.length + MAX_PULL_BYTES))
                 });
@@ -781,7 +811,8 @@ export const syncCloudNow = async () => {
                     } as unknown as SyncOperation;
                     const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
+                        headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+                credentials: 'same-origin',
                         // O cursor fica igual: o que vier na resposta é recebido na próxima sincronização.
                         body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, pull: false, operations: [{ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) }] }),
                         signal: AbortSignal.timeout(requestTimeout(JSON.stringify(change.rows).length * 2))
@@ -795,7 +826,7 @@ export const syncCloudNow = async () => {
 
             if ((totalPulled || totalConflicts) && config.onRemoteApplied) await config.onRemoteApplied();
             void reportUsageIfDue({
-                url: normalizeBaseUrl(config.url), apiKey: config.apiKey, tenantId: config.tenantId,
+                url: normalizeBaseUrl(config.url), apiKey: config.sessionAuth ? '' : config.apiKey, tenantId: config.tenantId,
                 deviceId: getDeviceId(), query: (sql, params) => sqlite.all(sql, params), appVersion: `${window.electronAPI ? 'PC' : 'Web'} 3.0.2`,
             });
             if (totalSkipped) console.warn(`[CloudSync] ${totalSkipped} operações antigas cifradas com outra chave foram ignoradas.`);
@@ -878,8 +909,12 @@ export const resendUsersOnNextSync = () => {
 export const webCloudSyncConfig = (): CloudSyncConfig | null => {
     if (typeof window === 'undefined' || window.electronAPI) return null;
     const tenantId = localStorage.getItem('tango_active_tenant_id');
-    const typedCode = localStorage.getItem('tango_active_tenant_code');
-    const serverCode = localStorage.getItem('tango_active_tenant_sync_key');
+    // Ligação actual: sessão HttpOnly + chaves não exportáveis (o código não fica no navegador).
+    const cryptoKeys = lerChavesSincronizacao(tenantId);
+    if (tenantId && cryptoKeys) return { url: window.location.origin, apiKey: '', tenantId, sessionAuth: true, cryptoKeys };
+    // Ligações anteriores (ou a outro servidor): o código, cifrado no cofre, até a migração automática.
+    const typedCode = lerSegredo(SEGREDO_CODIGO_EMPRESA);
+    const serverCode = lerSegredo(SEGREDO_CHAVE_SINCRONIZACAO);
     const apiKey = serverCode || typedCode;
     if (!tenantId || !apiKey) return null;
     return { url: window.location.origin, apiKey, tenantId, extraKeys: [typedCode, serverCode] };
@@ -900,7 +935,8 @@ export const receiveUsersFromCloud = async (): Promise<UsersRosterOutcome> => {
         });
         const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'x-sync-passkey': config.apiKey },
+            headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+                credentials: 'same-origin',
             body: requestBody,
             signal: AbortSignal.timeout(requestTimeout(MAX_PULL_BYTES)),
         });

@@ -3,20 +3,42 @@
 // pertence a ela (o NIF é público, por isso não basta para ler ou escrever dados da empresa).
 
 export const VERCEL_CLOUD_URL = 'https://tango-gestao-creditos.vercel.app';
+/** Endereço antigo (HTTP directo, sem cifra). Só serve para reconhecer configurações antigas: nunca é usado. */
 export const VPS_IP_URL = 'http://191.215.45.104:3000';
 export const VPS_DOMAIN_URL = 'https://tangogestaoecreditos.tech';
+
+const LEGACY_VPS_HOSTS = new Set(['191.215.45.104', 'tangogestaoecreditos.tech', 'www.tangogestaoecreditos.tech']);
+const isLocalNetworkHost = (host: string) =>
+    /^(localhost|127\.\d+\.\d+\.\d+|\[::1\]|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+)$/i.test(host) ||
+    /\.(local|localhost|test|lan)$/i.test(host);
+
+/**
+ * Servidores na Internet só por HTTPS: códigos de acesso e chaves nunca viajam sem cifra. O IP e o domínio da
+ * VPS passam para o domínio oficial em HTTPS; servidores da rede local (modo servidor da empresa) ficam como estão.
+ */
+export const secureCloudUrl = (url: string): string => {
+    const value = String(url || '').trim().replace(/\/+$/, '');
+    let parsed: URL;
+    try { parsed = new URL(value); } catch { return value; }
+    if (parsed.protocol !== 'http:' || isLocalNetworkHost(parsed.hostname)) return value;
+    if (LEGACY_VPS_HOSTS.has(parsed.hostname.toLowerCase())) return `${VPS_DOMAIN_URL}${parsed.pathname.replace(/\/+$/, '')}`;
+    parsed.protocol = 'https:';
+    if (parsed.port === '80') parsed.port = '';
+    return parsed.toString().replace(/\/+$/, '');
+};
 
 export const getCloudBaseUrl = (): string => {
     if (typeof localStorage !== 'undefined') {
         const custom = (localStorage.getItem('tango_cloud_url') || localStorage.getItem('tango_master_cloud_url') || localStorage.getItem('tango_dev_cloud_url') || '').trim();
         if (custom.startsWith('http')) {
             if (!custom.includes('vercel.app')) {
-                return custom.replace(/\/+$/, '');
+                return secureCloudUrl(custom);
             }
         }
     }
 
-    const envUrl = (import.meta.env.VITE_TANGO_MASTER_URL || import.meta.env.VITE_CLOUD_URL || '') as string;
+    const env: Partial<ImportMetaEnv> = import.meta.env || {}; // Fora do Vite (testes em Node) não há import.meta.env.
+    const envUrl = (env.VITE_TANGO_MASTER_URL || env.VITE_CLOUD_URL || '') as string;
     if (envUrl && envUrl.trim().startsWith('http')) {
         return envUrl.trim().replace(/\/+$/, '');
     }
@@ -31,18 +53,13 @@ export const getCloudBaseUrl = (): string => {
 
 /** Lista de todos os servidores centrais autorizados para consulta em cascata */
 export const getKnownCloudServers = (): string[] => {
-    const isHttps = typeof window !== 'undefined' && window.location?.protocol === 'https:';
     const current = getCloudBaseUrl();
     const list = [current];
+    // Só servidores HTTPS: as alternativas em HTTP (IP directo) enviavam o Código de Acesso sem cifra.
     const known = [
         VPS_DOMAIN_URL,
         VERCEL_CLOUD_URL
     ];
-    // Evitar URLs http:// se estiver sob https:// para prevenir Mixed Content e bloqueio CSP
-    if (!isHttps) {
-        known.push(VPS_IP_URL);
-        known.push('http://tangogestaoecreditos.tech');
-    }
     for (const url of known) {
         if (!list.includes(url)) list.push(url);
     }

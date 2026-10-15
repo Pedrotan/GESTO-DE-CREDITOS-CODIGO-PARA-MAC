@@ -64,7 +64,8 @@ import { DEFAULT_ACCESS_SCHEDULE, normalizeAccessSchedule, validateAccessSchedul
 import { isCloudSyncUrl, startCloudSync, syncCloudNow, webCloudSyncConfig } from '@/servicos/ServicoSincronizacaoCloud';
 import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { LegalCase, Warranty } from '@/tipos/contencioso';
-import { getScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from '@/bibliotecas/contas';
+import { getActiveAccountIdFromStorage, getScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from '@/bibliotecas/contas';
+import { guardarSegredo, segredoPasskeyConta, semSegredos } from '@/bibliotecas/cofre-segredos';
 
 export interface AdvancedReportData {
     monthlyRevenue: { month: string; amount: number }[];
@@ -664,10 +665,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 }
 
                 setCompanySettings(hydratedSettings);
-                setScopedLocalStorageItem('cached_company_settings', JSON.stringify({
+                // Cópia para o arranque offline, sem segredos (pentest A-02).
+                setScopedLocalStorageItem('cached_company_settings', JSON.stringify(semSegredos({
                     ...hydratedSettings,
                     name: sanitizedName,
-                }));
+                })));
                 retryCount.current = 0;
             } else if (!Array.isArray(result)) {
                 console.warn("Startup timeout hit! Loading fallback/cached settings to unblock UI.");
@@ -957,7 +959,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         }
 
         setCompanySettings(hydratedSettings);
-        setScopedLocalStorageItem('cached_company_settings', JSON.stringify(effectiveSettings));
+        setScopedLocalStorageItem('cached_company_settings', JSON.stringify(semSegredos(effectiveSettings)));
         // Só os campos alterados, com o valor anterior e o novo (segredos e imagens nunca entram no registo).
         const SECRET_SETTING = /password|rescueKey|passkey|apiKey|licenseKey|smtpPassword/i;
         const changedKeys = Object.keys(updates).filter(key => JSON.stringify((companySettings as any)[key] ?? null) !== JSON.stringify((updates as any)[key] ?? null));
@@ -983,7 +985,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
         if (updates.syncEnabled !== undefined) setScopedLocalStorageItem('sync_enabled', updates.syncEnabled ? 'true' : 'false');
         if (updates.syncUrl !== undefined) setScopedLocalStorageItem('sync_url', updates.syncUrl || '');
-        if (updates.syncPasskey !== undefined) setScopedLocalStorageItem('sync_passkey', updates.syncPasskey || '');
+        if (updates.syncPasskey !== undefined) void guardarSegredo(segredoPasskeyConta(getActiveAccountIdFromStorage()), updates.syncPasskey);
 
         const isMaster = getScopedLocalStorageItem('is_master') === 'true';
         if (!isMaster && (updates.syncEnabled !== undefined || updates.syncUrl !== undefined)) {
@@ -1187,6 +1189,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         // No navegador, a chave é o Código de Acesso tal como está guardado no servidor (o mesmo que o computador
         // recebe ao ligar-se): o código escrito pelo utilizador pode diferir em hífens ou espaços.
         const web = webCloudSyncConfig();
+        // Ligação web com sessão HttpOnly: nenhum código entra na configuração, só as chaves não exportáveis.
+        if (web?.sessionAuth) {
+            // Navegador migrado para a sessão: o código que ainda estivesse nas definições locais é apagado.
+            if (companySettings.syncPasskey || companySettings.syncApiKey) void updateCompanySettings({ syncPasskey: '', syncApiKey: '' });
+            return startCloudSync({ ...web, url: companySettings.syncUrl, onRemoteApplied: refreshData });
+        }
         const apiKey = web?.apiKey || companySettings.syncApiKey || companySettings.syncPasskey || '';
         return startCloudSync({
             url: companySettings.syncUrl,

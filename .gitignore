@@ -49,3 +49,6 @@ public_key.json
 # OS metadata
 ._*
 **/._*
+
+# Segredos de produção: nunca no git (usar .env.production.example como modelo)
+.env.production

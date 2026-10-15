@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
     formatKz, overdueRate, summarizeUsage, usageToCsv, variation, type CompanyUsage,
 } from '@/bibliotecas/volume-saas';
+import { masterTenantsRequest } from '@/servicos/ServicoMasterCloud';
 
 // Relatórios de volume de negócio das empresas que usam o Tango (SaaS). Os números chegam agregados
 // por mês, enviados por cada empresa depois de sincronizar; o Master nunca vê dados de clientes.
@@ -21,16 +22,9 @@ const DEFAULT_URL = 'https://tangogestaoecreditos.tech';
 const callUsageApi = async (period: string) => {
     let base = (localStorage.getItem(URL_KEY) || DEFAULT_URL).trim().replace(/\/+$/, '');
     if (base.includes('vercel.app')) base = DEFAULT_URL;
-    const secret = (localStorage.getItem(SECRET_KEY) || 'TangoMaster#2026!ChaveForteHostinger').trim();
+    const secret = (localStorage.getItem(SECRET_KEY) || '').trim();
     if (!secret) throw new Error('Configure a Chave Mestra em "Empresas Cloud" para ver os relatórios.');
-    const headerSafe = /^[\x20-\x7e]*$/.test(secret);
-    const response = await fetch(`${base}/api/tenants`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(headerSafe ? { Authorization: `Bearer ${secret}` } : {}) },
-        body: JSON.stringify({ action: 'usage', period, masterSecret: secret }),
-        signal: AbortSignal.timeout(20_000),
-    });
-    const data = await response.json().catch(() => ({}));
+    const { response, data } = await masterTenantsRequest(base, secret, { action: 'usage', period });
     if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
     return data as { period: string; previousPeriod: string; companies: CompanyUsage[] };
 };

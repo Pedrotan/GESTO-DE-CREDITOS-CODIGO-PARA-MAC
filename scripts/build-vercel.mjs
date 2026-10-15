@@ -52,6 +52,12 @@ const securityHeaders = [
   { key: 'X-Permitted-Cross-Domain-Policies', value: 'none' },
 ];
 
+// Pentest A-03: a Vercel serve os ficheiros estáticos com "Access-Control-Allow-Origin: *". Só o domínio da
+// própria aplicação os pode ler por CORS (a própria página carrega-os na mesma origem, sem precisar de CORS).
+// As rotas /api/* ficam de fora: definem a origem permitida pedido a pedido (_security.js).
+const webOrigin = String(process.env.TANGO_WEB_ORIGIN || 'https://tango-gestao-creditos.vercel.app').trim().replace(/\/+$/, '');
+if (!/^https:\/\/[a-z0-9.-]+$/i.test(webOrigin)) throw new Error(`TANGO_WEB_ORIGIN inválida: ${webOrigin}`);
+
 const vercelConfig = {
   version: 2,
   cleanUrls: true,
@@ -70,6 +76,13 @@ const vercelConfig = {
       // Cabeçalhos de segurança em todas as páginas e ficheiros servidos.
       source: '/(.*)',
       headers: securityHeaders
+    },
+    {
+      source: '/((?!api/).*)',
+      headers: [
+        { key: 'Access-Control-Allow-Origin', value: webOrigin },
+        { key: 'Vary', value: 'Origin' }
+      ]
     },
     {
       // A página inicial nunca fica em cache: depois de um deploy aponta sempre para os ficheiros novos.

@@ -4,6 +4,7 @@ import { Button } from '@/componentes/ui/button';
 import { Badge } from '@/componentes/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/componentes/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/componentes/ui/table';
+import { masterTenantsRequest } from '@/servicos/ServicoMasterCloud';
 
 // Painel Master › Segurança: tentativas de intrusão contra a API na nuvem (chave mestra errada, códigos
 // de acesso errados, força bruta, sites não autorizados, excesso de pedidos) e contra este computador.
@@ -27,16 +28,9 @@ const SEVERITY: Record<string, { label: string; className: string }> = {
 const callTenants = async (action: string) => {
     let base = (localStorage.getItem(URL_KEY) || DEFAULT_URL).trim().replace(/\/+$/, '');
     if (base.includes('vercel.app')) base = DEFAULT_URL;
-    const secret = (localStorage.getItem(SECRET_KEY) || 'TangoMaster#2026!ChaveForteHostinger').trim();
+    const secret = (localStorage.getItem(SECRET_KEY) || '').trim();
     if (!secret) throw new Error('Configure a Chave Mestra em "Empresas Cloud" para ver os alertas do servidor.');
-    const headerSafe = /^[\x20-\x7e]*$/.test(secret);
-    const response = await fetch(`${base}/api/tenants`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...(headerSafe ? { Authorization: `Bearer ${secret}` } : {}) },
-        body: JSON.stringify({ action, masterSecret: secret }),
-        signal: AbortSignal.timeout(20_000),
-    });
-    const data = await response.json().catch(() => ({}));
+    const { response, data } = await masterTenantsRequest(base, secret, { action });
     if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
     return data;
 };

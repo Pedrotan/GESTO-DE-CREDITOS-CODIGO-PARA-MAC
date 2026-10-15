@@ -1,4 +1,6 @@
 import { useEffect, useState } from 'react';
+import { masterTenantsRequest } from '@/servicos/ServicoMasterCloud';
+import { secureCloudUrl } from '@/servicos/ServicoLigacaoNuvem';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
@@ -52,7 +54,6 @@ const URL_KEY = 'tango_master_cloud_url';
 const SECRET_KEY = 'tango_master_cloud_secret';
 const LOCAL_TENANTS_KEY = 'tango_master_registered_tenants';
 export const DEFAULT_CLOUD_URL = 'https://tangogestaoecreditos.tech';
-export const DEFAULT_MASTER_SECRET = 'TangoMaster#2026!ChaveForteHostinger';
 
 const generateFriendlyCode = () => {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -78,16 +79,10 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
             localStorage.setItem(URL_KEY, DEFAULT_CLOUD_URL);
             return DEFAULT_CLOUD_URL;
         }
-        return saved;
+        return secureCloudUrl(saved);
     });
-    const [masterSecret, setMasterSecret] = useState(() => {
-        const saved = (localStorage.getItem(SECRET_KEY) || '').trim();
-        if (!saved) {
-            localStorage.setItem(SECRET_KEY, DEFAULT_MASTER_SECRET);
-            return DEFAULT_MASTER_SECRET;
-        }
-        return saved;
-    });
+    // Nunca há chave por omissão no código (iria parar ao bundle público): o administrador introdu-la.
+    const [masterSecret, setMasterSecret] = useState(() => (localStorage.getItem(SECRET_KEY) || '').trim());
     const [showSecret, setShowSecret] = useState(false);
 
     const [tenants, setTenants] = useState<CloudTenant[]>(() => {
@@ -220,19 +215,10 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
         
         const secret = masterSecret.trim();
         if (!secret) throw new Error('Indique a Chave Mestra do Tango Master.');
-        // No corpo a chave segue em UTF-8; o cabeçalho só aceita texto latin1 (sem acentos especiais).
-        const headerSafe = /^[\x20-\x7e]*$/.test(secret);
         let response: Response;
+        let data: any;
         try {
-            response = await fetch(`${base}/api/tenants`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...(headerSafe ? { 'Authorization': `Bearer ${secret}` } : {})
-                },
-                body: JSON.stringify({ action, ...payload, masterSecret: secret }),
-                signal: AbortSignal.timeout(20_000)
-            });
+            ({ response, data } = await masterTenantsRequest(base, secret, { action, ...payload }));
         } catch (fetchErr: any) {
             console.error('[GestaoEmpresasCloud] Erro de rede na chamada à API:', fetchErr);
             const isTimeout = fetchErr?.name === 'TimeoutError';
@@ -241,7 +227,6 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                 : `Falha de conexão com o servidor (${base}).`;
             throw new Error(`${detail} Verifique a ligação ou mude para o Domínio VPS Oficial (https://tangogestaoecreditos.tech).`);
         }
-        const data = await response.json().catch(() => ({}));
         if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
         return data;
     };
@@ -290,7 +275,7 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
     };
 
     const handleSwitchServer = async (newUrl: string) => {
-        const clean = newUrl.trim().replace(/\/+$/, '');
+        const clean = secureCloudUrl(newUrl);
         setServerUrl(clean);
         localStorage.setItem(URL_KEY, clean);
         await loadTenants(clean);
@@ -826,17 +811,6 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                             </button>
                             <button
                                 type="button"
-                                onClick={() => handleSwitchServer('http://191.215.45.104:3000')}
-                                className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
-                                    serverUrl.includes('191.215.45.104')
-                                        ? 'bg-[#5514d8] text-white border-[#5514d8]'
-                                        : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300'
-                                }`}
-                            >
-                                ⚡ IP VPS Direto (:3000)
-                            </button>
-                            <button
-                                type="button"
                                 onClick={() => handleSwitchServer('https://tango-gestao-creditos.vercel.app')}
                                 className={`text-[11px] font-bold px-2.5 py-1 rounded-lg border transition-all ${
                                     serverUrl.includes('vercel.app')
@@ -868,7 +842,7 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                                 type={showSecret ? 'text' : 'password'}
                                 value={masterSecret}
                                 onChange={(e) => setMasterSecret(e.target.value)}
-                                placeholder="Chave mestra configurada no servidor (TANGO_MASTER_SECRET)"
+                                placeholder="Chave mestra configurada no servidor"
                                 className="h-11 pr-11 rounded-xl"
                             />
                             <button

@@ -181,3 +181,89 @@ test('relatório de utilização só aceita métricas agregadas válidas e exige
         if (previous === undefined) delete process.env.DATABASE_URL; else process.env.DATABASE_URL = previous;
     }
 });
+// ---- Relatório de pentest externo (7/10/2026): achados A-01, A-04 e A-05 ----
+
+// Base de dados falsa controlada pelo teste: regista as consultas e deixa definir a contagem de pedidos e os bloqueios.
+const FAKE_DB_NEON = 'export const neon = () => ({ query: (text, params) => globalThis.__pentestQuery(text, params) });';
+async function loadHandlerWithFakeDb(file) {
+    const outdir = mkdtempSync(path.join(tmpdir(), 'api-pentest-'));
+    const outfile = path.join(outdir, 'handler.mjs');
+    await build({
+        entryPoints: [path.join(import.meta.dirname, '..', 'vercel-api', file)],
+        bundle: true, format: 'esm', platform: 'node', outfile, logLevel: 'silent',
+        plugins: [{ name: 'neon-fake', setup(builder) {
+            builder.onResolve({ filter: /^@neondatabase\/serverless$/ }, () => ({ path: 'neon', namespace: 'neon-fake' }));
+            builder.onLoad({ filter: /.*/, namespace: 'neon-fake' }, () => ({ contents: FAKE_DB_NEON, loader: 'js' }));
+        } }]
+    });
+    const module = await import(pathToFileURL(outfile).href);
+    rmSync(outdir, { recursive: true, force: true });
+    return module.default;
+}
+const fakeDb = ({ requestCount = 1, lockedSeconds = 0 } = {}) => {
+    const queries = [];
+    globalThis.__pentestQuery = async (text) => {
+        queries.push(text);
+        if (/^\s*(CREATE|ALTER)/i.test(text)) return [];
+        if (/api_rate_limits/.test(text)) return [{ request_count: requestCount, reset_epoch: Math.floor(Date.now() / 1000) + 60 }];
+        if (/FROM security_lockouts WHERE key_hash = ANY/.test(text)) return lockedSeconds ? [{ remaining: lockedSeconds }] : [];
+        if (/security_lockouts|security_events/.test(text)) return [];
+        throw new Error('Consulta inesperada no teste de pentest.');
+    };
+    return queries;
+};
+const withEnv = async (vars, run) => {
+    const previous = Object.fromEntries(Object.keys(vars).map(key => [key, process.env[key]]));
+    Object.assign(process.env, vars);
+    try { return await run(); } finally {
+        for (const [key, value] of Object.entries(previous)) if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+};
+
+test('A-01/A-04: chave mestra errada recebe mensagem genérica, conta para o limite de 10/min e regista a falha', async () => {
+    const tenants = await loadHandlerWithFakeDb('tenants.js');
+    await withEnv({ DATABASE_URL: 'postgres://test', TANGO_MASTER_SECRET: 'segredo-real' }, async () => {
+        const queries = fakeDb();
+        const res = response();
+        await tenants({ method: 'POST', headers: { 'x-forwarded-for': '198.51.100.7', authorization: 'Bearer tentativa' }, body: { action: 'list' }, socket: {} }, res);
+        assert.equal(res.statusCode, 401);
+        assert.equal(res.body.message, 'Chave de autenticação inválida.');
+        assert.doesNotMatch(JSON.stringify(res.body), /TANGO_|MASTER_SECRET|\.env|Vercel/i);
+        assert.equal(res.headers['RateLimit-Limit'], '10', 'o 401 também traz o limite de pedidos');
+        assert.ok(queries.some(text => /INSERT INTO security_lockouts/.test(text)), 'a falha conta para o bloqueio do IP');
+    });
+});
+
+test('A-04: acima do limite ou com o IP bloqueado, a chave nem chega a ser comparada', async () => {
+    const tenants = await loadHandlerWithFakeDb('tenants.js');
+    await withEnv({ DATABASE_URL: 'postgres://test', TANGO_MASTER_SECRET: 'segredo-real' }, async () => {
+        const request = { method: 'POST', headers: { 'x-forwarded-for': '198.51.100.8' }, body: { action: 'verify', masterSecret: 'segredo-real' }, socket: {} };
+        fakeDb({ requestCount: 11 });
+        const limited = response();
+        await tenants(request, limited);
+        assert.equal(limited.statusCode, 429);
+
+        const queries = fakeDb({ lockedSeconds: 3000 });
+        const locked = response();
+        await tenants(request, locked);
+        assert.equal(locked.statusCode, 429, 'mesmo a chave certa é recusada durante o bloqueio');
+        assert.ok(!queries.some(text => /INSERT INTO security_lockouts/.test(text)));
+    });
+});
+
+test('A-05: verify-company aplica o limite (10/min por IP) a todas as respostas, incluindo pedidos inválidos', async () => {
+    const verify = await loadHandlerWithFakeDb('verify-company.js');
+    await withEnv({ DATABASE_URL: 'postgres://test' }, async () => {
+        fakeDb();
+        const invalid = response();
+        await verify({ method: 'POST', headers: { 'x-forwarded-for': '198.51.100.9' }, body: {}, socket: {} }, invalid);
+        assert.equal(invalid.statusCode, 400);
+        assert.equal(invalid.headers['RateLimit-Limit'], '10');
+
+        fakeDb({ requestCount: 11 });
+        const limited = response();
+        await verify({ method: 'POST', headers: { 'x-forwarded-for': '198.51.100.9' }, body: { nif: '5003207439', code: 'TG-ABCD-EFGH' }, socket: {} }, limited);
+        assert.equal(limited.statusCode, 429);
+        assert.ok(Number(limited.headers['Retry-After']) > 0);
+    });
+});

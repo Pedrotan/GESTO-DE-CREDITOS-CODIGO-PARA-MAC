@@ -38,6 +38,7 @@ const bundleHandler = async entry => {
     return (await import(`${pathToFileURL(outfile).href}?v=${Math.random()}`)).default;
 };
 
+let requestSeq = 1;
 const invoke = async (handler, url, body) => {
     const response = { statusCode: 200, body: null };
     const res = {
@@ -45,7 +46,9 @@ const invoke = async (handler, url, body) => {
         setHeader() { return res; },
         json(data) { response.body = data; return res; },
     };
-    await handler({ method: 'POST', url, headers: { 'x-forwarded-for': '10.3.3.3' }, body, query: {}, socket: {} }, res);
+    // Cada pedido vem de um IP diferente: estes testes são funcionais e o limite de pedidos do painel (10/min por IP)
+    // é testado em api-security.test.mjs.
+    await handler({ method: 'POST', url, headers: { 'x-forwarded-for': `10.3.${(requestSeq >> 8) & 255}.${requestSeq++ & 255}` }, body, query: {}, socket: {} }, res);
     return response;
 };
 

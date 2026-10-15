@@ -1,17 +1,6 @@
 import { appAdapter } from './adaptador-aplicacao';
-import { getScopedLocalStorageItem, removeScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from './contas';
-
-// A02: Obfuscação Base64 para evitar exposição casual da passkey no DevTools
-const obfuscate = (value: string): string => {
-    if (!value) return '';
-    try { return btoa(unescape(encodeURIComponent(value))); } catch { return value; }
-};
-const deobfuscate = (value: string): string => {
-    if (!value) return '';
-    try { return decodeURIComponent(escape(atob(value))); } catch { return value; }
-};
-
-const PASSKEY_STORAGE_KEY = 'sync_pk_v2'; // Nova chave para migrar dados antigos
+import { getActiveAccountIdFromStorage, getScopedLocalStorageItem, setScopedLocalStorageItem } from './contas';
+import { guardarSegredo, lerSegredo, segredoPasskeyConta } from './cofre-segredos';
 
 // Initialize from LocalStorage or default to current origin (for Web Client auto-discovery)
 const getInitialUrl = () => {
@@ -28,35 +17,18 @@ const getInitialUrl = () => {
     return '';
 };
 
-// A02: Migrar passkey antiga (plaintext) para formato obfuscado
-const getStoredPasskey = (): string => {
-    if (typeof window === 'undefined') return '';
-    // Tentar ler da nova chave obfuscada
-    const obfuscated = localStorage.getItem(scopedStorageKey(PASSKEY_STORAGE_KEY));
-    if (obfuscated) return deobfuscate(obfuscated);
-    // Migrar da chave antiga (plaintext)
-    const legacy = getScopedLocalStorageItem('sync_passkey') || localStorage.getItem('sync_passkey');
-    if (legacy) {
-        localStorage.setItem(scopedStorageKey(PASSKEY_STORAGE_KEY), obfuscate(legacy));
-        removeScopedLocalStorageItem('sync_passkey');
-        localStorage.removeItem('sync_passkey'); // Limpar a versão plaintext
-        return legacy;
-    }
-    return '';
-};
+// Pentest A-02: a passkey vive no cofre cifrado (cofre-segredos.ts), nunca em texto claro no localStorage.
+const getStoredPasskey = (): string => lerSegredo(segredoPasskeyConta(getActiveAccountIdFromStorage())) || '';
 
 let remoteSyncUrl = getInitialUrl();
-let remoteSyncPasskey = getStoredPasskey();
+let remoteSyncPasskey = '';
 
 export function setRemoteSqlConfig(url: string, passkey: string) {
     remoteSyncUrl = url;
     remoteSyncPasskey = passkey;
     if (typeof window !== 'undefined') {
         setScopedLocalStorageItem('sync_url', url);
-        localStorage.setItem(scopedStorageKey(PASSKEY_STORAGE_KEY), obfuscate(passkey));
-        // Garantir que a chave antiga não permanece
-        removeScopedLocalStorageItem('sync_passkey');
-        localStorage.removeItem('sync_passkey');
+        void guardarSegredo(segredoPasskeyConta(getActiveAccountIdFromStorage()), passkey);
     }
 }
 
@@ -85,7 +57,7 @@ async function executeRemoteSql(sql: string, params: any[] = [], method: 'all' |
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-sync-passkey': remoteSyncPasskey,
+                'x-sync-passkey': remoteSyncPasskey || getStoredPasskey(),
                 'x-client-name': typeof window !== 'undefined' ? (window.location.hostname || 'Web Client') : 'Slave Device'
             },
             body: JSON.stringify({ sql, params, method }),

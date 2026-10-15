@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
-import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
+import { clearAuthFailures, isTrustedClient, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure, rememberTrustedClient } from './_alertas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
 import { licenseGate, licenseSummary, tenantAllowsFeature } from './_licencas.js';
+import { companySessionTenant, endCompanySession, sameCompany, startCompanySession } from './_sessao-empresa.js';
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -43,8 +44,30 @@ export default async function handler(req, res) {
   const rawNif = String(body.nif || body.tenantId || '').trim();
   const rawCode = String(body.accessCode || body.code || '').trim();
 
-  const tenantId = rawNif.replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+  const tenantId = rawNif.replace(/[^a-zA-Z0-9]/g, '').toUpperCase().slice(0, 64);
   const normalizedCode = normalizeCode(rawCode);
+  // Versão web já ligada: confirma a empresa pela sessão HttpOnly, sem enviar o Código de Acesso (que o
+  // navegador já não guarda). A resposta nunca devolve o código nesse caso.
+  const sessionMode = body.session === true && !rawCode;
+
+  const client = neon(databaseUrl);
+  const sql = (text, params) => client.query(text, params);
+
+  // Limite antes de qualquer validação, para que todas as respostas (400, 401, 404) contem e tragam os
+  // cabeçalhos RateLimit-*: 10 tentativas por minuto por IP. As falhas bloqueiam ainda o IP e o NIF
+  // (registerAuthFailure, mais abaixo); só as falhas contam por NIF, para que ninguém consiga impedir o
+  // acesso legítimo de uma empresa apenas por enviar pedidos com o NIF dela.
+  try {
+    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 10, windowMs: 60_000, scope: 'verify_company' })) return;
+  } catch (error) {
+    console.error('[verify-company][rate-limit]', error);
+    return send(res, 503, { success: false, code: 'SERVER_ERROR', message: 'O controlo de acesso está temporariamente indisponível.' });
+  }
+
+  if (body.logout === true) {
+    try { await endCompanySession(sql, req, res); } catch (error) { console.error('[verify-company][logout]', error); }
+    return send(res, 200, { success: true });
+  }
 
   if (!tenantId || tenantId.length < 5) {
     return send(res, 400, { 
@@ -54,7 +77,7 @@ export default async function handler(req, res) {
     });
   }
 
-  if (!normalizedCode || normalizedCode.length < 4) {
+  if (!sessionMode && (!normalizedCode || normalizedCode.length < 4)) {
     return send(res, 400, { 
       success: false, 
       code: 'INVALID_CODE',
@@ -62,18 +85,16 @@ export default async function handler(req, res) {
     });
   }
 
-  const client = neon(databaseUrl);
-  const sql = (text, params) => client.query(text, params);
-
   try {
-    // Limite de segurança: 20 tentativas por minuto por IP para prevenir força bruta
-    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 20, windowMs: 60_000, scope: 'verify_company' })) return;
-    const remaining = await lockoutRemaining(sql, req, { scope: 'company_code', subject: tenantId });
+    // Bloqueio por IP e por NIF; os clientes que já entraram nesta empresa não ficam presos ao bloqueio do NIF
+    // (um atacante não consegue tirar o acesso à própria empresa) e as falhas deles não contam para o NIF.
+    const trusted = await isTrustedClient(sql, req, tenantId);
+    const remaining = await lockoutRemaining(sql, req, { scope: 'company_code', subject: tenantId, trusted });
     if (remaining > 0) {
       res.setHeader('Retry-After', String(remaining));
       return send(res, 429, { success: false, code: 'LOCKED', message: `Demasiadas tentativas falhadas. Tente novamente em ${Math.ceil(remaining / 60)} minuto(s).` });
     }
-    const failure = (details) => registerAuthFailure(sql, req, { scope: 'company_code', subject: tenantId, type: 'company_code_failed',
+    const failure = (details) => registerAuthFailure(sql, req, { scope: 'company_code', subject: trusted ? '' : tenantId, type: 'company_code_failed',
       title: 'Código de acesso de empresa errado', details });
 
     // Garantir que a tabela existe e suporta o campo access_code
@@ -102,7 +123,7 @@ export default async function handler(req, res) {
     const rows = await sql('SELECT * FROM tango_tenants WHERE UPPER(tenant_id) = $1', [tenantId]);
 
     if (!rows || rows.length === 0) {
-      await failure(`Tentativa de activação com o NIF ${tenantId}, que não está registado.`);
+      if (!sessionMode) await failure(`Tentativa de activação com o NIF ${tenantId}, que não está registado.`);
       return send(res, 404, {
         success: false,
         code: 'NOT_REGISTERED',
@@ -130,8 +151,17 @@ export default async function handler(req, res) {
       });
     }
 
-    // Verificar o código de acesso
-    const codeMatches = 
+    // Verificar o código de acesso (ou, na versão web já ligada, a sessão)
+    if (sessionMode) {
+      if (!sameCompany(await companySessionTenant(sql, req), tenant.tenant_id)) {
+        return send(res, 401, {
+          success: false,
+          code: 'SESSION_INVALID',
+          message: 'A sessão deste navegador terminou ou o Código de Acesso da empresa mudou. Introduza o Código de Acesso.'
+        });
+      }
+    }
+    const codeMatches = sessionMode ||
       (tenant.access_code && (
         safeEqual(normalizeCode(tenant.access_code), normalizedCode) ||
         safeEqual(tenant.access_code.trim().toUpperCase(), rawCode.trim().toUpperCase())
@@ -149,6 +179,7 @@ export default async function handler(req, res) {
     }
 
     await clearAuthFailures(sql, { scope: 'company_code', subject: tenantId });
+    await rememberTrustedClient(sql, req, tenantId);
 
     // Licença da empresa: suspensa, revogada ou expirada bloqueia a versão web e a ligação do Desktop.
     const license = await licenseGate(sql, tenantId);
@@ -169,14 +200,16 @@ export default async function handler(req, res) {
     let multiTenantAllowed = true;
     try { multiTenantAllowed = await tenantAllowsFeature(sql, tenantId, 'multi_empresa'); } catch { multiTenantAllowed = true; }
 
+    // Código correcto: o navegador recebe a sessão HttpOnly e pode deixar de guardar o código.
+    if (!sessionMode) await startCompanySession(sql, res, tenant.tenant_id, tenant.key_hash);
+
     // Empresa aprovada com sucesso!
     return send(res, 200, {
       success: true,
       code: 'AUTHORIZED',
       tenantId: tenant.tenant_id,
       companyName: tenant.name,
-      accessCode: tenant.access_code || rawCode,
-      syncPasskey: tenant.access_code || rawCode,
+      ...(sessionMode ? {} : { accessCode: tenant.access_code || rawCode, syncPasskey: tenant.access_code || rawCode }),
       status: tenant.status,
       expiresAt: tenant.expires_at,
       // Layout da versão web: true/false conforme configurado na empresa; null = ainda desconhecido.

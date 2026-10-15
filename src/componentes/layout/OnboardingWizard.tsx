@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { apagarSegredo, segredoPasskeyConta } from '@/bibliotecas/cofre-segredos';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
@@ -751,6 +752,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                     localStorage.removeItem(ONBOARDING_KEY);
                                     removeScopedLocalStorageItem('sync_url');
                                     removeScopedLocalStorageItem('sync_passkey');
+                                    apagarSegredo(segredoPasskeyConta(getActiveAccountIdFromStorage()));
                                     setOnboardingMode('connect');
                                     setStep(1.5);
                                     setStayVisible(true);

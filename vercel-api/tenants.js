@@ -1,22 +1,23 @@
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
-import { applyCors, enforceDistributedRateLimit } from './_security.js';
+import { applyCors, enforceDistributedRateLimit, isCompromisedSecret } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
 import { changeLicensePlan, importLegacyKeys, legacyKeyStatuses, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
+import { createMasterSession, isValidMasterSession, revokeMasterSession } from './_sessao-master.js';
 import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
 
 const KEY_TOOLS = { generate: generateLicenseKey, parse: parseLicenseKey, hash: licenseKeyHash, prefix: licenseKeyPrefix };
 
 // API de administração de empresas (tenants) e chaves de sincronização.
-// Uso exclusivo do Painel Master. Protegida por TANGO_MASTER_SECRET
-// Sem a variável configurada, o painel fica indisponível (não há chaves fixas no código).
+// Uso exclusivo do Painel Master. Protegida pela chave mestra configurada no servidor.
+// Sem ela, o painel fica indisponível (não há chaves fixas no código).
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-master-secret');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-master-secret, x-master-session');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.json(body);
 };
@@ -113,6 +114,10 @@ export default async function handler(req, res) {
   if (!databaseUrl || !masterSecret) {
     return send(res, 503, { success: false, message: 'Painel Master ainda não configurado no servidor.' });
   }
+  if (isCompromisedSecret(masterSecret)) {
+    console.error('[tenants] A chave mestra configurada já foi exposta publicamente: substitua-a. O painel fica fechado até lá.');
+    return send(res, 503, { success: false, message: 'Painel Master indisponível: a chave mestra do servidor tem de ser substituída.' });
+  }
 
   // O corpo JSON chega em UTF-8; os cabeçalhos HTTP são lidos em latin1, o que altera acentos.
   const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
@@ -123,23 +128,42 @@ export default async function handler(req, res) {
     Buffer.from(header, 'latin1').toString('utf8')
   ].map(normalizeSecret).filter(Boolean);
 
-  if (!candidates.some(candidate => safeEqual(candidate, masterSecret))) {
-    return send(res, 401, { success: false, message: 'Chave mestra inválida. Use o mesmo valor de TANGO_MASTER_SECRET configurado neste servidor (ficheiro .env da VPS ou variáveis do projeto na Vercel).' });
-  }
-
   const client = neon(databaseUrl);
   const sql = (text, params) => client.query(text, params);
+  // Com sessão aberta o painel usa o token (256 bits, não se adivinha) e tem um limite largo; sem sessão, cada
+  // pedido é uma tentativa de chave mestra: limite apertado e bloqueio por IP ANTES de comparar a chave.
+  const sessionToken = String(req.headers['x-master-session'] || '').trim();
   try {
-    // Limite de pedidos e bloqueio por IP: impede abusos no painel
-    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 60, windowMs: 60_000, scope: 'tenants' })) return;
-    const remaining = await lockoutRemaining(sql, req, { scope: 'master' });
-    if (remaining > 0) {
-      res.setHeader('Retry-After', String(remaining));
-      return send(res, 429, { success: false, message: `Acesso bloqueado por tentativas falhadas. Tente novamente em ${Math.ceil(remaining / 60)} minuto(s).` });
+    if (sessionToken) {
+      if (!await enforceDistributedRateLimit(sql, req, res, { limit: 300, windowMs: 60_000, scope: 'tenants_session' })) return;
+    } else {
+      if (!await enforceDistributedRateLimit(sql, req, res, { limit: 10, windowMs: 60_000, scope: 'tenants' })) return;
+      const remaining = await lockoutRemaining(sql, req, { scope: 'master' });
+      if (remaining > 0) {
+        res.setHeader('Retry-After', String(remaining));
+        return send(res, 429, { success: false, message: `Acesso bloqueado por tentativas falhadas. Tente novamente em ${Math.ceil(remaining / 60)} minuto(s).` });
+      }
     }
   } catch (error) {
     console.error('[tenants][rate-limit]', error);
     return send(res, 503, { success: false, message: 'O controlo de acesso está temporariamente indisponível.' });
+  }
+
+  if (sessionToken) {
+    let valid = false;
+    try {
+      valid = await isValidMasterSession(sql, sessionToken, masterSecret);
+    } catch (error) {
+      console.error('[tenants][session]', error);
+      return send(res, 503, { success: false, message: 'O controlo de acesso está temporariamente indisponível.' });
+    }
+    if (!valid) return send(res, 401, { success: false, code: 'SESSION_INVALID', message: 'A sessão do painel expirou. Autentique-se novamente.' });
+  } else if (!candidates.some(candidate => safeEqual(candidate, masterSecret))) {
+    // 5 falhas em 15 min bloqueiam este IP durante 1 hora. A resposta não revela nada da configuração.
+    await registerAuthFailure(sql, req, { scope: 'master', type: 'master_secret_failed',
+      title: 'Chave mestra errada no painel Master', details: 'Tentativa de acesso à API de administração com uma chave inválida.',
+      ipPolicy: LOCKOUT_POLICIES.master });
+    return send(res, 401, { success: false, message: 'Chave de autenticação inválida.' });
   }
 
   const body = req.body || {};
@@ -175,8 +199,18 @@ export default async function handler(req, res) {
       }
     };
 
-    if (action === 'verify') {
-      return send(res, 200, { success: true, message: 'Credenciais master válidas e ligadas com sucesso.' });
+    if (action === 'verify' || action === 'session') {
+      // Quem se autenticou com a chave mestra recebe uma sessão para os pedidos seguintes.
+      const session = sessionToken ? null : await createMasterSession(sql, masterSecret, clientIp);
+      return send(res, 200, {
+        success: true,
+        message: 'Credenciais master válidas e ligadas com sucesso.',
+        ...(session ? { sessionToken: session.token, sessionExpiresAt: session.expiresAt } : {}),
+      });
+    }
+    if (action === 'logout') {
+      if (sessionToken) await revokeMasterSession(sql, sessionToken);
+      return send(res, 200, { success: true });
     }
 
     if (action === 'list') {

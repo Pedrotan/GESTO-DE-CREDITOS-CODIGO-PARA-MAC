@@ -3,12 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { toNeonResult } from './vercel-api/_ponte-pg.js';
+import { applyCors } from './vercel-api/_security.js';
 
 // Tango Gestão e Créditos ERP - Servidor de Produção VPS (Hostinger / Linux)
 // Suporta execução contínua com Node.js nativo, Docker e PM2.
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const PUBLIC_URL = String(process.env.TANGO_PUBLIC_URL || 'https://tangogestaoecreditos.tech').replace(/\/+$/, '');
 
 // Carregar variáveis de ambiente do ficheiro .env se existir
 const envFiles = [path.join(__dirname, '.env'), path.join(__dirname, '.env.production')];
@@ -256,6 +258,19 @@ const server = http.createServer(async (req, res) => {
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
 
+  // HTTPS obrigatório fora da própria máquina: o nginx termina o TLS e indica o protocolo original. Páginas em
+  // HTTP são redireccionadas; pedidos à API em HTTP são recusados (códigos e chaves não viajam sem cifra).
+  const requestHost = String(req.headers.host || '').replace(/:\d+$/, '').toLowerCase();
+  const isLocalRequest = /^(localhost|127\.\d+\.\d+\.\d+|\[::1\])$/.test(requestHost) || process.env.TANGO_ALLOW_HTTP === 'true';
+  const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim().toLowerCase();
+  if (!isLocalRequest && forwardedProto !== 'https') {
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      res.writeHead(308, { Location: `${PUBLIC_URL}${req.url}` });
+      return res.end();
+    }
+    return res.status(426).json({ success: false, message: `Ligação sem cifra recusada. Use ${PUBLIC_URL}.` });
+  }
+
   // 1. Healthcheck do Servidor
   if (pathname === '/api/health') {
     let dbStatus = 'unconfigured';
@@ -278,8 +293,9 @@ const server = http.createServer(async (req, res) => {
       'Content-Type': 'text/event-stream; charset=utf-8',
       'Cache-Control': 'no-cache, no-transform',
       'Connection': 'keep-alive',
-      'Access-Control-Allow-Origin': req.headers.origin || '*',
-      'X-Accel-Buffering': 'no'
+      'X-Accel-Buffering': 'no',
+      // Só as origens autorizadas (as mesmas da API) recebem cabeçalhos CORS.
+      ...(req.headers.origin && applyCors(req, { setHeader() {} }) ? { 'Access-Control-Allow-Origin': req.headers.origin, Vary: 'Origin' } : {})
     });
     res.write(`data: ${JSON.stringify({ type: 'connected', time: new Date().toISOString() })}\n\n`);
     const sseKeepAlive = setInterval(() => {
@@ -293,16 +309,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // 2. Encaminhamento de Rotas da API com CORS Universal
+  // 2. Encaminhamento de Rotas da API: CORS só para as origens autorizadas (lista única em _security.js).
+  // Antes refletia qualquer origem, o que deixava qualquer site passar o preflight.
   if (pathname.startsWith('/api/')) {
-    const origin = req.headers.origin || '*';
-    res.setHeader('Access-Control-Allow-Origin', origin);
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret, x-tenant-id');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Vary', 'Origin');
-
+    const originAllowed = applyCors(req, res);
     if (req.method === 'OPTIONS') {
-      return res.status(200).end();
+      return res.status(originAllowed ? 200 : 403).end();
     }
   }
 

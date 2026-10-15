@@ -102,6 +102,12 @@ const cloud = await bundle('src/servicos/ServicoSincronizacaoCloud.ts', {
         transaction: statements => globalThis.__sqlite.transaction(statements),
     };`,
     '@/servicos/ServicoRelatorioUso': 'export const reportUsageIfDue = async () => {};',
+    // Cofre já aberto: neste teste os segredos da empresa ligada ficam no localStorage simulado.
+    '@/bibliotecas/cofre-segredos': `
+        export const SEGREDO_CODIGO_EMPRESA = 'tango_active_tenant_code';
+        export const SEGREDO_CHAVE_SINCRONIZACAO = 'tango_active_tenant_sync_key';
+        export const lerSegredo = nome => localStorage.getItem(nome);
+        export const lerChavesSincronizacao = () => null;`,
 });
 
 // ---------- Ambiente de um dispositivo (computador ou navegador) ----------

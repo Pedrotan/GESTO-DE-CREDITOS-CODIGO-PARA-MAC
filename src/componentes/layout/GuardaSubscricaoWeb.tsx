@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { apagarChavesSincronizacao, apagarSegredo, guardarChavesSincronizacao, lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGREDO_CODIGO_EMPRESA } from '@/bibliotecas/cofre-segredos';
+import { getScopedLocalStorageItem } from '@/bibliotecas/contas';
 import { AlertTriangle, CalendarClock, Loader2, RefreshCw, ShieldOff, X } from 'lucide-react';
 import { Button } from '@/componentes/ui/button';
-import { stopCloudSync } from '@/servicos/ServicoSincronizacaoCloud';
+import { deriveWebSyncKeys, stopCloudSync } from '@/servicos/ServicoSincronizacaoCloud';
 import { subscriptionState } from '@/bibliotecas/subscricao';
 import { storeWebMultiTenant } from '@/servicos/ServicoIdentidadeEmpresa';
 import Swal from 'sweetalert2';
@@ -14,7 +16,9 @@ import { storeWebCompanyLicense } from '@/bibliotecas/licenca-nuvem-cliente';
 
 const CHECK_INTERVAL_MS = 10 * 60 * 1000;
 const DISMISS_KEY = 'tango_subscription_warning_dismissed';
-const TENANT_KEYS = ['tango_company_status', 'tango_active_tenant_authorized', 'tango_active_tenant_code', 'tango_active_tenant_sync_key', 'tango_active_tenant_multi'];
+// Ao focar a janela a verificação só se repete passado este tempo (limite de pedidos do servidor por IP).
+const FOCUS_RECHECK_MS = 2 * 60 * 1000;
+const TENANT_KEYS = ['tango_company_status', 'tango_active_tenant_authorized', 'tango_active_tenant_multi'];
 
 type Blocked = { reason: 'blocked' | 'expired'; message: string };
 
@@ -24,11 +28,17 @@ export const GuardaSubscricaoWeb = () => {
     const [blocked, setBlocked] = useState<Blocked | null>(null);
     const [expiresAt, setExpiresAt] = useState<string | null>(null);
     const [isChecking, setIsChecking] = useState(false);
+    const lastCheckRef = useRef(0);
     const [dismissedToday, setDismissedToday] = useState(() => localStorage.getItem(DISMISS_KEY) === new Date().toDateString());
 
     const revokeBrowser = useCallback(async (title: string, message: string) => {
         stopCloudSync();
         TENANT_KEYS.forEach(key => localStorage.removeItem(key));
+        apagarSegredo(SEGREDO_CODIGO_EMPRESA);
+        apagarSegredo(SEGREDO_CHAVE_SINCRONIZACAO);
+        await apagarChavesSincronizacao();
+        // Termina também a sessão HttpOnly no servidor (o cookie só o servidor o consegue apagar).
+        await fetch('/api/verify-company', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ logout: true }) }).catch(() => undefined);
         await Swal.fire({
             title,
             text: message,
@@ -43,14 +53,21 @@ export const GuardaSubscricaoWeb = () => {
 
     const check = useCallback(async () => {
         const nif = localStorage.getItem('tango_active_tenant_id');
-        const accessCode = localStorage.getItem('tango_active_tenant_code');
-        if (!nif || !accessCode || !navigator.onLine) return;
+        // Ligação actual: confirma pela sessão HttpOnly, sem código. Navegadores ligados antes desta versão ainda
+        // têm o código no cofre: enviam-no uma última vez para receber a sessão e esquecem-no (migração).
+        const hasSession = Boolean(lerChavesSincronizacao(nif));
+        const syncUrl = getScopedLocalStorageItem('sync_url') || window.location.origin;
+        const sameOrigin = (() => { try { return new URL(syncUrl).origin === window.location.origin; } catch { return false; } })();
+        const accessCode = hasSession ? null : lerSegredo(SEGREDO_CODIGO_EMPRESA);
+        if (!nif || (!hasSession && !accessCode) || !navigator.onLine) return;
+        lastCheckRef.current = Date.now();
         setIsChecking(true);
         try {
             const response = await fetch('/api/verify-company', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ nif, accessCode }),
+                credentials: 'same-origin',
+                body: JSON.stringify(hasSession ? { nif, session: true } : { nif, accessCode }),
                 signal: AbortSignal.timeout(15_000)
             });
             const data = await response.json().catch(() => ({}));
@@ -58,9 +75,12 @@ export const GuardaSubscricaoWeb = () => {
                 setBlocked(null);
                 // A empresa pode ter mudado o modo multi-empresa no executável: o layout acompanha.
                 storeWebMultiTenant(data.multiTenant);
-                // Navegadores ligados antes de guardarem o código na forma do servidor (a que cifra os dados).
-                if (data.syncPasskey && localStorage.getItem('tango_active_tenant_sync_key') !== data.syncPasskey) {
-                    localStorage.setItem('tango_active_tenant_sync_key', String(data.syncPasskey));
+                // Migração: o servidor abriu a sessão HttpOnly; ficam só as chaves de cifra (não exportáveis).
+                if (!hasSession && accessCode && sameOrigin) {
+                    const serverCode = String(data.syncPasskey || lerSegredo(SEGREDO_CHAVE_SINCRONIZACAO) || accessCode);
+                    await guardarChavesSincronizacao(await deriveWebSyncKeys(String(data.tenantId || nif), [serverCode, accessCode]));
+                    apagarSegredo(SEGREDO_CODIGO_EMPRESA);
+                    apagarSegredo(SEGREDO_CHAVE_SINCRONIZACAO);
                     window.dispatchEvent(new Event('tango_tenant_sync_key_changed'));
                 }
                 setExpiresAt(data.expiresAt || null);
@@ -72,6 +92,9 @@ export const GuardaSubscricaoWeb = () => {
             if (data.code === 'NOT_REGISTERED') {
                 await revokeBrowser('Acesso removido',
                     'O registo desta empresa foi eliminado pelo administrador do Tango Master. Este navegador deixou de ter acesso ao sistema. Contacte o administrador para mais informações.');
+            } else if (data.code === 'SESSION_INVALID') {
+                await revokeBrowser('Sessão terminada',
+                    'Por segurança, a ligação deste navegador à empresa terminou (o Código de Acesso pode ter sido alterado). Introduza o Código de Acesso da empresa para continuar.');
             } else if (data.code === 'WRONG_CODE') {
                 await revokeBrowser('Código de Acesso alterado',
                     'O Código de Acesso da empresa foi alterado pelo administrador. Inicie sessão novamente com o novo código.');
@@ -90,7 +113,7 @@ export const GuardaSubscricaoWeb = () => {
     useEffect(() => {
         void check();
         const timer = setInterval(() => void check(), CHECK_INTERVAL_MS);
-        const onFocus = () => void check();
+        const onFocus = () => { if (Date.now() - lastCheckRef.current >= FOCUS_RECHECK_MS) void check(); };
         // A sincronização recusou o código: confirmar já (código alterado → volta ao pedido do código).
         const onSync = (event: Event) => { if ((event as CustomEvent<{ authFailed?: boolean }>).detail?.authFailed) void check(); };
         window.addEventListener('focus', onFocus);

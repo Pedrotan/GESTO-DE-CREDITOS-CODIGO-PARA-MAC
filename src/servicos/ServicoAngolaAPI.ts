@@ -48,6 +48,7 @@ export interface BIDataResult {
 }
 
 import { detetarGeneroPorNome } from '../bibliotecas/genero.ts';
+import { lerChavesSincronizacao, lerSegredo, SEGREDO_CODIGO_EMPRESA } from '../bibliotecas/cofre-segredos.ts';
 import { calcularIdade, normalizarDataISO, inferirProvinciaDoBI } from '../bibliotecas/formatadores.ts';
 
 function normalizeGender(raw: any): string {
@@ -117,15 +118,18 @@ export class ServicoAngolaAPI {
 
         // O Master usa primeiro o servidor: as chaves dos fornecedores permanecem no backend.
         const tenantId = typeof localStorage !== 'undefined' ? localStorage.getItem('tango_active_tenant_id') : null;
-        const tenantCode = typeof localStorage !== 'undefined' ? localStorage.getItem('tango_active_tenant_code') : null;
+        const tenantCode = lerSegredo(SEGREDO_CODIGO_EMPRESA);
         const lookupServer = server?.url || (typeof window !== 'undefined' && window.location.protocol.startsWith('http') ? window.location.origin : 'https://tangogestaoecreditos.tech');
-        if ((server?.url && server.secret) || (tenantId && tenantCode)) {
+        // Versão web com sessão HttpOnly (mesma origem): basta o NIF; o cookie identifica a empresa.
+        const webSession = Boolean(tenantId && !server?.url && lerChavesSincronizacao(tenantId));
+        if ((server?.url && server.secret) || (tenantId && (tenantCode || webSession))) {
             try {
                 const params = new URLSearchParams({ document, type });
                 const response = await fetch(lookupServer.trim().replace(/\/+$/, '') + '/api/lookup-document?' + params, {
                     headers: { Accept: 'application/json',
                         ...(server?.secret ? { Authorization: 'Bearer ' + server.secret.trim() } :
-                            { 'x-tenant-id': tenantId!, 'x-sync-passkey': tenantCode! }) },
+                            { 'x-tenant-id': tenantId!, ...(tenantCode ? { 'x-sync-passkey': tenantCode } : {}) }) },
+                    credentials: 'same-origin',
                     signal: AbortSignal.timeout(12_000)
                 });
                 const result = await response.json().catch(() => null);
