@@ -46,8 +46,10 @@ test('migrações de arranque (antes do login) não são recusadas e não interr
     assert.ok(statements.length > 150);
     const refused = statements.filter(sql => financialStatementTarget(sql, true));
     assert.deepEqual(refused, [], 'cada migração recusada antes do login deixava as seguintes por aplicar');
-    // Fora da janela de arranque continuam a exigir sessão.
+    // O backfill da hora de registo só passa na janela de arranque; fora dela continua a exigir sessão.
+    assert.equal(financialStatementTarget('UPDATE payments SET registeredAt = paymentDate WHERE registeredAt IS NULL', true), null);
     assert.equal(financialStatementTarget('UPDATE payments SET registeredAt = paymentDate WHERE registeredAt IS NULL'), 'payments');
+    assert.equal(financialStatementTarget('UPDATE payments SET registeredAt = paymentDate WHERE registeredAt IS NULL OR 1 = 1', true), 'payments');
     assert.equal(financialStatementTarget('UPDATE payments SET registeredAt = ? WHERE id = ?', true), 'payments');
 });
 
