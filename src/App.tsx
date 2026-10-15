@@ -52,7 +52,7 @@ const Fornecedores = lazyWithReload(() => import("./paginas/Fornecedores"));
 const Scoring = lazyWithReload(() => import("./paginas/Scoring"));
 const SimuladorCredito = lazyWithReload(() => import("./paginas/SimuladorCredito"));
 const TermosPoliticas = lazyWithReload(() => import("./paginas/TermosPoliticas"));
-const CartasTransferencia = lazyWithReload(() => import("./paginas/CartasTransferencia").then(m => ({ default: m.CartasTransferencia })));
+const CartasTransferencia = lazyWithReload(() => import("./paginas/CartasTransferencia").then(m => ({ default: m?.CartasTransferencia })));
 const LixeiraPage = lazyWithReload(() => import("./paginas/Lixeira"));
 const Perfis = lazyWithReload(() => import("./paginas/Perfis"));
 const NaoEncontrado = lazyWithReload(() => import("./paginas/NaoEncontrado"));
@@ -157,8 +157,10 @@ const AppContent = () => {
       }
     };
     // O Vite avisa quando o pré-carregamento de um ficheiro falha (típico depois de um deploy).
-    const handlePreloadError = (event: Event) => {
-      if (reloadForNewVersion()) event.preventDefault();
+    // Não se cancela o evento: cancelado, o import() resolvia com undefined e o React.lazy mostrava
+    // "Cannot read properties of undefined (reading 'default')". O erro segue para o lazyWithReload.
+    const handlePreloadError = () => {
+      reloadForNewVersion();
     };
 
     window.addEventListener('error', handleChunkError);

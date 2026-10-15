@@ -1,5 +1,5 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { isChunkLoadError, reloadForNewVersion } from '@/bibliotecas/carregamento-modulos';
+import { isChunkLoadError, isReloadPending, reloadForNewVersion } from '@/bibliotecas/carregamento-modulos';
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
     constructor(props: { children: ReactNode }) {
@@ -14,10 +14,19 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
     componentDidCatch(error: Error, errorInfo: ErrorInfo) {
         console.error("Uncaught error:", error, errorInfo);
         // Página de uma versão anterior (depois de um deploy): recarrega para obter a versão nova.
-        if (isChunkLoadError(error)) reloadForNewVersion();
+        if (isChunkLoadError(error) && reloadForNewVersion()) this.forceUpdate();
     }
 
     render() {
+        if (this.state.hasError && isReloadPending()) {
+            // A aplicação está a recarregar para a versão nova: não mostra um erro que vai desaparecer.
+            return (
+                <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+                    <p className="text-sm font-medium text-slate-500">A atualizar a aplicação…</p>
+                </div>
+            );
+        }
+
         if (this.state.hasError) {
             return (
                 <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
