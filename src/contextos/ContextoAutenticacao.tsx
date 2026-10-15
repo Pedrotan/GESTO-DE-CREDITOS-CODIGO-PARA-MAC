@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, ReactNode, useEffect, useRe
 import { accessDenialFor } from '@/servicos/ServicoHorarioAcesso';
 import { User, Role, AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
 import { db } from '@/bibliotecas/bd';
+import { usersListSqlFromColumns } from '@/bibliotecas/sql-utilizadores';
 import bcrypt from 'bcryptjs';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
@@ -51,14 +52,11 @@ interface ContextoAutenticacaoType {
     verify2FA: (userId: string, code: string) => Promise<{ authenticated: boolean; reason?: 'challenge_expired' | 'replayed_code' | 'invalid_code' }>;
 }
 
-// No computador o processo principal recusa leituras que incluam senhas ou segredos de 2FA (SELECT * incluído):
-// a lista de utilizadores pede só as restantes colunas. No navegador a base é local e a leitura é completa.
-const SECRET_USER_COLUMNS = new Set(['password', 'twoFactorSecret', 'mfaRecoveryCodes']);
+// No navegador a base é local e a leitura é completa; no computador só as colunas sem segredos.
 const usersListSql = async () => {
     if (typeof window === 'undefined' || !window.electronAPI) return 'SELECT * FROM users';
     const info = await db.all<{ name: string }>('PRAGMA table_info(users)');
-    const columns = info.map(column => column.name).filter(name => /^[A-Za-z_]\w*$/.test(name) && !SECRET_USER_COLUMNS.has(name));
-    return `SELECT ${columns.map(name => `"${name}"`).join(', ')} FROM users`;
+    return usersListSqlFromColumns(info.map(column => column.name));
 };
 
 const ContextoAutenticacao = createContext<ContextoAutenticacaoType | undefined>(undefined);
@@ -136,6 +134,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                         return;
                     }
                     setUser(status.user as User);
+                    setHasUsers(true);
                     sessionStorage.setItem('user', JSON.stringify(status.user));
                 }
 
@@ -214,6 +213,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             } catch (error) {
                 console.error('Failed to initialize authentication:', error);
+                // Uma falha no arranque não pode mostrar "Nenhum utilizador" numa base que já os tem:
+                // a contagem do processo principal (base da conta activa) decide o aviso.
+                try {
+                    const bootstrap = await window.electronAPI?.userAuthBootstrapStatus?.();
+                    if (bootstrap) setHasUsers(Boolean(bootstrap.hasUsers));
+                } catch (bootstrapError) {
+                    console.warn('[Auth] userAuthBootstrapStatus falhou:', bootstrapError);
+                }
             }
         };
 
