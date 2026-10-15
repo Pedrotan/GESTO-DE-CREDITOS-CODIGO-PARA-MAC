@@ -35,6 +35,7 @@ COPY package*.json ./
 RUN npm ci --omit=dev --omit=optional --ignore-scripts
 
 COPY server.mjs ./
+COPY server/ ./server/
 COPY vercel-api/ ./vercel-api/
 COPY --from=builder /app/vercel-web/ ./vercel-web/
 

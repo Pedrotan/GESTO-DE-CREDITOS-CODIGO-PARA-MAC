@@ -1,6 +1,6 @@
 import { authorizeTenant } from './_autorizacao-empresa.js';
 import { lookupConfiguredProvider } from './_document-provider.js';
-import { applyCors, enforceDistributedRateLimit, requireSecret } from './_security.js';
+import { applyCors, enforceDistributedRateLimit, isValidMasterSecret, requireSecret } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 
 const send = (res, status, body) => {
@@ -38,8 +38,9 @@ export default async function handler(req, res) {
       return send(res, 429, { success: false, message: 'Acesso bloqueado por tentativas falhadas.' });
     }
   }
-  let authorized = requireSecret(req, process.env.TANGO_LOOKUP_API_KEY) ||
-    requireSecret(req, process.env.TANGO_MASTER_SECRET, 'x-master-secret');
+    const masterSecret = process.env.TANGO_MASTER_SECRET;
+    let authorized = requireSecret(req, process.env.TANGO_LOOKUP_API_KEY) ||
+      (isValidMasterSecret(masterSecret) && requireSecret(req, masterSecret, 'x-master-secret'));
   if (!authorized && sentSecret) {
     await registerAuthFailure(sql, req, { scope: 'master', type: 'master_secret_failed', title: 'Chave errada na consulta de documentos',
       details: 'Pedido à consulta de BI/NIF com uma chave de API ou chave mestra inválida.', ipPolicy: LOCKOUT_POLICIES.master });

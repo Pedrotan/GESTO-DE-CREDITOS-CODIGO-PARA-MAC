@@ -34,13 +34,26 @@ O banco local é cifrado e aberto pelo worker. Pagamentos, estornos, restauraç�
 
 | Segredo | Armazenamento esperado | Rotação |
 |---|---|---|
+| `DB_PASSWORD` | secret manager do runtime; nunca em defaults do Compose | coordenada com a alteração da password da role PostgreSQL |
 | `DATABASE_URL` | secret store da plataforma cloud | após exposição e a cada mudança de operador |
-| `TANGO_MASTER_SECRET` | KMS/secret store cloud | trimestral ou após incidente |
-| chave por tenant | apenas hash no PostgreSQL; valor mostrado uma vez | por empresa e após suspeita |
+| `TANGO_MASTER_SECRET` | secret manager da VPS e da Vercel; 32 bytes aleatórios em base64url | rotação coordenada após exposição ou mudança de operador |
+| chave por tenant | hash de verificação no PostgreSQL; o campo legado `access_code` ainda requer remoção | após incidente, depois da correção do seed de arranque |
 | chave RSA de licença | `safeStorage` local no Master; KMS/HSM em produção | por `kid`, mantendo chave pública anterior durante migração |
 | certificados de assinatura | cofre do CI/provedor de assinatura | conforme validade e após incidente |
 
-Nenhum valor real foi encontrado no workspace. A revogação de credenciais já distribuídas exige acesso às contas externas e deve ser registada no relatório do incidente.
+Os segredos não devem constar do repositório, das imagens nem dos logs. Valores anteriormente versionados continuam no histórico Git e devem ser considerados comprometidos; removê-los do HEAD não os revoga. A rotação real exige acesso às contas externas e deve ser registada no relatório do incidente.
+
+### Distribuição e rotação do segredo Master
+
+1. Gera 32 bytes aleatórios num secret manager aprovado e guarda-os como base64url sem padding; não imprimas o valor em logs, shell history, chat ou CI.
+2. Configura o mesmo valor de forma independente nos runtimes VPS e Vercel antes de iniciar a versão que o exige. O servidor recusa valores ausentes ou fora do formato.
+3. Atualiza o segredo nos dois runtimes numa janela coordenada e valida o acesso administrativo com a chave nova.
+4. A chave anterior não é aceite como fallback. Revoga-a no secret manager após validar todos os consumidores.
+5. Para sincronização, provisiona e distribui uma chave individual por tenant. Não existe chave global de compatibilidade; clientes que ainda dependam dela devem ser migrados antes da publicação.
+
+Não rotes chaves de tenant em produção enquanto o seed de arranque ainda puder restaurar credenciais antigas. Essa correção é um passo operacional/de código separado e tem de preceder a rotação dos tenants.
+
+Alterar `DB_PASSWORD` no ambiente não altera a password da role PostgreSQL. A rotação real exige uma alteração de role coordenada com a atualização dos runtimes e uma validação de ligação; não executar apenas um dos lados.
 
 ## Retenção e privacidade
 

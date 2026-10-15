@@ -60,12 +60,13 @@ cp .env.production.example .env
 nano .env
 ```
 No editor `nano`, preencha:
-- `TANGO_SYNC_SECRET`: Uma chave segura para sincronização das empresas.
-- `TANGO_MASTER_SECRET`: A sua senha de administração do Tango Master.
+- `TANGO_MASTER_SECRET`: Chave aleatória de 32 bytes, codificada em base64url sem padding, fornecida pelo secret manager do runtime.
 - `TANGO_MASTERGEN_URL`: O seu domínio (ex: `https://erp.seudominio.com`).
 - `TANGO_ALLOWED_ORIGINS`: O seu domínio (ex: `https://erp.seudominio.com,http://localhost:3000`).
 
 *(Pressione `Ctrl + O` e `Enter` para guardar, e `Ctrl + X` para sair).*
+
+Não guardes segredos reais em ficheiros versionados, imagens ou histórico de shell. O Compose falha se `TANGO_MASTER_SECRET` não for fornecido. A sincronização usa exclusivamente a chave individual registada para cada tenant; `TANGO_SYNC_SECRET` global já não é aceite. Clientes que ainda usem essa chave têm de ser ligados novamente com a chave individual antes da publicação.
 
 ---
 

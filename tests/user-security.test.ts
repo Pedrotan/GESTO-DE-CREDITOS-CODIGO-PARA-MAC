@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertFinancialPermission, financialStatementTarget, generateTotpForTest, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from '../electron/user-security.ts';
+import { assertFinancialReadPermission, assertFinancialWritePermission, financialReadTargets, financialStatementTarget, generateTotpForTest, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from '../electron/user-security.ts';
 
 const user = { id: 'u1', name: 'Admin', email: 'admin@example.com', role: 'admin', permissions: '["payments.create"]' };
 
@@ -18,10 +18,11 @@ test('sessão de utilizador é mantida no processo e não expõe segredo MFA', (
     assert.equal(service.status(10).authenticated, false);
 });
 
-test('operações financeiras exigem sessão e permissão de pagamentos', () => {
+test('leitura e escrita financeiras exigem permissões distintas', () => {
     assert.equal(financialStatementTarget('SELECT * FROM payments'), null);
     assert.equal(financialStatementTarget('INSERT INTO payments (id) VALUES (?)'), 'payments');
     assert.equal(financialStatementTarget('UPDATE credits SET status = ? WHERE id = ?'), 'credits');
+    assert.deepEqual(financialReadTargets('WITH recent AS (SELECT * FROM credits) SELECT * FROM recent JOIN payments ON payments.creditId = recent.id'), ['credits', 'payments']);
     assert.equal(financialStatementTarget('INSERT INTO payments (id) SELECT id FROM payments_old'), 'payments');
     assert.equal(financialStatementTarget('INSERT INTO payments (id) SELECT id FROM payments_old', true), null);
     assert.equal(financialStatementTarget('ALTER TABLE payments ADD COLUMN legacy TEXT'), 'payments');
@@ -29,10 +30,35 @@ test('operações financeiras exigem sessão e permissão de pagamentos', () => 
     assert.equal(financialStatementTarget('ALTER TABLE payments RENAME TO payments_old'), 'payments');
     assert.equal(financialStatementTarget('DROP TABLE payments_old'), 'payments');
     assert.equal(financialStatementTarget('CREATE TABLE IF NOT EXISTS ledger_lines (id TEXT)'), 'ledger_lines');
-    assert.throws(() => assertFinancialPermission(null, 'payments'), /Sessão/);
-    assert.throws(() => assertFinancialPermission({ role: 'viewer', permissions: [] }, 'payments'), /permissão/);
-    assert.doesNotThrow(() => assertFinancialPermission({ role: 'manager', permissions: ['manage_payments'] }, 'payments'));
-    assert.doesNotThrow(() => assertFinancialPermission({ role: 'viewer', permissions: [] }, 'credits'));
+    const viewer = { role: 'viewer', permissions: [] };
+    const creditManager = { role: 'manager', permissions: ['manage_credits', 'view_credits'] };
+    const cashier = { role: 'manager', permissions: ['manage_payments'] };
+    const paymentBatch = [
+        { sql: 'INSERT INTO payments (id) VALUES (?)' },
+        { sql: 'UPDATE credits SET currentBalance = ? WHERE id = ?' },
+        { sql: 'INSERT INTO accounting_entries (id) VALUES (?)' },
+        { sql: 'INSERT INTO ledger_transactions (id) VALUES (?)' },
+        { sql: 'INSERT INTO ledger_lines (id) VALUES (?)' },
+        { sql: 'INSERT INTO audit_logs (id) VALUES (?)' },
+    ];
+    assert.throws(() => assertFinancialWritePermission(null, 'payments'), /Sessão/);
+    assert.throws(() => assertFinancialWritePermission(viewer, 'payments'), /permissão/);
+    assert.throws(() => assertFinancialWritePermission(viewer, 'credits'), /permissão/);
+    assert.throws(() => assertFinancialWritePermission(viewer, 'credit_installments'), /permissão/);
+    assert.throws(() => assertFinancialWritePermission({ role: 'manager', permissions: ['unknown'] }, 'credits'), /permissão/);
+    assert.doesNotThrow(() => assertFinancialWritePermission(creditManager, 'credits'));
+    assert.doesNotThrow(() => assertFinancialWritePermission(creditManager, 'credit_installments'));
+    assert.throws(() => assertFinancialWritePermission(creditManager, 'payments'), /permissão/);
+    assert.doesNotThrow(() => assertFinancialWritePermission(cashier, 'payments'));
+    assert.throws(() => assertFinancialWritePermission(cashier, 'credits'), /permissão/);
+    assert.throws(() => assertFinancialWritePermission(cashier, 'credits', paymentBatch.slice(0, 2)), /permissão/);
+    assert.doesNotThrow(() => assertFinancialWritePermission(cashier, 'credits', paymentBatch));
+    assert.throws(() => assertFinancialReadPermission(null, 'credits'), /Sessão/);
+    assert.throws(() => assertFinancialReadPermission(viewer, 'credits'), /permissão/);
+    assert.doesNotThrow(() => assertFinancialReadPermission({ role: 'viewer', permissions: ['view_credits'] }, 'credits'));
+    assert.doesNotThrow(() => assertFinancialReadPermission({ role: 'viewer', permissions: ['view_reports'] }, 'payments'));
+    assert.throws(() => assertFinancialReadPermission(viewer, 'unknown'), /permissão/);
+    assert.doesNotThrow(() => assertFinancialWritePermission({ role: 'admin', permissions: [] }, 'credits'));
 });
 
 test('consultas do renderer não podem extrair hashes ou segredos MFA', () => {

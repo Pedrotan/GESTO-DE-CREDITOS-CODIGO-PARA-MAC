@@ -121,7 +121,7 @@ writeFileSync(
     '2. Na pasta principal execute: vercel vercel-web --prod',
     '',
     'A aplicação continua a guardar os dados localmente (IndexedDB) e funciona offline.',
-    'Para sincronizar, ligue uma base Neon ao projeto e configure TANGO_SYNC_SECRET na Vercel.',
+    'Para sincronizar, ligue uma base Neon ao projeto e registe uma chave individual para cada tenant no Painel Master.',
     ''
   ].join('\n'),
   'utf8'

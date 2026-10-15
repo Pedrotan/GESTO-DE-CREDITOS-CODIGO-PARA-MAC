@@ -11,6 +11,12 @@ export const safeEqual = (left, right) => {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 };
 
+export const isValidMasterSecret = (value) => {
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(value)) return false;
+  const decoded = Buffer.from(value, 'base64url');
+  return decoded.length === 32 && decoded.toString('base64url') === value;
+};
+
 /**
  * Origens que podem chamar a API a partir de um navegador: as configuradas em TANGO_ALLOWED_ORIGINS e,
  * por omissão, o próprio domínio da aplicação na Vercel, a aplicação desktop (origem "null" de file://)

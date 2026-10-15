@@ -23,7 +23,7 @@ import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeEx
 import { MASTER_PUBLIC_KEY } from '../src/bibliotecas/chave-publica-licencas';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import bcrypt from 'bcryptjs';
-import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
+import { assertFinancialReadPermission, assertFinancialWritePermission, financialReadTargets, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
 installStructuredConsole('tango-electron-main');
 if (!app.isPackaged) {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
@@ -989,12 +989,18 @@ const assertTrustedIpcSender = (event) => {
   }
 };
 const assertFinancialSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string }>) => {
-  for (const statement of statements) {
-    const table = financialStatementTarget(statement.sql, financialSchemaBootstrapOpen);
-    if (!table) continue;
-    const user: any = userAuth.assertAuthenticated(event.sender.id);
-    assertFinancialPermission(user, table);
-  }
+  const tables = statements
+    .map(statement => financialStatementTarget(statement.sql, financialSchemaBootstrapOpen))
+    .filter((table): table is string => Boolean(table));
+  if (!tables.length) return;
+  const user: any = userAuth.assertAuthenticated(event.sender.id);
+  for (const table of tables) assertFinancialWritePermission(user, table, statements);
+};
+const assertFinancialReadSqlAuthorized = (event: Electron.IpcMainInvokeEvent, sql: string) => {
+  const tables = financialReadTargets(sql);
+  if (!tables.length) return;
+  const user: any = userAuth.assertAuthenticated(event.sender.id);
+  for (const table of tables) assertFinancialReadPermission(user, table);
 };
 const hasManageUsers = (user: any) => ['super_admin', 'admin'].includes(String(user?.role)) ||
   (Array.isArray(user?.permissions) && user.permissions.includes('manage_users'));
@@ -2974,7 +2980,11 @@ app.whenReady().then(async () => {
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
     if (!financialSchemaBootstrapOpen) {
       const count: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
-      if (Number(count?.total || 0) > 0) userAuth.assertAuthenticated(event.sender.id);
+        if (financialReadTargets(request.sql).length) {
+          assertFinancialReadSqlAuthorized(event, request.sql);
+        } else if (Number(count?.total || 0) > 0) {
+          userAuth.assertAuthenticated(event.sender.id);
+        }
     }
     return runQuery("query", request.sql, request.params);
   });
@@ -2984,7 +2994,11 @@ app.whenReady().then(async () => {
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
     if (!financialSchemaBootstrapOpen) {
       const count: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
-      if (Number(count?.total || 0) > 0) userAuth.assertAuthenticated(event.sender.id);
+        if (financialReadTargets(request.sql).length) {
+          assertFinancialReadSqlAuthorized(event, request.sql);
+        } else if (Number(count?.total || 0) > 0) {
+          userAuth.assertAuthenticated(event.sender.id);
+        }
     }
     return runQuery("get", request.sql, request.params);
   });

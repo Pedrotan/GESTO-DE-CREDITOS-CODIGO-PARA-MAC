@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomBytes } from 'node:crypto';
 import test from 'node:test';
 import { build } from 'esbuild';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -61,6 +62,7 @@ test('API de empresas só aceita a chave mestra configurada e falha fechada sem 
     // a base de dados de teste só responde a essas tabelas.
     const tenants = await loadHandlerWithoutNeon('tenants.js', true);
     const previous = { db: process.env.DATABASE_URL, master: process.env.TANGO_MASTER_SECRET };
+    const masterSecret = randomBytes(32).toString('base64url');
     process.env.DATABASE_URL = 'postgres://test';
     const call = async secret => {
         const res = response();
@@ -69,10 +71,10 @@ test('API de empresas só aceita a chave mestra configurada e falha fechada sem 
     };
     try {
         delete process.env.TANGO_MASTER_SECRET;
-        assert.equal((await call('TangoMaster#2026!LiveSecret')).statusCode, 503);
-        process.env.TANGO_MASTER_SECRET = 'segredo-configurado-no-servidor';
-        for (const legacy of ['TangoMaster#2026!LiveSecret', 'TANGO_MASTER_2024', 'Senha-Mestra-2026!', 'TangoSync#2026!Live']) {
-            assert.equal((await call(legacy)).statusCode, 401, legacy);
+        assert.equal((await call(randomBytes(32).toString('base64url'))).statusCode, 503);
+        process.env.TANGO_MASTER_SECRET = masterSecret;
+        for (const invalid of [randomBytes(32).toString('base64url'), randomBytes(31).toString('base64url')]) {
+            assert.equal((await call(invalid)).statusCode, 401);
         }
         // A chave correta passa a autenticação (falha depois apenas no acesso à base de dados de teste).
         const accepted = async request => {
@@ -80,11 +82,11 @@ test('API de empresas só aceita a chave mestra configurada e falha fechada sem 
             await tenants({ method: 'POST', headers: {}, ...request }, res).catch(() => undefined);
             return res.statusCode !== 401;
         };
-        process.env.TANGO_MASTER_SECRET = ' "Chave-Mestra-Açúcar-2026" \n';
-        assert.equal(await accepted({ body: { action: 'list', masterSecret: 'Chave-Mestra-Açúcar-2026' } }), true);
-        const latin1Header = Buffer.from('Bearer Chave-Mestra-Açúcar-2026', 'utf8').toString('latin1');
+        process.env.TANGO_MASTER_SECRET = masterSecret;
+        assert.equal(await accepted({ body: { action: 'list', masterSecret } }), true);
+        const latin1Header = Buffer.from(`Bearer ${masterSecret}`, 'utf8').toString('latin1');
         assert.equal(await accepted({ headers: { authorization: latin1Header }, body: { action: 'list' } }), true);
-        assert.equal(await accepted({ body: { action: 'list', masterSecret: 'Chave-Mestra-Acucar-2026' } }), false);
+        assert.equal(await accepted({ body: { action: 'list', masterSecret: randomBytes(32).toString('base64url') } }), false);
     } finally {
         for (const [key, value] of [['DATABASE_URL', previous.db], ['TANGO_MASTER_SECRET', previous.master]]) {
             if (value === undefined) delete process.env[key]; else process.env[key] = value;

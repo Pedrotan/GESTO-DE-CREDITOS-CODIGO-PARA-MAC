@@ -2,6 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { isValidMasterSecret } from './vercel-api/_security.js';
 
 // Tango Gestão e Créditos ERP - Servidor de Produção VPS (Hostinger / Linux)
 // Suporta execução contínua com Node.js nativo, Docker e PM2.
@@ -35,6 +36,10 @@ for (const envPath of envFiles) {
       console.warn(`[VPS Config] Aviso ao ler ${envPath}:`, err.message);
     }
   }
+}
+
+if (!isValidMasterSecret(process.env.TANGO_MASTER_SECRET)) {
+  throw new Error('Configuração inválida: TANGO_MASTER_SECRET deve ser uma chave aleatória de 32 bytes em base64url.');
 }
 
 const PORT = parseInt(process.env.PORT || '3000', 10);

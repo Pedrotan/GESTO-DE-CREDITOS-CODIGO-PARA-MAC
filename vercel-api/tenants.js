@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { neon } from '@neondatabase/serverless';
-import { applyCors, enforceDistributedRateLimit } from './_security.js';
+import { applyCors, enforceDistributedRateLimit, isValidMasterSecret } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
@@ -103,7 +103,7 @@ export default async function handler(req, res) {
   // Apenas a chave mestra configurada no servidor é aceite; sem ela o painel fica indisponível.
   const masterSecret = normalizeSecret(process.env.TANGO_MASTER_SECRET);
 
-  if (!databaseUrl || !masterSecret) {
+  if (!databaseUrl || !isValidMasterSecret(masterSecret)) {
     return send(res, 503, { success: false, message: 'Painel Master ainda não configurado no servidor.' });
   }
 
@@ -117,7 +117,7 @@ export default async function handler(req, res) {
   ].map(normalizeSecret).filter(Boolean);
 
   if (!candidates.some(candidate => safeEqual(candidate, masterSecret))) {
-    return send(res, 401, { success: false, message: 'Chave mestra inválida. Use o valor de TANGO_MASTER_SECRET configurado no projeto na Vercel.' });
+    return send(res, 401, { success: false, message: 'Chave mestra inválida.' });
   }
 
   const client = neon(databaseUrl);

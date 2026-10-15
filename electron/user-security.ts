@@ -223,6 +223,72 @@ export function financialStatementTarget(sql: string, allowMigration = false) {
   return migration && allowMigration ? null : match[1].toLowerCase();
 }
 
+const FINANCIAL_READ_PERMISSIONS: Record<string, string[]> = {
+  credits: ['view_credits', 'manage_credits', 'manage_payments', 'view_reports'],
+  credit_installments: ['view_credits', 'manage_credits', 'manage_payments', 'view_reports'],
+  credit_reinforcements: ['view_credits', 'manage_credits', 'manage_payments', 'view_reports'],
+  payments: ['manage_payments', 'manage_fiscal', 'view_reports'],
+  accounting_entries: ['manage_payments', 'manage_fiscal', 'view_reports'],
+  ledger_transactions: ['manage_payments', 'manage_fiscal', 'view_reports'],
+  ledger_lines: ['manage_payments', 'manage_fiscal', 'view_reports'],
+};
+
+const FINANCIAL_WRITE_PERMISSIONS: Record<string, string> = {
+  credits: 'manage_credits',
+  credit_installments: 'manage_credits',
+  credit_reinforcements: 'manage_credits',
+  payments: 'manage_payments',
+  accounting_entries: 'manage_payments',
+  ledger_transactions: 'manage_payments',
+  ledger_lines: 'manage_payments',
+};
+
+export function financialReadTargets(sql: string): string[] {
+  const tables = new Set<string>();
+  const pattern = /\b(?:FROM|JOIN)\s+(?:(?:["'`\[]?[\w$]+["'`\]]?)\.)?["'`\[]?([\w$]+)["'`\]]?/giu;
+  for (const match of sql.matchAll(pattern)) {
+    const table = match[1].toLowerCase();
+    if (FINANCIAL_READ_PERMISSIONS[table]) tables.add(table);
+  }
+  return [...tables];
+}
+
+const isAdministrator = (user: any) => ['super_admin', 'admin'].includes(String(user?.role));
+const hasAnyPermission = (user: any, required: string[]) => {
+  const permissions = Array.isArray(user?.permissions) ? user.permissions : [];
+  return required.some(permission => permissions.includes(permission));
+};
+
+const writeTable = (sql: string) => sql.match(/^\s*(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+["'`\[]?([a-z_][\w$]*)/iu)?.[1]?.toLowerCase();
+
+const isCompletePaymentBatch = (statements: Array<{ sql: string }>) => {
+  const tables = new Set(statements.map(statement => writeTable(statement.sql)).filter(Boolean));
+  return tables.has('payments') && tables.has('accounting_entries') &&
+    tables.has('ledger_transactions') && tables.has('ledger_lines') && tables.has('audit_logs');
+};
+
+export function assertFinancialReadPermission(user: any, table: string) {
+  if (!user) throw new Error('Sessão inexistente ou expirada.');
+  if (isAdministrator(user)) return;
+  const required = FINANCIAL_READ_PERMISSIONS[table];
+  if (!required || !hasAnyPermission(user, required)) {
+    throw new Error('O utilizador não possui permissão para consultar estes dados financeiros.');
+  }
+}
+
+export function assertFinancialWritePermission(user: any, table: string, statements: Array<{ sql: string }> = []) {
+  if (!user) throw new Error('Sessão inexistente ou expirada.');
+  if (isAdministrator(user)) return;
+
+  const paymentBatch = isCompletePaymentBatch(statements);
+  const required = paymentBatch && ['credits', 'credit_installments'].includes(table)
+    ? 'manage_payments'
+    : FINANCIAL_WRITE_PERMISSIONS[table];
+  if (!required || !hasAnyPermission(user, [required])) {
+    throw new Error('O utilizador não possui permissão para esta operação financeira.');
+  }
+}
+
 export function userReadExposesSecrets(sql: string) {
   const normalized = sql.replace(/\s+/gu, ' ').trim();
   if (!/\bFROM\s+["'`\[]?users\b/i.test(normalized)) return false;
@@ -243,15 +309,6 @@ export function userStatementKind(sql: string): 'insert' | 'update' | 'delete' |
 export function userUpdateTouchesPrivileges(sql: string) {
   const setClause = sql.replace(/\s+/gu, ' ').match(/^UPDATE\s+["'`\[]?users["'`\]]?\s+SET\s+(.+?)\s+WHERE\s/iu)?.[1] || '';
   return /\b(?:role|permissions|twoFactorEnabled|twoFactorSecret|mfaRecoveryCodes|failedAttempts|blockedAt)\b/iu.test(setClause);
-}
-
-export function assertFinancialPermission(user: any, table: string) {
-  if (!user) throw new Error('Sessão inexistente ou expirada.');
-  if (table === 'credits' || table === 'credit_installments') return;
-  const permissions = Array.isArray(user.permissions) ? user.permissions : [];
-  if (!['super_admin', 'admin'].includes(String(user.role)) && !permissions.includes('manage_payments')) {
-    throw new Error('O utilizador não possui permissão para operações financeiras.');
-  }
 }
 
 export const generateTotpForTest = totpForCounter;

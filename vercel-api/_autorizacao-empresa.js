@@ -15,9 +15,7 @@ export const sha256 = (value) => crypto.createHash('sha256').update(String(value
 export const normalizeCode = (val) => String(val || '').trim().replace(/[-\s]/g, '').toUpperCase();
 
 // Middleware de autorização por empresa (tenant).
-// Se a empresa estiver registada no Painel Master (tabela tango_tenants),
-// valida a chave/código individual dela + estado + expiração. Caso contrário,
-// mantém a compatibilidade com a chave global TANGO_SYNC_SECRET.
+// Só tenants registados no Painel Master podem sincronizar; cada um usa a sua chave individual.
 export const authorizeTenant = async (sql, tenantId, providedKey, req = null) => {
   await sql(`
     CREATE TABLE IF NOT EXISTS tango_tenants (
@@ -48,20 +46,9 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
     if (req) await registerAuthFailure(sql, req, { scope: 'tenant_key', subject: tenantId, type: 'tenant_key_failed', title: 'Chave de sincronização de empresa errada', details });
     return result;
   };
-  const rows = await sql('SELECT key_hash, status, expires_at, access_code FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
-  // Chave global de administração: apenas a configurada no servidor, nunca um valor fixo no código.
-  const globalSecret = String(process.env.TANGO_SYNC_SECRET || '').trim();
-  const isGlobalSecretValid = Boolean(globalSecret && safeEqual(providedKey, globalSecret));
+    const rows = await sql('SELECT key_hash, status, expires_at, access_code FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
 
-  if (!rows.length) {
-    if (isGlobalSecretValid) {
-      await sql(`
-        INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash, status, created_at, last_sync_at)
-        VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
-        ON CONFLICT (tenant_id) DO UPDATE SET last_sync_at = NOW()
-      `, [tenantId, sha256(tenantId), `Empresa ${tenantId}`, sha256(providedKey)]);
-      return { ok: true };
-    }
+    if (!rows.length) {
     return fail({ ok: false, status: 403, message: 'Empresa não registada para sincronização.' }, `Tentativa de sincronizar a empresa ${tenantId}, que não está registada.`);
   }
 
@@ -75,7 +62,7 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
       safeEqual(normalizeCode(tenant.access_code), normProvided)
     ));
 
-  if (!isTenantKeyValid && !isGlobalSecretValid) {
+  if (!isTenantKeyValid) {
     return fail({ ok: false, status: 401, message: 'Chave ou Código de Acesso de sincronização inválido para esta empresa.' }, `Chave de sincronização errada para a empresa ${tenantId}.`);
   }
   if (tenant.status !== 'active') {
