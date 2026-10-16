@@ -116,34 +116,37 @@ export const planFromStoredInstallments = (
 ): PaymentPlan => {
     if (rows.length === 0) throw new Error('Este crédito não tem prestações registadas.');
     const sorted = [...rows].sort((a, b) => a.installmentNumber - b.installmentNumber);
-    const totalMinor = sorted.reduce((sum, row) => sum + row.principalMinor + row.interestMinor + Number(row.lateInterestMinor || 0), 0);
+    const totalMinor = sorted.reduce((sum, row) => sum + Number(row.principalMinor || 0) + Number(row.interestMinor || 0) + Number(row.lateInterestMinor || 0), 0);
     let scheduled = 0;
     const installments = sorted.map(row => {
-        const dueMinor = row.principalMinor + row.interestMinor + Number(row.lateInterestMinor || 0);
+        const principal = Number(row.principalMinor || 0);
+        const interest = Number(row.interestMinor || 0);
+        const lateInterest = Number(row.lateInterestMinor || 0);
+        const dueMinor = principal + interest + lateInterest;
         const paidMinor = Number(row.paidPrincipalMinor || 0) + Number(row.paidInterestMinor || 0) + Number(row.paidLateInterestMinor || 0);
         scheduled += dueMinor;
         return {
             number: row.installmentNumber,
             dueDate: row.dueDate,
-            principalMinor: row.principalMinor,
-            interestMinor: row.interestMinor + Number(row.lateInterestMinor || 0),
+            principalMinor: principal,
+            interestMinor: interest + lateInterest,
             totalMinor: dueMinor,
-            balanceAfterMinor: totalMinor - scheduled,
+            balanceAfterMinor: Math.max(0, totalMinor - scheduled),
             paidMinor,
             status: row.status === 'cancelled' ? 'pending' as const : statusOf(dueMinor, paidMinor, row.dueDate, today),
             paidAt: row.paidAt || null,
         };
     });
-    const principalMinor = sorted.reduce((sum, row) => sum + row.principalMinor, 0);
+    const principalMinor = sorted.reduce((sum, row) => sum + Number(row.principalMinor || 0), 0);
     return {
         principalMinor,
-        ratePercent,
+        ratePercent: Number(ratePercent) || 0,
         months: installments.length,
-        interestMinor: totalMinor - principalMinor,
+        interestMinor: Math.max(0, totalMinor - principalMinor),
         totalMinor,
-        installmentMinor: Math.max(...installments.map(item => item.totalMinor)),
-        firstDueDate: installments[0].dueDate,
-        lastDueDate: installments[installments.length - 1].dueDate,
+        installmentMinor: installments.length > 0 ? Math.max(...installments.map(item => item.totalMinor)) : 0,
+        firstDueDate: installments[0]?.dueDate || today.toISOString(),
+        lastDueDate: installments[installments.length - 1]?.dueDate || today.toISOString(),
         installments,
     };
 };

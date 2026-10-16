@@ -1,3 +1,22 @@
+/// <reference types="node" />
+
+declare module 'nodemailer' {
+  const nodemailer: any;
+  export = nodemailer;
+}
+
+declare module 'bcryptjs' {
+  const bcrypt: any;
+  export default bcrypt;
+  export = bcrypt;
+}
+
+declare module 'better-sqlite3-multiple-ciphers' {
+  const Database: any;
+  export default Database;
+  export = Database;
+}
+
 declare namespace Electron {
   interface IpcRendererEvent {
     sender: any;

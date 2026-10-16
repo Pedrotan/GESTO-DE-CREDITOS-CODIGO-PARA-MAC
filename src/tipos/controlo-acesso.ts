@@ -137,6 +137,14 @@ export const MODULOS_SISTEMA: DefinicaoModulo[] = [
     caminho: '/simulador'
   },
   {
+    id: 'mercado',
+    nome: 'Mercado e Câmbios BNA',
+    area: 'comercial',
+    acoesDisponiveis: ['ver', 'exportar'],
+    caminho: '/mercado',
+    legadoId: 'view_market'
+  },
+  {
     id: 'garantias',
     nome: 'Garantias',
     area: 'comercial',

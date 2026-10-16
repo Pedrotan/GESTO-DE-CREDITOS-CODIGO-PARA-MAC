@@ -1,3 +1,6 @@
+/// <reference path="./electron-env.d.ts" />
+/// <reference types="node" />
+
 import { auditSqlHash } from '../src/bibliotecas/cadeia-auditoria';
 import { parentPort, workerData } from 'worker_threads';
 import Database from 'better-sqlite3-multiple-ciphers';

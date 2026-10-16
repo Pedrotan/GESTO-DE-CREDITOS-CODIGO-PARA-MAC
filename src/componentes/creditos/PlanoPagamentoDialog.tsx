@@ -44,14 +44,16 @@ const isoDate = (value: Date | string | undefined) => {
 interface PlanoPagamentoDialogProps {
     open: boolean;
     onOpenChange: (open: boolean) => void;
+    initialClientId?: string;
+    initialCreditId?: string;
 }
 
-export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialogProps) {
+export function PlanoPagamentoDialog({ open, onOpenChange, initialClientId, initialCreditId }: PlanoPagamentoDialogProps) {
     const { clients, credits, payments, interestTiers, companySettings } = useData();
     const { user } = useAuth();
     const { toast } = useToast();
-    const [clientId, setClientId] = useState('');
-    const [creditId, setCreditId] = useState(NEW_SIMULATION);
+    const [clientId, setClientId] = useState(initialClientId || '');
+    const [creditId, setCreditId] = useState(initialCreditId || NEW_SIMULATION);
     const [amount, setAmount] = useState(0);
     const [startDate, setStartDate] = useState(today);
     const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
@@ -59,12 +61,22 @@ export function PlanoPagamentoDialog({ open, onOpenChange }: PlanoPagamentoDialo
 
     useEffect(() => {
         if (!open) return;
-        setClientId('');
-        setCreditId(NEW_SIMULATION);
+        const cid = initialClientId || '';
+        setClientId(cid);
+        if (initialCreditId) {
+            setCreditId(initialCreditId);
+        } else if (cid) {
+            const latest = credits
+                .filter(credit => credit.clientId === cid && !['cancelled', 'rejected'].includes(credit.status) && !credit.deletedAt)
+                .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
+            setCreditId(latest ? latest.id : NEW_SIMULATION);
+        } else {
+            setCreditId(NEW_SIMULATION);
+        }
         setAmount(0);
         setStartDate(today());
         setSelectedTierId(null);
-    }, [open]);
+    }, [open, initialClientId, initialCreditId, credits]);
 
     const client = clients.find(item => item.id === clientId);
     const clientCredits = useMemo(() => credits

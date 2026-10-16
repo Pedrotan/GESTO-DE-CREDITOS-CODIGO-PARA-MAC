@@ -1995,56 +1995,67 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         performAutoSync();
     };
 
+    const lastAutomationRunDateRef = useRef<string>('');
+    const isAutomationRunningRef = useRef<boolean>(false);
+
     const runCollectionAutomation = useCallback(async () => {
         if (isDataLoading || credits.length === 0) return;
-        // Em atraso no dia seguinte ao vencimento de uma prestação não paga; volta a Ativo quando regulariza.
-        const delinquency = await ServicoCarteira.refreshDelinquency().catch(error => { console.warn('[Cobrança] Atualização de atrasos:', error); return { changed: 0 }; });
-        if (delinquency.changed) await refreshData().catch(() => undefined);
-
         const todayKey = new Date().toISOString().slice(0, 10);
-        const thresholds = [0, 3, 7, 15, 30, 60];
+        if (isAutomationRunningRef.current || lastAutomationRunDateRef.current === todayKey) return;
+        isAutomationRunningRef.current = true;
 
-        for (const credit of credits) {
-            if (['paid', 'cancelled', 'rejected', 'pending_approval'].includes(credit.status)) continue;
+        try {
+            // Em atraso no dia seguinte ao vencimento de uma prestação não paga; volta a Ativo quando regulariza.
+            const delinquency = await ServicoCarteira.refreshDelinquency().catch(error => { console.warn('[Cobrança] Atualização de atrasos:', error); return { changed: 0 }; });
+            if (delinquency.changed) await refreshData().catch(() => undefined);
 
-            const dueDate = new Date(credit.dueDate);
-            if (Number.isNaN(dueDate.getTime())) continue;
+            const thresholds = [0, 3, 7, 15, 30, 60];
 
-            const daysOverdue = Math.floor((Date.now() - dueDate.getTime()) / (24 * 60 * 60 * 1000));
-            if (daysOverdue < 0) continue;
+            for (const credit of credits) {
+                if (['paid', 'cancelled', 'rejected', 'pending_approval'].includes(credit.status)) continue;
+
+                const dueDate = new Date(credit.dueDate);
+                if (Number.isNaN(dueDate.getTime())) continue;
+
+                const daysOverdue = Math.floor((Date.now() - dueDate.getTime()) / (24 * 60 * 60 * 1000));
+                if (daysOverdue < 0) continue;
 
 
-            const stage = thresholds.reduce((current, threshold) => daysOverdue >= threshold ? threshold : current, 0);
-            const notificationKey = `collection:${credit.id}:${stage}:${todayKey}`;
-            if (!localStorage.getItem(notificationKey)) {
-                const title = stage === 0 ? 'Crédito vence hoje' : `Cobrança D+${stage}`;
-                await addNotification({
-                    id: crypto.randomUUID(),
-                    userId: credit.usuario_id,
-                    title,
-                    message: `${credit.clientName} tem saldo de ${formatCurrency(credit.currentBalance)} no crédito ${credit.id}.`,
-                    type: stage >= 30 ? 'error' : stage >= 7 ? 'warning' : 'info',
-                    read: false,
-                    timestamp: new Date()
-                });
-                localStorage.setItem(notificationKey, 'sent');
+                const stage = thresholds.reduce((current, threshold) => daysOverdue >= threshold ? threshold : current, 0);
+                const notificationKey = `collection:${credit.id}:${stage}:${todayKey}`;
+                if (!localStorage.getItem(notificationKey)) {
+                    const title = stage === 0 ? 'Crédito vence hoje' : `Cobrança D+${stage}`;
+                    await addNotification({
+                        id: crypto.randomUUID(),
+                        userId: credit.usuario_id,
+                        title,
+                        message: `${credit.clientName} tem saldo de ${formatCurrency(credit.currentBalance)} no crédito ${credit.id}.`,
+                        type: stage >= 30 ? 'error' : stage >= 7 ? 'warning' : 'info',
+                        read: false,
+                        timestamp: new Date()
+                    });
+                    localStorage.setItem(notificationKey, 'sent');
+                }
+
+                if (daysOverdue >= 30 && !legalCases.some(c => c.creditId === credit.id && c.stage !== 'closed')) {
+                    await addLegalCaseRef.current({
+                        clientId: credit.clientId,
+                        creditId: credit.id,
+                        stage: 'interpellated',
+                        priority: daysOverdue >= 60 ? 'critical' : 'high',
+                        debtAmount: credit.currentBalance || credit.totalDue,
+                        lastAction: `Gerado automaticamente por atraso de ${daysOverdue} dias.`,
+                        notes: 'Processo criado pela esteira automática de cobrança.',
+                        updatedAt: new Date().toISOString(),
+                        usuario_id: credit.usuario_id
+                    }, { id: 'system', name: 'Sistema de Cobrança' });
+                }
             }
-
-            if (daysOverdue >= 30 && !legalCases.some(c => c.creditId === credit.id && c.stage !== 'closed')) {
-                await addLegalCaseRef.current({
-                    clientId: credit.clientId,
-                    creditId: credit.id,
-                    stage: 'interpellated',
-                    priority: daysOverdue >= 60 ? 'critical' : 'high',
-                    debtAmount: credit.currentBalance || credit.totalDue,
-                    lastAction: `Gerado automaticamente por atraso de ${daysOverdue} dias.`,
-                    notes: 'Processo criado pela esteira automática de cobrança.',
-                    updatedAt: new Date().toISOString(),
-                    usuario_id: credit.usuario_id
-                }, { id: 'system', name: 'Sistema de Cobrança' });
-            }
+            lastAutomationRunDateRef.current = todayKey;
+        } finally {
+            isAutomationRunningRef.current = false;
         }
-    }, [addNotification, credits, isDataLoading, legalCases]);
+    }, [addNotification, credits, isDataLoading, legalCases, refreshData]);
 
     useEffect(() => {
         runCollectionAutomation().catch(error => console.error('[Cobrança] Falha na automação:', error));

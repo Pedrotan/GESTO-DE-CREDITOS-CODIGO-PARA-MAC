@@ -270,16 +270,18 @@
   .card-kpi-info     { @apply card-kpi-sky; }
   .card-kpi-neutral  { @apply card-kpi-purple; }
 
-  /* Faixa de cotações: desliza da direita para a esquerda.
+  /* Faixa de cotações: desliza da direita para a esquerda acelerada por GPU.
      -50% porque a lista é renderizada em duplicado, por isso ao fim de meio
      percurso a segunda cópia está exactamente onde a primeira começou. */
   @keyframes ticker-rtl {
-    from { transform: translateX(0); }
-    to   { transform: translateX(-50%); }
+    from { transform: translate3d(0, 0, 0); }
+    to   { transform: translate3d(-50%, 0, 0); }
   }
 
   .animate-ticker {
     animation: ticker-rtl 60s linear infinite;
+    will-change: transform;
+    backface-visibility: hidden;
   }
 
   @media (prefers-reduced-motion: reduce) {

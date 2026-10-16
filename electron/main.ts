@@ -1,3 +1,6 @@
+/// <reference path="./electron-env.d.ts" />
+/// <reference types="node" />
+
 import { EMPTY_USAGE, canApproveAtLevel, diffPolicies, evaluateOperation, needsSecondApproval, parsePolicy, policyFromRows, requiredLevelFor } from '../src/bibliotecas/alcadas';
 import * as electron from 'electron';
 import { app, BrowserWindow, ipcMain, dialog, protocol, Menu, safeStorage, Notification } from 'electron';

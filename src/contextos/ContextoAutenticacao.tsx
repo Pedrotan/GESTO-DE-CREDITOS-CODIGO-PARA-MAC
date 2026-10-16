@@ -13,7 +13,10 @@ const DEFAULT_PERMISSIONS: Record<Role, string[]> = {
     manager: ['manage_clients', 'view_credits', 'manage_payments', 'view_market', 'use_simulator', 'view_chat']
 };
 
+let cachedIP: string | null = null;
+
 const getIP = async () => {
+    if (cachedIP) return cachedIP;
     try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 3000); // 3s timeout
@@ -21,7 +24,11 @@ const getIP = async () => {
         const response = await fetch('https://api.ipify.org?format=json', { signal: controller.signal });
         clearTimeout(timeoutId);
         const data = await response.json();
-        return data.ip;
+        if (data && data.ip) {
+            cachedIP = data.ip;
+            return data.ip;
+        }
+        return 'Local Machine';
     } catch (e) {
         return 'Local Machine';
     }
@@ -343,11 +350,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
         };
 
-        // Eventos a monitorizar
-        const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
-        const handleActivity = () => updateLastActivity();
+        // Eventos a monitorizar com throttle de 5 segundos para não saturar o event loop nem bloquear a thread principal
+        let lastActivityRecorded = 0;
+        const handleActivity = () => {
+            const now = Date.now();
+            if (now - lastActivityRecorded > 5000) {
+                lastActivityRecorded = now;
+                updateLastActivity();
+            }
+        };
 
-        events.forEach(event => document.addEventListener(event, handleActivity));
+        const passiveOptions = { passive: true };
+        events.forEach(event => document.addEventListener(event, handleActivity, passiveOptions));
 
         // Intervalo de verificação robusto (funciona melhor se a tab for suspensa e voltar)
         const intervalId = setInterval(checkSession, CHECK_INTERVAL);
@@ -1071,9 +1085,25 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 console.warn('[Auth] Erro ao atualizar lastSeen na BD:', e);
             }
 
-            // Sincronizar em tempo real o utilizador e a lista em memória
-            setUser(prev => (prev && prev.id === user.id ? { ...prev, lastSeen: agoraIso, status: 'active', ip: prev.ip || currentIp } : prev));
-            setUsers(prev => prev.map(u => (u.id === user.id ? { ...u, lastSeen: agoraIso, status: 'active', ip: u.ip || currentIp } : u)));
+            // Sincronizar em tempo real o utilizador e a lista em memória APENAS se houver alteração de status ou IP.
+            // O timestamp lastSeen é persistido na BD SQLite sem necessidade de criar novos objetos de estado
+            // a cada 30 segundos, o que causava re-renderização completa da árvore React e alertas de lentidão no Chrome.
+            setUser(prev => {
+                if (!prev || prev.id !== user.id) return prev;
+                const statusChanged = prev.status !== 'active';
+                const ipChanged = !prev.ip && currentIp && currentIp !== 'Local Machine';
+                if (!statusChanged && !ipChanged) return prev;
+                return { ...prev, status: 'active', ip: prev.ip || currentIp };
+            });
+
+            setUsers(prev => {
+                const target = prev.find(u => u.id === user.id);
+                if (!target) return prev;
+                const statusChanged = target.status !== 'active';
+                const ipChanged = !target.ip && currentIp && currentIp !== 'Local Machine';
+                if (!statusChanged && !ipChanged) return prev;
+                return prev.map(u => (u.id === user.id ? { ...u, status: 'active', ip: u.ip || currentIp } : u));
+            });
 
             // Um administrador pode terminar esta sessão à distância, pondo o
             // estado a 'offline' (ou bloqueando a conta). O login repõe-o a

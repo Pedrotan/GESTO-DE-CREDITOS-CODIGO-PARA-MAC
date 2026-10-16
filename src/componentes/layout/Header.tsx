@@ -233,7 +233,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
         <div className="hidden min-w-0 items-center gap-2.5 sm:flex">
           <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-white shadow-sm ring-1 ring-border">
             <img
-              src={companySettings?.logo ? (companySettings.logo.startsWith('data:') ? companySettings.logo : `${getFileUrl(companySettings.logo)}?t=${new Date().getTime()}`) : 'logo-app.png'}
+              src={companySettings?.logo ? (companySettings.logo.startsWith('data:') ? companySettings.logo : getFileUrl(companySettings.logo)) : 'logo-app.png'}
               alt="Logótipo"
               className="h-full w-full object-contain"
               onError={(e) => {

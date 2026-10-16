@@ -310,7 +310,7 @@ const AppContent = () => {
             <Route
               path="/mercado"
               element={
-                <ProtectedRoute permission="view_market">
+                <ProtectedRoute>
                   <Mercado />
                 </ProtectedRoute>
               }
@@ -535,7 +535,7 @@ const AppContent = () => {
             <Route
               path="/simulador"
               element={
-                <ProtectedRoute permission="use_simulator">
+                <ProtectedRoute>
                   <Suspense fallback={suspenseFallback}>
                     <SimuladorCredito />
                   </Suspense>

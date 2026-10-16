@@ -2,7 +2,9 @@
   "compilerOptions": {
     "target": "ES2022",
     "lib": [
-      "ES2023"
+      "ES2023",
+      "DOM",
+      "DOM.Iterable"
     ],
     "module": "ESNext",
     "skipLibCheck": true,
@@ -22,9 +24,7 @@
   },
   "include": [
     "vite.config.ts",
-    "electron/main.ts",
-    "electron/preload.ts",
-    "electron/db-worker.ts",
-    "electron/*.d.ts"
+    "electron/**/*.ts",
+    "electron/**/*.d.ts"
   ]
 }

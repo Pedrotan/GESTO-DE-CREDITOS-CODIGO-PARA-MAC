@@ -92,13 +92,15 @@ export function TickerTaxas() {
             </div>
 
             <div className="relative flex-1 overflow-hidden">
+                {/* Gradientes de desvanecimento laterais estáticos (GPU-accelerated, sem forçar rasterização de CPU) */}
+                <div className="pointer-events-none absolute left-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-r from-emerald-800 to-transparent" />
+                <div className="pointer-events-none absolute right-0 top-0 bottom-0 z-10 w-12 bg-gradient-to-l from-emerald-800 to-transparent" />
+
                 <div
                     className="flex w-max animate-ticker gap-10 whitespace-nowrap pl-10 group-hover:[animation-play-state:paused]"
                     style={{
                         // Velocidade constante e legível (~40px/s), independentemente do número de taxas.
                         animationDuration: `${Math.max(60, taxas.length * 7)}s`,
-                        maskImage: 'linear-gradient(to right, transparent, black 3rem, black calc(100% - 3rem), transparent)',
-                        WebkitMaskImage: 'linear-gradient(to right, transparent, black 3rem, black calc(100% - 3rem), transparent)',
                     }}
                 >
                     {sequencia.map((t, i) => (

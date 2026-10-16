@@ -98,8 +98,8 @@ const menuItems: MenuItem[] = [
     ],
   },
   { icon: Handshake, label: 'Fornecedores', path: '/fornecedores', permission: 'manage_suppliers', moduleKey: 'enableSuppliersModule' },
-  { icon: LineChart, label: 'Mercado', path: '/mercado', permission: 'view_market' },
-  { icon: Calculator, label: 'Simulador', path: '/simulador', permission: 'use_simulator' },
+  { icon: LineChart, label: 'Mercado', path: '/mercado' },
+  { icon: Calculator, label: 'Simulador', path: '/simulador' },
   { icon: CreditCard, label: 'Créditos', path: '/creditos', permission: 'view_credits' },
   { icon: CaixaEletronicoIcon, label: 'Pagamentos', path: '/pagamentos', permission: 'manage_payments' },
   { icon: CalendarDays, label: 'Plano Mensal', path: '/plano-mensal', permission: 'view_credits' },
@@ -295,7 +295,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
             collapsed ? "h-11 w-11 hover:scale-105 cursor-pointer" : "h-11 w-11 hover:scale-105"
           )}>
             <img
-              src={companySettings?.logo ? (companySettings.logo.startsWith('data:') ? companySettings.logo : `${getFileUrl(companySettings.logo)}?t=${new Date().getTime()}`) : 'logo-app.png'}
+              src={companySettings?.logo ? (companySettings.logo.startsWith('data:') ? companySettings.logo : getFileUrl(companySettings.logo)) : 'logo-app.png'}
               alt="Logo"
               className="h-full w-full object-contain"
               onError={(e) => {

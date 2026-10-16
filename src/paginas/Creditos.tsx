@@ -56,6 +56,7 @@ export default function Credits() {
   const [importOpen, setImportOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
+  const [planTarget, setPlanTarget] = useState<{ clientId?: string; creditId?: string } | null>(null);
   const [detail, setDetail] = useState<CardDetail | null>(null);
   const [wizard, setWizard] = useState<{ open: boolean; renewal: Renewal | null }>({ open: false, renewal: null });
   const [payCreditId, setPayCreditId] = useState<string | null>(null);
@@ -167,6 +168,7 @@ export default function Credits() {
           <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuItem className="gap-2" onClick={() => openCreditFile(row)}><Eye className="h-4 w-4" /> Abrir ficha do crédito</DropdownMenuItem>
             <DropdownMenuItem className="gap-2 font-semibold text-orange-600 dark:text-orange-400" onClick={() => openCreditFile(row, 'plano')}><CalendarClock className="h-4 w-4" /> Ver plano de prestações</DropdownMenuItem>
+            <DropdownMenuItem className="gap-2" onClick={() => { setPlanTarget({ clientId: credit.clientId, creditId: credit.id }); setPlanOpen(true); }}><FileText className="h-4 w-4" /> Simular / PDF do plano</DropdownMenuItem>
             <DropdownMenuItem className="gap-2" disabled={!payable} onClick={() => setPayCreditId(credit.id)}><Receipt className="h-4 w-4" /> Registar pagamento</DropdownMenuItem>
             {row.stage === 'liquidado' && (
               <DropdownMenuItem className="flex-col items-start gap-0.5" disabled={!!renewalBlocked} title={renewalBlocked || undefined}
@@ -246,7 +248,7 @@ export default function Credits() {
         </DropdownMenu>
         <Button
           className="gap-2 bg-[#F37021] hover:bg-[#d95d13] text-white font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
-          onClick={() => setPlanOpen(true)}
+          onClick={() => { setPlanTarget(null); setPlanOpen(true); }}
           title="Abrir simulador e plano de prestações"
         >
           <CalendarClock className="h-4 w-4" /> Plano de Prestações
@@ -277,7 +279,7 @@ export default function Credits() {
       <ImportacaoCreditos open={importOpen} onClose={() => setImportOpen(false)} clients={clients} credits={carteira.credits} actor={actor} addCredit={addCredit}
         onImported={message => { void carteira.reloadContext(); setAlertConfig({ isOpen: true, title: 'Importação de créditos', description: message, type: 'success' }); }} />
       <RelatoriosCreditos state={carteira} open={reportsOpen} onClose={() => setReportsOpen(false)} actor={actor} />
-      <PlanoPagamentoDialog open={planOpen} onOpenChange={setPlanOpen} />
+      <PlanoPagamentoDialog open={planOpen} onOpenChange={setPlanOpen} initialClientId={planTarget?.clientId} initialCreditId={planTarget?.creditId} />
 
       <JustificationModal isOpen={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={handleConfirmDelete} title="Excluir crédito"
         description="O crédito vai para a Lixeira (exclusão lógica) e a justificação fica na auditoria. Créditos com saldo em dívida não podem ser excluídos." confirmText="Confirmar exclusão" actionType="destructive" />

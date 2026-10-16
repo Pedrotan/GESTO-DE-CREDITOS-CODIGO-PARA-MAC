@@ -7,9 +7,10 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Area, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
-    AlarmClock, ArrowLeft, Ban, CalendarClock, CheckCircle2, ExternalLink, FileText, FileUp, Gavel, HandCoins, History, Loader2, MoreHorizontal,
+    AlarmClock, ArrowLeft, Ban, CalendarClock, CheckCircle2, ExternalLink, FileDown, FileText, FileUp, Gavel, HandCoins, History, Loader2, MoreHorizontal,
     Phone, PlusCircle, Printer, Receipt, RefreshCcw, Scale, Send, ShieldCheck, Trash2, UserCog, Wallet,
 } from 'lucide-react';
+import { PlanoPagamentoDialog } from '@/componentes/creditos/PlanoPagamentoDialog';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
@@ -86,6 +87,7 @@ export default function FichaCredito() {
     const [decision, setDecision] = useState<{ id: string; approve: boolean } | null>(null);
     const [contractUrl, setContractUrl] = useState<string | null>(null);
     const [preview, setPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
+    const [planDialogOpen, setPlanDialogOpen] = useState(false);
 
     const [searchParams, setSearchParams] = useSearchParams();
     const initialTab = searchParams.get('tab') || 'resumo';
@@ -95,6 +97,12 @@ export default function FichaCredito() {
         const tab = searchParams.get('tab');
         if (tab && ['resumo', 'plano', 'pagamentos', 'garantias', 'documentos', 'cobranca', 'contabilidade', 'historico'].includes(tab)) {
             setActiveTab(tab);
+            if (tab === 'plano') {
+                const timer = setTimeout(() => {
+                    document.getElementById('tabs-section')?.scrollIntoView({ behavior: 'smooth' });
+                }, 100);
+                return () => clearTimeout(timer);
+            }
         }
     }, [searchParams]);
 
@@ -232,7 +240,9 @@ export default function FichaCredito() {
                             className="gap-1.5 bg-[#F37021] hover:bg-[#d95d13] text-white font-bold shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
                             onClick={() => {
                                 handleTabChange('plano');
-                                document.getElementById('tabs-section')?.scrollIntoView({ behavior: 'smooth' });
+                                setTimeout(() => {
+                                    document.getElementById('tabs-section')?.scrollIntoView({ behavior: 'smooth' });
+                                }, 50);
                             }}
                             title="Ver plano de prestações e projeção de mora"
                         >
@@ -286,7 +296,9 @@ export default function FichaCredito() {
                             className="gap-1.5 bg-[#F37021] hover:bg-[#d95d13] text-white font-bold shadow-xs transition-transform hover:scale-[1.02]"
                             onClick={() => {
                                 handleTabChange('plano');
-                                document.getElementById('tabs-section')?.scrollIntoView({ behavior: 'smooth' });
+                                setTimeout(() => {
+                                    document.getElementById('tabs-section')?.scrollIntoView({ behavior: 'smooth' });
+                                }, 50);
                             }}
                         >
                             <CalendarClock className="h-3.5 w-3.5" /> Ver Detalhes no Plano
@@ -491,9 +503,20 @@ export default function FichaCredito() {
                                 <strong className="text-base font-black text-amber-700 dark:text-amber-400 ml-1">{kz(totalWithProjectedMoraMinor)}</strong>
                             </div>
                         </div>
-                        <span className="text-[11px] font-bold text-orange-800 dark:text-orange-300 bg-orange-100 dark:bg-orange-900/50 px-2.5 py-1 rounded-md">
-                            Mora: {credit.lateInterestRate}% ao dia
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className="text-[11px] font-bold text-orange-800 dark:text-orange-300 bg-orange-100 dark:bg-orange-900/50 px-2.5 py-1 rounded-md">
+                                Mora: {credit.lateInterestRate}% ao dia
+                            </span>
+                            <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 gap-1.5 border-orange-300 bg-white text-xs font-bold text-orange-700 hover:bg-orange-100 dark:border-orange-800 dark:bg-slate-900 dark:text-orange-300 shadow-2xs"
+                                onClick={() => setPlanDialogOpen(true)}
+                                title="Abrir simulador e gerar PDF oficial do plano"
+                            >
+                                <FileDown className="h-3.5 w-3.5 text-orange-600" /> Exportar / PDF do Plano
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="grid gap-2 sm:grid-cols-3">
@@ -681,6 +704,14 @@ export default function FichaCredito() {
                     </div>
                 </DialogContent>
             </Dialog>
+            {credit && (
+                <PlanoPagamentoDialog
+                    open={planDialogOpen}
+                    onOpenChange={setPlanDialogOpen}
+                    initialClientId={credit.clientId}
+                    initialCreditId={credit.id}
+                />
+            )}
         </MainLayout>
     );
 }

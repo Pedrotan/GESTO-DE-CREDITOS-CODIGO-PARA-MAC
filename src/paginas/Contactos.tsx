@@ -21,14 +21,39 @@ import { ServicoAlcadas } from '@/servicos/ServicoAlcadas';
 
 type CategoriaFiltro = 'TODOS' | 'COMUM' | 'APOSENTADO' | 'ESTRANGEIRO';
 
-/** Botão que copia um valor e confirma visualmente */
-function BotaoCopiar({ valor, titulo }: { valor?: string; titulo: string }) {
+const getInitials = (name?: string) => {
+    if (!name) return 'CL';
+    const parts = name.trim().split(/\s+/);
+    if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
+const getAvatarBg = (name?: string) => {
+    const colors = [
+        'bg-emerald-600 text-white',
+        'bg-blue-600 text-white',
+        'bg-teal-600 text-white',
+        'bg-indigo-600 text-white',
+        'bg-amber-600 text-white',
+        'bg-rose-600 text-white',
+    ];
+    let sum = 0;
+    for (let i = 0; i < (name?.length || 0); i++) {
+        sum += name!.charCodeAt(i);
+    }
+    return colors[sum % colors.length];
+};
+
+/** Botão que copia um valor e confirma visualmente com suporte a ícones e link direto */
+function BotaoCopiar({ valor, titulo, icone, linkHref }: { valor?: string; titulo: string; icone?: React.ReactNode; linkHref?: string }) {
     const [copiado, setCopiado] = useState(false);
     const { toast } = useToast();
 
-    if (!valor || valor.trim() === '') return <span className="text-slate-400">--</span>;
+    if (!valor || valor.trim() === '') return <span className="text-slate-400 italic text-[11px]">--</span>;
 
-    const copiar = async () => {
+    const copiar = async (e: React.MouseEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
         try {
             await navigator.clipboard.writeText(valor);
             setCopiado(true);
@@ -39,17 +64,35 @@ function BotaoCopiar({ valor, titulo }: { valor?: string; titulo: string }) {
     };
 
     return (
-        <button
-            type="button"
-            onClick={copiar}
-            title={`Copiar ${titulo}`}
-            className="group inline-flex items-center gap-1.5 rounded px-1 py-0.5 text-left transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
-        >
-            <span className="truncate max-w-[260px]">{valor}</span>
-            {copiado
-                ? <Check className="h-3 w-3 shrink-0 text-emerald-600" />
-                : <Copy className="h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-60" />}
-        </button>
+        <div className="group/cell inline-flex items-center gap-1.5 max-w-full">
+            {linkHref ? (
+                <a
+                    href={linkHref}
+                    title={`Abrir ${titulo}`}
+                    className="inline-flex items-center gap-1.5 truncate text-slate-700 dark:text-slate-200 hover:text-primary transition-colors max-w-[200px]"
+                >
+                    {icone && <span className="text-slate-400 shrink-0">{icone}</span>}
+                    <span className="truncate">{valor}</span>
+                </a>
+            ) : (
+                <span className="inline-flex items-center gap-1.5 truncate text-slate-700 dark:text-slate-200 max-w-[200px]">
+                    {icone && <span className="text-slate-400 shrink-0">{icone}</span>}
+                    <span className="truncate">{valor}</span>
+                </span>
+            )}
+            <button
+                type="button"
+                onClick={copiar}
+                title={`Copiar ${titulo}`}
+                className="opacity-0 group-hover/cell:opacity-100 p-1 rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-all shrink-0"
+            >
+                {copiado ? (
+                    <Check className="h-3.5 w-3.5 text-emerald-600 animate-in zoom-in" />
+                ) : (
+                    <Copy className="h-3 w-3 text-slate-400 hover:text-foreground" />
+                )}
+            </button>
+        </div>
     );
 }
 
@@ -339,80 +382,109 @@ export default function Contactos() {
                     )}
                 </div>
 
-                {/* --- TABELA COM CABEÇALHO VERDE ESCURO IGUAL À SEGUNDA IMAGEM --- */}
-                <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 shadow-xs bg-card">
-                    <div className="overflow-x-auto">
-                        <Table className="w-full text-xs">
-                            <TableHeader>
-                                <TableRow className="bg-[#04432c] hover:bg-[#04432c] text-white border-b-0">
-                                    <TableHead className="w-12 text-center font-bold text-white uppercase text-[11px] py-3">#</TableHead>
-                                    <TableHead className="font-bold text-white uppercase text-[11px] py-3">NOME DO CLIENTE</TableHead>
-                                    <TableHead className="w-40 font-bold text-white uppercase text-[11px] py-3">NIF / BI</TableHead>
-                                    <TableHead className="w-40 font-bold text-white uppercase text-[11px] py-3">TELEFONE</TableHead>
-                                    <TableHead className="w-56 font-bold text-white uppercase text-[11px] py-3">CORREIO ELETRÓNICO</TableHead>
-                                    <TableHead className="min-w-[220px] font-bold text-white uppercase text-[11px] py-3">ENDEREÇO / MORADA</TableHead>
-                                    <TableHead className="w-16 text-center font-bold text-white uppercase text-[11px] py-3 print:hidden">WHATSAPP</TableHead>
+                {/* --- TABELA DE CONTACTOS TOTALMENTE AJUSTADA E PROPORCIONAL --- */}
+                <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm bg-card">
+                    <Table className="w-full text-xs min-w-[980px]">
+                        <TableHeader>
+                            <TableRow className="bg-[#04432c] hover:bg-[#04432c] text-white border-b-0 select-none">
+                                <TableHead className="w-12 text-center font-black text-white uppercase text-[11px] py-3.5 tracking-wider">#</TableHead>
+                                <TableHead className="w-64 font-black text-white uppercase text-[11px] py-3.5 px-3 tracking-wider">NOME DO CLIENTE</TableHead>
+                                <TableHead className="w-40 font-black text-white uppercase text-[11px] py-3.5 px-3 tracking-wider">NIF / BI</TableHead>
+                                <TableHead className="w-44 font-black text-white uppercase text-[11px] py-3.5 px-3 tracking-wider">TELEFONE</TableHead>
+                                <TableHead className="w-60 font-black text-white uppercase text-[11px] py-3.5 px-3 tracking-wider">CORREIO ELETRÓNICO</TableHead>
+                                <TableHead className="min-w-[220px] font-black text-white uppercase text-[11px] py-3.5 px-3 tracking-wider">ENDEREÇO / MORADA</TableHead>
+                                <TableHead className="w-24 text-center font-black text-white uppercase text-[11px] py-3.5 tracking-wider print:hidden">WHATSAPP</TableHead>
+                            </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                            {lista.length === 0 ? (
+                                <TableRow>
+                                    <TableCell colSpan={7} className="py-16 text-center text-xs text-muted-foreground">
+                                        <div className="flex flex-col items-center justify-center gap-2">
+                                            <Users className="h-8 w-8 text-slate-300 dark:text-slate-600" />
+                                            <span>
+                                                {procura
+                                                    ? `Nenhum contacto encontrado para "${procura}".`
+                                                    : 'Nenhum cliente cadastrado nesta seleção.'}
+                                            </span>
+                                        </div>
+                                    </TableCell>
                                 </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {lista.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={7} className="py-12 text-center text-xs text-muted-foreground">
-                                            {procura
-                                                ? `Nenhum contacto encontrado para "${procura}".`
-                                                : 'Nenhum cliente cadastrado nesta seleção.'}
-                                        </TableCell>
-                                    </TableRow>
-                                ) : (
-                                    lista.map((c, index) => {
-                                        return (
-                                            <TableRow key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 border-b border-slate-100 dark:border-slate-800 transition-colors">
-                                                <TableCell className="text-center font-medium text-slate-500 py-2.5">
-                                                    {index + 1}
-                                                </TableCell>
-                                                <TableCell className="font-bold text-slate-900 dark:text-slate-100 py-2.5">
-                                                    <div className="leading-tight">
-                                                        <span>{c.name}</span>
-                                                        {c.nif && (
-                                                            <span className="block text-[10px] font-normal text-slate-400 mt-0.5">
-                                                                BI / NIF: {c.nif}
-                                                            </span>
-                                                        )}
+                            ) : (
+                                lista.map((c, index) => {
+                                    return (
+                                        <TableRow key={c.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 transition-colors group">
+                                            <TableCell className="text-center font-bold text-slate-400 py-3.5 w-12">
+                                                {index + 1}
+                                            </TableCell>
+                                            <TableCell className="py-3.5 px-3 w-64">
+                                                <div className="flex items-center gap-2.5">
+                                                    <div className={cn("h-8 w-8 rounded-full flex items-center justify-center font-black text-[11px] shrink-0 shadow-2xs", getAvatarBg(c.name))}>
+                                                        {getInitials(c.name)}
                                                     </div>
-                                                </TableCell>
-                                                <TableCell className="font-mono text-xs text-slate-700 dark:text-slate-300 py-2.5">
-                                                    <BotaoCopiar valor={c.nif} titulo="NIF/BI" />
-                                                </TableCell>
-                                                <TableCell className="font-mono text-xs text-slate-700 dark:text-slate-300 py-2.5">
-                                                    <BotaoCopiar valor={c.phone} titulo="telefone" />
-                                                </TableCell>
-                                                <TableCell className="text-xs text-slate-700 dark:text-slate-300 py-2.5">
-                                                    <BotaoCopiar valor={c.email} titulo="correio eletrónico" />
-                                                </TableCell>
-                                                <TableCell className="text-xs text-slate-700 dark:text-slate-300 py-2.5">
-                                                    <BotaoCopiar valor={c.address} titulo="morada" />
-                                                </TableCell>
-                                                <TableCell className="text-center py-2.5 print:hidden">
-                                                    {c.phone ? (
-                                                        <a
-                                                            href={`https://wa.me/${c.phone.replace(/\D/g, '')}`}
-                                                            target="_blank"
-                                                            rel="noreferrer"
-                                                            title={`Conversar com ${c.name} no WhatsApp`}
-                                                            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors"
-                                                        >
-                                                            <MessageCircle className="h-4 w-4" />
-                                                        </a>
-                                                    ) : (
-                                                        <span className="text-slate-300">--</span>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        );
-                                    })
-                                )}
-                            </TableBody>
-                        </Table>
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="font-bold text-slate-900 dark:text-slate-100 truncate text-xs" title={c.name}>
+                                                            {c.name}
+                                                        </div>
+                                                        <div className="mt-0.5">
+                                                            {c.clientCategory === 'APOSENTADO' ? (
+                                                                <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                                                                    Aposentado
+                                                                </span>
+                                                            ) : c.clientCategory === 'ESTRANGEIRO' ? (
+                                                                <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-100 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300">
+                                                                    Estrangeiro
+                                                                </span>
+                                                            ) : (
+                                                                <span className="inline-block px-1.5 py-0.2 rounded text-[9px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800">
+                                                                    Comum
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </TableCell>
+                                            <TableCell className="font-mono text-xs text-slate-700 dark:text-slate-300 py-3.5 px-3 w-40">
+                                                <BotaoCopiar valor={c.nif} titulo="NIF/BI" icone={<CreditCard className="h-3.5 w-3.5 text-slate-400" />} />
+                                            </TableCell>
+                                            <TableCell className="font-mono text-xs text-slate-700 dark:text-slate-300 py-3.5 px-3 w-44">
+                                                <BotaoCopiar valor={c.phone} titulo="telefone" icone={<Phone className="h-3.5 w-3.5 text-slate-400" />} linkHref={c.phone ? `tel:${c.phone}` : undefined} />
+                                            </TableCell>
+                                            <TableCell className="text-xs text-slate-700 dark:text-slate-300 py-3.5 px-3 w-60">
+                                                <BotaoCopiar valor={c.email} titulo="correio eletrónico" icone={<Mail className="h-3.5 w-3.5 text-slate-400" />} linkHref={c.email ? `mailto:${c.email}` : undefined} />
+                                            </TableCell>
+                                            <TableCell className="text-xs text-slate-700 dark:text-slate-300 py-3.5 px-3 min-w-[220px]">
+                                                <BotaoCopiar valor={c.address} titulo="morada" icone={<MapPin className="h-3.5 w-3.5 text-slate-400" />} />
+                                            </TableCell>
+                                            <TableCell className="text-center py-3.5 px-3 w-24 print:hidden">
+                                                {c.phone ? (
+                                                    <a
+                                                        href={`https://wa.me/${c.phone.replace(/\D/g, '')}`}
+                                                        target="_blank"
+                                                        rel="noreferrer"
+                                                        title={`Conversar com ${c.name} no WhatsApp`}
+                                                        className="inline-flex h-7 px-2.5 items-center gap-1 rounded-lg text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all font-semibold text-[11px] shadow-2xs"
+                                                    >
+                                                        <MessageCircle className="h-3.5 w-3.5" />
+                                                        <span>Chat</span>
+                                                    </a>
+                                                ) : (
+                                                    <span className="text-slate-300 dark:text-slate-600 text-xs">--</span>
+                                                )}
+                                            </TableCell>
+                                        </TableRow>
+                                    );
+                                })
+                            )}
+                        </TableBody>
+                    </Table>
+                    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 bg-slate-50/70 dark:bg-slate-900/40 border-t border-slate-200 dark:border-slate-800 text-xs text-muted-foreground">
+                        <span>A mostrar <strong>{lista.length}</strong> de <strong>{clients.length}</strong> clientes registados</span>
+                        {categoriaFiltro !== 'TODOS' && (
+                            <span className="inline-flex items-center gap-1 text-[11px] bg-primary/10 text-primary px-2.5 py-0.5 rounded-full font-medium">
+                                Filtro Ativo: {categoriaFiltro}
+                            </span>
+                        )}
                     </div>
                 </div>
             </div>

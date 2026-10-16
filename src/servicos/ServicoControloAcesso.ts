@@ -217,7 +217,9 @@ export class ServicoControloAcesso {
       generate_fiscal_docs: ['saft.criar', 'facturas_electronicas.criar'],
       manage_warranties: ['garantias.ver', 'garantias.criar', 'garantias.editar'],
       manage_legal: ['contencioso.ver', 'contencioso.criar', 'contencioso.editar'],
-      manage_users: ['utilizadores.ver', 'utilizadores.criar', 'utilizadores.editar', 'perfis.ver', 'sessoes.ver']
+      manage_users: ['utilizadores.ver', 'utilizadores.criar', 'utilizadores.editar', 'perfis.ver', 'sessoes.ver'],
+      view_market: ['mercado.ver'],
+      use_simulator: ['simulador.ver']
     };
     return mapa[legado] || [legado];
   }
@@ -310,6 +312,15 @@ export class ServicoControloAcesso {
   static temPermissao(utilizador: Partial<User> | null | undefined, permissao: string): boolean {
     if (!utilizador) return false;
     if (isPrimaryOwner(utilizador)) return true;
+
+    // Páginas operacionais de consulta geral financeira (ex: Mercado de câmbios BNA):
+    // Visíveis a todos os colaboradores autenticados por omissão, salvo se expressamente revogadas.
+    if (permissao === 'view_market') {
+      const excecoes = utilizador.permissionExceptions || [];
+      const revogada = excecoes.some(e => (e.permissionId === 'view_market' || e.permissionId === 'mercado.ver') && e.tipo === 'retirar');
+      if (revogada) return false;
+      return true;
+    }
 
     const { permissoes } = this.calcularPermissoesEfetivas(utilizador);
 
