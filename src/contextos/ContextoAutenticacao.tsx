@@ -351,6 +351,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         };
 
         // Eventos a monitorizar com throttle de 5 segundos para não saturar o event loop nem bloquear a thread principal
+        const events = ['mousedown', 'mousemove', 'keydown', 'scroll', 'touchstart', 'click'];
         let lastActivityRecorded = 0;
         const handleActivity = () => {
             const now = Date.now();
