@@ -33,8 +33,9 @@ export const PORTFOLIO_SCHEMA_SQL = [
     `CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_immutable BEFORE UPDATE ON credit_restructurings
         WHEN OLD.status <> 'pending' OR NEW.originalPlan <> OLD.originalPlan OR NEW.newPlan <> OLD.newPlan OR NEW.creditId <> OLD.creditId
         BEGIN SELECT RAISE(ABORT, 'Uma reestruturação já decidida não pode ser alterada'); END`,
-    `CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_four_eyes BEFORE UPDATE ON credit_restructurings
-        WHEN NEW.status = 'approved' AND OLD.kind = 'restructure' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.requestedBy)
+    `DROP TRIGGER IF EXISTS trg_credit_restructurings_four_eyes`,
+    `CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_four_eyes_v2 BEFORE UPDATE ON credit_restructurings
+        WHEN NEW.status = 'approved' AND OLD.kind = 'restructure' AND (NEW.decidedBy IS NULL OR (NEW.decidedBy = OLD.requestedBy AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.decidedBy AND role = 'super_admin')))
         BEGIN SELECT RAISE(ABORT, 'A reestruturação tem de ser aprovada por outra pessoa'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_credit_manager_transfers_update BEFORE UPDATE ON credit_manager_transfers
         BEGIN SELECT RAISE(ABORT, 'O histórico de transferências é imutável'); END`,

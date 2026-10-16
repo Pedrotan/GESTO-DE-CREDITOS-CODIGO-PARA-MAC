@@ -83,11 +83,11 @@ export function ExcecoesTemporarias({ state }: { state: AlcadasState }) {
                 <p className="text-xs"><span className="font-semibold">Motivo:</span> {item.reason}</p>
                 <p className="text-[11px] text-muted-foreground">Pedido por {item.requestedByName} em {formatLuandaDateTime(item.requestedAt)}{item.decidedByName ? ` · ${item.status === 'rejected' ? 'rejeitada' : 'decidida'} por ${item.decidedByName}` : ''}{item.decisionReason ? ` — “${item.decisionReason}”` : ''}</p>
                 <div className="flex flex-wrap justify-end gap-2 pt-1">
-                    {tone === 'pending' && state.isAdmin && item.requestedBy !== state.user?.id && item.userId !== state.user?.id && <>
+                    {tone === 'pending' && state.isAdmin && (state.fullAuthority || (item.requestedBy !== state.user?.id && item.userId !== state.user?.id)) && <>
                         <Button size="sm" variant="outline" className="gap-1" onClick={() => setDeciding({ item, kind: 'reject' })}><X className="h-4 w-4" /> Rejeitar</Button>
                         <Button size="sm" className="gap-1" onClick={() => setDeciding({ item, kind: 'approve' })}><Check className="h-4 w-4" /> Aprovar</Button>
                     </>}
-                    {tone === 'pending' && (item.requestedBy === state.user?.id || item.userId === state.user?.id) && <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Tem de ser aprovada por outro administrador.</p>}
+                    {tone === 'pending' && !state.fullAuthority && (item.requestedBy === state.user?.id || item.userId === state.user?.id) && <p className="text-[11px] font-semibold text-amber-700 dark:text-amber-300">Tem de ser aprovada por outro administrador.</p>}
                     {(tone === 'active' || tone === 'scheduled') && state.canEdit && <Button size="sm" variant="outline" className="gap-1 text-destructive" onClick={() => setDeciding({ item, kind: 'revoke' })}><XCircle className="h-4 w-4" /> Terminar agora</Button>}
                 </div>
             </div>

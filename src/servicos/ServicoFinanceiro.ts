@@ -15,7 +15,7 @@ import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
 import { reconcileInstallments } from '@/bibliotecas/conciliacao-prestacoes';
 import { planConsecutiveInstallments, type InstallmentBalance } from '@/bibliotecas/liquidacao-prestacoes';
 import { calculateLateInterest, type LateInterestSummary } from '@/bibliotecas/juros-mora';
-import { isPrimaryOwner } from '@/bibliotecas/conta-principal';
+import { actorHasFullAuthority } from '@/servicos/AutoridadeTotal';
 import {
     allocatePaymentByInstallments, allocatePaymentMinor, applyPaymentToBalances, creditBalancesFromRow, revertPaymentFromBalances,
     type AllocationMinor, type CreditBalancesAfter, type CreditBalancesMinor
@@ -679,10 +679,9 @@ export class ServicoFinanceiro {
         // Papel e conta principal lidos da base (nunca do ecrã).
         const actorRow = await db.get<{ role: string; name: string; branchId?: string | null }>('SELECT role, name, branchId FROM users WHERE id = ?', [input.actorId]);
         if (!actorRow) throw new Error('Utilizador de aprovação não encontrado.');
-        const ownerRow = await db.get<{ isOwner?: number }>('SELECT isOwner FROM users WHERE id = ?', [input.actorId]).catch(() => undefined);
         // Super Administrador (nível máximo) e conta principal: autoridade total sobre a decisão — sem alçada, sem
         // dupla aprovação e podendo decidir os próprios pedidos. Fica sempre registado na auditoria.
-        const actorIsOwner = isPrimaryOwner(ownerRow) || actorRow.role === 'super_admin';
+        const actorIsOwner = await actorHasFullAuthority(input.actorId);
         if (!actorIsOwner && input.credit.requestedBy && input.credit.requestedBy === input.actorId) {
             throw new Error('O criador do crédito não pode aprovar ou rejeitar a própria operação.');
         }
@@ -1281,10 +1280,11 @@ export class ServicoFinanceiro {
     private static async reversalDecisionStatement(requestId: string, targetId: string, actorId: string, resultEntryId: string, now: string) {
         const request = await db.get<{requestedById:string;reason:string}>('SELECT requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?', [requestId, 'reversal', targetId, 'pending']);
         const actor = await db.get<{role:string;name:string}>('SELECT role, name FROM users WHERE id = ?', [actorId]);
-        if (!request || request.requestedById === actorId || !actor || !['admin','super_admin'].includes(actor.role)) throw new Error('O estorno exige um pedido pendente e outro administrador.');
+        const full = await actorHasFullAuthority(actorId);
+        if (!request || (request.requestedById === actorId && !full) || !actor || !['admin','super_admin'].includes(actor.role)) throw new Error('O estorno exige um pedido pendente e outro administrador.');
         return [{ sql: `UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ?
-                        WHERE id = ? AND status = 'pending' AND requestedById <> ?`,
-            params: ['approved',actor.name,actorId,now,request.reason,resultEntryId,requestId,actorId], expectChanges: 1 }];
+                        WHERE id = ? AND status = 'pending' AND (requestedById <> ? OR ? = 1)`,
+            params: ['approved',actor.name,actorId,now,request.reason,resultEntryId,requestId,actorId,full ? 1 : 0], expectChanges: 1 }];
     }
 
     static async reverseJournalEntry(input: { entryId: string; reason: string; actorId: string; actorName: string; approvedBy?: string; requestId?: string }): Promise<AccountingEntry> {
@@ -1415,7 +1415,9 @@ export class ServicoFinanceiro {
         await this.assertNotFrozen();
         const request = await db.get<{id:string;requestedById:string;reason:string}>('SELECT id, requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?', [input.requestId,'writeoff',input.creditId,'pending']);
         if (!request || request.requestedById !== input.requestedById || request.reason !== input.reason) throw new Error('Pedido de abate pendente não encontrado ou alterado.');
-        if (input.requestedById === input.approvedById) throw new Error('O abate tem de ser aprovado por um administrador diferente de quem o pediu.');
+        const approverFull = await actorHasFullAuthority(input.approvedById);
+        if (input.requestedById === input.approvedById && !approverFull)
+            throw new Error('O abate tem de ser aprovado por um administrador diferente de quem o pediu.');
         const reason = input.reason?.trim() || '';
         if (reason.length < 10) throw new Error('Indique o motivo do abate (pelo menos 10 caracteres).');
         const credit = await db.get<any>('SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL', [input.creditId]);
@@ -1470,8 +1472,8 @@ export class ServicoFinanceiro {
                 params: [input.creditId, balances.version], expectChanges: 1
             }],
             { sql: `UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ?
-                WHERE id = ? AND status = 'pending' AND requestedById <> ?`,
-                params:['approved',input.approvedBy,input.approvedById,entry.timestampIso,input.decisionReason || reason,entry.id,input.requestId,input.approvedById],expectChanges:1 },
+                WHERE id = ? AND status = 'pending' AND (requestedById <> ? OR ? = 1)`,
+                params:['approved',input.approvedBy,input.approvedById,entry.timestampIso,input.decisionReason || reason,entry.id,input.requestId,input.approvedById,approverFull ? 1 : 0],expectChanges:1 },
             this.journalAudit(entry, input.approvedById, input.approvedBy, `Abate do crédito ${input.creditId}`,
                 { creditId: input.creditId, reason, requestedBy: input.requestedBy, provisionUsedMinor: provisionUsed, lossMinor: loss })
         ]);

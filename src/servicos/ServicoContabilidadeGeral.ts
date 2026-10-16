@@ -1,6 +1,7 @@
 import bcrypt from 'bcryptjs';
 import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { db } from '@/bibliotecas/bd';
+import { actorHasFullAuthority } from '@/servicos/AutoridadeTotal';
 import { auditRiskFindings } from '@/bibliotecas/alertas-auditoria';
 import { auditChainFindings } from '@/bibliotecas/cadeia-auditoria';
 import { auditStatus, runAccountingAudit, type AuditFinding, type AuditKind, type AuditResult, type AuditCreditRow, type AuditEntryRow, type AuditLineRow, type AuditPaymentRow, type AuditTransactionRow } from '@/bibliotecas/auditoria-contabil';
@@ -264,7 +265,8 @@ export class ServicoContabilidadeGeral {
         const stored = await db.get<AccountingRequest>('SELECT * FROM accounting_requests WHERE id = ?', [request.id]);
         if (!stored) throw new Error('Pedido não encontrado.');
         request = stored;
-        if (request.requestedById === actor.id) throw new Error('O pedido tem de ser decidido por um administrador diferente de quem o fez.');
+        if (request.requestedById === actor.id && !(await actorHasFullAuthority(actor.id)))
+            throw new Error('O pedido tem de ser decidido por um administrador diferente de quem o fez.');
         if (request.status !== 'pending') throw new Error('Este pedido já foi decidido.');
         const reason = decisionReason?.trim() || '';
         if (!approve && reason.length < 5) throw new Error('Indique o motivo da rejeição.');
@@ -337,7 +339,8 @@ export class ServicoContabilidadeGeral {
         if (!isAdmin(actor)) throw new Error('Só administradores podem desbloquear a movimentação.');
         const lock = await this.getPanicLock();
         if (!lock) throw new Error('A movimentação não está congelada.');
-        if (lock.lockedById === actor.id) throw new Error('O desbloqueio tem de ser feito por um administrador diferente de quem congelou.');
+        if (lock.lockedById === actor.id && !(await actorHasFullAuthority(actor.id)))
+            throw new Error('O desbloqueio tem de ser feito por um administrador diferente de quem congelou.');
         if ((reason?.trim() || '').length < 10) throw new Error('Indique o motivo do desbloqueio (pelo menos 10 caracteres).');
         if (!(await this.confirmPassword(password, actor.id))) throw new Error('Palavra-passe incorrecta.');
         const now = new Date().toISOString();

@@ -26,7 +26,7 @@ export function BotaoPanico({ panic, onChanged }: { panic: PanicLock | null; onC
     const [error, setError] = useState('');
     if (!isAdminRole(user?.role)) return null;
     const unlocking = !!panic;
-    const sameAdmin = unlocking && panic?.lockedById === user?.id;
+    const sameAdmin = unlocking && panic?.lockedById === user?.id && user?.role !== 'super_admin' && !(user as any)?.isOwner;
 
     const submit = async () => {
         if (!user) return;

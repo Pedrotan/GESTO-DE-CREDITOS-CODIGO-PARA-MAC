@@ -123,6 +123,8 @@ export function useAlcadas() {
     const actor = user ? { id: user.id, name: user.name, role: user.role, branchId: (user as any).branchId || null, permissions: user.permissions } : null;
     return {
         user, actor, canEdit: canManageLimits(actor), isAdmin: ['admin', 'super_admin'].includes(String(user?.role)),
+        /** Super Administrador: decide os próprios pedidos (autoridade total). */
+        fullAuthority: String(user?.role) === 'super_admin' || Boolean((user as any)?.isOwner),
         data, policy, draft, setDraft, discard, loading, error, reload, refreshedAt, now, products,
         profiles, profileName, issues, issueByPath, changes, second, dirty, usage, summary, branchName,
     };

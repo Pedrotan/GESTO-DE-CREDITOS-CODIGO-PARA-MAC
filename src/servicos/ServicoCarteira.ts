@@ -3,6 +3,7 @@
 // transferência de gestor, lembretes, reestruturação (com aprovação de outra pessoa), liquidação antecipada,
 // documentos do crédito e lotes de importação anuláveis. Usa as operações financeiras existentes.
 import { db } from '@/bibliotecas/bd';
+import { actorHasFullAuthority } from '@/servicos/AutoridadeTotal';
 import { luandaDateKey, luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import type { InstallmentRow } from '@/bibliotecas/carteira-credito';
 import type { EarlySettlement, PlanItem } from '@/bibliotecas/liquidacao-antecipada';
@@ -232,7 +233,7 @@ export class ServicoCarteira {
         if (!ADMIN.includes(actor.role) && actor.role !== 'credit_director') throw new Error('A reestruturação é aprovada por um administrador ou diretor.');
         const request = (await this.restructurings()).find(item => item.id === id);
         if (!request || request.status !== 'pending') throw new Error('Este pedido já não está pendente.');
-        if (request.requestedBy === actor.id) throw new Error('Quem pediu a reestruturação não a pode aprovar.');
+        if (request.requestedBy === actor.id && !(await actorHasFullAuthority(actor.id))) throw new Error('Quem pediu a reestruturação não a pode aprovar.');
         await ServicoAuditoriaAvancada.assertJustification(reason, actor.id);
         const when = new Date().toISOString();
         const decision: Statement = { sql: `UPDATE credit_restructurings SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'`,

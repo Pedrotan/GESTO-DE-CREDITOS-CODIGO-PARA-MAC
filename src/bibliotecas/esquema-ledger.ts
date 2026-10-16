@@ -93,9 +93,12 @@ export const LEDGER_PROTECTION_SQL = [
         provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0),
         reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10),
         requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL,
-        entryId TEXT NOT NULL, createdAt TEXT NOT NULL,
-        CHECK(requestedById <> approvedById)
+        entryId TEXT NOT NULL, createdAt TEXT NOT NULL
     );`,
+    // Quem pede e quem aprova são pessoas diferentes, salvo o Super Administrador (autoridade total).
+    `CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_four_eyes BEFORE INSERT ON credit_writeoffs
+        WHEN NEW.requestedById = NEW.approvedById AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.approvedById AND role = 'super_admin')
+        BEGIN SELECT RAISE(ABORT, 'O abate tem de ser aprovado por um administrador diferente de quem o pediu'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_update BEFORE UPDATE ON credit_writeoffs
         BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_delete BEFORE DELETE ON credit_writeoffs
@@ -135,8 +138,9 @@ export const LEDGER_PROTECTION_SQL = [
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_requests_pending ON accounting_requests(kind, targetId) WHERE status = 'pending'`,
     `CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_decided BEFORE UPDATE ON accounting_requests
         WHEN OLD.status <> 'pending' BEGIN SELECT RAISE(ABORT, 'Pedido já decidido: não pode ser alterado'); END`,
-    `CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_segregation BEFORE UPDATE ON accounting_requests
-        WHEN NEW.decidedById IS NOT NULL AND NEW.decidedById = OLD.requestedById
+    `DROP TRIGGER IF EXISTS trg_accounting_requests_segregation`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_segregation_v2 BEFORE UPDATE ON accounting_requests
+        WHEN NEW.decidedById IS NOT NULL AND NEW.decidedById = OLD.requestedById AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.decidedById AND role = 'super_admin')
         BEGIN SELECT RAISE(ABORT, 'O pedido tem de ser decidido por outro administrador'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_delete BEFORE DELETE ON accounting_requests
         BEGIN SELECT RAISE(ABORT, 'O histórico de pedidos é imutável'); END`,

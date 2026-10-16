@@ -8,6 +8,13 @@ import { formatCurrency } from '@/bibliotecas/formatters';
 import { formatLuandaDateTime } from '@/bibliotecas/fuso-angola';
 import type { PaymentRow } from '@/bibliotecas/pagamentos-analise';
 import { validateJustification } from '@/bibliotecas/justificacao';
+import { useAuth } from '@/contextos/ContextoAutenticacao';
+
+/** Super Administrador: autoridade total (anula os próprios registos e dispensa segundo administrador). */
+const useFullAuthority = () => {
+    const { user } = useAuth();
+    return user?.role === 'super_admin' || Boolean((user as any)?.isOwner);
+};
 
 /** Anulação: permissão própria, motivo obrigatório e segregação de funções (validadas no serviço). */
 export function AnulacaoPagamento({ row, open, onOpenChange, threshold, actorId, onConfirm }: {
@@ -21,10 +28,11 @@ export function AnulacaoPagamento({ row, open, onOpenChange, threshold, actorId,
     const [reason, setReason] = useState('');
     const [error, setError] = useState('');
     const [busy, setBusy] = useState(false);
+    const fullAuthority = useFullAuthority();
     useEffect(() => { if (open) { setReason(''); setError(''); setBusy(false); } }, [open]);
     if (!row) return null;
-    const ownPayment = Boolean(row.operatorId && row.operatorId === actorId);
-    const needsApproval = row.status === 'confirmed' && row.total > threshold;
+    const ownPayment = Boolean(row.operatorId && row.operatorId === actorId) && !fullAuthority;
+    const needsApproval = row.status === 'confirmed' && row.total > threshold && !fullAuthority;
     const submit = async () => {
         const invalid = validateJustification(reason);
         if (invalid) { setError(invalid); return; }
@@ -75,6 +83,7 @@ export function AprovacoesAnulacao({ requests, actorId, onDecide }: { requests: 
     const [error, setError] = useState('');
     const [rejecting, setRejecting] = useState('');
     const [rejectReason, setRejectReason] = useState('');
+    const fullAuthority = useFullAuthority();
     if (!requests.length) return null;
     const decide = async (request: CancellationRequest, approve: boolean) => {
         const reason = approve ? 'Aprovado' : rejectReason.trim();
@@ -92,7 +101,7 @@ export function AprovacoesAnulacao({ requests, actorId, onDecide }: { requests: 
                             <p className="font-semibold">{request.description} · {formatCurrency((request.amountMinor || 0) / 100)}</p>
                             <p className="text-xs text-muted-foreground">Pedido por {request.requestedBy} em {formatLuandaDateTime(request.requestedAt)} · Motivo: {request.reason}</p>
                         </div>
-                        {request.requestedById === actorId ? <span className="text-xs text-muted-foreground">Aguarda outro administrador</span> : rejecting === request.id ? (
+                        {request.requestedById === actorId && !fullAuthority ? <span className="text-xs text-muted-foreground">Aguarda outro administrador</span> : rejecting === request.id ? (
                             <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
                                 <input className="h-8 min-w-[220px] flex-1 rounded-md border bg-background px-2 text-sm" autoFocus value={rejectReason} maxLength={300}
                                     onChange={event => setRejectReason(event.target.value)} placeholder="Motivo da rejeição" />

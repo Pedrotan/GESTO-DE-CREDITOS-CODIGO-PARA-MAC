@@ -210,6 +210,34 @@ test('abate e aprovação são atómicos, mantêm dívida para cobrança e recup
         await assert.rejects(service.writeOffCredit(input),/pendente/);
     }finally{database.close();}
 });
+
+test('Super Administrador aprova o próprio pedido de abate; um Administrador continua bloqueado (serviço e base)', async () => {
+    const service = await loadService();
+    const database = await createDatabase();
+    try {
+        const now = new Date().toISOString();
+        // Os triggers de segregação (com a excepção do Super Administrador) tal como o arranque os cria.
+        const schema = readFileSync(path.join(root, 'src/bibliotecas/esquema-ledger.ts'), 'utf8');
+        for (const [, sql] of schema.matchAll(/`(CREATE TRIGGER IF NOT EXISTS (?:trg_credit_writeoffs_four_eyes|trg_accounting_requests_segregation_v2)\b[\s\S]*?END)`/g)) database.exec(sql);
+        database.prepare("INSERT INTO users(id,name,email,password,role,createdAt) VALUES ('sa','Super Admin','sa@example.invalid','x','super_admin',?)").run(now);
+        database.prepare("INSERT INTO users(id,name,email,password,role,createdAt) VALUES ('ad','Administrador','ad@example.invalid','x','admin',?)").run(now);
+        await service.addCredit({...credit,status:'overdue'});
+        // Administrador: o próprio pedido é recusado pelo serviço e pela base.
+        database.prepare(`INSERT INTO accounting_requests(id,kind,targetId,reason,requestedBy,requestedById,requestedAt,status)
+            VALUES ('wa','writeoff','cr1','Incobrável documentado','Administrador','ad',?,'pending')`).run(now);
+        await assert.rejects(service.writeOffCredit({creditId:'cr1',reason:'Incobrável documentado',requestedBy:'Administrador',requestedById:'ad',approvedBy:'Administrador',approvedById:'ad',requestId:'wa'}),/diferente/);
+        assert.throws(() => database.prepare(`INSERT INTO credit_writeoffs (id, creditId, principalMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt)
+            VALUES ('x','cr-x',1,'Incobrável documentado','A','ad','A','ad','e',?)`).run(now), /diferente de quem o pediu/);
+        assert.throws(() => database.prepare("UPDATE accounting_requests SET status='rejected', decidedBy='A', decidedById='ad', decidedAt=? WHERE id='wa'").run(now), /outro administrador/);
+        database.prepare("UPDATE accounting_requests SET status='rejected', decidedBy='Outro', decidedById='u2', decidedAt=? WHERE id='wa'").run(now);
+        // Super Administrador: autoridade total.
+        database.prepare(`INSERT INTO accounting_requests(id,kind,targetId,reason,requestedBy,requestedById,requestedAt,status)
+            VALUES ('ws','writeoff','cr1','Incobrável documentado','Super Admin','sa',?,'pending')`).run(now);
+        await service.writeOffCredit({creditId:'cr1',reason:'Incobrável documentado',requestedBy:'Super Admin',requestedById:'sa',approvedBy:'Super Admin',approvedById:'sa',requestId:'ws'});
+        assert.equal(database.prepare("SELECT status FROM accounting_requests WHERE id='ws'").get().status,'approved');
+        assert.equal(database.prepare("SELECT approvedById FROM credit_writeoffs WHERE creditId='cr1'").get().approvedById,'sa');
+    }finally{database.close();}
+});
 test('despesa guarda comprovativo na mesma transação e falha posterior reverte tudo',async()=>{
     const service=await loadService('ServicoContabilidade'),database=await createDatabase();
     const input={type:'adjustment',description:'Comunicações — Internet',debit:'expenses',credit:'bank',amountPrincipal:0,amountInterest:0,amountLateInterest:0,amountTotal:100,processedBy:'Administrador',usuario_id:'u2',receipt:{name:'recibo.pdf',mime:'application/pdf',data:'JVBERi0='},category:'Comunicações'};

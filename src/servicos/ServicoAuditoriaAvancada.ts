@@ -226,7 +226,7 @@ export class ServicoAuditoriaAvancada {
         const comment = (changes.comment || '').trim();
         if (comment.length < 10) throw new Error('Escreva um comentário com pelo menos 10 caracteres.');
         const closing = CLOSED_ALERT_STATUSES.includes(changes.status);
-        if (closing && alert.originUserId && alert.originUserId === actor.id) throw new Error('Não pode fechar um alerta originado por si próprio.');
+        // Só o Super Administrador gere alertas e tem autoridade total: pode fechar alertas originados por si (fica no comentário e na auditoria).
         if (closing) {
             const error = validateJustification(comment);
             if (error) throw new Error(`Para fechar o alerta, a justificação tem de ser válida: ${error}`);

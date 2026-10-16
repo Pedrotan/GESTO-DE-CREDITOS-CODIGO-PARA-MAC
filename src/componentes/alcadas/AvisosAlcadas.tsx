@@ -80,7 +80,7 @@ export function AvisosAlcadas({ state, onOpenExceptions }: { state: AlcadasState
                 );
             })}
             {pending.map(version => {
-                const mine = version.createdBy === state.user?.id;
+                const mine = version.createdBy === state.user?.id && !state.fullAuthority;
                 return (
                     <div key={version.id} className="flex flex-col gap-3 rounded-xl border border-amber-400/60 bg-amber-50 p-4 text-amber-950 dark:bg-amber-950/30 dark:text-amber-100 md:flex-row md:items-center">
                         <ShieldAlert className="h-6 w-6 shrink-0 text-amber-600" />

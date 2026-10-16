@@ -27,7 +27,7 @@ export function ReestruturacoesPendentes({ actor, clientNameOf }: { actor: Actor
                         </div>
                         <div className="flex shrink-0 gap-2">
                             <Button size="sm" variant="outline" onClick={() => navigate(`/creditos/${encodeURIComponent(item.creditId)}`)}>Abrir ficha</Button>
-                            {canDecide && item.requestedBy !== actor?.id && <>
+                            {canDecide && (item.requestedBy !== actor?.id || actor?.role === 'super_admin') && <>
                                 <Button size="sm" variant="outline" onClick={() => setDecision({ id: item.id, approve: false })}>Rejeitar</Button>
                                 <Button size="sm" onClick={() => setDecision({ id: item.id, approve: true })}>Aprovar</Button>
                             </>}

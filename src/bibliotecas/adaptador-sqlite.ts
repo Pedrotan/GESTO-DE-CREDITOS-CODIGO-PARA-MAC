@@ -1223,6 +1223,32 @@ const createTables = async () => {
 );`);
     for (const statement of LEDGER_PROTECTION_SQL) await executeSql(statement);
 
+    // Abates: o CHECK(requestedById <> approvedById) passou a trigger, para o Super Administrador (autoridade
+    // total) poder aprovar o próprio pedido. Bases antigas reconstroem a tabela numa só transacção.
+    try {
+        const writeoffs = await querySql("SELECT sql FROM sqlite_master WHERE type='table' AND name='credit_writeoffs'");
+        if (/CHECK\s*\(\s*requestedById\s*<>\s*approvedById\s*\)/i.test(String((writeoffs as any[])?.[0]?.sql || ''))) {
+            const createTable = LEDGER_PROTECTION_SQL.find(sql => /^\s*CREATE TABLE IF NOT EXISTS credit_writeoffs\b/i.test(sql))!;
+            const rebuild = [
+                'ALTER TABLE credit_writeoffs RENAME TO credit_writeoffs_old',
+                createTable,
+                'INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) SELECT id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt FROM credit_writeoffs_old',
+                'DROP TABLE credit_writeoffs_old',
+                ...LEDGER_PROTECTION_SQL.filter(sql => /^\s*CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_/i.test(sql)),
+            ];
+            if (isElectron) {
+                await (window as any).electronAPI.dbTransaction(rebuild.map(sql => ({ sql, params: [] })));
+            } else {
+                db!.run('BEGIN TRANSACTION');
+                try { for (const sql of rebuild) db!.run(sql); db!.run('COMMIT'); }
+                catch (error) { try { db!.run('ROLLBACK'); } catch { /* já sem transacção */ } throw error; }
+            }
+            console.log('[Migration] credit_writeoffs: CHECK de segregação substituído por trigger.');
+        }
+    } catch (error) {
+        console.warn('[Migration] credit_writeoffs (autoridade total):', error);
+    }
+
     await safeAddColumn("contracts", "startDate", "TEXT");
     await safeAddColumn("contracts", "endDate", "TEXT");
     await safeAddColumn("contracts", "deletedAt", "TEXT");

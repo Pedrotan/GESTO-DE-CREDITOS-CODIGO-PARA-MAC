@@ -48,13 +48,17 @@ export const LIMITS_EXTENSION_SQL = [
         WHEN OLD.status <> 'pending' OR NEW.policy <> OLD.policy OR NEW.version <> OLD.version OR NEW.createdBy <> OLD.createdBy
             OR NEW.effectiveFrom <> OLD.effectiveFrom OR NEW.reason <> OLD.reason OR NEW.requiresSecondApproval <> OLD.requiresSecondApproval
         BEGIN SELECT RAISE(ABORT, 'Uma versão dos limites já decidida não pode ser alterada'); END`,
-    `CREATE TRIGGER IF NOT EXISTS trg_limit_versions_four_eyes BEFORE UPDATE ON limit_policy_versions
-        WHEN NEW.status = 'approved' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.createdBy)
+    // Quatro olhos com autoridade total do Super Administrador (v2 substitui a versão sem excepção).
+    `DROP TRIGGER IF EXISTS trg_limit_versions_four_eyes`,
+    `CREATE TRIGGER IF NOT EXISTS trg_limit_versions_four_eyes_v2 BEFORE UPDATE ON limit_policy_versions
+        WHEN NEW.status = 'approved' AND (NEW.decidedBy IS NULL OR (NEW.decidedBy = OLD.createdBy AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.decidedBy AND role = 'super_admin')))
         BEGIN SELECT RAISE(ABORT, 'A alteração tem de ser aprovada por um segundo administrador'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_delete BEFORE DELETE ON limit_exceptions
         BEGIN SELECT RAISE(ABORT, 'As exceções de limites não podem ser apagadas'); END`,
-    `CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_four_eyes BEFORE UPDATE ON limit_exceptions
-        WHEN NEW.status = 'approved' AND OLD.status = 'pending' AND (NEW.decidedBy IS NULL OR NEW.decidedBy = OLD.requestedBy OR NEW.decidedBy = OLD.userId)
+    `DROP TRIGGER IF EXISTS trg_limit_exceptions_four_eyes`,
+    `CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_four_eyes_v2 BEFORE UPDATE ON limit_exceptions
+        WHEN NEW.status = 'approved' AND OLD.status = 'pending' AND (NEW.decidedBy IS NULL
+            OR ((NEW.decidedBy = OLD.requestedBy OR NEW.decidedBy = OLD.userId) AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.decidedBy AND role = 'super_admin')))
         BEGIN SELECT RAISE(ABORT, 'A exceção tem de ser aprovada por outro administrador'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_limit_exceptions_immutable BEFORE UPDATE ON limit_exceptions
         WHEN NEW.userId <> OLD.userId OR NEW.operationType <> OLD.operationType OR NEW.startsAt <> OLD.startsAt OR NEW.endsAt <> OLD.endsAt

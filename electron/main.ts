@@ -902,6 +902,8 @@ const isAllowedWriteStatement = (statement) => {
   if (keyword === "DROP") {
     if (/^DROP\s+TABLE\s+(IF\s+EXISTS\s+)?(?:"|'|`|\[)?[a-z0-9_]+_old(?:"|'|`|\])?\s*$/i.test(cleaned)) return true;
     if (/^DROP\s+INDEX\s+IF\s+EXISTS\s+/i.test(cleaned)) return true;
+    // Só os DROP TRIGGER exactos do esquema (substituição de triggers por versões novas).
+    if (/^DROP\s+TRIGGER\s+IF\s+EXISTS\s+/i.test(cleaned)) return isApprovedLedgerTrigger(cleaned);
     return false;
   }
   if (keyword === "DELETE" && /\bFROM\s+sqlite_(master|schema)\b/i.test(cleaned)) {

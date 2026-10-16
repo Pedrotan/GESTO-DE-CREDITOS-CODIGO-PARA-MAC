@@ -17,8 +17,10 @@ export const AUDIT_EXTENSION_SQL = [
     `CREATE INDEX IF NOT EXISTS idx_audit_alerts_status ON audit_alerts(status, occurredAt)`,
     `CREATE TRIGGER IF NOT EXISTS trg_audit_alerts_delete BEFORE DELETE ON audit_alerts
         BEGIN SELECT RAISE(ABORT, 'Os alertas de auditoria não podem ser apagados'); END`,
-    `CREATE TRIGGER IF NOT EXISTS trg_audit_alerts_self_close BEFORE UPDATE ON audit_alerts
+    `DROP TRIGGER IF EXISTS trg_audit_alerts_self_close`,
+    `CREATE TRIGGER IF NOT EXISTS trg_audit_alerts_self_close_v2 BEFORE UPDATE ON audit_alerts
         WHEN NEW.status IN ('justified','false_positive','resolved') AND NEW.closedBy IS NOT NULL AND NEW.closedBy = OLD.originUserId
+            AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.closedBy AND role = 'super_admin')
         BEGIN SELECT RAISE(ABORT, 'Quem originou o alerta não o pode fechar'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_audit_alert_comments_update BEFORE UPDATE ON audit_alert_comments
         BEGIN SELECT RAISE(ABORT, 'Os comentários dos alertas são imutáveis'); END`,

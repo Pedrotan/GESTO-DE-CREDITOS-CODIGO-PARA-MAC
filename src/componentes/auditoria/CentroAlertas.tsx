@@ -41,7 +41,8 @@ function GerirAlerta({ alert, actor, responsibles, onClose, onSaved, events, onO
     }, [alert]);
     if (!alert) return null;
     const canManage = actor.role === 'super_admin';
-    const ownAlert = alert.originUserId === actor.id;
+    // O Super Administrador (único que gere alertas) tem autoridade total: pode fechar alertas que originou.
+    const ownAlert = alert.originUserId === actor.id && actor.role !== 'super_admin';
     const linked = (() => { try { return (JSON.parse(alert.eventIds || '[]') as string[]).map(id => events.find(event => event.id === id)).filter(Boolean) as AuditEvent[]; } catch { return []; } })();
     const save = async () => {
         setBusy(true); setError('');

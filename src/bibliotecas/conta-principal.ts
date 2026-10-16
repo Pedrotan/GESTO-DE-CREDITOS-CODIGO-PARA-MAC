@@ -148,3 +148,12 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
     }
     return { error: null, changesPrivileges: privileged.length > 0 };
 };
+
+/**
+ * Autoridade total: o Super Administrador (nível máximo) e a conta principal passam por cima das regras de
+ * segregação de funções ("quatro olhos") — podem decidir os próprios pedidos e dispensam segundo aprovador.
+ * Cada vez que isso acontece fica marcado na auditoria. Os restantes perfis mantêm a segregação.
+ */
+export const FULL_AUTHORITY_ROLE = 'super_admin';
+export const hasFullAuthority = (user: { role?: unknown; isOwner?: unknown } | null | undefined) =>
+    Boolean(user) && (String(user!.role) === FULL_AUTHORITY_ROLE || isPrimaryOwner(user));

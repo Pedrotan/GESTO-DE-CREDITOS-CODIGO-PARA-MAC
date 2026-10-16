@@ -209,6 +209,11 @@ const isAllowedWriteStatement = (statement: string) => {
         if (/^DROP\s+TABLE\s+(IF\s+EXISTS\s+)?(?:"|'|`|\[)?[a-z0-9_]+_old(?:"|'|`|\])?\s*$/i.test(cleaned)) return true;
         // Allow DROP INDEX IF EXISTS (needed for recreating unique indexes during migrations)
         if (/^DROP\s+INDEX\s+IF\s+EXISTS\s+/i.test(cleaned)) return true;
+        // Só os DROP TRIGGER exactos do esquema (substituição de triggers por versões novas).
+        if (/^DROP\s+TRIGGER\s+IF\s+EXISTS\s+/i.test(cleaned)) {
+            const normalized = cleaned.replace(/\s+/g, ' ').trim();
+            return LEDGER_PROTECTION_SQL.some(allowed => allowed.replace(/\s+/g, ' ').trim() === normalized);
+        }
         return false;
     }
     if (keyword === 'DELETE' && /\bFROM\s+sqlite_(master|schema)\b/i.test(cleaned)) return false;

@@ -3,6 +3,7 @@
 // utilizador/agência/empresa com guardas na mesma transacção da operação, alertas a 80% e 100%, fila de
 // escalonamento (com subida automática ao nível seguinte e dupla aprovação) e dados para os relatórios.
 import { db } from '@/bibliotecas/bd';
+import { actorHasFullAuthority } from '@/servicos/AutoridadeTotal';
 import * as A from '@/bibliotecas/alcadas';
 import { formatLuandaDateTime } from '@/bibliotecas/fuso-angola';
 import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
@@ -133,7 +134,7 @@ export class ServicoAlcadas {
         assertAdmin(actor, 'A aprovação de alterações aos limites');
         const version = (await this.versions()).find(item => item.id === versionId);
         if (!version || version.status !== 'pending') throw new Error('Esta versão já não está pendente.');
-        if (version.createdBy === actor.id) throw new Error('Quem propôs a alteração não a pode aprovar: tem de ser um segundo administrador.');
+        if (version.createdBy === actor.id && !(await actorHasFullAuthority(actor.id))) throw new Error('Quem propôs a alteração não a pode aprovar: tem de ser um segundo administrador.');
         await ServicoAuditoriaAvancada.assertJustification(reason, actor.id);
         const now = new Date().toISOString();
         await db.transaction([
@@ -192,8 +193,9 @@ export class ServicoAlcadas {
         assertAdmin(actor, 'A aprovação de exceções de limites');
         const exception = (await this.exceptions()).find(item => item.id === id);
         if (!exception || exception.status !== 'pending') throw new Error('Esta exceção já não está pendente.');
-        if (exception.requestedBy === actor.id) throw new Error('Quem pediu a exceção não a pode aprovar: tem de ser outro administrador.');
-        if (exception.userId === actor.id) throw new Error('Não pode aprovar uma exceção para si próprio.');
+        const full = await actorHasFullAuthority(actor.id);
+        if (!full && exception.requestedBy === actor.id) throw new Error('Quem pediu a exceção não a pode aprovar: tem de ser outro administrador.');
+        if (!full && exception.userId === actor.id) throw new Error('Não pode aprovar uma exceção para si próprio.');
         await ServicoAuditoriaAvancada.assertJustification(reason, actor.id);
         const now = new Date().toISOString();
         await db.transaction([
@@ -410,6 +412,8 @@ export class ServicoAlcadas {
      */
     static async approverStatements(input: { actor: A.LimitActor; operationType: A.OperationType; amountMinor: number; entityType: string; entityId: string; requesterId?: string | null; now?: Date }) {
         const now = input.now || new Date();
+        // Super Administrador: autoridade total (decide os próprios pedidos e não consome alçada).
+        if (input.actor.isOwner || await actorHasFullAuthority(input.actor.id)) return [];
         if (input.requesterId && input.requesterId === input.actor.id) throw new Error('Quem pediu a operação não a pode aprovar.');
         if (input.operationType !== 'write_off') return this.enforce(input);
         const { policy } = await this.current(now);

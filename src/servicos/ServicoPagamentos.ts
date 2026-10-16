@@ -3,6 +3,7 @@
 // pendentes de validação, anulação com segregação de funções e dupla aprovação, lotes de importação,
 // comprovativos, histórico de auditoria e relatórios gerados.
 import { db } from '@/bibliotecas/bd';
+import { actorHasFullAuthority } from '@/servicos/AutoridadeTotal';
 import type { User } from '@/tipos/autenticacao';
 import type { Payment, PaymentMethod } from '@/tipos/credito';
 import { calculateLateInterest } from '@/bibliotecas/juros-mora';
@@ -312,7 +313,9 @@ export class ServicoPagamentos {
         const payment = (await this.listPayments()).find(item => item.id === paymentId);
         if (!payment) throw new Error('Pagamento não encontrado.');
         if (payment.status === 'cancelled') throw new Error('Este pagamento já está anulado.');
-        ServicoControloAcesso.verificarSegregacaoQuatroOlhos('anular_pagamento', actor as any, { processadoPorId: payment.usuario_id });
+        // Super Administrador: autoridade total — anula os próprios registos e não precisa de segundo administrador.
+        const full = await actorHasFullAuthority(actor.id);
+        if (!full) ServicoControloAcesso.verificarSegregacaoQuatroOlhos('anular_pagamento', actor as any, { processadoPorId: payment.usuario_id });
         const now = new Date().toISOString();
         if (payment.status === 'pending') {
             await db.transaction([
@@ -321,16 +324,16 @@ export class ServicoPagamentos {
                           WHERE id = ? AND status = 'pending' AND deletedAt IS NULL`,
                     params: [now, actor.name, text, paymentId], expectChanges: 1,
                 },
-                auditStatement(actor, 'delete', `Anulou o pagamento pendente ${paymentId}`, { paymentId, creditId: payment.creditId, reason: text }, now),
+                auditStatement(actor, 'delete', `Anulou o pagamento pendente ${paymentId}`, { paymentId, creditId: payment.creditId, reason: text, ...(full ? { superAdminOverride: true, selfDecision: payment.usuario_id === actor.id } : {}) }, now),
             ]);
             return { status: 'cancelled' };
         }
         const config = await this.getConfig();
         // Alçada de anulação (valor e número por dia): acima dela, o pedido vai para um segundo administrador.
-        const limitActor = await ServicoAlcadas.actorOf(actor.id);
+        const limitActor = full ? null : await ServicoAlcadas.actorOf(actor.id);
         const limitPlan = limitActor ? await ServicoAlcadas.plan({ actor: limitActor, operationType: 'payment_reversal', amountMinor: Math.round(payment.amount * 100), entityType: 'payment', entityId: paymentId }) : null;
         const overLimit = limitPlan && limitPlan.evaluation.decision !== 'allow';
-        if (payment.amount > config.cancelApprovalThreshold || overLimit) {
+        if (!full && (payment.amount > config.cancelApprovalThreshold || overLimit)) {
             await ServicoContabilidadeGeral.createRequest({
                 kind: 'reversal', targetId: `payment:${paymentId}`, amountMinor: Math.round(payment.amount * 100),
                 description: `Anulação do recibo ${receiptLabel(payment) || paymentId} de ${payment.clientName}${overLimit ? ` (${limitPlan!.evaluation.reasons[0]})` : ''}`, reason: text,
@@ -401,7 +404,8 @@ export class ServicoPagamentos {
         if (!can(actor, 'pagamentos.anular_pagamento')) throw new Error('Sem permissão para anular pagamentos.');
         const batch = await db.get<ImportBatch>('SELECT * FROM payment_import_batches WHERE id = ?', [batchId]);
         if (!batch || batch.status !== 'active') throw new Error('O lote não existe ou já foi anulado.');
-        ServicoControloAcesso.verificarSegregacaoQuatroOlhos('anular_pagamento', actor as any, { processadoPorId: batch.createdById || undefined });
+        if (!(await actorHasFullAuthority(actor.id)))
+            ServicoControloAcesso.verificarSegregacaoQuatroOlhos('anular_pagamento', actor as any, { processadoPorId: batch.createdById || undefined });
         const payments = (await this.listPayments()).filter(item => item.batchId === batchId && item.status !== 'cancelled')
             .sort((a, b) => String(b.registeredAt || '').localeCompare(String(a.registeredAt || '')));
         const now = new Date().toISOString();

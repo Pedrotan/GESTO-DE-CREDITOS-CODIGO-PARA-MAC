@@ -403,6 +403,14 @@ test('H · Reestruturação: novo plano só depois de aprovado por outra pessoa;
         const requestId = await M.ServicoCarteira.requestRestructure({ credit: target, plan: proposal.plan, replacedIds: proposal.replacedIds, params: { months: 12 }, reason: 'Perda de rendimento comprovada; o cliente propõe pagar em 12 meses', actor: ADMIN });
         assert.equal((await portfolio(M)).rows.find(item => item.id === 'CR-REESTRUTURAR').stage, 'em_atraso', 'pendente: nada muda antes da aprovação');
         await assert.rejects(M.ServicoCarteira.decideRestructure(requestId, true, 'Aprovo o plano proposto pelo próprio pedido', ADMIN), /Quem pediu a reestruturação não a pode aprovar/);
+        // O Super Administrador tem autoridade total: a base aceita que decida um pedido feito por si.
+        const now = new Date().toISOString();
+        database.prepare(`INSERT INTO users (id, name, email, password, role, createdAt) VALUES ('u-sa', 'Super Admin', 'sa@example.invalid', 'x', 'super_admin', ?)`).run(now);
+        assert.throws(() => database.prepare(`UPDATE credit_restructurings SET status = 'approved', decidedBy = ? WHERE id = ?`).run(ADMIN.id, requestId), /outra pessoa/);
+        database.prepare(`INSERT INTO credit_restructurings (id, creditId, kind, reason, status, originalPlan, newPlan, requestedBy, requestedByName, requestedAt)
+            VALUES ('R-SA', 'CR-X', 'restructure', 'Pedido do Super Administrador', 'pending', '[]', '[]', 'u-sa', 'Super Admin', ?)`).run(now);
+        database.prepare(`UPDATE credit_restructurings SET status = 'approved', decidedBy = 'u-sa', decidedByName = 'Super Admin', decidedAt = ? WHERE id = 'R-SA'`).run(now);
+        assert.equal(database.prepare(`SELECT status FROM credit_restructurings WHERE id = 'R-SA'`).get().status, 'approved');
         await M.ServicoCarteira.decideRestructure(requestId, true, 'Plano sustentável face ao novo rendimento do cliente', { id: 'u-dir', name: 'Diogo Diretor', role: 'credit_director' });
         const after = (await portfolio(M)).rows.find(item => item.id === 'CR-REESTRUTURAR');
         assert.equal(after.stage, 'reestruturado');

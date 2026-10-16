@@ -65,7 +65,8 @@ export function PedidosAprovacao({ data }: { data: ContabilidadeData }) {
             </div>
             <div className="space-y-3">
                 {rows.map(request => {
-                    const canDecide = admin && request.status === 'pending' && request.requestedById !== user?.id;
+                    const fullAuthority = user?.role === 'super_admin' || Boolean((user as any)?.isOwner);
+                    const canDecide = admin && request.status === 'pending' && (request.requestedById !== user?.id || fullAuthority);
                     return (
                         <div key={request.id} className="rounded-xl border bg-card p-4">
                             <div className="flex flex-wrap items-start justify-between gap-2">
@@ -90,7 +91,7 @@ export function PedidosAprovacao({ data }: { data: ContabilidadeData }) {
                                     </div>
                                 </div>
                             )}
-                            {request.status === 'pending' && request.requestedById === user?.id && <p className="mt-2 text-xs text-muted-foreground">Aguarda a decisão de outro administrador.</p>}
+                            {request.status === 'pending' && request.requestedById === user?.id && !canDecide && <p className="mt-2 text-xs text-muted-foreground">Aguarda a decisão de outro administrador.</p>}
                         </div>
                     );
                 })}
