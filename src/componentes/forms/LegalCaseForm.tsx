@@ -59,26 +59,28 @@ interface LegalCaseFormProps {
     credits: Credit[];
     onCancel: () => void;
     initialData?: LegalCase;
+    /** Valores sugeridos para um novo processo (ex.: crédito com +90 dias de atraso). */
+    prefill?: Partial<Pick<LegalCase, 'clientId' | 'creditId' | 'priority' | 'debtAmount' | 'stage'>>;
 }
 
-export function LegalCaseForm({ onSubmit, clients, credits, onCancel, initialData }: LegalCaseFormProps) {
+export function LegalCaseForm({ onSubmit, clients, credits, onCancel, initialData, prefill }: LegalCaseFormProps) {
     const [openClient, setOpenClient] = useState(false);
     const [openCredit, setOpenCredit] = useState(false);
 
     const form = useForm<LegalCaseFormValues>({
         resolver: zodResolver(legalCaseSchema),
         defaultValues: {
-            clientId: initialData?.clientId || '',
-            creditId: initialData?.creditId || '',
-            stage: initialData?.stage || 'interpellated',
-            priority: initialData?.priority || 'normal',
-            debtAmount: initialData?.debtAmount || 0,
+            clientId: initialData?.clientId || prefill?.clientId || '',
+            creditId: initialData?.creditId || prefill?.creditId || '',
+            stage: initialData?.stage || prefill?.stage || 'interpellated',
+            priority: initialData?.priority || prefill?.priority || 'normal',
+            debtAmount: initialData?.debtAmount || prefill?.debtAmount || 0,
             lastAction: initialData?.lastAction || '',
             notes: initialData?.notes || '',
         },
     });
 
-    const draftKey = initialData?.id ? `legal_case_edit_${initialData.id}` : 'legal_case_create';
+    const draftKey = initialData?.id ? `legal_case_edit_${initialData.id}` : prefill?.creditId ? `legal_case_create_${prefill.creditId}` : 'legal_case_create';
     const { clearDraft } = useFormDraft<LegalCaseFormValues>(draftKey, form);
 
     const handleFormSubmit = (data: LegalCaseFormValues) => {
@@ -95,7 +97,9 @@ export function LegalCaseForm({ onSubmit, clients, credits, onCancel, initialDat
         if (selectedCreditId && !initialData) {
             const credit = credits.find(c => c.id === selectedCreditId);
             if (credit) {
-                form.setValue('debtAmount', credit.currentBalance);
+                // Dívida total (capital + juros + mora); recua para o capital se não existir
+                const total = Number(credit.totalDue || 0);
+                form.setValue('debtAmount', total > 0 ? Math.max(total, Number(credit.currentBalance || 0)) : credit.currentBalance);
             }
         }
     }, [selectedCreditId, credits, form, initialData]);

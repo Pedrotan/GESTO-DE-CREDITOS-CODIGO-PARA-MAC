@@ -1,5 +1,6 @@
 import { Client, Credit, Payment } from '@/tipos/credito';
 import { differenceInMonths } from 'date-fns';
+import { daysPastDue } from './risco-carteira.ts';
 
 export interface ClientScore {
     score: number; // 0-1000
@@ -10,7 +11,11 @@ export interface ClientScore {
         activeCredits: number; // 0-200
         borrowedAmount: number; // 0-100
         tenure: number; // 0-100
+        /** Penalização pela situação actual de atraso (0 ou negativa). */
+        delinquencyPenalty: number;
     };
+    /** Fiabilidade do score: 'baixa' quando há pouco histórico de pagamentos. */
+    confidence: 'alta' | 'média' | 'baixa';
     metrics: {
         totalCredits: number;
         totalContracts: number;
@@ -20,7 +25,18 @@ export interface ClientScore {
         activeCreditsCount: number;
         totalBorrowed: number;
         monthsAsClient: number;
+        /** Maior atraso actual (dias) entre os créditos em aberto. */
+        maxDaysOverdue: number;
     };
+}
+
+/** Penalização aplicada ao score conforme o atraso actual. */
+export function delinquencyPenaltyFor(maxDaysOverdue: number, hasDefault: boolean): number {
+    if (hasDefault || maxDaysOverdue > 90) return -450;
+    if (maxDaysOverdue > 60) return -300;
+    if (maxDaysOverdue > 30) return -200;
+    if (maxDaysOverdue > 0) return -100;
+    return 0;
 }
 
 /**
@@ -32,16 +48,18 @@ export function calculateClientScore(
     payments: Payment[]
 ): ClientScore {
     // Filtrar créditos e pagamentos deste cliente
-    const clientCredits = credits.filter(c => c.clientId === client.id);
+    const clientCredits = credits.filter(c => c.clientId === client.id && !c.deletedAt);
+    const clientCreditIds = new Set(clientCredits.map(c => c.id));
+    // Pagamentos anulados não contam para o histórico
     const clientPayments = payments.filter(p =>
-        clientCredits.some(c => c.id === p.creditId)
+        clientCreditIds.has(p.creditId) && p.status !== 'cancelled' && !(p as any).deletedAt
     );
 
     // Métricas básicas
     const totalCredits = clientCredits.length;
     const totalContracts = clientCredits.length; // Assumindo 1 contrato por crédito
     const activeCreditsCount = clientCredits.filter(c =>
-        c.status === 'active' || c.status === 'overdue' || c.status === 'renegotiated'
+        c.status === 'active' || c.status === 'overdue' || c.status === 'renegotiated' || c.status === 'defaulted'
     ).length;
     const totalBorrowed = clientCredits.reduce((sum, c) => sum + c.principalAmount, 0);
 
@@ -54,12 +72,11 @@ export function calculateClientScore(
     let latePayments = 0;
 
     clientPayments.forEach(payment => {
-        const credit = clientCredits.find(c => c.id === payment.creditId);
-        if (!credit) return;
-
         // Verificar se o pagamento foi feito antes ou depois da data de vencimento
         const paymentDate = new Date(payment.paymentDate);
-        const dueDate = new Date(payment.dueDate);
+        const dueDate = new Date(payment.dueDate as any);
+        // Sem data de vencimento válida não há evidência de atraso: fica fora da pontualidade
+        if (isNaN(paymentDate.getTime()) || isNaN(dueDate.getTime())) return;
 
         if (paymentDate <= dueDate) {
             paymentsOnTime++;
@@ -86,12 +103,20 @@ export function calculateClientScore(
     // Clientes com mais de 12 meses ganham pontuação máxima
     const tenureScore = monthsAsClient >= 12 ? 100 : monthsAsClient * 8.33;
 
+    // 5. Situação actual: atraso em curso penaliza o score (um cliente em
+    // incumprimento não pode aparecer como "Bom" só por falta de histórico)
+    const today = new Date();
+    const maxDaysOverdue = clientCredits.reduce((max, c) => Math.max(max, daysPastDue(c as any, today)), 0);
+    const hasDefault = clientCredits.some(c => c.status === 'defaulted' && Number(c.currentBalance || 0) > 0.01);
+    const delinquencyPenalty = delinquencyPenaltyFor(maxDaysOverdue, hasDefault);
+
     // Score total
     const totalScore = Math.round(
         paymentHistoryScore +
         activeCreditsScore +
         borrowedAmountScore +
-        tenureScore
+        tenureScore +
+        delinquencyPenalty
     );
 
     // Garantir que o score está entre 0-1000
@@ -127,7 +152,9 @@ export function calculateClientScore(
             activeCredits: Math.round(activeCreditsScore),
             borrowedAmount: Math.round(borrowedAmountScore),
             tenure: Math.round(tenureScore),
+            delinquencyPenalty,
         },
+        confidence: totalPayments >= 6 ? 'alta' : totalPayments >= 2 ? 'média' : 'baixa',
         metrics: {
             totalCredits,
             totalContracts,
@@ -137,6 +164,7 @@ export function calculateClientScore(
             activeCreditsCount,
             totalBorrowed,
             monthsAsClient,
+            maxDaysOverdue,
         },
     };
 }

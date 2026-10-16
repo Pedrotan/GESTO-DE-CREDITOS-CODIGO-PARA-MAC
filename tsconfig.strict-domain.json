@@ -22,6 +22,7 @@
     "src/bibliotecas/plano-pagamento.ts",
     "src/bibliotecas/fecho-mes.ts",
     "src/bibliotecas/horario-acesso.ts",
-    "src/bibliotecas/alertas-auditoria.ts"
+    "src/bibliotecas/alertas-auditoria.ts",
+    "src/bibliotecas/risco-carteira.ts"
   ]
 }

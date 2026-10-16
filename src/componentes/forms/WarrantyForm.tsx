@@ -60,18 +60,20 @@ interface WarrantyFormProps {
     credits: Credit[];
     onCancel: () => void;
     initialData?: Warranty;
+    /** Valores sugeridos para um novo registo (ex.: crédito sem garantia). */
+    prefill?: Partial<Pick<Warranty, 'clientId' | 'creditId' | 'type'>>;
 }
 
-export function WarrantyForm({ onSubmit, clients, credits, onCancel, initialData }: WarrantyFormProps) {
+export function WarrantyForm({ onSubmit, clients, credits, onCancel, initialData, prefill }: WarrantyFormProps) {
     const [openClient, setOpenClient] = useState(false);
     const [openCredit, setOpenCredit] = useState(false);
 
     const form = useForm<WarrantyFormValues>({
         resolver: zodResolver(warrantySchema),
         defaultValues: {
-            clientId: initialData?.clientId || '',
-            creditId: initialData?.creditId || undefined,
-            type: initialData?.type || 'Veículo',
+            clientId: initialData?.clientId || prefill?.clientId || '',
+            creditId: initialData?.creditId || prefill?.creditId || undefined,
+            type: initialData?.type || prefill?.type || 'Veículo',
             description: initialData?.description || '',
             marketValue: initialData?.marketValue || 0,
             status: initialData?.status || 'active',
@@ -80,7 +82,7 @@ export function WarrantyForm({ onSubmit, clients, credits, onCancel, initialData
         },
     });
 
-    const draftKey = initialData?.id ? `warranty_edit_${initialData.id}` : 'warranty_create';
+    const draftKey = initialData?.id ? `warranty_edit_${initialData.id}` : prefill?.creditId ? `warranty_create_${prefill.creditId}` : 'warranty_create';
     const { clearDraft } = useFormDraft<WarrantyFormValues>(draftKey, form);
 
     const handleFormSubmit = (data: WarrantyFormValues) => {

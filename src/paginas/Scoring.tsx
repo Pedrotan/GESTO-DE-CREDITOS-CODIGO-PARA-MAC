@@ -54,6 +54,12 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { format } from 'date-fns';
 import { formatCurrency } from '@/bibliotecas/formatters';
 import { applyBranding, fitPdfText, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from '@/bibliotecas/pdf';
+import { exportToExcel } from '@/bibliotecas/ExcelHelper';
+import { cn } from '@/bibliotecas/utils';
+import {
+    computePortfolioRisk, paymentTrend, agingBucketFor, type ClientRisk, type PaymentTrend,
+} from '@/bibliotecas/risco-carteira';
+import { Layers, Siren, FileSpreadsheet, Scale } from 'lucide-react';
 
 const RATING_COLORS = {
     'Excelente': '#22c55e',
@@ -76,37 +82,57 @@ interface ClientWithScore {
     name: string;
     nif: string;
     score: ClientScore;
-    trend: 'up' | 'down' | 'stable';
+    trend: PaymentTrend;
+    /** Exposição actual, atraso e cobertura (ausente se o cliente não tiver créditos em aberto). */
+    risk?: ClientRisk;
 }
 
+/** Escalões condensados para a matriz Rating × Atraso. */
+const MATRIX_COLUMNS = [
+    { key: 'em_dia', label: 'Em dia', match: (d: number) => d === 0 },
+    { key: '1_30', label: '1–30 d', match: (d: number) => d >= 1 && d <= 30 },
+    { key: '31_90', label: '31–90 d', match: (d: number) => d >= 31 && d <= 90 },
+    { key: '90', label: '+90 d', match: (d: number) => d > 90 },
+];
+const RATINGS: ClientScore['rating'][] = ['Excelente', 'Bom', 'Regular', 'Fraco', 'Muito Fraco'];
+
 export default function Scoring() {
-    const { clients, credits, payments } = useData();
+    const { clients, credits, payments, warranties, legalCases } = useData();
     const [searchTerm, setSearchTerm] = useState('');
     const [ratingFilter, setRatingFilter] = useState<string>('all');
-    const [sortBy, setSortBy] = useState<'score' | 'name'>('score');
+    const [sortBy, setSortBy] = useState<'score' | 'name' | 'exposure' | 'dpd'>('score');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
     const [selectedClient, setSelectedClient] = useState<ClientWithScore | null>(null);
 
+    // Risco da carteira (exposição, atraso, garantias, concentração)
+    const portfolio = useMemo(
+        () => computePortfolioRisk({ credits: credits as any[], warranties: warranties as any[], legalCases: legalCases as any[], clients: clients as any[] }),
+        [credits, warranties, legalCases, clients]
+    );
+
     // Calcular scores para todos os clientes
     const clientsWithScores = useMemo<ClientWithScore[]>(() => {
+        const today = new Date();
+        const creditIdsByClient = new Map<string, Set<string>>();
+        credits.forEach(c => {
+            if (!creditIdsByClient.has(c.clientId)) creditIdsByClient.set(c.clientId, new Set());
+            creditIdsByClient.get(c.clientId)!.add(c.id);
+        });
         return clients.map(client => {
             const score = calculateClientScore(client, credits, payments);
-
-            // Simular tendência (em produção, comparar com score anterior)
-            const trend: 'up' | 'down' | 'stable' =
-                score.score >= 700 ? 'up' :
-                    score.score <= 400 ? 'down' :
-                        'stable';
+            // Tendência real: pontualidade dos últimos 90 dias vs 90 dias anteriores
+            const trend = paymentTrend(creditIdsByClient.get(client.id) || new Set(), payments as any[], today);
 
             return {
                 id: client.id,
                 name: client.name,
                 nif: client.nif,
                 score,
-                trend
+                trend,
+                risk: portfolio.perClient.get(client.id),
             };
         });
-    }, [clients, credits, payments]);
+    }, [clients, credits, payments, portfolio]);
 
     // Filtrar e ordenar
     const filteredClients = useMemo(() => {
@@ -125,8 +151,16 @@ export default function Scoring() {
             filtered = filtered.filter(c => c.score.rating === ratingFilter);
         }
 
-        // Ordenação
-        filtered.sort((a, b) => {
+        // Ordenação (cópia: não altera a lista memorizada)
+        filtered = [...filtered].sort((a, b) => {
+            if (sortBy === 'exposure') {
+                const diff = (b.risk?.exposure || 0) - (a.risk?.exposure || 0);
+                return sortOrder === 'desc' ? diff : -diff;
+            }
+            if (sortBy === 'dpd') {
+                const diff = (b.risk?.maxDpd || 0) - (a.risk?.maxDpd || 0);
+                return sortOrder === 'desc' ? diff : -diff;
+            }
             if (sortBy === 'score') {
                 return sortOrder === 'desc'
                     ? b.score.score - a.score.score
@@ -186,11 +220,64 @@ export default function Scoring() {
         }));
 
     // Dados para gráfico de barras (top 10 clientes)
-    const topClientsData = filteredClients.slice(0, 10).map(c => ({
+    const topClientsData = [...clientsWithScores].sort((a, b) => b.score.score - a.score.score).slice(0, 10).map(c => ({
         name: c.name.split(' ')[0], // Primeiro nome apenas
         score: c.score.score,
         fill: RATING_COLORS[c.score.rating]
     }));
+
+    // Matriz Rating × Atraso (nº de clientes e exposição) — só clientes com dívida em aberto
+    const riskMatrix = useMemo(() => RATINGS.map(rating => ({
+        rating,
+        cells: MATRIX_COLUMNS.map(col => {
+            const list = clientsWithScores.filter(c => c.risk && c.score.rating === rating && col.match(c.risk.maxDpd));
+            return { key: col.key, count: list.length, exposure: list.reduce((s, c) => s + (c.risk?.exposure || 0), 0) };
+        }),
+    })), [clientsWithScores]);
+
+    // Sinais de alerta precoce por cliente (só quem tem exposição)
+    const earlyWarnings = useMemo(() => {
+        return clientsWithScores
+            .filter(c => c.risk && c.risk.exposure > 0)
+            .map(c => {
+                const r = c.risk!;
+                const signals: { label: string; level: 'high' | 'medium' | 'low' }[] = [];
+                if (r.maxDpd > 30) signals.push({ label: `${r.maxDpd} dias em atraso`, level: 'high' });
+                else if (r.maxDpd > 0) signals.push({ label: `${r.maxDpd} dias em atraso`, level: 'medium' });
+                if (r.overLimit) signals.push({ label: 'Acima do plafond', level: 'high' });
+                if (c.trend === 'down') signals.push({ label: 'Pontualidade a piorar', level: 'medium' });
+                if (c.score.score < 400) signals.push({ label: `Score ${c.score.score}`, level: 'high' });
+                if (r.coverage < 0.3 && r.maxDpd > 0) signals.push({ label: 'Garantia insuficiente', level: 'medium' });
+                if (r.openCredits > 2) signals.push({ label: `${r.openCredits} créditos em simultâneo`, level: 'low' });
+                if (c.score.confidence === 'baixa') signals.push({ label: 'Histórico insuficiente', level: 'low' });
+                if (r.share > 0.2 && portfolio.perClient.size > 1) signals.push({ label: `${(r.share * 100).toFixed(0)}% da carteira`, level: 'medium' });
+                const weight = signals.reduce((s, x) => s + (x.level === 'high' ? 3 : x.level === 'medium' ? 2 : 1), 0);
+                return { client: c, signals, weight };
+            })
+            .filter(x => x.signals.some(s => s.level !== 'low'))
+            .sort((a, b) => b.weight - a.weight || (b.client.risk?.exposure || 0) - (a.client.risk?.exposure || 0));
+    }, [clientsWithScores, portfolio]);
+
+    const agingChartData = portfolio.aging.map(a => ({ name: a.label, exposure: a.exposure, count: a.count, fill: a.color }));
+
+    const handleExportExcel = () => {
+        exportToExcel(filteredClients.map((c, i) => ({
+            '#': i + 1,
+            'Cliente': c.name,
+            'NIF': c.nif,
+            'Score': c.score.score,
+            'Rating': c.score.rating,
+            'Confiança': c.score.confidence,
+            'Penalização atraso': c.score.breakdown.delinquencyPenalty,
+            'Exposição (Kz)': Math.round((c.risk?.exposure || 0) * 100) / 100,
+            'Dias em atraso': c.risk?.maxDpd || 0,
+            'Cobertura garantias': c.risk ? `${(c.risk.coverage * 100).toFixed(0)}%` : '',
+            'Peso na carteira': c.risk ? `${(c.risk.share * 100).toFixed(1)}%` : '',
+            'Pagamentos em dia': c.score.metrics.paymentsOnTime,
+            'Pagamentos atrasados': c.score.metrics.latePayments,
+            'Tendência': c.trend === 'up' ? 'A melhorar' : c.trend === 'down' ? 'A piorar' : c.trend === 'stable' ? 'Estável' : 'Sem histórico',
+        })), `ranking_risco_${format(new Date(), 'yyyy-MM-dd')}`);
+    };
 
     const selectedClientAnalysis = useMemo(() => {
         if (!selectedClient) return null;
@@ -212,6 +299,8 @@ export default function Scoring() {
 
         const hardRules = [
             { name: 'Cliente ativo', passed: client?.status === 'active' },
+            { name: 'Sem atraso em curso', passed: (selectedClient.score.metrics.maxDaysOverdue || 0) === 0 },
+            { name: 'Exposição dentro do plafond', passed: !selectedClient.risk?.overLimit },
             { name: 'Sem atraso recorrente', passed: selectedClient.score.metrics.latePayments <= 1 || punctuality >= 0.8 },
             { name: 'Exposição simultânea aceitável', passed: activeExposure <= 2 },
             { name: 'Score mínimo operacional', passed: selectedClient.score.score >= 400 }
@@ -237,7 +326,7 @@ export default function Scoring() {
         );
     };
 
-    const getTrendIcon = (trend: 'up' | 'down' | 'stable') => {
+    const getTrendIcon = (trend: PaymentTrend) => {
         switch (trend) {
             case 'up':
                 return <TrendingUp className="w-4 h-4 text-green-600" />;
@@ -245,6 +334,8 @@ export default function Scoring() {
                 return <TrendingDown className="w-4 h-4 text-red-600" />;
             case 'stable':
                 return <Minus className="w-4 h-4 text-gray-600" />;
+            default:
+                return <Minus className="w-4 h-4 text-gray-300" />;
         }
     };
 
@@ -398,7 +489,8 @@ export default function Scoring() {
             ['Histórico de Pagamentos', client.score.breakdown.paymentHistory, '600'],
             ['Créditos Ativos', client.score.breakdown.activeCredits, '200'],
             ['Valor Emprestado', client.score.breakdown.borrowedAmount, '100'],
-            ['Antiguidade', client.score.breakdown.tenure, '100']
+            ['Antiguidade', client.score.breakdown.tenure, '100'],
+            ['Penalização por atraso actual', client.score.breakdown.delinquencyPenalty, '0']
         ];
 
         autoTable(doc, {
@@ -426,6 +518,9 @@ export default function Scoring() {
             ['Pagamentos em Dia', client.score.metrics.paymentsOnTime],
             ['Pagamentos Atrasados', client.score.metrics.latePayments],
             ['Total Emprestado', formatCurrency(client.score.metrics.totalBorrowed)],
+            ['Exposição Actual', formatCurrency(client.risk?.exposure || 0)],
+            ['Atraso Actual (dias)', client.score.metrics.maxDaysOverdue || 0],
+            ['Cobertura por Garantias', `${Math.round((client.risk?.coverage || 0) * 100)}%`],
             ['Taxa de Pontualidade', `${Math.round((client.score.metrics.paymentsOnTime / client.score.metrics.totalPayments) * 100 || 0)}%`]
         ];
 
@@ -469,10 +564,16 @@ export default function Scoring() {
                         <h1 className="text-3xl font-bold text-slate-800">Análise de Risco (Scoring)</h1>
                         <p className="text-slate-600 mt-1">Inteligência de crédito e pontuação preditiva</p>
                     </div>
-                    <Button variant="outline" className="gap-2" onClick={handleExportPDF}>
-                        <Download className="w-4 h-4" />
-                        Exportar Relatório
-                    </Button>
+                    <div className="flex flex-wrap gap-2">
+                        <Button variant="outline" className="gap-2" onClick={handleExportExcel}>
+                            <FileSpreadsheet className="w-4 h-4" />
+                            Excel
+                        </Button>
+                        <Button variant="outline" className="gap-2" onClick={handleExportPDF}>
+                            <Download className="w-4 h-4" />
+                            Exportar Relatório
+                        </Button>
+                    </div>
                 </div>
 
                 {/* Estatísticas Principais Estilo Pastel Arredondado */}
@@ -497,7 +598,7 @@ export default function Scoring() {
                         </div>
 
                         <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate">
-                            Avaliados no motor de risco
+                            {portfolio.perClient.size} com dívida em aberto · {formatCurrency(portfolio.totalExposure)}
                         </p>
                     </div>
 
@@ -585,7 +686,185 @@ export default function Scoring() {
                             <BarChartIcon className="w-4 h-4" />
                             Ranking
                         </TabsTrigger>
+                        <TabsTrigger value="portfolio" className="gap-2">
+                            <Layers className="w-4 h-4" />
+                            Carteira & Concentração
+                        </TabsTrigger>
+                        <TabsTrigger value="warnings" className="gap-2">
+                            <Siren className="w-4 h-4" />
+                            Alertas Precoces
+                            {earlyWarnings.length > 0 && <span className="ml-1 rounded-full bg-rose-600 text-white text-[10px] font-bold px-1.5">{earlyWarnings.length}</span>}
+                        </TabsTrigger>
                     </TabsList>
+
+                    {/* Carteira & Concentração */}
+                    <TabsContent value="portfolio" className="space-y-4">
+                        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                            {[
+                                { label: 'PAR 30', value: `${(portfolio.par30 * 100).toFixed(1)}%`, hint: formatCurrency(portfolio.par30Amount), bad: portfolio.par30 >= 0.1 },
+                                { label: 'NPL (+90 dias)', value: `${(portfolio.par90 * 100).toFixed(1)}%`, hint: formatCurrency(portfolio.nplAmount), bad: portfolio.par90 >= 0.07 },
+                                { label: 'Provisões estimadas', value: formatCurrency(portfolio.provisionNet), hint: `após garantias · bruto ${formatCurrency(portfolio.provisionGross)}`, bad: false },
+                                { label: 'Concentração', value: `${(portfolio.concentration.top5Share * 100).toFixed(1)}%`, hint: `top 5 · HHI ${(portfolio.concentration.hhi * 10000).toFixed(0)}`, bad: portfolio.concentration.top1Share > 0.2 && portfolio.perClient.size > 1 },
+                            ].map(k => (
+                                <Card key={k.label} className={cn(k.bad && 'border-rose-300 dark:border-rose-500/40')}>
+                                    <CardContent className="p-4">
+                                        <p className="text-[11px] font-black uppercase tracking-wider text-muted-foreground">{k.label}</p>
+                                        <p className={cn('text-2xl font-black', k.bad && 'text-rose-600')}>{k.value}</p>
+                                        <p className="text-xs text-muted-foreground truncate">{k.hint}</p>
+                                    </CardContent>
+                                </Card>
+                            ))}
+                        </div>
+
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Envelhecimento da Dívida</CardTitle>
+                                    <CardDescription>Exposição por escalão de atraso</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <ResponsiveContainer width="100%" height={280}>
+                                        <BarChart data={agingChartData}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} />
+                                            <XAxis dataKey="name" fontSize={11} />
+                                            <YAxis fontSize={11} tickFormatter={(v: number) => v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1e3 ? `${(v / 1e3).toFixed(0)}K` : String(v)} />
+                                            <Tooltip formatter={(v: number, _n: string, item: any) => [`${formatCurrency(v)} · ${item?.payload?.count || 0} crédito(s)`, 'Exposição']} />
+                                            <Bar dataKey="exposure" radius={[6, 6, 0, 0]}>
+                                                {agingChartData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                                            </Bar>
+                                        </BarChart>
+                                    </ResponsiveContainer>
+                                </CardContent>
+                            </Card>
+
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Matriz Rating × Atraso</CardTitle>
+                                    <CardDescription>Clientes com dívida em aberto — os cantos inferiores direitos são o risco mais grave</CardDescription>
+                                </CardHeader>
+                                <CardContent className="overflow-x-auto">
+                                    <table className="w-full text-xs">
+                                        <thead>
+                                            <tr>
+                                                <th className="text-left p-1.5 text-muted-foreground font-semibold">Rating</th>
+                                                {MATRIX_COLUMNS.map(col => <th key={col.key} className="p-1.5 text-muted-foreground font-semibold">{col.label}</th>)}
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {riskMatrix.map((row, ri) => (
+                                                <tr key={row.rating}>
+                                                    <td className="p-1.5 font-semibold" style={{ color: RATING_COLORS[row.rating] }}>{row.rating}</td>
+                                                    {row.cells.map((cell, ci) => {
+                                                        const severity = ri + ci * 1.5; // pior rating e maior atraso = mais grave
+                                                        const bg = cell.count === 0 ? 'bg-muted/30 text-muted-foreground' : severity >= 6 ? 'bg-rose-500 text-white' : severity >= 4 ? 'bg-orange-300 text-orange-950' : severity >= 2.5 ? 'bg-amber-200 text-amber-950' : 'bg-emerald-200 text-emerald-950';
+                                                        return (
+                                                            <td key={cell.key} className="p-1">
+                                                                <div className={cn('rounded-md p-2 text-center', bg)} title={formatCurrency(cell.exposure)}>
+                                                                    <p className="font-black text-sm">{cell.count}</p>
+                                                                    {cell.count > 0 && <p className="text-[10px] opacity-90 truncate">{formatCurrency(cell.exposure)}</p>}
+                                                                </div>
+                                                            </td>
+                                                        );
+                                                    })}
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </CardContent>
+                            </Card>
+                        </div>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Maiores Exposições</CardTitle>
+                                <CardDescription>10 maiores devedores — peso na carteira, atraso e cobertura por garantias</CardDescription>
+                            </CardHeader>
+                            <CardContent className="overflow-x-auto">
+                                {portfolio.concentration.top.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground text-center py-6">Sem créditos em aberto.</p>
+                                ) : (
+                                    <table className="w-full text-sm">
+                                        <thead>
+                                            <tr className="text-xs text-muted-foreground border-b">
+                                                <th className="text-left p-2">Cliente</th>
+                                                <th className="text-right p-2">Exposição</th>
+                                                <th className="text-left p-2 w-[160px]">Peso</th>
+                                                <th className="text-right p-2">Atraso</th>
+                                                <th className="text-right p-2">Cobertura</th>
+                                                <th className="text-left p-2">Estado</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {portfolio.concentration.top.map(r => {
+                                                const scored = clientsWithScores.find(c => c.id === r.clientId);
+                                                return (
+                                                    <tr key={r.clientId} className="border-b last:border-0 hover:bg-muted/40 cursor-pointer" onClick={() => scored && setSelectedClient(scored)}>
+                                                        <td className="p-2 font-medium">{r.name}</td>
+                                                        <td className="p-2 text-right font-mono">{formatCurrency(r.exposure)}</td>
+                                                        <td className="p-2">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="h-1.5 flex-1 rounded-full bg-muted overflow-hidden"><div className="h-full bg-indigo-500" style={{ width: `${r.share * 100}%` }} /></div>
+                                                                <span className="text-xs tabular-nums w-10 text-right">{(r.share * 100).toFixed(1)}%</span>
+                                                            </div>
+                                                        </td>
+                                                        <td className="p-2 text-right" style={{ color: agingBucketFor(r.maxDpd).color }}>{r.maxDpd > 0 ? `${r.maxDpd} d` : 'em dia'}</td>
+                                                        <td className="p-2 text-right">{(r.coverage * 100).toFixed(0)}%</td>
+                                                        <td className="p-2 text-xs">
+                                                            {r.hasLegalCase && <Badge variant="destructive" className="text-[9px] mr-1">Contencioso</Badge>}
+                                                            {r.overLimit && <Badge variant="warning" className="text-[9px] mr-1">Acima do plafond</Badge>}
+                                                            {scored && <Badge className={cn('text-[9px]', getRatingColor(scored.score.rating))}>{scored.score.rating}</Badge>}
+                                                        </td>
+                                                    </tr>
+                                                );
+                                            })}
+                                        </tbody>
+                                    </table>
+                                )}
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
+
+                    {/* Alertas Precoces */}
+                    <TabsContent value="warnings" className="space-y-4">
+                        <Card>
+                            <CardHeader>
+                                <CardTitle className="flex items-center gap-2"><Siren className="w-5 h-5 text-rose-600" /> Sistema de Alerta Precoce</CardTitle>
+                                <CardDescription>Clientes com sinais de deterioração antes de entrarem em incumprimento — actue primeiro nos de maior peso.</CardDescription>
+                            </CardHeader>
+                            <CardContent className="space-y-2">
+                                {earlyWarnings.length === 0 ? (
+                                    <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 dark:bg-emerald-500/10 dark:border-emerald-500/20 p-4 text-sm text-emerald-800 dark:text-emerald-200">
+                                        <CheckCircle className="w-4 h-4" /> Nenhum cliente com sinais de alerta relevantes.
+                                    </div>
+                                ) : earlyWarnings.map(({ client, signals }) => (
+                                    <div key={client.id} className="flex flex-col md:flex-row md:items-center justify-between gap-3 rounded-lg border p-3 hover:bg-muted/40">
+                                        <div className="min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <span className="font-semibold">{client.name}</span>
+                                                <Badge className={getRatingColor(client.score.rating)}>{client.score.score} · {client.score.rating}</Badge>
+                                                {client.risk?.hasLegalCase && <Badge variant="destructive" className="text-[9px] gap-1"><Scale className="w-3 h-3" />Contencioso</Badge>}
+                                            </div>
+                                            <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                                {signals.map(s => (
+                                                    <span key={s.label} className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold',
+                                                        s.level === 'high' ? 'bg-rose-100 text-rose-800 dark:bg-rose-500/20 dark:text-rose-200' :
+                                                            s.level === 'medium' ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/20 dark:text-amber-200' :
+                                                                'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300')}>{s.label}</span>
+                                                ))}
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-3 shrink-0">
+                                            <div className="text-right">
+                                                <p className="font-bold font-mono text-sm">{formatCurrency(client.risk?.exposure || 0)}</p>
+                                                <p className="text-[10px] text-muted-foreground">exposição</p>
+                                            </div>
+                                            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setSelectedClient(client)}><Eye className="w-4 h-4" /> Analisar</Button>
+                                        </div>
+                                    </div>
+                                ))}
+                            </CardContent>
+                        </Card>
+                    </TabsContent>
                     {/* Visão Geral */}
                     <TabsContent value="overview" className="space-y-4">
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -688,6 +967,8 @@ export default function Scoring() {
                                                 <SelectContent>
                                                     <SelectItem value="score">Score</SelectItem>
                                                     <SelectItem value="name">Nome</SelectItem>
+                                                    <SelectItem value="exposure">Exposição</SelectItem>
+                                                    <SelectItem value="dpd">Dias em atraso</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                             <Button
@@ -726,9 +1007,20 @@ export default function Scoring() {
                                                     <div className="text-2xl font-bold text-slate-400 w-8">
                                                         #{index + 1}
                                                     </div>
-                                                    <div className="flex-1">
-                                                        <div className="font-semibold text-slate-800">{client.name}</div>
-                                                        <div className="text-sm text-slate-500">{client.nif}</div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="font-semibold text-slate-800 dark:text-slate-100">{client.name}</div>
+                                                        <div className="text-sm text-slate-500">
+                                                            {client.nif}
+                                                            {client.risk && (
+                                                                <span className="ml-2 text-xs">
+                                                                    · {formatCurrency(client.risk.exposure)}
+                                                                    {client.risk.maxDpd > 0
+                                                                        ? <span className={cn('ml-1 font-bold', client.risk.maxDpd > 30 ? 'text-rose-600' : 'text-amber-600')}>· {client.risk.maxDpd}d atraso</span>
+                                                                        : <span className="ml-1 text-emerald-600">· em dia</span>}
+                                                                </span>
+                                                            )}
+                                                            {client.score.confidence === 'baixa' && <span className="ml-2 text-[10px] rounded bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5">histórico insuficiente</span>}
+                                                        </div>
                                                     </div>
                                                 </div>
 
@@ -793,6 +1085,36 @@ export default function Scoring() {
                                     </div>
                                     <div className="text-slate-600 mb-3">Score de Crédito</div>
                                     {renderStars(selectedClient.score.stars)}
+                                </div>
+
+                                {/* Situação actual (atraso, exposição, garantias) */}
+                                <div className={cn('grid grid-cols-2 md:grid-cols-4 gap-3 rounded-lg border p-4',
+                                    (selectedClient.score.metrics.maxDaysOverdue || 0) > 30 ? 'border-rose-300 bg-rose-50/60 dark:bg-rose-500/10' : 'bg-slate-50/60 dark:bg-white/5')}>
+                                    <div>
+                                        <div className="text-xs text-slate-500">Exposição actual</div>
+                                        <div className="font-bold">{formatCurrency(selectedClient.risk?.exposure || 0)}</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-xs text-slate-500">Atraso actual</div>
+                                        <div className={cn('font-bold', (selectedClient.score.metrics.maxDaysOverdue || 0) > 0 && 'text-rose-600')}>
+                                            {(selectedClient.score.metrics.maxDaysOverdue || 0) > 0 ? `${selectedClient.score.metrics.maxDaysOverdue} dias` : 'Em dia'}
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <div className="text-xs text-slate-500">Cobertura por garantias</div>
+                                        <div className="font-bold">{Math.round((selectedClient.risk?.coverage || 0) * 100)}%</div>
+                                    </div>
+                                    <div>
+                                        <div className="text-xs text-slate-500">Penalização no score</div>
+                                        <div className={cn('font-bold', selectedClient.score.breakdown.delinquencyPenalty < 0 && 'text-rose-600')}>
+                                            {selectedClient.score.breakdown.delinquencyPenalty} pts
+                                        </div>
+                                    </div>
+                                    <div className="col-span-2 md:col-span-4 text-[11px] text-slate-500">
+                                        Fiabilidade do score: <b>{selectedClient.score.confidence}</b>
+                                        {selectedClient.score.confidence !== 'alta' && ' — poucos pagamentos registados; trate a pontuação como indicativa.'}
+                                        {selectedClient.risk?.hasLegalCase && <span className="ml-2 text-rose-600 font-semibold">· Tem processo de contencioso aberto</span>}
+                                    </div>
                                 </div>
 
                                 {/* Breakdown dos Fatores */}
@@ -885,7 +1207,7 @@ export default function Scoring() {
                                                 <div className="text-sm text-slate-600">Tendência</div>
                                                 <div className="text-xl font-bold flex items-center gap-2">
                                                     {getTrendIcon(selectedClient.trend)}
-                                                    {selectedClient.trend === 'up' ? 'Melhorando' : selectedClient.trend === 'down' ? 'Piorando' : 'Estável'}
+                                                    {selectedClient.trend === 'up' ? 'A melhorar' : selectedClient.trend === 'down' ? 'A piorar' : selectedClient.trend === 'stable' ? 'Estável' : 'Sem histórico'}
                                                 </div>
                                             </div>
                                         </div>

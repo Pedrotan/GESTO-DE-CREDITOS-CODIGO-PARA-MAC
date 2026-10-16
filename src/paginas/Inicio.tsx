@@ -60,6 +60,8 @@ import {
   PieChart as PieIcon
 } from 'lucide-react';
 import { LicenseRenewalModal } from '@/componentes/dashboard/LicenseRenewalModal';
+import { SaudeCarteira } from '@/componentes/dashboard/SaudeCarteira';
+import { computePortfolioRisk, isDisbursedCredit } from '@/bibliotecas/risco-carteira';
 import { subDays, subMonths, isAfter, isBefore, format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from 'date-fns';
 import { validateLicense, getMachineId } from '@/bibliotecas/licenciamento';
 import { useTangoAI } from '@/ganchos/usar-tango-ai';
@@ -83,11 +85,25 @@ import {
 } from 'recharts';
 
 export default function Dashboard() {
-  const { clients, credits, payments, contracts, companySettings } = useData();
+  const { clients, credits, payments: allPayments, contracts, companySettings, warranties, legalCases } = useData();
   const { user } = useAuth();
   // Fonte única (A2): a mesma carteira da página de Créditos decide que créditos estão em curso e em atraso.
   const carteira = useCarteira();
   const sharedBook = useMemo(() => new Map(carteira.rows.filter(row => IN_PORTFOLIO.includes(row.stage)).map(row => [row.id, row])), [carteira.rows]);
+
+  // Pagamentos anulados (estornos) nunca contam para receita, caixa ou indicadores.
+  const payments = useMemo(
+    () => allPayments.filter(p => p.status !== 'cancelled' && !(p as any).deletedAt),
+    [allPayments]
+  );
+  // Índice O(1) de créditos por id (evita procuras lineares dentro de ciclos de pagamentos).
+  const creditById = useMemo(() => new Map(credits.map(c => [c.id, c])), [credits]);
+  // Créditos efectivamente desembolsados (exclui pedidos pendentes, rejeitados e cancelados).
+  const disbursedCredits = useMemo(() => credits.filter(c => isDisbursedCredit(c as any)), [credits]);
+  const portfolioRisk = useMemo(
+    () => computePortfolioRisk({ credits: credits as any[], warranties: warranties as any[], legalCases: legalCases as any[], clients: clients as any[] }),
+    [credits, warranties, legalCases, clients]
+  );
 
   // Estado para Ordenação dos Melhores Clientes
   const [clientSort, setClientSort] = useState<'desc' | 'asc'>('desc');
@@ -304,7 +320,7 @@ export default function Dashboard() {
   const activeCredits = credits.filter(c => inBook(c));
   const overdueCredits = credits.filter(c => inBook(c) && isLate(c));
 
-  const historicalDisbursed = credits.reduce((acc, c) => acc + c.principalAmount, 0);
+  const historicalDisbursed = disbursedCredits.reduce((acc, c) => acc + Number(c.principalAmount || 0), 0);
   const totalDisbursed = credits
     .filter(c => !c.deletedAt && inBook(c))
     .reduce((sum, c) => {
@@ -323,7 +339,7 @@ export default function Dashboard() {
   const totalReceivedLateInterest = payments.reduce((acc, p) => acc + Number(p.allocatedToLateInterest || 0), 0);
   const investmentReturnRate = historicalDisbursed > 0 ? (totalProfit / historicalDisbursed) * 100 : 0;
   // Total Outstanding not really used in new logic, but kept for cache? No, user wants Disbursed in card.
-  const totalOutstanding = credits.reduce((acc, c) => acc + c.currentBalance, 0);
+  const totalOutstanding = credits.filter(c => inBook(c)).reduce((acc, c) => acc + Number(c.currentBalance || 0), 0);
 
   // Overdue Interest defaults
   const totalOverdueInterest = overdueCredits.reduce((acc, c) => acc + c.lateInterest, 0);
@@ -1132,7 +1148,7 @@ export default function Dashboard() {
         });
 
         const weekCredits = credits.filter(c => {
-          if (c.deletedAt) return false;
+          if (!isDisbursedCredit(c)) return false;
           if (!isValidDate(c.startDate)) return false;
           const cDate = new Date(c.startDate);
           return cDate >= startDay && cDate <= endDay;
@@ -1163,7 +1179,7 @@ export default function Dashboard() {
       return CF_MONTH_SHORT_NAMES.map((mName, mIdx) => {
         const monthPayments = payments.filter(p => {
           if (p.status === 'cancelled' || p.deletedAt) return false;
-          const credit = credits.find(c => c.id === p.creditId);
+          const credit = creditById.get(p.creditId);
           if (credit?.targetMonthId) {
             const [yStr, mStr] = credit.targetMonthId.split('-');
             return parseInt(yStr) === targetYear && (parseInt(mStr) - 1) === mIdx;
@@ -1174,7 +1190,7 @@ export default function Dashboard() {
         });
 
         const monthCredits = credits.filter(c => {
-          if (c.deletedAt) return false;
+          if (!isDisbursedCredit(c)) return false;
           if (c.targetMonthId) {
             const [yStr, mStr] = c.targetMonthId.split('-');
             return parseInt(yStr) === targetYear && (parseInt(mStr) - 1) === mIdx;
@@ -1216,7 +1232,7 @@ export default function Dashboard() {
         const mYear = date.getFullYear();
         const monthPayments = payments.filter(p => {
           if (p.status === 'cancelled' || p.deletedAt) return false;
-          const credit = credits.find(c => c.id === p.creditId);
+          const credit = creditById.get(p.creditId);
           if (credit?.targetMonthId) {
             const [yStr, mStr] = credit.targetMonthId.split('-');
             return parseInt(yStr) === mYear && (parseInt(mStr) - 1) === mIdx;
@@ -1226,7 +1242,7 @@ export default function Dashboard() {
           return pDate.getMonth() === mIdx && pDate.getFullYear() === mYear;
         });
         const monthCredits = credits.filter(c => {
-          if (c.deletedAt) return false;
+          if (!isDisbursedCredit(c)) return false;
           if (c.targetMonthId) {
             const [yStr, mStr] = c.targetMonthId.split('-');
             return parseInt(yStr) === mYear && (parseInt(mStr) - 1) === mIdx;
@@ -1265,7 +1281,7 @@ export default function Dashboard() {
         const mYear = date.getFullYear();
         const monthPayments = payments.filter(p => {
           if (p.status === 'cancelled' || p.deletedAt) return false;
-          const credit = credits.find(c => c.id === p.creditId);
+          const credit = creditById.get(p.creditId);
           if (credit?.targetMonthId) {
             const [yStr, mStr] = credit.targetMonthId.split('-');
             return parseInt(yStr) === mYear && (parseInt(mStr) - 1) === mIdx;
@@ -1275,7 +1291,7 @@ export default function Dashboard() {
           return pDate.getMonth() === mIdx && pDate.getFullYear() === mYear;
         });
         const monthCredits = credits.filter(c => {
-          if (c.deletedAt) return false;
+          if (!isDisbursedCredit(c)) return false;
           if (c.targetMonthId) {
             const [yStr, mStr] = c.targetMonthId.split('-');
             return parseInt(yStr) === mYear && (parseInt(mStr) - 1) === mIdx;
@@ -1327,7 +1343,7 @@ export default function Dashboard() {
         });
 
         const segCredits = credits.filter(c => {
-          if (c.deletedAt) return false;
+          if (!isDisbursedCredit(c)) return false;
           if (!isValidDate(c.startDate)) return false;
           const cDate = new Date(c.startDate);
           return cDate >= segStart && cDate <= segEnd;
@@ -1598,16 +1614,11 @@ export default function Dashboard() {
   };
 
   // 3. Distribuição de Risco (Pie)
-  const getRiskData = () => {
-    const lowRisk = clients.filter(d => d.riskLevel === 'low').length;
-    const mediumRisk = clients.filter(d => d.riskLevel === 'medium').length;
-    const highRisk = clients.filter(d => d.riskLevel === 'high').length;
-    return [
-      { name: 'Baixo Risco', value: lowRisk, fill: '#22c55e' },
-      { name: 'Médio Risco', value: mediumRisk, fill: '#eab308' },
-      { name: 'Alto Risco', value: highRisk, fill: '#ef4444' },
-    ].filter(i => i.value > 0);
-  };
+  // Risco real da carteira: valor em dívida por escalão de atraso (aging),
+  // em vez do nível de risco estático atribuído no registo do cliente.
+  const getRiskData = () => portfolioRisk.aging
+    .filter(a => a.exposure > 0)
+    .map(a => ({ name: a.label, value: a.exposure, fill: a.color }));
   const riskData = getRiskData();
 
   // 4. Revenue Breakdown (Donut) & Payment Methods
@@ -1633,7 +1644,7 @@ export default function Dashboard() {
       const monthStr = date.toLocaleString('default', { month: 'short' });
       const monthPayments = payments.filter(p => {
         if (p.status === 'cancelled' || p.deletedAt) return false;
-        const credit = credits.find(c => c.id === p.creditId);
+        const credit = creditById.get(p.creditId);
         if (credit?.targetMonthId) {
           const [yearStr, monthStr] = credit.targetMonthId.split('-');
           return parseInt(yearStr) === date.getFullYear() && (parseInt(monthStr) - 1) === date.getMonth();
@@ -1703,15 +1714,24 @@ export default function Dashboard() {
 
   // 4. Revenue Breakdown (Donut) & Payment Methods
   const getPaymentMethodsData = () => {
-    const cash = payments.filter(p => p.method === 'cash').length;
-    const transfer = payments.filter(p => p.method === 'transfer').length;
-    const reference = payments.filter(p => p.method === 'reference').length;
-
-    return [
-      { name: 'Dinheiro', value: cash, fill: '#22c55e' },
-      { name: 'Transferência', value: transfer, fill: '#3b82f6' },
-      { name: 'Referência', value: reference, fill: '#f59e0b' },
-    ].filter(i => i.value > 0);
+    const methods: Array<{ key: string; name: string; fill: string }> = [
+      { key: 'cash', name: 'Numerário', fill: '#22c55e' },
+      { key: 'transfer', name: 'Transferência', fill: '#3b82f6' },
+      { key: 'multicaixa', name: 'Multicaixa Express', fill: '#ef4444' },
+      { key: 'tpa', name: 'TPA', fill: '#8b5cf6' },
+      { key: 'reference', name: 'Referência', fill: '#f59e0b' },
+      { key: 'deposit', name: 'Depósito', fill: '#0ea5e9' },
+    ];
+    const counts = new Map<string, { count: number; amount: number }>();
+    payments.forEach(p => {
+      const cur = counts.get(p.method) || { count: 0, amount: 0 };
+      cur.count += 1;
+      cur.amount += Number(p.amount || 0);
+      counts.set(p.method, cur);
+    });
+    return methods
+      .map(m => ({ name: m.name, value: counts.get(m.key)?.count || 0, amount: counts.get(m.key)?.amount || 0, fill: m.fill }))
+      .filter(i => i.value > 0);
   };
   const paymentMethods = getPaymentMethodsData();
 
@@ -1747,11 +1767,16 @@ export default function Dashboard() {
   const activityData = getActivityData();
 
   // 6. Melhores Clientes (Atualizado com Ordenação e Limite)
+  const openDebtByClient = new Map<string, number>();
+  credits.forEach(c => {
+    if (!inBook(c)) return;
+    openDebtByClient.set(c.clientId, (openDebtByClient.get(c.clientId) || 0) + Number(c.currentBalance || 0));
+  });
   const sortedClients = clients
     .map(d => {
-      const dCredits = credits.filter(c => c.clientId === d.id);
-      const debt = dCredits.reduce((acc, c) => acc + c.currentBalance, 0);
-      return { ...d, debt };
+      const debt = openDebtByClient.get(d.id) || 0;
+      const dpd = portfolioRisk.perClient.get(d.id)?.maxDpd || 0;
+      return { ...d, debt, dpd };
     })
     .filter(d => d.debt > 0) // Mostrar apenas clientes com dívida
     .sort((a, b) => clientSort === 'desc' ? b.debt - a.debt : a.debt - b.debt);
@@ -1775,7 +1800,7 @@ export default function Dashboard() {
       const monthStr = date.toLocaleString('default', { month: 'short' });
       const yearStr = date.getFullYear().toString().slice(-2);
       const monthCredits = credits.filter(c => {
-        if (c.deletedAt) return false;
+        if (!isDisbursedCredit(c)) return false;
         if (c.targetMonthId) {
           const [yearStr, monthStr] = c.targetMonthId.split('-');
           return parseInt(yearStr) === date.getFullYear() && (parseInt(monthStr) - 1) === date.getMonth();
@@ -2181,6 +2206,9 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* 1b. Saúde da Carteira: PAR, NPL, provisões, cobertura, alertas e vencimentos */}
+      <SaudeCarteira />
 
       {/* 2. Grelha Principal de Gráficos (Ajustados com mesmo tamanho e altura perfeitamente alinhada) */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-7 mb-6 items-stretch">
@@ -2748,12 +2776,22 @@ export default function Dashboard() {
             <CardDescription>Preferência dos clientes</CardDescription>
           </CardHeader>
           <CardContent className="h-[270px]">
+            {paymentMethods.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center gap-2 text-muted-foreground">
+                <Wallet className="h-8 w-8 opacity-40" />
+                <p className="text-sm font-medium">Ainda não há pagamentos registados</p>
+                <p className="text-xs">A distribuição por método aparece após o primeiro recebimento.</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={paymentMethods} layout="vertical">
                 <CartesianGrid strokeDasharray="3 3" horizontal={true} vertical={false} opacity={0.1} />
-                <XAxis type="number" hide />
+                <XAxis type="number" hide allowDecimals={false} />
                 <YAxis dataKey="name" type="category" width={150} axisLine={false} tickLine={false} fontSize={12} />
-                <Tooltip cursor={{ fill: 'transparent' }} />
+                <Tooltip
+                  cursor={{ fill: 'transparent' }}
+                  formatter={(val: number, _name: string, item: any) => [`${val} pagamento(s) · ${formatCurrency(item?.payload?.amount || 0)}`, 'Total']}
+                />
                 <Bar dataKey="value" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={30}>
                   {
                     paymentMethods.map((entry, index) => (
@@ -2763,6 +2801,7 @@ export default function Dashboard() {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -2793,12 +2832,16 @@ export default function Dashboard() {
                     <div className="flex items-center justify-between mb-1">
                       <div className="flex items-center gap-2">
                         <div className={`h-6 w-6 rounded-full flex items-center justify-center text-xs font-bold ring-2 ring-offset-1 
-                                       ${d.riskLevel === 'high' ? 'bg-red-100 text-red-700 ring-red-200' : 'bg-primary/10 text-primary ring-primary/20'}`}>
+                                       ${d.dpd > 30 ? 'bg-red-100 text-red-700 ring-red-200' : d.dpd > 0 ? 'bg-amber-100 text-amber-700 ring-amber-200' : 'bg-primary/10 text-primary ring-primary/20'}`}>
                           {i + 1}
                         </div>
                         <div>
                           <span className="text-sm font-semibold block leading-none">{d.name}</span>
-                          <span className="text-[10px] text-muted-foreground">{d.phone} • {d.riskLevel === 'low' ? 'BAIXO' : d.riskLevel === 'medium' ? 'MÉDIO' : d.riskLevel === 'high' ? 'ALTO' : 'NORMAL'}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {d.phone} • {d.dpd > 0
+                              ? <span className={d.dpd > 30 ? 'text-red-600 font-bold' : 'text-amber-600 font-bold'}>{d.dpd} DIAS EM ATRASO</span>
+                              : <span className="text-emerald-600 font-bold">EM DIA</span>}
+                          </span>
                         </div>
                       </div>
                       <span className="font-bold text-sm text-destructive">{formatCurrency(d.debt)}</span>
@@ -2807,7 +2850,7 @@ export default function Dashboard() {
                     {/* Barra Visual de Dívida */}
                     <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
                       <div
-                        className={`h-full rounded-full ${d.riskLevel === 'high' ? 'bg-red-500' : 'bg-blue-500'}`}
+                        className={`h-full rounded-full ${d.dpd > 30 ? 'bg-red-500' : d.dpd > 0 ? 'bg-amber-500' : 'bg-blue-500'}`}
                         style={{ width: `${percent}%` }}
                       />
                     </div>
@@ -2824,10 +2867,17 @@ export default function Dashboard() {
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-6 mb-6">
         {/* Risco - Cartão Contextual */}
         <Card className="col-span-2 lg:col-span-2 card-elevated h-[300px] bg-red-50/50 border-red-100">
-          <CardHeader>
-            <CardTitle className="text-red-800">Risco da Carteira</CardTitle>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-red-800 dark:text-red-300">Risco da Carteira</CardTitle>
+            <CardDescription>Valor em dívida por dias de atraso</CardDescription>
           </CardHeader>
           <CardContent className="h-[220px]">
+            {riskData.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center text-center gap-2 text-muted-foreground">
+                <ShieldCheck className="h-8 w-8 opacity-40" />
+                <p className="text-sm font-medium">Sem créditos em aberto</p>
+              </div>
+            ) : (
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
@@ -2842,10 +2892,11 @@ export default function Dashboard() {
                     <Cell key={`cell-${index}`} fill={entry.fill} strokeWidth={0} />
                   ))}
                 </Pie>
-                <Tooltip />
+                <Tooltip formatter={(val: number) => formatCurrency(val)} />
                 <Legend iconType="circle" />
               </PieChart>
             </ResponsiveContainer>
+            )}
           </CardContent>
         </Card>
 
@@ -2859,6 +2910,8 @@ export default function Dashboard() {
               <BarChart data={activityData} barSize={30}>
                 <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.1} />
                 <XAxis dataKey="name" axisLine={false} tickLine={false} />
+                <YAxis axisLine={false} tickLine={false} allowDecimals={false} width={28} fontSize={11} />
+                <Legend verticalAlign="top" height={24} iconType="circle" />
                 <Tooltip
                   cursor={{ fill: 'rgba(0,0,0,0.05)' }}
                   content={({ active, payload, label }) => {
@@ -2876,7 +2929,8 @@ export default function Dashboard() {
                     return null;
                   }}
                 />
-                <Bar dataKey="value" name="Ações" fill="#64748b" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="credits" name="Créditos" stackId="act" fill="#6366f1" />
+                <Bar dataKey="payments" name="Pagamentos" stackId="act" fill="#10b981" radius={[4, 4, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </CardContent>
@@ -3006,30 +3060,30 @@ export default function Dashboard() {
             <div className="p-3 rounded-xl bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-100 dark:border-emerald-800/30 flex flex-col justify-center">
               <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider">Taxa de Recobrança</span>
               <span className="text-xl font-black text-emerald-800 dark:text-emerald-200">
-                {totalDisbursed > 0 ? ((totalCashTotal / totalDisbursed) * 100).toFixed(1) : '0'}%
+                {historicalDisbursed > 0 ? ((totalCashTotal / historicalDisbursed) * 100).toFixed(1) : '0'}%
               </span>
-              <span className="text-[10px] text-emerald-500 font-medium">Pagos / Concedidos</span>
+              <span className="text-[10px] text-emerald-500 font-medium">Recebido / Capital concedido</span>
             </div>
             <div className="p-3 rounded-xl bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-800/30 flex flex-col justify-center">
               <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold uppercase tracking-wider">Ticket Médio</span>
-              <span className="text-xl font-black text-blue-800 dark:text-blue-200 truncate" title={credits.length > 0 ? formatCurrency(totalDisbursed / credits.length) : '0'}>
-                {credits.length > 0 ? formatCurrency(totalDisbursed / credits.length) : formatCurrency(0)}
+              <span className="text-xl font-black text-blue-800 dark:text-blue-200 truncate" title={disbursedCredits.length > 0 ? formatCurrency(historicalDisbursed / disbursedCredits.length) : '0'}>
+                {disbursedCredits.length > 0 ? formatCurrency(historicalDisbursed / disbursedCredits.length) : formatCurrency(0)}
               </span>
-              <span className="text-[10px] text-blue-500 font-medium">Valor médio por crédito</span>
+              <span className="text-[10px] text-blue-500 font-medium">Valor médio por crédito concedido</span>
             </div>
             <div className="p-3 rounded-xl bg-amber-50 dark:bg-amber-900/20 border border-amber-100 dark:border-amber-800/30 flex flex-col justify-center">
               <span className="text-[10px] text-amber-600 dark:text-amber-400 font-bold uppercase tracking-wider">Contratos/Cliente</span>
               <span className="text-xl font-black text-amber-800 dark:text-amber-200">
-                {totalClients > 0 ? (credits.length / totalClients).toFixed(1) : '0'}
+                {totalClients > 0 ? (disbursedCredits.length / totalClients).toFixed(1) : '0'}
               </span>
               <span className="text-[10px] text-amber-500 font-medium">Média de contratos</span>
             </div>
             <div className="p-3 rounded-xl bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800/30 flex flex-col justify-center">
               <span className="text-[10px] text-red-600 dark:text-red-400 font-bold uppercase tracking-wider">Taxa de Incumprimento</span>
               <span className="text-xl font-black text-red-800 dark:text-red-200">
-                {credits.length > 0 ? ((overdueCredits.length / credits.length) * 100).toFixed(1) : '0'}%
+                {portfolioRisk.openCredits > 0 ? ((overdueCredits.length / portfolioRisk.openCredits) * 100).toFixed(1) : '0'}%
               </span>
-              <span className="text-[10px] text-red-500 font-medium">Contratos em atraso</span>
+              <span className="text-[10px] text-red-500 font-medium">Contratos em aberto em atraso</span>
             </div>
           </CardContent>
         </Card>
