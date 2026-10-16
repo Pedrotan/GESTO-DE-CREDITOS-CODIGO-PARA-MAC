@@ -14,7 +14,7 @@ const TabsList = React.forwardRef<
     className={cn(
       // Em ecrãs estreitos os separadores deslizam na horizontal em vez de saírem do ecrã; "safe center"
       // centra quando cabem e alinha à esquerda quando não cabem (o primeiro nunca fica cortado).
-      "inline-flex h-10 max-w-full items-center justify-[safe_center] overflow-x-auto overscroll-x-contain rounded-md bg-muted p-1 text-muted-foreground [scrollbar-width:thin]",
+      "inline-flex h-10 max-w-full items-center [justify-content:safe_center] overflow-x-auto overscroll-x-contain rounded-md bg-muted p-1 text-muted-foreground [scrollbar-width:thin]",
       className,
     )}
     {...props}
