@@ -1,0 +1,8 @@
+node_modules
+.git
+.agents
+dist
+dist-electron
+release
+.env
+.env.production
