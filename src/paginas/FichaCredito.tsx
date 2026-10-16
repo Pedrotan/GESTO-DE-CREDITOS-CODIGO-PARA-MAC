@@ -4,7 +4,7 @@
 // existentes; nada é recalculado com fórmulas próprias.
 import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { Area, CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import {
     AlarmClock, ArrowLeft, Ban, CalendarClock, CheckCircle2, ExternalLink, FileText, FileUp, Gavel, HandCoins, History, Loader2, MoreHorizontal,
@@ -87,6 +87,26 @@ export default function FichaCredito() {
     const [contractUrl, setContractUrl] = useState<string | null>(null);
     const [preview, setPreview] = useState<{ url: string; name: string; mime: string } | null>(null);
 
+    const [searchParams, setSearchParams] = useSearchParams();
+    const initialTab = searchParams.get('tab') || 'resumo';
+    const [activeTab, setActiveTab] = useState(initialTab);
+
+    useEffect(() => {
+        const tab = searchParams.get('tab');
+        if (tab && ['resumo', 'plano', 'pagamentos', 'garantias', 'documentos', 'cobranca', 'contabilidade', 'historico'].includes(tab)) {
+            setActiveTab(tab);
+        }
+    }, [searchParams]);
+
+    const handleTabChange = (newTab: string) => {
+        setActiveTab(newTab);
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            next.set('tab', newTab);
+            return next;
+        }, { replace: true });
+    };
+
     const row = carteira.rows.find(item => item.id === creditId) || null;
     const credit = row?.credit || null;
     const client = clients.find((item: any) => item.id === credit?.clientId);
@@ -132,6 +152,28 @@ export default function FichaCredito() {
             return { name: key.split('-').reverse().join('/'), Previsto: Math.max(0, granted - planned) / 100, Real: key <= carteira.today ? Math.max(0, granted - paid) / 100 : null };
         });
     }, [credit, visibleInstallments, carteira.payments, carteira.today]);
+
+    // ── Cálculos de Liquidação: No Prazo (sem atrasos) vs Com Juros de Mora ──
+    const totalPlannedWithoutDelayMinor = useMemo(() => {
+        if (visibleInstallments.length > 0) {
+            return visibleInstallments.reduce((sum, item) => sum + num(item.principalMinor) + num(item.interestMinor), 0);
+        }
+        return num(row?.grantedMinor) + num(row?.contractedInterestMinor);
+    }, [visibleInstallments, row?.grantedMinor, row?.contractedInterestMinor]);
+
+    const remainingWithoutDelayMinor = useMemo(() => {
+        return Math.max(0, num(row?.outstandingMinor) + num(row?.interestOutstandingMinor));
+    }, [row?.outstandingMinor, row?.interestOutstandingMinor]);
+
+    const currentMoraMinor = useMemo(() => {
+        return Math.max(num(row?.moraMinor), num(file?.mora?.owedMinor));
+    }, [row?.moraMinor, file?.mora?.owedMinor]);
+
+    const totalWithCurrentMoraMinor = totalPlannedWithoutDelayMinor + currentMoraMinor;
+    const remainingWithCurrentMoraMinor = remainingWithoutDelayMinor + currentMoraMinor;
+
+    const projectedMoraMinor = moraProjection ? moraProjection.projectedOwedMinor : currentMoraMinor;
+    const totalWithProjectedMoraMinor = totalPlannedWithoutDelayMinor + projectedMoraMinor;
 
     if (!row || !credit) {
         return (
@@ -186,6 +228,16 @@ export default function FichaCredito() {
                     </div>
                     <div className="flex flex-wrap gap-2">
                         {actions.pay && <Button className="gap-1.5" onClick={() => setDialog('pay')}><Receipt className="h-4 w-4" /> Registar pagamento</Button>}
+                        <Button
+                            className="gap-1.5 bg-[#F37021] hover:bg-[#d95d13] text-white font-bold shadow-sm transition-transform hover:scale-[1.02] active:scale-[0.98]"
+                            onClick={() => {
+                                handleTabChange('plano');
+                                document.getElementById('tabs-section')?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                            title="Ver plano de prestações e projeção de mora"
+                        >
+                            <CalendarClock className="h-4 w-4" /> Plano de Prestações
+                        </Button>
                         {actions.renew && (
                             <Button className="gap-1.5 bg-emerald-600 hover:bg-emerald-700" disabled={!!renewalBlocked} title={renewalBlocked || undefined}
                                 onClick={() => navigate(`/creditos?novoCredito=${encodeURIComponent(credit.clientId)}&renovacao=${encodeURIComponent(credit.id)}`)}>
@@ -217,6 +269,126 @@ export default function FichaCredito() {
                     <Stat label="Dias de atraso" value={String(row.daysOverdue)} tone={row.daysOverdue ? 'red' : 'green'} />
                     <Stat label="Mora por cobrar" value={kz(row.moraMinor)} tone={row.moraMinor ? 'red' : undefined} />
                 </div>
+
+                {/* ── Total a pagar previsto: Sem atrasos vs Com juros de mora ── */}
+                <div className="mt-4 rounded-2xl border border-border/70 bg-card/90 p-4 shadow-sm">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 border-b pb-2.5">
+                        <div>
+                            <h3 className="flex items-center gap-2 text-sm font-black uppercase tracking-tight text-foreground">
+                                <Scale className="h-4 w-4 text-[#F37021]" /> Resumo Financeiro de Liquidação Prevista
+                            </h3>
+                            <p className="text-xs text-muted-foreground">
+                                Comparativo entre o cumprimento do plano nas datas contratuais e o impacto dos juros de mora em caso de atraso.
+                            </p>
+                        </div>
+                        <Button
+                            size="sm"
+                            className="gap-1.5 bg-[#F37021] hover:bg-[#d95d13] text-white font-bold shadow-xs transition-transform hover:scale-[1.02]"
+                            onClick={() => {
+                                handleTabChange('plano');
+                                document.getElementById('tabs-section')?.scrollIntoView({ behavior: 'smooth' });
+                            }}
+                        >
+                            <CalendarClock className="h-3.5 w-3.5" /> Ver Detalhes no Plano
+                        </Button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                        {/* Cenário 1: Pagamento nas datas certas / sem atrasos */}
+                        <div className="flex flex-col justify-between rounded-xl border border-emerald-300 bg-emerald-50/70 p-3.5 shadow-2xs dark:border-emerald-800/60 dark:bg-emerald-950/25">
+                            <div>
+                                <div className="flex items-center justify-between gap-1">
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
+                                        Total a Pagar (Sem Atrasos)
+                                    </span>
+                                    <span className="rounded-full bg-emerald-200/90 px-2 py-0.5 text-[10px] font-black uppercase text-emerald-900 dark:bg-emerald-900 dark:text-emerald-200">
+                                        Datas Corretas
+                                    </span>
+                                </div>
+                                <p className="mt-1.5 font-display text-2xl font-black tracking-tight text-emerald-700 dark:text-emerald-400 sm:text-3xl">
+                                    {kz(totalPlannedWithoutDelayMinor)}
+                                </p>
+                                <p className="mt-1 text-xs text-emerald-900/80 dark:text-emerald-300/80">
+                                    Capital ({kz(row.grantedMinor)}) + Juros acordados ({kz(row.contractedInterestMinor)}) pagos estritamente nas datas de vencimento.
+                                </p>
+                            </div>
+                            <div className="mt-3 border-t border-emerald-200/80 pt-2 text-xs dark:border-emerald-900/50">
+                                <span className="text-muted-foreground">Saldo remanescente no plano: </span>
+                                <strong className="font-bold text-emerald-800 dark:text-emerald-300">{kz(remainingWithoutDelayMinor)}</strong>
+                            </div>
+                        </div>
+
+                        {/* Cenário 2: Total com mora acumulada hoje */}
+                        <div className={cn(
+                            "flex flex-col justify-between rounded-xl border p-3.5 shadow-2xs transition-colors",
+                            currentMoraMinor > 0
+                                ? "border-rose-300 bg-rose-50/80 dark:border-rose-800/60 dark:bg-rose-950/25"
+                                : "border-slate-200 bg-slate-50/70 dark:border-slate-800 dark:bg-slate-900/30"
+                        )}>
+                            <div>
+                                <div className="flex items-center justify-between gap-1">
+                                    <span className={cn(
+                                        "text-[11px] font-black uppercase tracking-wider",
+                                        currentMoraMinor > 0 ? "text-rose-800 dark:text-rose-300" : "text-slate-700 dark:text-slate-300"
+                                    )}>
+                                        Total Previsto (Com Mora Atual)
+                                    </span>
+                                    {currentMoraMinor > 0 ? (
+                                        <span className="rounded-full bg-rose-200/90 px-2 py-0.5 text-[10px] font-black uppercase text-rose-900 dark:bg-rose-900 dark:text-rose-200">
+                                            +{kz(currentMoraMinor)} Mora
+                                        </span>
+                                    ) : (
+                                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                            Em dia
+                                        </span>
+                                    )}
+                                </div>
+                                <p className={cn(
+                                    "mt-1.5 font-display text-2xl font-black tracking-tight sm:text-3xl",
+                                    currentMoraMinor > 0 ? "text-rose-700 dark:text-rose-400" : "text-slate-900 dark:text-slate-100"
+                                )}>
+                                    {kz(totalWithCurrentMoraMinor)}
+                                </p>
+                                <p className="mt-1 text-xs text-muted-foreground">
+                                    {currentMoraMinor > 0
+                                        ? `Total contratado com ${kz(currentMoraMinor)} de juros de mora acumulados (${row.daysOverdue} dias de atraso).`
+                                        : 'Sem atrasos até à data. O total exigível coincide com o total contratado.'}
+                                </p>
+                            </div>
+                            <div className={cn("mt-3 border-t pt-2 text-xs", currentMoraMinor > 0 ? "border-rose-200/80 dark:border-rose-900/50" : "border-slate-200 dark:border-slate-800")}>
+                                <span className="text-muted-foreground">Total exigível para quitação hoje: </span>
+                                <strong className={cn("font-bold", currentMoraMinor > 0 ? "text-rose-800 dark:text-rose-300" : "text-foreground")}>
+                                    {kz(remainingWithCurrentMoraMinor)}
+                                </strong>
+                            </div>
+                        </div>
+
+                        {/* Cenário 3: Projeção de atraso futuro */}
+                        <div className="flex flex-col justify-between rounded-xl border border-amber-300 bg-amber-50/70 p-3.5 dark:border-amber-800/60 dark:bg-amber-950/25 sm:col-span-2 lg:col-span-1">
+                            <div>
+                                <div className="flex items-center justify-between gap-1">
+                                    <span className="text-[11px] font-black uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                                        Projeção se o atraso continuar
+                                    </span>
+                                    <span className="rounded-full bg-amber-200/90 px-2 py-0.5 text-[10px] font-black uppercase text-amber-900 dark:bg-amber-900 dark:text-amber-200">
+                                        Até {dateLabel(moraDate)}
+                                    </span>
+                                </div>
+                                <p className="mt-1.5 font-display text-2xl font-black tracking-tight text-amber-700 dark:text-amber-400 sm:text-3xl">
+                                    {kz(totalWithProjectedMoraMinor)}
+                                </p>
+                                <p className="mt-1 text-xs text-amber-900/80 dark:text-amber-300/80">
+                                    Total com acréscimo de mora (+{kz(projectedMoraMinor)}) caso o atraso não seja liquidado até {dateLabel(moraDate)}.
+                                </p>
+                            </div>
+                            <div className="mt-3 flex items-center justify-between border-t border-amber-200/80 pt-2 text-xs dark:border-amber-900/50">
+                                <span className="text-muted-foreground">Taxa de mora diária:</span>
+                                <strong className="font-bold text-amber-800 dark:text-amber-300">{kz(file?.mora?.dailyMinor || 0)} / dia ({credit.lateInterestRate}%)</strong>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 {(pendingRestructure || pendingWriteoff) && (
                     <div className="mt-3 space-y-2">
                         {pendingRestructure && (
@@ -235,13 +407,32 @@ export default function FichaCredito() {
                 )}
             </div>
 
-            <Tabs defaultValue="resumo">
-                <TabsList className="mb-3 flex h-auto flex-wrap justify-start gap-1">
-                    {[['resumo', 'Resumo'], ['plano', 'Plano de Prestações'], ['pagamentos', `Pagamentos (${paymentRows.length})`], ['garantias', `Garantias (${file?.warranties.length || 0})`], ['documentos', `Documentos (${file?.documents.length || 0})`],
-                        ['cobranca', `Cobrança (${file?.collection.length || 0})`], ['contabilidade', `Contabilidade (${file?.entries.length || 0})`], ['historico', 'Histórico']].map(([value, label]) => (
-                        <TabsTrigger key={value} value={value}>{label}</TabsTrigger>
-                    ))}
-                </TabsList>
+            <div id="tabs-section" className="scroll-mt-6">
+                <Tabs value={activeTab} onValueChange={handleTabChange}>
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                        <TabsList className="flex h-auto flex-wrap justify-start gap-1 p-1">
+                            {[['resumo', 'Resumo'], ['plano', 'Plano de Prestações'], ['pagamentos', `Pagamentos (${paymentRows.length})`], ['garantias', `Garantias (${file?.warranties.length || 0})`], ['documentos', `Documentos (${file?.documents.length || 0})`],
+                                ['cobranca', `Cobrança (${file?.collection.length || 0})`], ['contabilidade', `Contabilidade (${file?.entries.length || 0})`], ['historico', 'Histórico']].map(([value, label]) => (
+                                <TabsTrigger
+                                    key={value}
+                                    value={value}
+                                    className={cn(
+                                        value === 'plano' && 'border border-orange-300 bg-orange-50 font-bold text-orange-800 shadow-2xs hover:bg-orange-100 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-200 data-[state=active]:bg-[#F37021] data-[state=active]:text-white data-[state=active]:border-[#F37021]'
+                                    )}
+                                >
+                                    {value === 'plano' && <CalendarClock className="mr-1.5 h-3.5 w-3.5 text-orange-600 inline data-[state=active]:text-white" />}
+                                    {label}
+                                </TabsTrigger>
+                            ))}
+                        </TabsList>
+                        <Button
+                            size="sm"
+                            className="gap-1.5 bg-[#F37021] hover:bg-[#d95d13] text-white font-bold shadow-xs transition-all hover:scale-[1.02] active:scale-[0.98]"
+                            onClick={() => handleTabChange('plano')}
+                        >
+                            <CalendarClock className="h-4 w-4" /> Ver Plano de Prestações
+                        </Button>
+                    </div>
 
                 {/* 1. Resumo */}
                 <TabsContent value="resumo" className="grid gap-4 lg:grid-cols-3">
@@ -256,6 +447,8 @@ export default function FichaCredito() {
                         <Info label="Método" value={credit.amortizationMethod === 'PRICE' ? 'Prestação constante (PRICE)' : credit.amortizationMethod === 'SAC' ? 'Amortização constante (SAC)' : 'Taxa fixa (FLAT)'} />
                         <Info label="Prestações" value={`${row.paidCount} pagas de ${row.totalCount}`} />
                         <Info label="Juros contratados" value={kz(row.contractedInterestMinor)} />
+                        <Info label="Total previsto sem atrasos" value={<span className="font-bold text-emerald-700 dark:text-emerald-400">{kz(totalPlannedWithoutDelayMinor)}</span>} />
+                        <Info label="Total previsto com mora atual" value={<span className={cn("font-bold", currentMoraMinor > 0 ? "text-rose-700 dark:text-rose-400" : "text-foreground")}>{kz(totalWithCurrentMoraMinor)}</span>} />
                         <Info label="Juros por receber" value={kz(row.interestOutstandingMinor)} />
                         <Info label="Taxa de mora" value={`${num(credit.lateInterestRate).toLocaleString('pt-BR')}% ao dia`} />
                         <Info label="Pedido por" value={credit.requestedBy || '—'} />
@@ -283,6 +476,26 @@ export default function FichaCredito() {
 
                 {/* 2. Plano de prestações */}
                 <TabsContent value="plano" className="space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-orange-200 bg-orange-50/80 p-3.5 dark:border-orange-900/50 dark:bg-orange-950/20 shadow-2xs">
+                        <div className="flex flex-wrap items-center gap-4 text-xs">
+                            <div>
+                                <span className="text-muted-foreground font-semibold">Total sem atrasos (no prazo): </span>
+                                <strong className="text-base font-black text-emerald-700 dark:text-emerald-400 ml-1">{kz(totalPlannedWithoutDelayMinor)}</strong>
+                            </div>
+                            <div>
+                                <span className="text-muted-foreground font-semibold">Total com mora acumulada: </span>
+                                <strong className={cn("text-base font-black ml-1", currentMoraMinor > 0 ? "text-rose-700 dark:text-rose-400" : "text-foreground")}>{kz(totalWithCurrentMoraMinor)}</strong>
+                            </div>
+                            <div>
+                                <span className="text-muted-foreground font-semibold">Previsão até {dateLabel(moraDate)}: </span>
+                                <strong className="text-base font-black text-amber-700 dark:text-amber-400 ml-1">{kz(totalWithProjectedMoraMinor)}</strong>
+                            </div>
+                        </div>
+                        <span className="text-[11px] font-bold text-orange-800 dark:text-orange-300 bg-orange-100 dark:bg-orange-900/50 px-2.5 py-1 rounded-md">
+                            Mora: {credit.lateInterestRate}% ao dia
+                        </span>
+                    </div>
+
                     <div className="grid gap-2 sm:grid-cols-3">
                         <Stat label="Mora acumulada (hoje)" value={kz(file?.mora?.owedMinor || 0)} tone={(file?.mora?.owedMinor || 0) > 0 ? 'red' : undefined} />
                         <div className="rounded-xl border bg-background/70 p-3">
@@ -440,6 +653,7 @@ export default function FichaCredito() {
                     </div>
                 </TabsContent>
             </Tabs>
+            </div>
 
             {/* Diálogos */}
             {dialog === 'pay' && <RegistarPagamentoCredito creditId={credit.id} onClose={() => setDialog(null)} onDone={() => void refreshAll()} />}

@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-  AlertCircle, ArrowDownUp, Calendar, Download, Eye, FileClock, FileText, History, ListOrdered, Lock, MoreVertical, Plus, PlusCircle,
+  AlertCircle, ArrowDownUp, Calendar, CalendarClock, Download, Eye, FileClock, FileText, History, ListOrdered, Lock, MoreVertical, Plus, PlusCircle,
   Receipt, Trash2, Upload,
 } from 'lucide-react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
@@ -66,7 +66,7 @@ export default function Credits() {
   const [alertConfig, setAlertConfig] = useState<{ isOpen: boolean; title: string; description: string; type: AlertModalType }>({ isOpen: false, title: '', description: '', type: 'success' });
 
   const taskMonths = useMemo(() => new Set((calendarTasks || []).map(task => String(task.date).slice(0, 7))), [calendarTasks]);
-  const openCreditFile = (row: PortfolioRow) => navigate(`/creditos/${encodeURIComponent(row.id)}`);
+  const openCreditFile = (row: PortfolioRow, tab?: string) => navigate(`/creditos/${encodeURIComponent(row.id)}${tab ? `?tab=${tab}` : ''}`);
 
   // Anos disponíveis no seletor (desde o primeiro crédito).
   const availableYears = useMemo(() => {
@@ -151,24 +151,37 @@ export default function Credits() {
     const payable = ['active', 'overdue', 'defaulted', 'renegotiated'].includes(credit.status) && row.stage !== 'abatido' && row.outstandingMinor + row.interestOutstandingMinor + row.moraMinor > 0;
     const renewalBlocked = row.stage === 'liquidado' ? newCreditBlockReason(clientCreditStanding(credit.clientId, carteira.credits), value => formatCurrency(value)) : null;
     return (
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Ações de ${row.reference}`}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-60">
-          <DropdownMenuItem className="gap-2" onClick={() => openCreditFile(row)}><Eye className="h-4 w-4" /> Abrir ficha do crédito</DropdownMenuItem>
-          <DropdownMenuItem className="gap-2" disabled={!payable} onClick={() => setPayCreditId(credit.id)}><Receipt className="h-4 w-4" /> Registar pagamento</DropdownMenuItem>
-          {row.stage === 'liquidado' && (
-            <DropdownMenuItem className="flex-col items-start gap-0.5" disabled={!!renewalBlocked} title={renewalBlocked || undefined}
-              onClick={() => openWizard({ clientId: credit.clientId, minAmount: clientCreditStanding(credit.clientId, carteira.credits).lastPaidPrincipal || row.grantedMinor / 100, previousId: credit.id })}>
-              <span className="flex items-center gap-2 font-semibold text-emerald-700 dark:text-emerald-400"><PlusCircle className="h-4 w-4" /> Solicitar novo crédito</span>
-              {renewalBlocked && <span className="max-w-[220px] pl-6 text-[11px] leading-snug text-muted-foreground">{renewalBlocked}</span>}
-            </DropdownMenuItem>
-          )}
-          <DropdownMenuItem className="gap-2" onClick={() => navigate(`/pagamentos?search=${encodeURIComponent(row.reference)}`)}><History className="h-4 w-4" /> Ver pagamentos</DropdownMenuItem>
-          <DropdownMenuItem className="gap-2" onClick={() => setAuditTarget({ mode: 'entity', key: credit.id, label: `Crédito ${row.reference} de ${credit.clientName}` })}><FileClock className="h-4 w-4" /> Histórico de auditoria</DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => setDeleteTarget(row)}><Trash2 className="h-4 w-4" /> Excluir</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <div className="flex items-center justify-end gap-1.5">
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 gap-1 border-orange-300 bg-orange-50/90 px-2.5 text-xs font-bold text-orange-700 shadow-2xs transition-colors hover:bg-orange-100 hover:text-orange-800 dark:border-orange-800 dark:bg-orange-950/40 dark:text-orange-300 dark:hover:bg-orange-900/60"
+          onClick={() => openCreditFile(row, 'plano')}
+          title="Ver Plano de Prestações deste crédito"
+        >
+          <CalendarClock className="h-3.5 w-3.5 text-orange-600 dark:text-orange-400" />
+          Plano
+        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild><Button variant="ghost" size="icon" className="h-8 w-8" aria-label={`Ações de ${row.reference}`}><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-60">
+            <DropdownMenuItem className="gap-2" onClick={() => openCreditFile(row)}><Eye className="h-4 w-4" /> Abrir ficha do crédito</DropdownMenuItem>
+            <DropdownMenuItem className="gap-2 font-semibold text-orange-600 dark:text-orange-400" onClick={() => openCreditFile(row, 'plano')}><CalendarClock className="h-4 w-4" /> Ver plano de prestações</DropdownMenuItem>
+            <DropdownMenuItem className="gap-2" disabled={!payable} onClick={() => setPayCreditId(credit.id)}><Receipt className="h-4 w-4" /> Registar pagamento</DropdownMenuItem>
+            {row.stage === 'liquidado' && (
+              <DropdownMenuItem className="flex-col items-start gap-0.5" disabled={!!renewalBlocked} title={renewalBlocked || undefined}
+                onClick={() => openWizard({ clientId: credit.clientId, minAmount: clientCreditStanding(credit.clientId, carteira.credits).lastPaidPrincipal || row.grantedMinor / 100, previousId: credit.id })}>
+                <span className="flex items-center gap-2 font-semibold text-emerald-700 dark:text-emerald-400"><PlusCircle className="h-4 w-4" /> Solicitar novo crédito</span>
+                {renewalBlocked && <span className="max-w-[220px] pl-6 text-[11px] leading-snug text-muted-foreground">{renewalBlocked}</span>}
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuItem className="gap-2" onClick={() => navigate(`/pagamentos?search=${encodeURIComponent(row.reference)}`)}><History className="h-4 w-4" /> Ver pagamentos</DropdownMenuItem>
+            <DropdownMenuItem className="gap-2" onClick={() => setAuditTarget({ mode: 'entity', key: credit.id, label: `Crédito ${row.reference} de ${credit.clientName}` })}><FileClock className="h-4 w-4" /> Histórico de auditoria</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => setDeleteTarget(row)}><Trash2 className="h-4 w-4" /> Excluir</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
     );
   };
 
@@ -231,6 +244,13 @@ export default function Credits() {
             <DropdownMenuItem className="gap-2" onClick={() => setPlanOpen(true)}><ListOrdered className="h-4 w-4" /> Plano de pagamento</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        <Button
+          className="gap-2 bg-[#F37021] hover:bg-[#d95d13] text-white font-bold shadow-sm transition-all hover:scale-[1.02] active:scale-[0.98]"
+          onClick={() => setPlanOpen(true)}
+          title="Abrir simulador e plano de prestações"
+        >
+          <CalendarClock className="h-4 w-4" /> Plano de Prestações
+        </Button>
         <Button className="gap-2" onClick={() => openWizard(null)}><Plus className="h-4 w-4" /> Novo Crédito</Button>
       </div>
 
