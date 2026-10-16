@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -32,7 +32,27 @@ if (savedVercelLink) {
   mkdirSync(join(outputDir, '.vercel'), { recursive: true });
   writeFileSync(vercelLinkPath, savedVercelLink, 'utf8');
 }
-cpSync(apiSourceDir, join(outputDir, 'api'), { recursive: true });
+// O plano Hobby da Vercel aceita no máximo 12 funções por publicação. Todas as rotas vão para api/_rotas/
+// (pasta privada: a Vercel não a transforma em funções) e uma única função, api/encaminhar.js, chama a rota
+// pedida. A VPS (server.mjs) continua a usar vercel-api/ directamente, rota a rota.
+const routesDir = join(outputDir, 'api', '_rotas');
+cpSync(apiSourceDir, routesDir, { recursive: true });
+const routeNames = readdirSync(apiSourceDir).filter(file => file.endsWith('.js') && !file.startsWith('_')).map(file => file.slice(0, -3)).sort();
+if (!routeNames.length) throw new Error('vercel-api sem rotas: a publicação foi interrompida.');
+writeFileSync(join(outputDir, 'api', 'encaminhar.js'), [
+  '// Gerado por scripts/build-vercel.mjs: uma só função para todas as rotas da API (limite do plano Hobby).',
+  ...routeNames.map((name, index) => `import rota${index} from './_rotas/${name}.js';`),
+  '',
+  `const ROTAS = new Map([${routeNames.map((name, index) => `['${name}', rota${index}]`).join(', ')}]);`,
+  '',
+  'export default async function handler(req, res) {',
+  "  const nome = String(req.query?.rota || '').trim();",
+  '  const rota = ROTAS.get(nome);',
+  "  if (!rota) return res.status(404).json({ success: false, message: 'Rota da API não encontrada.' });",
+  '  return rota(req, res);',
+  '}',
+  '',
+].join('\n'), 'utf8');
 
 // A mesma política de conteúdo do index.html, enviada também como cabeçalho HTTP, com a protecção que uma
 // meta tag não consegue dar: a aplicação nunca pode ser incorporada noutro site (clickjacking).
@@ -62,14 +82,17 @@ const vercelConfig = {
   version: 2,
   cleanUrls: true,
   functions: {
-    'api/*.js': { maxDuration: 30 }
+    'api/encaminhar.js': { maxDuration: 30 }
   },
+  // Todos os caminhos da API vão para a função única; os mais específicos primeiro.
   rewrites: [
-    { source: '/api/v1/companies/status/:id', destination: '/api/company-status?id=:id' },
-    { source: '/api/v1/companies/onboarding', destination: '/api/onboarding' },
-    { source: '/api/v1/auth/forgot-password', destination: '/api/auth-forgot-password' },
-    { source: '/api/v1/auth/reset-password', destination: '/api/auth-reset-password' },
-    { source: '/api/v1/auth/login', destination: '/api/auth-login' }
+    { source: '/api/v1/companies/status/:id', destination: '/api/encaminhar?rota=company-status&id=:id' },
+    { source: '/api/v1/companies/onboarding', destination: '/api/encaminhar?rota=onboarding' },
+    { source: '/api/v1/auth/forgot-password', destination: '/api/encaminhar?rota=auth-forgot-password' },
+    { source: '/api/v1/auth/reset-password', destination: '/api/encaminhar?rota=auth-reset-password' },
+    { source: '/api/v1/auth/login', destination: '/api/encaminhar?rota=auth-login' },
+    { source: '/api/licencas/:acao', destination: '/api/encaminhar?rota=licencas&acao=:acao' },
+    ...routeNames.map(name => ({ source: `/api/${name}`, destination: `/api/encaminhar?rota=${name}` }))
   ],
   headers: [
     {
