@@ -676,9 +676,13 @@ export class ServicoFinanceiro {
     }): Promise<{ final: boolean; message?: string }> {
         await assertFinancialConnection(input.decision === 'approved' ? 'aprovar e desembolsar o crédito' : 'rejeitar o crédito');
         if (input.credit.status !== 'pending_approval') throw new Error('Apenas créditos pendentes podem ser decididos.');
-        // Lido da base (nunca do ecrã): o Super Administrador principal aprova em qualquer etapa.
+        // Papel e conta principal lidos da base (nunca do ecrã).
+        const actorRow = await db.get<{ role: string; name: string; branchId?: string | null }>('SELECT role, name, branchId FROM users WHERE id = ?', [input.actorId]);
+        if (!actorRow) throw new Error('Utilizador de aprovação não encontrado.');
         const ownerRow = await db.get<{ isOwner?: number }>('SELECT isOwner FROM users WHERE id = ?', [input.actorId]).catch(() => undefined);
-        const actorIsOwner = isPrimaryOwner(ownerRow);
+        // Super Administrador (nível máximo) e conta principal: autoridade total sobre a decisão — sem alçada, sem
+        // dupla aprovação e podendo decidir os próprios pedidos. Fica sempre registado na auditoria.
+        const actorIsOwner = isPrimaryOwner(ownerRow) || actorRow.role === 'super_admin';
         if (!actorIsOwner && input.credit.requestedBy && input.credit.requestedBy === input.actorId) {
             throw new Error('O criador do crédito não pode aprovar ou rejeitar a própria operação.');
         }
@@ -687,8 +691,6 @@ export class ServicoFinanceiro {
             throw new Error('Indique o motivo da rejeição (pelo menos 5 caracteres).');
         }
         // Alçadas: nível exigido pelo pedido (valor, risco, escalonamento) e dupla aprovação acima do nível máximo.
-        const actorRow = await db.get<{ role: string; name: string; branchId?: string | null }>('SELECT role, name, branchId FROM users WHERE id = ?', [input.actorId]);
-        if (!actorRow) throw new Error('Utilizador de aprovação não encontrado.');
         const actual = await db.get<{ principalAmountMinor: number; principalAmount: number }>('SELECT principalAmountMinor, principalAmount FROM credits WHERE id = ?', [input.credit.id]);
         if (!actual) throw new Error('Crédito não encontrado.');
         const limitDecision = await ServicoAlcadas.creditDecision({
@@ -764,7 +766,8 @@ export class ServicoFinanceiro {
                 params: [input.auditId, timestamp, input.actorId, input.actorName,
                     `${approved ? 'Aprovou' : 'Rejeitou'} crédito de ${input.credit.clientName}`,
                     JSON.stringify(input.credit), JSON.stringify({ ...input.credit, status: nextStatus, approvedBy: input.actorName, approvalNotes: notes }),
-                    JSON.stringify({ decision: input.decision, notes, escalationId: limitDecision.escalation?.id, requiredLevel: limitDecision.required.name })]
+                    JSON.stringify({ decision: input.decision, notes, escalationId: limitDecision.escalation?.id, requiredLevel: limitDecision.required.name,
+                        ...(actorIsOwner ? { superAdminOverride: true, selfDecision: (limitDecision.escalation?.requestedById || input.credit.requestedBy) === input.actorId } : {}) })]
             },
             ...limitDecision.statements
         ]).catch(error => {

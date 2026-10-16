@@ -169,6 +169,33 @@ test('J2 · Crédito de 8 000 000 Kz exige dupla aprovação do nível máximo',
     } finally { database.close(); }
 });
 
+test('J2b · Super Administrador decide os próprios pedidos (autoridade total, registada na auditoria)', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        // Pedido acima de qualquer alçada, criado pelo próprio Super Administrador.
+        const saved = await M.ServicoFinanceiro.addCredit(credit('CR-J2B', 'c-baixo', 8_000_000), USERS.superAdmin);
+        const load = async () => (await M.ServicoFinanceiro.getAllCredits()).find(item => item.id === 'CR-J2B');
+        console.log(`    J2b: pedido do Super Administrador → ${saved.status}`);
+        if (saved.status === 'pending_approval') {
+            const escalation = database.prepare(`SELECT * FROM limit_escalations WHERE entityId = 'CR-J2B'`).get();
+            if (escalation) assert.equal(escalation.requestedById, USERS.superAdmin.id);
+            const decision = await M.ServicoFinanceiro.decideCredit({ credit: await load(), decision: 'approved', actorId: USERS.superAdmin.id, actorName: USERS.superAdmin.name, notes: 'Aprovado pelo Super Administrador', notificationId: crypto.randomUUID(), auditId: crypto.randomUUID() });
+            assert.equal(decision.final, true, 'decisão final numa só aprovação, sem dupla aprovação');
+            assert.equal((await load()).status, 'active');
+            const audit = database.prepare(`SELECT metadata FROM audit_logs WHERE entity = 'credit' AND details LIKE 'Aprovou crédito%' ORDER BY timestamp DESC LIMIT 1`).get();
+            const meta = JSON.parse(audit.metadata);
+            assert.equal(meta.superAdminOverride, true);
+            if (escalation) assert.equal(meta.selfDecision, true);
+        }
+        // Um Administrador continua impedido de decidir o próprio pedido.
+        const own = await M.ServicoFinanceiro.addCredit(credit('CR-J2C', 'c-baixo-2', 8_000_000), USERS.admin);
+        assert.equal(own.status, 'pending_approval');
+        const ownLoaded = (await M.ServicoFinanceiro.getAllCredits()).find(item => item.id === 'CR-J2C');
+        await assert.rejects(M.ServicoFinanceiro.decideCredit({ credit: ownLoaded, decision: 'approved', actorId: USERS.admin.id, actorName: USERS.admin.name, notificationId: crypto.randomUUID(), auditId: crypto.randomUUID() }), /Quem pediu|criador|alçada/);
+    } finally { database.close(); }
+});
+
 test('J3 · Gravar um limite por operação maior do que o diário é bloqueado com mensagem clara', async () => {
     const M = await loadModules();
     const database = await createDatabase(M);

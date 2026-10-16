@@ -466,7 +466,8 @@ export class ServicoAlcadas {
         const requester = pending?.requestedById || input.requestedById || null;
         const statements: Statement[] = [];
         const nowIso = now.toISOString();
-        // Super Administrador principal: decisão final em qualquer etapa (sem alçada, dupla aprovação nem volumes).
+        // Super Administrador (e conta principal): decisão final em qualquer etapa (sem alçada, dupla aprovação nem
+        // volumes), incluindo os próprios pedidos.
         if (input.actor.isOwner) {
             // O voto só é registado se não foi a própria conta principal a pedir (a base recusa auto-aprovação); a
             // decisão fica sempre em credit_approvals e na auditoria.
