@@ -1,3 +1,4 @@
+/// <reference path="./electron-env.d.ts" />
 import { contextBridge, ipcRenderer } from 'electron';
 
 type SqlParams = unknown[];

@@ -24,6 +24,7 @@
     "vite.config.ts",
     "electron/main.ts",
     "electron/preload.ts",
-    "electron/db-worker.ts"
+    "electron/db-worker.ts",
+    "electron/*.d.ts"
   ]
 }
