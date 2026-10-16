@@ -1,4 +1,5 @@
 import * as crypto from 'node:crypto';
+import { ALL_ASSIGNABLE_PERMISSIONS } from '../src/bibliotecas/conta-principal';
 
 type UserRecord = {
   id: string; name: string; email?: string; username?: string; role: string;
@@ -200,7 +201,13 @@ export class UserSessionService {
     catch { permissions = []; }
     // Nunca o hash da palavra-passe nem os códigos MFA na sessão (que também chega à interface).
     const { twoFactorSecret: _secret, password: _password, mfaRecoveryCodes: _codes, ...safe } = record as UserRecord & { password?: string; mfaRecoveryCodes?: string };
-    return { ...safe, permissions, twoFactorEnabled: Boolean(record.twoFactorEnabled) };
+    const isSuperAdmin = record.role === 'super_admin' || (record as any).isOwner === 1 || (record as any).isOwner === true;
+    return {
+      ...safe,
+      isOwner: isSuperAdmin ? 1 : (safe as any).isOwner,
+      permissions: isSuperAdmin ? [...ALL_ASSIGNABLE_PERMISSIONS] : permissions,
+      twoFactorEnabled: Boolean(record.twoFactorEnabled)
+    };
   }
 }
 
@@ -254,8 +261,9 @@ export function userUpdateTouchesPrivileges(sql: string) {
 export function assertFinancialPermission(user: any, table: string) {
   if (!user) throw new Error('Sessão inexistente ou expirada.');
   if (table === 'credits' || table === 'credit_installments') return;
+  if (user.role === 'super_admin' || user.isOwner === 1 || user.isOwner === true) return;
   const permissions = Array.isArray(user.permissions) ? user.permissions : [];
-  if (!(user.isOwner === 1 || user.isOwner === true) && !permissions.includes('manage_payments')) {
+  if (!permissions.includes('manage_payments')) {
     throw new Error('O utilizador não possui permissão para operações financeiras.');
   }
 }

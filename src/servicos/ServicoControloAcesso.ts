@@ -5,7 +5,7 @@
  */
 
 import type { User } from '../tipos/autenticacao.ts';
-import { isPrimaryOwner } from '../bibliotecas/conta-principal.ts';
+import { isPrimaryOwner, ALL_ASSIGNABLE_PERMISSIONS } from '../bibliotecas/conta-principal.ts';
 import type {
   PerfilAcesso,
   AcaoModulo,
@@ -238,20 +238,12 @@ export class ServicoControloAcesso {
     const perfis = perfisDisponiveis || this.obterPerfis();
     const roleId = utilizador.role || 'manager';
 
-    // Só o Super Administrador principal tem acesso total. Os outros Super Administradores têm apenas as permissões
-    // que lhes forem atribuídas (convertidas nas permissões detalhadas de cada módulo).
-    if (roleId === 'super_admin' && !isPrimaryOwner(utilizador)) {
-      const atribuidas = new Set<string>();
-      for (const legado of utilizador.permissions || []) {
-        atribuidas.add(legado);
-        this.resolverLegadoParaGranular(legado).forEach(p => atribuidas.add(p));
-      }
-      const origem: Record<string, any> = {};
-      atribuidas.forEach(p => { origem[p] = { origem: 'perfil' }; });
-      return { permissoes: [...atribuidas], origemPorPermissao: origem, excecoesRevogadas: {}, totalExcecoesAtivas: 0 };
-    }
-    if (isPrimaryOwner(utilizador)) {
-      const todas = MODULOS_SISTEMA.flatMap(m => m.acoesDisponiveis.map(a => comporPermissao(m.id, a)));
+    // Super Administrador ou conta principal têm sempre acesso total e irrestrito a todas as ações e módulos
+    if (roleId === 'super_admin' || isPrimaryOwner(utilizador)) {
+      const todas = Array.from(new Set([
+        ...MODULOS_SISTEMA.flatMap(m => m.acoesDisponiveis.map(a => comporPermissao(m.id, a))),
+        ...ALL_ASSIGNABLE_PERMISSIONS
+      ]));
       const origem: Record<string, any> = {};
       todas.forEach(p => { origem[p] = { origem: 'perfil' }; });
       return {
@@ -261,6 +253,7 @@ export class ServicoControloAcesso {
         totalExcecoesAtivas: 0
       };
     }
+
 
     const perfil = perfis.find(p => p.id === roleId) || perfis.find(p => p.id === 'manager') || PERFIS_PREDEFINIDOS[3];
     const conjuntoPermissoes = new Set<string>(perfil.permissoesBase);
@@ -311,7 +304,7 @@ export class ServicoControloAcesso {
    */
   static temPermissao(utilizador: Partial<User> | null | undefined, permissao: string): boolean {
     if (!utilizador) return false;
-    if (isPrimaryOwner(utilizador)) return true;
+    if (utilizador.role === 'super_admin' || isPrimaryOwner(utilizador)) return true;
 
     // Páginas operacionais de consulta geral financeira (ex: Mercado de câmbios BNA):
     // Visíveis a todos os colaboradores autenticados por omissão, salvo se expressamente revogadas.

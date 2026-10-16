@@ -309,7 +309,8 @@ const createTables = async () => {
             permissions TEXT,
             status TEXT DEFAULT 'active',
             ip TEXT,
-            signature TEXT
+            signature TEXT,
+            isOwner INTEGER DEFAULT 0
         );
 
         CREATE TABLE IF NOT EXISTS clients (
@@ -1150,6 +1151,12 @@ const createTables = async () => {
     await safeAddColumn("users", "ip", "TEXT");
     await safeAddColumn("users", "signature", "TEXT");
     await safeAddColumn("users", "createdAt", "TEXT");
+    await safeAddColumn("users", "isOwner", "INTEGER DEFAULT 0");
+    try {
+        await executeSql("UPDATE users SET isOwner = 1 WHERE role = 'super_admin'");
+    } catch {
+        // Ignora se a tabela ainda não tiver dados
+    }
 
     await safeAddColumn("clients", "documents", "TEXT");
     await safeAddColumn("clients", "whatsappVerified", "INTEGER DEFAULT 0");

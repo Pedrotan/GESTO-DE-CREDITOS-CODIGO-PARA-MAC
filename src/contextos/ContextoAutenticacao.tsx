@@ -72,7 +72,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [user, setUser] = useState<User | null>(() => {
         if (window.electronAPI?.userAuthStatus) return null;
         const savedUser = sessionStorage.getItem('user');
-        return savedUser ? JSON.parse(savedUser) : null;
+        if (!savedUser) return null;
+        try {
+            const parsed = JSON.parse(savedUser);
+            if (parsed && (parsed.role === 'super_admin' || parsed.isOwner === 1 || parsed.isOwner === true)) {
+                return {
+                    ...parsed,
+                    isOwner: 1,
+                    permissions: AVAILABLE_PERMISSIONS.map(p => p.id)
+                };
+            }
+            return parsed;
+        } catch {
+            return null;
+        }
     });
 
     const [users, setUsers] = useState<User[]>([]);
@@ -140,9 +153,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                         sessionStorage.removeItem('user');
                         return;
                     }
-                    setUser(status.user as User);
+                    const isSuperAdmin = status.user.role === 'super_admin' || (status.user as any).isOwner === 1 || (status.user as any).isOwner === true;
+                    const enrichedUser = isSuperAdmin ? {
+                        ...status.user,
+                        isOwner: 1,
+                        permissions: AVAILABLE_PERMISSIONS.map(p => p.id)
+                    } : status.user;
+                    setUser(enrichedUser as User);
                     setHasUsers(true);
-                    sessionStorage.setItem('user', JSON.stringify(status.user));
+                    sessionStorage.setItem('user', JSON.stringify(enrichedUser));
                 }
 
                 // Load all users for state
@@ -167,9 +186,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                         permissionExceptions: parsedExceptions
                     });
 
+                    const isSuperAdmin = u.role === 'super_admin' || u.isOwner === 1 || u.isOwner === true;
                     return {
                         ...u,
-                        permissions: efetivas.permissoes.length > 0 ? efetivas.permissoes : (parsedPermissions && Array.isArray(parsedPermissions) && parsedPermissions.length > 0 ? parsedPermissions : DEFAULT_PERMISSIONS[u.role as Role]),
+                        isOwner: isSuperAdmin ? 1 : u.isOwner,
+                        permissions: isSuperAdmin
+                            ? AVAILABLE_PERMISSIONS.map(p => p.id)
+                            : (efetivas.permissoes.length > 0 ? efetivas.permissoes : (parsedPermissions && Array.isArray(parsedPermissions) && parsedPermissions.length > 0 ? parsedPermissions : DEFAULT_PERMISSIONS[u.role as Role])),
                         permissionExceptions: parsedExceptions,
                         approvalLimits: parsedLimits,
                         status: (u.status as any) || 'active',
@@ -184,8 +207,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 if (window.electronAPI?.userAuthStatus) {
                     const status = await window.electronAPI.userAuthStatus();
                     if (status.authenticated && status.user) {
-                        setUser(status.user as User);
-                        sessionStorage.setItem('user', JSON.stringify(status.user));
+                        const isSuperAdmin = status.user.role === 'super_admin' || (status.user as any).isOwner === 1 || (status.user as any).isOwner === true;
+                        const enrichedUser = isSuperAdmin ? {
+                            ...status.user,
+                            isOwner: 1,
+                            permissions: AVAILABLE_PERMISSIONS.map(p => p.id)
+                        } : status.user;
+                        setUser(enrichedUser as User);
+                        sessionStorage.setItem('user', JSON.stringify(enrichedUser));
                     } else {
                         setUser(null);
                         sessionStorage.removeItem('user');
@@ -198,9 +227,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     if (dbUser) {
                         const { password: _, permissions: permissionsStr, ...userWithoutPassword } = dbUser;
                         const parsedPermissions = permissionsStr ? JSON.parse(permissionsStr) : [];
+                        const isSuperAdmin = dbUser.role === 'super_admin' || dbUser.isOwner === 1 || dbUser.isOwner === true;
                         const syncedUser = {
                             ...userWithoutPassword,
-                            permissions: (parsedPermissions.length > 0) ? parsedPermissions : DEFAULT_PERMISSIONS[dbUser.role as Role],
+                            isOwner: isSuperAdmin ? 1 : userWithoutPassword.isOwner,
+                            permissions: isSuperAdmin
+                                ? AVAILABLE_PERMISSIONS.map(p => p.id)
+                                : ((parsedPermissions.length > 0) ? parsedPermissions : DEFAULT_PERMISSIONS[dbUser.role as Role]),
                             status: dbUser.status || 'active'
                         };
                         setUser(syncedUser);
@@ -401,9 +434,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     permissionExceptions: parsedExceptions
                 });
 
+                const isSuperAdmin = u.role === 'super_admin' || u.isOwner === 1 || u.isOwner === true;
                 return {
                     ...u,
-                    permissions: efetivas.permissoes.length > 0 ? efetivas.permissoes : (Array.isArray(parsedPermissions) && parsedPermissions.length > 0 ? parsedPermissions : DEFAULT_PERMISSIONS[u.role as Role]),
+                    isOwner: isSuperAdmin ? 1 : u.isOwner,
+                    permissions: isSuperAdmin
+                        ? AVAILABLE_PERMISSIONS.map(p => p.id)
+                        : (efetivas.permissoes.length > 0 ? efetivas.permissoes : (Array.isArray(parsedPermissions) && parsedPermissions.length > 0 ? parsedPermissions : DEFAULT_PERMISSIONS[u.role as Role])),
                     permissionExceptions: parsedExceptions,
                     approvalLimits: parsedLimits,
                     status: (u.status as any) || 'active',
@@ -447,9 +484,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                     throw new Error(`MFA_SETUP_REQUIRED:${nativeResult.userId}`);
                 }
                 if (nativeResult.authenticated && nativeResult.user) {
-                    setUser(nativeResult.user as User);
+                    const isSuperAdmin = nativeResult.user.role === 'super_admin' || (nativeResult.user as any).isOwner === 1 || (nativeResult.user as any).isOwner === true;
+                    const enrichedUser = isSuperAdmin ? {
+                        ...nativeResult.user,
+                        isOwner: 1,
+                        permissions: AVAILABLE_PERMISSIONS.map(p => p.id)
+                    } : nativeResult.user;
+                    setUser(enrichedUser as User);
                     setHasUsers(true);
-                    sessionStorage.setItem('user', JSON.stringify(nativeResult.user));
+                    sessionStorage.setItem('user', JSON.stringify(enrichedUser));
                     void reloadUsers();
                     return true;
                 }
@@ -669,12 +712,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 }
             }
 
-            const finalPermissions = (Array.isArray(parsedPermissions) && parsedPermissions.length > 0)
-                ? parsedPermissions
-                : DEFAULT_PERMISSIONS[foundUser.role as Role];
+            const isSuperAdmin = foundUser.role === 'super_admin' || (foundUser as any).isOwner === 1 || (foundUser as any).isOwner === true;
+            const finalPermissions = isSuperAdmin
+                ? AVAILABLE_PERMISSIONS.map(p => p.id)
+                : ((Array.isArray(parsedPermissions) && parsedPermissions.length > 0)
+                    ? parsedPermissions
+                    : DEFAULT_PERMISSIONS[foundUser.role as Role]);
 
             const userWithLogin = {
                 ...userWithoutPassword,
+                isOwner: isSuperAdmin ? 1 : userWithoutPassword.isOwner,
                 permissions: finalPermissions,
                 lastLogin: now,
                 lastSeen: now,

@@ -191,6 +191,15 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
    * manage_limits, Auditoria exige view_audit_logs).
    */
   const isAllowed = useCallback((item: MenuItem): boolean => {
+    // Super Administrador ou conta principal têm sempre acesso irrestrito a todos os menus e páginas
+    if (user?.role === 'super_admin' || isPrimaryOwner(user)) {
+      if (item.moduleKey) {
+        const isEnabled = companySettings[item.moduleKey as keyof typeof companySettings];
+        if (isEnabled !== undefined && isEnabled !== null && !Boolean(isEnabled)) return false;
+      }
+      return true;
+    }
+
     if (item.moduleKey) {
       const isEnabled = companySettings[item.moduleKey as keyof typeof companySettings];
       if (isEnabled !== undefined && isEnabled !== null && !Boolean(isEnabled)) return false;
@@ -200,8 +209,6 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
       if (isAdminOnly && user?.role !== 'admin' && user?.role !== 'super_admin') return false;
     }
 
-    // Só a conta principal vê tudo; os outros (incluindo outros Super Administradores) vêem o que lhes for atribuído.
-    if (isPrimaryOwner(user)) return true;
     if (item.roles && !item.roles.includes(user?.role as Role)) return false;
     if (item.permission && !ServicoControloAcesso.temPermissao(user, item.permission)) return false;
 
@@ -220,7 +227,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
    */
   const filhosVisiveis = useCallback((item: MenuItem): MenuItem[] =>
     (item.children || []).filter(child => {
-      if (child.hideWhenSingular && isSingular) return false;
+      if (child.hideWhenSingular && isSingular && user?.role !== 'super_admin' && !isPrimaryOwner(user)) return false;
       if (child.adminOnly && user?.role !== 'admin' && user?.role !== 'super_admin') return false;
       if (!isAllowed(child)) return false;
       return true;

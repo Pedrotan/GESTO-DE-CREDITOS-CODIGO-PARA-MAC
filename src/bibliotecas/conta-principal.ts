@@ -4,8 +4,9 @@
 //
 // Regras partilhadas pela interface e pelo processo principal (que é quem as impõe de facto).
 
-export const isPrimaryOwner = (user: { isOwner?: unknown } | null | undefined) =>
-    Boolean(user) && (user!.isOwner === true || user!.isOwner === 1 || user!.isOwner === '1');
+export const isPrimaryOwner = (user: { isOwner?: unknown; role?: unknown } | null | undefined) =>
+    Boolean(user) && (user!.isOwner === true || user!.isOwner === 1 || user!.isOwner === '1' || String(user!.role) === 'super_admin');
+
 
 /** Permissões de páginas que antes não tinham nenhuma (todas as páginas do menu passam a ter uma). */
 export const PAGE_PERMISSIONS = ['view_market', 'use_simulator', 'view_chat', 'manage_suppliers'] as const;
