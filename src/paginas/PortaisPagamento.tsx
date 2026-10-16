@@ -130,7 +130,7 @@ export default function PaymentGateways() {
                             Integração com APIs de Multicaixa Express, Referências EMIS, Carteiras Digitais e Transferências Bancárias (AO06).
                         </p>
                     </div>
-                    <div className="flex items-center gap-2.5">
+                    <div className="flex flex-wrap items-center gap-2.5">
                         <Button
                             onClick={() => setIsGenerateModalOpen(true)}
                             className="bg-[#04432c] hover:bg-[#065f46] text-white font-bold rounded-xl h-10 shadow-xs gap-2"

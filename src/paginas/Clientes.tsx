@@ -659,7 +659,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     <option value="all">Todos os estados</option>
                     {(Object.keys(CLIENT_STATUS_LABELS) as ClientDisplayStatus[]).map(key => <option key={key} value={key}>{CLIENT_STATUS_LABELS[key]}</option>)}
                 </select>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     <Button variant="outline" className="gap-2" onClick={handleDownloadTemplate}>
                         <Download className="h-4 w-4" />
                         Modelo

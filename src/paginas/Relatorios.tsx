@@ -455,7 +455,7 @@ export default function Reports() {
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                     <Button variant="outline" className="gap-2 border-slate-200 hover:bg-slate-50 transition-colors" onClick={exportToJPG}>
                         <ImageIcon className="h-4 w-4" />
                         Baixar Gráficos (JPG)

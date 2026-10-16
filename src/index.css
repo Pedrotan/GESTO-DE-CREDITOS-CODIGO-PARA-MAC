@@ -150,6 +150,13 @@
     @apply border-border;
   }
 
+  /* Responsividade: os itens de uma grelha podem encolher abaixo da largura do seu conteúdo. Sem isto, uma grelha
+     sem colunas definidas no telemóvel (ex.: "grid lg:grid-cols-2") estica até ao conteúdo mais largo (tabelas,
+     gráficos, menus) e empurra a página para fora do ecrã. Uma classe min-w-* continua a sobrepor-se. */
+  .grid > * {
+    min-width: 0;
+  }
+
   html,
   body,
   #root {

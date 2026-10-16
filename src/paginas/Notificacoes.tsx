@@ -237,7 +237,7 @@ export default function Notifications() {
                 </div>
             </div>
 
-            <div className="mb-6 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div className="mb-6 flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="flex flex-1 items-center gap-4">
                     <div className="relative w-full lg:w-80">
                         <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -264,7 +264,7 @@ export default function Notifications() {
                     </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                     <Button
                         variant="outline"
                         size="sm"

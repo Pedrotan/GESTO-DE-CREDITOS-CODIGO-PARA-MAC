@@ -36,7 +36,7 @@ export function IndicadorIntranet() {
                     tabIndex={0}
                     aria-label={`Intranet: ${role} — ${stateLabel}`}
                     className={cn(
-                        'flex cursor-default flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 2xl:px-3',
+                        'flex cursor-default flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 min-[1800px]:px-3',
                         connected
                             ? 'border-indigo-300 bg-indigo-50 text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950/30 dark:text-indigo-300'
                             : isClient
@@ -44,8 +44,8 @@ export function IndicadorIntranet() {
                                 : 'border-slate-200 bg-slate-50 text-slate-400 dark:border-slate-800 dark:bg-slate-900/30 dark:text-slate-500',
                     )}
                 >
-                    {connected ? <Network className="h-5 w-5 2xl:h-6 2xl:w-6" /> : <Unplug className="h-5 w-5 2xl:h-6 2xl:w-6" />}
-                    <span className="hidden whitespace-nowrap text-[10px] font-semibold 2xl:inline">
+                    {connected ? <Network className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" /> : <Unplug className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />}
+                    <span className="hidden whitespace-nowrap text-[10px] font-semibold min-[1800px]:inline">
                         {isServer ? `Intranet · Servidor (${posts.length})` : isClient ? `Intranet · ${clientState === 'connected' ? 'Posto' : 'Offline'}` : 'Intranet'}
                     </span>
                 </div>

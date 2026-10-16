@@ -2408,8 +2408,8 @@ export default function Dashboard() {
         {/* Donut de Detalhamento de Receita & Evolução da Composição */}
         <Card className="col-span-3 card-elevated flex flex-col justify-between h-full">
           <CardHeader className="pb-2">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-              <div>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
                 <CardTitle className="text-base font-bold flex items-center gap-2">
                   <div className="p-1.5 bg-primary/10 rounded-lg text-primary">
                     <PieIcon className="h-4 w-4" />
@@ -2715,8 +2715,8 @@ export default function Dashboard() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               {revenueDetailItems.map((item) => (
                 <div key={item.label} className="rounded-xl border bg-slate-50/70 p-3 dark:bg-slate-900/40 hover:bg-slate-100/60 dark:hover:bg-slate-800/40 transition-colors">
-                  <div className="mb-1.5 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
                       <span className={cn("h-2.5 w-2.5 rounded-full shrink-0", item.color)} />
                       <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground truncate">{item.label}</span>
                     </div>

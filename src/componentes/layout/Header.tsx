@@ -201,6 +201,10 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
     return () => clearInterval(interval);
   }, []);
 
+  const companyDisplayName = companySettings?.name && !['A Carregar...', 'Provisório', 'Empresa'].includes(companySettings.name)
+    ? companySettings.name
+    : 'A Sua Empresa';
+
   // Faz o sino "tocar" periodicamente enquanto houver notificações por ler
   const [isBellRinging, setIsBellRinging] = useState(false);
   useEffect(() => {
@@ -238,24 +242,25 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
               }}
             />
           </div>
-          <span className="hidden max-w-[360px] text-sm font-black uppercase leading-tight tracking-tight text-foreground lg:inline-block">
-            {companySettings?.name && companySettings.name !== 'A Carregar...' && companySettings.name !== 'Provisório' && companySettings.name !== 'Empresa' ? companySettings.name : 'A Sua Empresa'}
-          </span>
+          {/* Nome (no máximo 2 linhas, nunca uma palavra por linha) e NIF por baixo. O nome completo fica na dica. */}
+          <div className="hidden min-w-[9rem] max-w-[13rem] flex-col leading-tight lg:flex xl:max-w-[16rem] min-[1800px]:max-w-[22rem]" title={companyDisplayName}>
+            <span className="line-clamp-2 break-words text-[13px] font-black uppercase tracking-tight text-foreground">
+              {companyDisplayName}
+            </span>
+            {companySettings?.nif && (
+              <span className="mt-0.5 truncate text-[11px] font-semibold text-muted-foreground">
+                <span className="font-bold text-emerald-700 dark:text-emerald-400">NIF</span> <span className="tabular-nums">{companySettings.nif}</span>
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-1 justify-end items-center gap-2 md:gap-3">
-        {/* Identificação da empresa, encostada ao cartão da data.
+      <div className="flex min-w-0 flex-1 justify-end items-center gap-1.5 md:gap-2 2xl:gap-3">
+        {/* Contactos da empresa: só em ecrãs muito largos, onde há espaço sem apertar os outros elementos.
             Todos os valores vêm das Configurações; o que não estiver
             preenchido não aparece, em vez de mostrar um marcador vazio. */}
-        <div className="hidden min-w-0 items-center gap-6 text-xs text-foreground/85 xl:flex">
-          {companySettings?.nif && (
-            <span className="flex items-center gap-2 whitespace-nowrap">
-              <span className="font-bold text-emerald-700 dark:text-emerald-400">NIF:</span>
-              <span className="font-bold tabular-nums">{companySettings.nif}</span>
-            </span>
-          )}
-
+        <div className="hidden min-w-0 max-w-[26rem] items-center gap-5 text-xs text-foreground/85 min-[1800px]:flex">
           {(companySettings?.email || companySettings?.website) && (
             <div className="flex min-w-0 flex-col gap-1.5 leading-none">
               {companySettings?.email && (
@@ -284,18 +289,18 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
         </div>
 
         {/* Data actual, tal como no cabeçalho dos documentos */}
-        <div className="hidden sm:flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5 shadow-sm shrink-0">
+        <div className="hidden md:flex items-center gap-2 rounded-xl border border-border bg-card px-2.5 py-1.5 shadow-sm shrink-0">
           <Calendar className="h-4 w-4 text-primary shrink-0" />
           <div className="leading-tight">
             <p className="text-xs font-bold text-foreground tabular-nums">{format(now, 'dd/MM/yyyy')}</p>
-            <p className="text-[9px] font-semibold uppercase tracking-wide text-primary">{format(now, 'EEEE', { locale: ptBR })}</p>
+            <p className="hidden text-[9px] font-semibold uppercase tracking-wide text-primary xl:block">{format(now, 'EEEE', { locale: ptBR })}</p>
           </div>
         </div>
 
         {installPrompt && !isInstalledPwa && !(window as any).electronAPI && (
-          <Button variant="outline" size="sm" className="hidden sm:flex" onClick={handleInstallPwa}>
-            <Download className="mr-2 h-4 w-4" />
-            Instalar App
+          <Button variant="outline" size="sm" className="hidden shrink-0 sm:flex" onClick={handleInstallPwa} title="Instalar App">
+            <Download className="h-4 w-4 min-[1800px]:mr-2" />
+            <span className="hidden min-[1800px]:inline">Instalar App</span>
           </Button>
         )}
         {/* Search - Responsive */}
@@ -303,21 +308,22 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="md:hidden text-muted-foreground"
+            className="shrink-0 text-muted-foreground xl:hidden"
+            title="Pesquisar"
             onClick={() => setIsMobileSearchOpen(!isMobileSearchOpen)}
           >
             <Search className="h-5 w-5" />
           </Button>
 
           <div className={cn(
-            "md:block",
-            isMobileSearchOpen ? "absolute top-12 right-0 w-[80vw] bg-background border p-2 rounded-lg shadow-xl z-50 animate-in fade-in slide-in-from-top-2" : "hidden"
+            "xl:block",
+            isMobileSearchOpen ? "absolute top-12 right-0 w-[min(80vw,24rem)] bg-background border p-2 rounded-lg shadow-xl z-50 animate-in fade-in slide-in-from-top-2" : "hidden"
           )}>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground hidden md:block" />
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground hidden xl:block" />
               <Input
                 placeholder="Pesquisar..."
-                className="w-full bg-muted/50 md:w-[220px] md:pl-10 lg:w-[250px] xl:w-[280px] 2xl:w-[320px] focus:bg-card transition-all duration-300"
+                className="w-full bg-muted/50 xl:w-[210px] xl:pl-10 2xl:w-[240px] min-[1800px]:w-[300px] focus:bg-card transition-all duration-300"
                 value={searchTerm}
                 onChange={(e) => handleSearch(e.target.value)}
                 onFocus={() => searchTerm.length >= 2 && setShowResults(true)}
@@ -399,19 +405,19 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
 
         {/* Multi-tenancy Context Switcher (Admin & Super Admin) */}
         {(user?.role === 'super_admin' || user?.role === 'admin') && (
-          <div className="hidden 2xl:flex items-center gap-2">
+          <div className="hidden shrink-0 2xl:flex items-center gap-2">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant={activeContextUserId ? "destructive" : "outline"}
                   size="sm"
                   className={cn(
-                    "gap-2 h-10 px-4 font-bold border-2 transition-all duration-500",
+                    "gap-2 h-10 px-3 font-bold border-2 transition-all duration-500 min-[1800px]:px-4",
                     activeContextUserId ? "animate-pulse border-danger shadow-[0_0_15px_rgba(239,68,68,0.3)]" : "border-primary/20 hover:border-primary/40"
                   )}
                 >
-                  <User className="h-4 w-4" />
-                  <span className="truncate max-w-[150px]">
+                  <User className="h-4 w-4 shrink-0" />
+                  <span className="hidden truncate max-w-[150px] min-[1800px]:inline">
                     {activeContextUserId
                       ? `Modo: ${users.find(u => u.id === activeContextUserId)?.name || '...'}`
                       : "Visão Global"}
@@ -472,16 +478,16 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
         )}
 
         {/* Indicadores de Estado */}
-        <div className="hidden items-center gap-2 xl:flex 2xl:gap-3">
+        <div className="hidden shrink-0 items-center gap-2 xl:flex min-[1800px]:gap-3">
           {/* Indicador de Internet */}
           <div title={internetState === 'checking' ? 'A verificar a ligação à Internet…' : isOnline ? 'Ligado à Internet (verificado de 20 em 20 segundos)' : 'Sem acesso à Internet: os dados continuam a ser gravados neste computador.'} className={cn(
-            "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 2xl:px-3",
+            "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 min-[1800px]:px-3",
             isOnline
               ? 'bg-green-50 border-green-300 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400'
               : 'bg-red-50 border-red-300 text-red-700 dark:bg-red-950/30 dark:border-red-800 dark:text-red-400 animate-pulse'
           )}>
-            {isOnline ? <Wifi className="h-5 w-5 2xl:h-6 2xl:w-6" /> : <WifiOff className="h-5 w-5 2xl:h-6 2xl:w-6" />}
-            <span className="hidden whitespace-nowrap text-[10px] font-semibold 2xl:inline">
+            {isOnline ? <Wifi className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" /> : <WifiOff className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />}
+            <span className="hidden whitespace-nowrap text-[10px] font-semibold min-[1800px]:inline">
               {internetState === 'checking' ? 'A verificar…' : isOnline ? 'Internet Online' : 'Offline'}
             </span>
           </div>
@@ -497,7 +503,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
             onClick={canOpenCloudLink ? () => window.dispatchEvent(new Event(OPEN_CLOUD_LINK_EVENT)) : undefined}
             onKeyDown={canOpenCloudLink ? (event) => { if (event.key === 'Enter') window.dispatchEvent(new Event(OPEN_CLOUD_LINK_EVENT)); } : undefined}
             className={cn(
-            "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 2xl:px-3",
+            "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 min-[1800px]:px-3",
             canOpenCloudLink && "cursor-pointer",
             serverInfo?.isRunning
               ? "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400"
@@ -513,31 +519,31 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           )}>
             {serverInfo?.isRunning ? (
               <>
-                <Server className="h-5 w-5 2xl:h-6 2xl:w-6" />
-                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase 2xl:inline">
+                <Server className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />
+                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase min-[1800px]:inline">
                   Servidor ({connectedClients.length})
                 </span>
               </>
             ) : dbAdapterMode === 'remote' ? (
               <>
-                <Cloud className="h-5 w-5 2xl:h-6 2xl:w-6" />
-                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase 2xl:inline">
+                <Cloud className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />
+                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase min-[1800px]:inline">
                   Modo Cliente
                 </span>
               </>
             ) : cloudLinked ? (
               <>
-                {cloudStatus.state === 'error' ? <CloudOff className="h-5 w-5 2xl:h-6 2xl:w-6" />
-                  : cloudStatus.state === 'syncing' ? <RefreshCw className="h-5 w-5 animate-spin 2xl:h-6 2xl:w-6" />
-                    : <Cloud className="h-5 w-5 2xl:h-6 2xl:w-6" />}
-                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase 2xl:inline">
+                {cloudStatus.state === 'error' ? <CloudOff className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />
+                  : cloudStatus.state === 'syncing' ? <RefreshCw className="h-5 w-5 animate-spin min-[1800px]:h-6 min-[1800px]:w-6" />
+                    : <Cloud className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />}
+                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase min-[1800px]:inline">
                   {cloudStatusLabel}
                 </span>
               </>
             ) : (
               <>
-                <CloudOff className="h-5 w-5 2xl:h-6 2xl:w-6" />
-                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase 2xl:inline">
+                <CloudOff className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />
+                <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase min-[1800px]:inline">
                   Modo Local
                 </span>
               </>
@@ -550,7 +556,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           variant="ghost"
           size="icon"
           onClick={toggleTheme}
-          className="text-primary hover:bg-primary/10"
+          className="shrink-0 text-primary hover:bg-primary/10"
           title={isDark ? "Mudar para Modo Claro" : "Mudar para Modo Escuro"}
         >
           {isDark ? <Sun className="h-5 w-5" /> : <Moon className="h-5 w-5" />}
@@ -562,7 +568,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
             <Button
               variant="ghost"
               size="icon"
-              className="relative text-primary hover:bg-primary/10"
+              className="relative shrink-0 text-primary hover:bg-primary/10"
               title="Chat Interno"
             >
               <MessageSquare className="h-5 w-5" />
@@ -641,7 +647,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
         {/* Notificações (Popover) */}
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="ghost" size="icon" className="relative" title="Notificações">
+            <Button variant="ghost" size="icon" className="relative shrink-0" title="Notificações">
               <Bell className={cn("h-5 w-5 origin-top", isBellRinging && "animate-bell-ring")} />
               {unreadCount > 0 && (
                 <span className="absolute -right-1 -top-1 flex h-6 w-6 items-center justify-center rounded-full bg-danger text-[10px] font-bold text-danger-foreground animate-pulse border-2 border-background">
@@ -725,7 +731,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <div className="flex items-center gap-3 rounded-lg border border-border bg-card px-3 py-2 cursor-pointer hover:bg-muted/50 transition-colors">
+            <div className="flex shrink-0 items-center gap-3 rounded-lg border border-border bg-card p-1.5 cursor-pointer hover:bg-muted/50 transition-colors min-[1800px]:px-3 min-[1800px]:py-2" title={user?.name || 'Usuário'}>
               <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-white font-black overflow-hidden ring-2 ring-primary/10">
                 {user?.avatar && !avatarLoadFailed ? (
                   <img
@@ -740,9 +746,9 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                   </span>
                 )}
               </div>
-              <div className="hidden md:block text-left">
-                <p className="text-sm font-medium text-foreground">{user?.name || 'Usuário'}</p>
-                <p className="text-xs text-muted-foreground">
+              <div className="hidden max-w-[9rem] text-left min-[1800px]:block">
+                <p className="truncate text-sm font-medium text-foreground">{user?.name || 'Usuário'}</p>
+                <p className="truncate text-xs text-muted-foreground">
                   {user ? ROLES[user.role].label : 'Visitante'}
                 </p>
               </div>

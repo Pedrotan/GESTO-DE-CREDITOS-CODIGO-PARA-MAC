@@ -142,8 +142,9 @@ export default function Accounting() {
 
             <CartoesContabeis data={data} range={range} rangeLabel={range.label} onOpen={open} />
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-[230px_minmax(0,1fr)]">
-                <nav aria-label="Secções da contabilidade" className="lg:sticky lg:top-0 lg:self-start">
+            {/* grid-cols-1 + min-w-0: no telemóvel o menu de secções desliza dentro do ecrã em vez de alargar a página */}
+            <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-[230px_minmax(0,1fr)]">
+                <nav aria-label="Secções da contabilidade" className="min-w-0 lg:sticky lg:top-0 lg:self-start">
                     <div className="flex gap-2 overflow-x-auto pb-2 lg:flex-col lg:gap-4 lg:overflow-visible lg:pb-0">
                         {NAVIGATION.map(group => (
                             <div key={group.group} className="flex shrink-0 gap-2 lg:flex-col lg:gap-0.5">

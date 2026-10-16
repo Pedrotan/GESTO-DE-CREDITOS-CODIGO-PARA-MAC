@@ -245,8 +245,8 @@ export default function Perfis() {
                 </div>
 
                 {/* Barra de Filtros e Ações */}
-                <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
-                    <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
                         <div className="relative w-full sm:w-64">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input
@@ -271,7 +271,7 @@ export default function Perfis() {
                         </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex shrink-0 flex-wrap items-center gap-2">
                         <Button
                             variant="outline"
                             onClick={() => navigate('/utilizadores')}
@@ -296,7 +296,7 @@ export default function Perfis() {
                 </div>
 
                 {/* Grid de Cards de Perfis */}
-                <div className="grid gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-4 grid-cols-1 lg:grid-cols-2 2xl:grid-cols-3">
                     {perfisFiltrados.map((perfil) => {
                         const totalUsers = contagemPorPerfil[perfil.id] || 0;
                         const temAlcada = perfil.alcadasPadrao.aprovacaoCreditoKz > 0;
@@ -307,7 +307,7 @@ export default function Perfis() {
                                 className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-sm hover:shadow-md transition-all flex flex-col justify-between group"
                             >
                                 <div className="space-y-3">
-                                    <div className="flex items-start justify-between gap-2">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
                                         <div className="flex items-center gap-2.5">
                                             <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center font-black">
                                                 <ShieldCheck className="h-5 w-5" />
@@ -355,7 +355,7 @@ export default function Perfis() {
                                 </div>
 
                                 {/* Ações do Perfil */}
-                                <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between gap-2">
+                                <div className="pt-4 mt-4 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
                                     <Button
                                         variant="outline"
                                         size="sm"

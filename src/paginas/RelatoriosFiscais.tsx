@@ -344,7 +344,7 @@ export default function FiscalReports() {
             <div className="grid gap-6 lg:grid-cols-2">
                 {/* Economic Report Generation */}
                 <Card className="p-6 lg:col-span-2 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-950/30 dark:to-indigo-950/30 border-blue-100 dark:border-blue-900/40">
-                    <div className="flex items-center gap-4 mb-6">
+                    <div className="mb-6 flex flex-wrap items-center gap-4">
                         <div className="p-3 bg-blue-100 dark:bg-blue-900/50 rounded-lg">
                             <TrendingUp className="h-8 w-8 text-blue-700 dark:text-blue-300" />
                         </div>

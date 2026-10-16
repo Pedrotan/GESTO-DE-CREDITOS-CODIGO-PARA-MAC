@@ -1341,7 +1341,7 @@ export default function Settings() {
                                             )}
                                         </div>
 
-                                        <div className="flex gap-2">
+                                        <div className="flex flex-wrap gap-2">
                                             <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => handleNativeLogoSelection('logo')} disabled={!isAdmin}>
                                                 <Upload className="mr-2 h-3 w-3" /> Alterar
                                             </Button>
@@ -1391,7 +1391,7 @@ export default function Settings() {
                                             )}
                                         </div>
 
-                                        <div className="flex gap-2">
+                                        <div className="flex flex-wrap gap-2">
                                             <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => handleNativeLogoSelection('report')} disabled={!isAdmin}>
                                                 <Upload className="mr-2 h-3 w-3" /> Alterar
                                             </Button>
@@ -1433,7 +1433,7 @@ export default function Settings() {
                                             )}
                                         </div>
 
-                                        <div className="flex gap-2">
+                                        <div className="flex flex-wrap gap-2">
                                             <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => handleNativeLogoSelection('watermark')} disabled={!isAdmin}>
                                                 <Upload className="mr-2 h-3 w-3" /> Alterar
                                             </Button>
@@ -1602,7 +1602,7 @@ export default function Settings() {
                                         )}
                                     </Label>
                                     <div className="space-y-3">
-                                        <div className="flex gap-2">
+                                        <div className="flex flex-wrap gap-2">
                                             <div className="relative flex-1">
                                                 <Input
                                                     id="whatsapp"
@@ -1661,14 +1661,14 @@ export default function Settings() {
                                 </div>
                                 <div className="grid gap-2">
                                     <Label htmlFor="primaryColor">Cor Primária do Contrato</Label>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-wrap gap-2">
                                         <Input id="primaryColor" type="color" value={formData.primaryColor} onChange={handleInputChange} className="w-12 p-1 h-10" disabled={!isAdmin} />
                                         <Input value={formData.primaryColor} onChange={handleInputChange} id="primaryColor" className="font-mono" disabled={!isAdmin} />
                                     </div>
                                 </div>
                                 <div className="grid gap-2">
                                     <Label htmlFor="secondaryColor">Cor Secundária do Contrato</Label>
-                                    <div className="flex gap-2">
+                                    <div className="flex flex-wrap gap-2">
                                         <Input id="secondaryColor" type="color" value={formData.secondaryColor} onChange={handleInputChange} className="w-12 p-1 h-10" disabled={!isAdmin} />
                                         <Input value={formData.secondaryColor} onChange={handleInputChange} id="secondaryColor" className="font-mono" disabled={!isAdmin} />
                                     </div>
@@ -2649,7 +2649,7 @@ export default function Settings() {
                             <div className="text-sm text-muted-foreground">
                                 Recomendado: Gmail com App Password.
                             </div>
-                            <div className="flex gap-2">
+                            <div className="flex flex-wrap gap-2">
                                 <Button
                                     variant="secondary"
                                     onClick={async () => {
