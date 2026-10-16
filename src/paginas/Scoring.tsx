@@ -59,7 +59,8 @@ import { cn } from '@/bibliotecas/utils';
 import {
     computePortfolioRisk, paymentTrend, agingBucketFor, type ClientRisk, type PaymentTrend,
 } from '@/bibliotecas/risco-carteira';
-import { Layers, Siren, FileSpreadsheet, Scale } from 'lucide-react';
+import { Layers, Siren, FileSpreadsheet, Scale, Info, ArrowRight, Wallet, ShieldCheck, PiggyBank } from 'lucide-react';
+import { Link } from 'react-router-dom';
 
 const RATING_COLORS = {
     'Excelente': '#22c55e',
@@ -257,6 +258,12 @@ export default function Scoring() {
             .filter(x => x.signals.some(s => s.level !== 'low'))
             .sort((a, b) => b.weight - a.weight || (b.client.risk?.exposure || 0) - (a.client.risk?.exposure || 0));
     }, [clientsWithScores, portfolio]);
+
+    // Pedidos ainda não desembolsados: não entram no risco, mas explicam uma carteira vazia
+    const pendingApprovals = useMemo(() => {
+        const list = credits.filter(c => c.status === 'pending_approval' && !c.deletedAt);
+        return { count: list.length, amount: list.reduce((s, c) => s + Number(c.principalAmount || 0), 0) };
+    }, [credits]);
 
     const agingChartData = portfolio.aging.map(a => ({ name: a.label, exposure: a.exposure, count: a.count, fill: a.color }));
 
@@ -675,6 +682,27 @@ export default function Scoring() {
                     </div>
                 </div>
 
+                {/* Carteira ainda sem créditos desembolsados */}
+                {portfolio.openCredits === 0 && (
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 dark:bg-sky-500/10 dark:border-sky-500/30 p-4">
+                        <div className="flex gap-3">
+                            <Info className="h-5 w-5 text-sky-600 shrink-0 mt-0.5" />
+                            <div className="text-sm text-sky-900 dark:text-sky-100">
+                                <p className="font-semibold">Ainda não há créditos desembolsados em aberto.</p>
+                                <p className="text-sky-800/80 dark:text-sky-200/80">
+                                    Os indicadores de risco (atraso, PAR, provisões, cobertura e alertas) são calculados sobre créditos aprovados.
+                                    {pendingApprovals.count > 0 && <> Há <b>{pendingApprovals.count}</b> {pendingApprovals.count === 1 ? 'pedido' : 'pedidos'} ({formatCurrency(pendingApprovals.amount)}) a aguardar aprovação.</>}
+                                </p>
+                            </div>
+                        </div>
+                        {pendingApprovals.count > 0 && (
+                            <Button asChild size="sm" variant="outline" className="shrink-0 gap-1.5">
+                                <Link to="/aprovacoes">Ver aprovações <ArrowRight className="h-4 w-4" /></Link>
+                            </Button>
+                        )}
+                    </div>
+                )}
+
                 {/* Tabs */}
                 <Tabs defaultValue="overview" className="space-y-4">
                     <TabsList>
@@ -867,6 +895,27 @@ export default function Scoring() {
                     </TabsContent>
                     {/* Visão Geral */}
                     <TabsContent value="overview" className="space-y-4">
+                        {/* Indicadores de risco da carteira */}
+                        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+                            {[
+                                { icon: <Wallet className="h-3.5 w-3.5" />, label: 'Carteira em dívida', value: formatCurrency(portfolio.totalExposure), hint: `${portfolio.openCredits} crédito(s) em aberto`, tone: 'neutral' },
+                                { icon: <AlertTriangle className="h-3.5 w-3.5" />, label: 'PAR 30', value: `${(portfolio.par30 * 100).toFixed(1)}%`, hint: `${formatCurrency(portfolio.par30Amount)} com +30 dias`, tone: portfolio.openCredits === 0 ? 'neutral' : portfolio.par30 >= 0.1 ? 'bad' : portfolio.par30 >= 0.05 ? 'warn' : 'good' },
+                                { icon: <Siren className="h-3.5 w-3.5" />, label: 'Malparado (+90 dias)', value: `${(portfolio.par90 * 100).toFixed(1)}%`, hint: formatCurrency(portfolio.nplAmount), tone: portfolio.openCredits === 0 ? 'neutral' : portfolio.par90 >= 0.07 ? 'bad' : portfolio.par90 >= 0.03 ? 'warn' : 'good' },
+                                { icon: <PiggyBank className="h-3.5 w-3.5" />, label: 'Provisões estimadas', value: formatCurrency(portfolio.provisionNet), hint: 'após garantias', tone: 'neutral' },
+                                { icon: <ShieldCheck className="h-3.5 w-3.5" />, label: 'Cobertura garantias', value: `${(portfolio.coverageRatio * 100).toFixed(0)}%`, hint: `elegível ${formatCurrency(portfolio.collateralEligible)}`, tone: portfolio.openCredits === 0 ? 'neutral' : portfolio.coverageRatio >= 0.5 ? 'good' : portfolio.coverageRatio >= 0.2 ? 'warn' : 'bad' },
+                            ].map(k => (
+                                <div key={k.label} className={cn('rounded-xl border p-3 min-w-0',
+                                    k.tone === 'good' ? 'bg-emerald-50 border-emerald-200 text-emerald-800 dark:bg-emerald-500/10 dark:border-emerald-500/20 dark:text-emerald-200' :
+                                        k.tone === 'warn' ? 'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-500/10 dark:border-amber-500/20 dark:text-amber-200' :
+                                            k.tone === 'bad' ? 'bg-rose-50 border-rose-200 text-rose-800 dark:bg-rose-500/10 dark:border-rose-500/20 dark:text-rose-200' :
+                                                'bg-card text-foreground')}>
+                                    <p className="flex items-center gap-1.5 text-[10px] font-black uppercase tracking-wider opacity-80">{k.icon}<span className="truncate">{k.label}</span></p>
+                                    <p className="text-xl font-black truncate">{k.value}</p>
+                                    <p className="text-[11px] opacity-75 truncate">{k.hint}</p>
+                                </div>
+                            ))}
+                        </div>
+
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
                             {/* Distribuição por Rating */}
                             <Card>
@@ -875,25 +924,48 @@ export default function Scoring() {
                                     <CardDescription>Classificação da carteira de clientes</CardDescription>
                                 </CardHeader>
                                 <CardContent>
-                                    <ResponsiveContainer width="100%" height={300}>
-                                        <RechartsPie>
-                                            <Pie
-                                                data={pieData}
-                                                cx="50%"
-                                                cy="50%"
-                                                labelLine={false}
-                                                label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                                                outerRadius={80}
-                                                fill="#8884d8"
-                                                dataKey="value"
-                                            >
-                                                {pieData.map((entry, index) => (
-                                                    <Cell key={`cell-${index}`} fill={entry.color} />
-                                                ))}
-                                            </Pie>
-                                            <Tooltip />
-                                        </RechartsPie>
-                                    </ResponsiveContainer>
+                                    <div className="grid grid-cols-1 sm:grid-cols-2 items-center gap-4">
+                                        <div className="relative h-[240px]">
+                                            <ResponsiveContainer width="100%" height="100%">
+                                                <RechartsPie>
+                                                    <Pie
+                                                        data={pieData}
+                                                        cx="50%"
+                                                        cy="50%"
+                                                        innerRadius={62}
+                                                        outerRadius={95}
+                                                        paddingAngle={pieData.length > 1 ? 2 : 0}
+                                                        dataKey="value"
+                                                        stroke="none"
+                                                    >
+                                                        {pieData.map((entry, index) => (
+                                                            <Cell key={`cell-${index}`} fill={entry.color} />
+                                                        ))}
+                                                    </Pie>
+                                                    <Tooltip formatter={(v: number, n: string) => [`${v} cliente(s)`, n]} />
+                                                </RechartsPie>
+                                            </ResponsiveContainer>
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                                                <span className="text-3xl font-black">{stats.avgScore}</span>
+                                                <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">score médio</span>
+                                            </div>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {RATINGS.map(r => {
+                                                const count = stats.distribution[r];
+                                                const pct = stats.totalClients > 0 ? (count / stats.totalClients) * 100 : 0;
+                                                return (
+                                                    <div key={r} className={cn('text-sm', count === 0 && 'opacity-50')}>
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: RATING_COLORS[r] }} />{r}</span>
+                                                            <span className="font-semibold tabular-nums">{count} · {pct.toFixed(0)}%</span>
+                                                        </div>
+                                                        <p className="text-[10px] text-muted-foreground pl-[18px]">{RISK_BASED_PRICING[r].approval} · taxa {RISK_BASED_PRICING[r].rate}</p>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
                                 </CardContent>
                             </Card>
 
@@ -905,12 +977,14 @@ export default function Scoring() {
                                 </CardHeader>
                                 <CardContent>
                                     <ResponsiveContainer width="100%" height={300}>
-                                        <BarChart data={topClientsData}>
-                                            <CartesianGrid strokeDasharray="3 3" />
-                                            <XAxis dataKey="name" />
-                                            <YAxis domain={[0, 1000]} />
-                                            <Tooltip />
-                                            <Bar dataKey="score" radius={[8, 8, 0, 0]} />
+                                        <BarChart data={topClientsData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                                            <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.4} />
+                                            <XAxis dataKey="name" fontSize={12} />
+                                            <YAxis domain={[0, 1000]} ticks={[0, 200, 400, 600, 800, 1000]} fontSize={11} />
+                                            <Tooltip formatter={(v: number) => [`${v} / 1000`, 'Score']} cursor={{ fill: 'rgba(0,0,0,0.04)' }} />
+                                            <Bar dataKey="score" radius={[8, 8, 0, 0]} maxBarSize={56}>
+                                                {topClientsData.map((d, i) => <Cell key={i} fill={d.fill} />)}
+                                            </Bar>
                                         </BarChart>
                                     </ResponsiveContainer>
                                 </CardContent>
