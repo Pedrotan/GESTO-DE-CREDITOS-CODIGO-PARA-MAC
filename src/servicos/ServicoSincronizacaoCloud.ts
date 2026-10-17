@@ -649,25 +649,64 @@ let lastUsersRoster: UsersRosterOutcome | undefined;
 let rejectedRosterAt: string | undefined;
 export const getLastUsersRoster = () => lastUsersRoster;
 
-// Versões anteriores retinham créditos/pagamentos remotos em sync_conflicts. Aplica uma vez as inserções
-// retidas (seguras); alterações e eliminações retidas continuam para revisão manual.
-const reprocessRetainedOperations = async () => {
-    if (localStorage.getItem(scopedStorageKey(REPROCESS_KEY)) === 'true') return 0;
-    const rows = await sqlite.all<{ id: string; operation: string }>(
-        `SELECT id, operation FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000`
-    );
-    const groups: RemoteGroup[] = [];
-    for (const row of rows) {
-        try {
-            const operation = JSON.parse(row.operation) as SyncOperation & { reason?: string };
-            // Com `reason` é um conflito real desta versão (ex.: versão divergente): fica para revisão.
-            if (operation.reason || !isSafeToReprocess(operation, RENDERER_SQL_BY_ID)) continue;
-            groups.push({ operations: [operation], resolvesConflictIds: [row.id] });
-        } catch { /* registo antigo ilegível: fica para revisão */ }
+// Reprocessa automaticamente operações seguras (inserções e snapshots) que tenham sido retidas em sync_conflicts
+// devido a esquemas temporariamente desalinhados ou dependências de chaves estrangeiras.
+export const reprocessRetainedOperations = async (): Promise<number> => {
+    try {
+        const rows = await sqlite.all<{ id: string; operation: string; entityType?: string }>(
+            `SELECT id, operation, entityType FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000`
+        );
+        if (!rows || rows.length === 0) return 0;
+
+        const TABLE_ORDER: Record<string, number> = {
+            users: 1,
+            company_settings: 2,
+            clients: 3,
+            credits: 4,
+            credit_installments: 5,
+            contracts: 6,
+            payments: 7,
+            warranties: 8,
+            legal_cases: 9,
+        };
+
+        const candidates: Array<{ group: RemoteGroup; priority: number; id: string }> = [];
+
+        for (const row of rows) {
+            try {
+                const operation = JSON.parse(row.operation) as SyncOperation & { reason?: string };
+                // Apenas operações comprovadamente seguras: inserções (snapshots e INSERT)
+                if (!isSafeToReprocess(operation, RENDERER_SQL_BY_ID)) continue;
+
+                const { reason: _reason, ...cleanOperation } = operation;
+                const entityType = row.entityType || operation.table || '';
+                const priority = TABLE_ORDER[entityType.toLowerCase()] ?? 50;
+
+                candidates.push({
+                    group: { operations: [cleanOperation], resolvesConflictIds: [row.id] },
+                    priority,
+                    id: row.id,
+                });
+            } catch {
+                // registo antigo ilegível: ignora e mantém para revisão manual
+            }
+        }
+
+        if (candidates.length === 0) return 0;
+
+        // Ordena por prioridade de tabela (ex: clientes antes de créditos, créditos antes de prestações)
+        candidates.sort((a, b) => a.priority - b.priority);
+        const groups = candidates.map(c => c.group);
+
+        const result = await applyGroups(groups);
+        if (result.applied > 0) {
+            console.log(`[CloudSync] ${result.applied} registos seguros de sync_conflicts reprocessados e aplicados com sucesso.`);
+        }
+        return result.applied;
+    } catch (err) {
+        console.warn('[CloudSync] Erro ao reprocessar operações retidas:', err);
+        return 0;
     }
-    const result = await applyGroups(groups);
-    localStorage.setItem(scopedStorageKey(REPROCESS_KEY), 'true');
-    return result.applied;
 };
 
 const emitStatus = (detail: CloudSyncStatus) => {

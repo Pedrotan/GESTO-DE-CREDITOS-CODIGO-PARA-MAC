@@ -2864,6 +2864,20 @@ app.whenReady().then(async () => {
       });
     }
   };
+  // Configuração inicial: antes de o sistema ser configurado, não há sessão de utilizador iniciada.
+  const isFirstSetup = async () => {
+    try {
+      const userCountRow: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
+      if (Number(userCountRow?.total || 0) === 0) return true;
+      const settings: any = await runQuery("get", "SELECT installDate, name FROM company_settings WHERE id = 1 LIMIT 1");
+      if (!settings || !settings.installDate) return true;
+      const defaultNames = new Set(["", "Tango Gestão de Créditos", "Empresa", "Provisório", "Iniciando Sistema...", "A Carregar..."]);
+      if (defaultNames.has(String(settings.name || "").trim())) return true;
+      return false;
+    } catch {
+      return true;
+    }
+  };
   const assertUserSqlAuthorized = async (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>) => {
     let reservedHere = false;
     try {
@@ -2873,7 +2887,7 @@ app.whenReady().then(async () => {
       if (kind === 'schema' && financialSchemaBootstrapOpen) continue;
       if (kind === 'insert') {
         const countRow: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
-        if (Number(countRow?.total || 0) === 0) {
+        if (Number(countRow?.total || 0) === 0 || await isFirstSetup()) {
           if (firstUserCreationReserved) throw new Error("A criacao do primeiro utilizador ja esta em curso.");
           const columns = statement.sql.match(/\busers\s*\(([^)]+)\)/iu)?.[1]
             .split(',').map(column => column.replace(/["'`\[\]]/gu, '').trim().toLowerCase()) || [];
@@ -2886,6 +2900,17 @@ app.whenReady().then(async () => {
             continue;
           }
           throw new Error("O primeiro utilizador deve ser um super administrador com palavra-passe protegida.");
+        }
+      }
+      if (kind === 'update' && await isFirstSetup()) {
+        const params = Array.isArray(statement.params) ? statement.params : [];
+        const byId = /\bWHERE\s+id\s*=\s*\?\s*$/iu.test(statement.sql.trim());
+        if (byId && params.length > 0) {
+          const targetId = params[params.length - 1];
+          const target: any = await runQuery("get", "SELECT id, role, isOwner FROM users WHERE id = ? LIMIT 1", [targetId]).catch(() => null);
+          if (target && (target.role === 'super_admin' || target.isOwner === 1 || target.id === 'dev-admin-emergency')) {
+            continue;
+          }
         }
       }
       const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
@@ -3243,11 +3268,6 @@ app.whenReady().then(async () => {
     return { success: true };
   });
 
-  // Configuração inicial: ainda não há utilizadores, logo não pode haver sessão iniciada.
-  const isFirstSetup = async () => {
-    const row: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
-    return Number(row?.total || 0) === 0;
-  };
   ipcMain.handle("db-execute", async (event, sql, params) => {
     assertTrustedIpcSender(event);
     assertCloudLicenseWritable();
@@ -3283,14 +3303,14 @@ app.whenReady().then(async () => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("query", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!financialSchemaBootstrapOpen && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
+    if (!financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
     return runQuery("query", request.sql, request.params);
   });
   ipcMain.handle("db-get", async (event, sql, params) => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("get", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!financialSchemaBootstrapOpen && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
+    if (!financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
     return runQuery("get", request.sql, request.params);
   });
   ipcMain.handle("db-exec", async (event, sql) => {

@@ -3320,6 +3320,11 @@ export default function Settings() {
                     <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
                 </TabsContent>
 
+                {/* Conflitos de Sincronização */}
+                <TabsContent value="conflicts" className="mt-6 space-y-6">
+                    <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
+                </TabsContent>
+
                 {/* Assinaturas */}
                 <TabsContent value="signatures" className="mt-6 space-y-6">
                     <Card>

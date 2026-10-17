@@ -56,6 +56,7 @@ import {
   RefreshCw,
   Gavel,
   ShieldAlert,
+  AlertTriangle,
 } from 'lucide-react';
 import {
   Tooltip,
@@ -148,7 +149,8 @@ const menuItems: MenuItem[] = [
       { icon: Calculator, label: 'Produtos de Crédito', path: '/definicoes?tab=simulador' },
       { icon: Megaphone, label: 'Marketing', path: '/definicoes?tab=marketing' },
       { icon: Mail, label: 'Email (SMTP)', path: '/definicoes?tab=email' },
-      { icon: Cloud, label: 'Cloud', path: '/definicoes?tab=cloud', hideWhenSingular: true },
+      { icon: Cloud, label: 'Sincronização & Nuvem', path: '/definicoes?tab=cloud' },
+      { icon: AlertTriangle, label: 'Conflitos de Sincronização', path: '/definicoes?tab=conflicts' },
       { icon: DatabaseBackup, label: 'Backup', path: '/definicoes?tab=backup' },
       { icon: RefreshCw, label: 'Backup Automático', path: '/definicoes?tab=auto-backup' },
       { icon: PenTool, label: 'Assinaturas', path: '/definicoes?tab=signatures' },

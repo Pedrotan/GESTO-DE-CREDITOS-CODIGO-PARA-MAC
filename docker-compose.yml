@@ -58,6 +58,7 @@ services:
     volumes:
       - ./server.mjs:/app/server.mjs:ro
       - ./vercel-api:/app/vercel-api:ro
+      - ./vercel-web:/app/vercel-web:ro
     depends_on:
       db:
         condition: service_healthy

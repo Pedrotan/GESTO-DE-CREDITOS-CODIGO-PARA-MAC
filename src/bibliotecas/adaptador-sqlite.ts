@@ -357,6 +357,14 @@ const createTables = async () => {
             spouseNif TEXT,
             spousePhone TEXT,
             spouseEmail TEXT,
+            spouseBirthDate TEXT,
+            spouseOccupation TEXT,
+            spouseIncome REAL,
+            spouseDataRefused INTEGER DEFAULT 0,
+            spouseDataRefusedAt TEXT,
+            spouseDataRefusedBy TEXT,
+            spouseConsentAt TEXT,
+            spouseConsentBy TEXT,
             legalRepresentative TEXT,
             legalRepRole TEXT
         );
@@ -394,6 +402,14 @@ const createTables = async () => {
             usuario_id TEXT,
             targetMonthId TEXT,
             productId TEXT,
+            amortizationMethod TEXT DEFAULT 'FLAT',
+            requestedBy TEXT,
+            requestedAt TEXT,
+            approvedBy TEXT,
+            approvalNotes TEXT,
+            supplierId TEXT,
+            supplierProfitRate REAL,
+            reinforcedAmount REAL DEFAULT 0,
             FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT
         );
 
@@ -499,7 +515,8 @@ const createTables = async () => {
             status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')),
             createdAt TEXT NOT NULL,
             resolvedAt TEXT,
-            resolvedBy TEXT
+            resolvedBy TEXT,
+            resolutionNote TEXT
         );
 
         CREATE TABLE IF NOT EXISTS password_reset_requests (

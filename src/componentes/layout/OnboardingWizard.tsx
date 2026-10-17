@@ -656,6 +656,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                 }
             }
             localStorage.setItem(ONBOARDING_KEY, 'true');
+            localStorage.setItem('tango_company_status', 'ACTIVE');
             localStorage.setItem('last_app_version', CURRENT_APP_VERSION);
             setDismissed(true);
             window.location.hash = '#/entrar';

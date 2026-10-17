@@ -84,7 +84,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS audit_logs ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, userId TEXT, userName TEXT, action TEXT NOT NULL, entity TEXT NOT NULL, details TEXT, previousState TEXT, newState TEXT, metadata TEXT )",
   "CREATE TABLE IF NOT EXISTS calendar_tasks ( id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, date TEXT NOT NULL, done INTEGER DEFAULT 0, createdAt TEXT DEFAULT (datetime('now')), usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS chat_messages ( id TEXT PRIMARY KEY, role TEXT, content TEXT, timestamp TEXT, userId TEXT )",
-  "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, legalRepresentative TEXT, legalRepRole TEXT )",
+  "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, spouseBirthDate TEXT, spouseOccupation TEXT, spouseIncome REAL, spouseDataRefused INTEGER DEFAULT 0, spouseDataRefusedAt TEXT, spouseDataRefusedBy TEXT, spouseConsentAt TEXT, spouseConsentBy TEXT, legalRepresentative TEXT, legalRepRole TEXT )",
   "CREATE TABLE IF NOT EXISTS closed_months ( id TEXT PRIMARY KEY, month INTEGER NOT NULL, year INTEGER NOT NULL, capitalApplied REAL NOT NULL, projectedProfit REAL NOT NULL, realizedProfit REAL NOT NULL, overdueAmount REAL NOT NULL, liquidationRate REAL NOT NULL, closedAt TEXT NOT NULL, closedBy TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS collection_events ( id TEXT PRIMARY KEY, creditId TEXT, kind TEXT NOT NULL CHECK(kind IN ('contact','promise','promise_kept','promise_broken','assignment','target')), agentId TEXT, agentName TEXT, monthKey TEXT, amountMinor INTEGER CHECK(amountMinor IS NULL OR (typeof(amountMinor) = 'integer' AND amountMinor >= 0)), promisedDate TEXT, relatedId TEXT, notes TEXT NOT NULL CHECK(length(trim(notes)) >= 5), actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK((kind NOT IN ('contact','promise','promise_kept','promise_broken','assignment')) OR creditId IS NOT NULL), CHECK(kind <> 'promise' OR (amountMinor > 0 AND promisedDate IS NOT NULL)), CHECK(kind <> 'target' OR (agentId IS NOT NULL AND monthKey IS NOT NULL AND amountMinor IS NOT NULL)), CHECK(kind <> 'assignment' OR agentId IS NOT NULL), CHECK(kind NOT IN ('promise_kept','promise_broken') OR relatedId IS NOT NULL) )",
   "CREATE TABLE IF NOT EXISTS collection_messages ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, creditIds TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, attemptNumber INTEGER DEFAULT 1, totalDue REAL DEFAULT 0, sentAt TEXT NOT NULL, sentBy TEXT, legalTriggered INTEGER DEFAULT 0 )",
@@ -100,7 +100,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS credit_reinforcements ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), idempotencyKey TEXT NOT NULL UNIQUE, notes TEXT, createdBy TEXT, createdAt TEXT NOT NULL, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT)",
   "CREATE TABLE IF NOT EXISTS credit_restructurings ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('restructure','early_settlement')), mode TEXT, reason TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected')), originalPlan TEXT NOT NULL, newPlan TEXT NOT NULL, params TEXT, payNowMinor INTEGER, requestedBy TEXT NOT NULL, requestedByName TEXT NOT NULL, requestedAt TEXT NOT NULL, decidedBy TEXT, decidedByName TEXT, decidedAt TEXT, decisionReason TEXT )",
   "CREATE TABLE IF NOT EXISTS credit_writeoffs ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL UNIQUE, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL, entryId TEXT NOT NULL, createdAt TEXT NOT NULL )",
-  "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, productId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
+  "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, productId TEXT, amortizationMethod TEXT DEFAULT 'FLAT', requestedBy TEXT, requestedAt TEXT, approvedBy TEXT, approvalNotes TEXT, supplierId TEXT, supplierProfitRate REAL, reinforcedAmount REAL DEFAULT 0, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )",
   "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS ledger_lines ( id TEXT PRIMARY KEY, transactionId TEXT NOT NULL, account TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('debit', 'credit')), component TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), FOREIGN KEY(transactionId) REFERENCES ledger_transactions(id) ON DELETE RESTRICT )",
@@ -126,9 +126,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS shared_settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )",
   "CREATE TABLE IF NOT EXISTS simulations ( id TEXT PRIMARY KEY, reference TEXT, date TEXT NOT NULL, clientName TEXT, clientIncome REAL DEFAULT 0, amount REAL DEFAULT 0, term INTEGER DEFAULT 0, interestRate REAL DEFAULT 0, method TEXT CHECK(method IN ('price', 'sac')), riskProfile TEXT CHECK(riskProfile IN ('low', 'medium', 'high')), totalPayment REAL DEFAULT 0, monthlyPayment REAL DEFAULT 0, aiAnalysis TEXT, usuario_id TEXT, createdAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS suppliers ( id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT, email TEXT, nif TEXT, address TEXT, notes TEXT, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')), createdAt TEXT DEFAULT (datetime('now')), deletedAt TEXT, deletedBy TEXT, usuario_id TEXT )",
-  "CREATE TABLE IF NOT EXISTS sync_conflicts ( id TEXT PRIMARY KEY, entityType TEXT NOT NULL, entityId TEXT, operation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')), createdAt TEXT NOT NULL, resolvedAt TEXT, resolvedBy TEXT )",
+  "CREATE TABLE IF NOT EXISTS sync_conflicts ( id TEXT PRIMARY KEY, entityType TEXT NOT NULL, entityId TEXT, operation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')), createdAt TEXT NOT NULL, resolvedAt TEXT, resolvedBy TEXT, resolutionNote TEXT )",
   "CREATE TABLE IF NOT EXISTS user_limits ( id TEXT PRIMARY KEY, userId TEXT, role TEXT CHECK(role IN ('admin', 'manager')), maxTransaction REAL NOT NULL, dailyLimit REAL NOT NULL, monthlyLimit REAL NOT NULL, restrictionsEnabled INTEGER DEFAULT 1, updatedAt TEXT NOT NULL )",
-  "CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT, permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT )",
+  "CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT, permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT, isOwner INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS warranties ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, creditId TEXT, type TEXT NOT NULL, description TEXT NOT NULL, marketValue REAL NOT NULL, estimatedValue REAL, status TEXT DEFAULT 'active', documents TEXT DEFAULT '[]', photos TEXT DEFAULT '[]', location TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
   "CREATE TABLE credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, startDate TEXT, accruedInterest REAL DEFAULT 0, lateInterest REAL DEFAULT 0, totalDue REAL NOT NULL, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, approvedBy TEXT, requestedBy TEXT, requestedAt TEXT, approvalNotes TEXT, targetMonthId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
   "CREATE TABLE dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )",
@@ -500,7 +500,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC",
   "SELECT id, creditId, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt FROM credit_installments",
   "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC",
-  "SELECT id, entityType, entityId, createdAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 100",
+  "SELECT id, entityType, entityId, operation, createdAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 100",
   "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, lateInterestMinor, version FROM credit_installments WHERE creditId = ?",
   "SELECT id, name, email, username, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature, ip FROM users",
@@ -509,7 +509,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, name, role FROM users WHERE LOWER(email) = ?",
   "SELECT id, name, role, branchId FROM users WHERE id = ?",
   "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'",
-  "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000",
+  "SELECT id, operation, entityType FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000",
   "SELECT id, paymentDate FROM payments WHERE receiptSeq IS NULL AND status = 'confirmed' AND deletedAt IS NULL ORDER BY paymentDate, id",
   "SELECT id, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, reportType, title, format, filters, fileName, generatedAt, generatedBy, generatedById FROM report_history ORDER BY generatedAt DESC LIMIT 200",
@@ -644,6 +644,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE users SET failedAttempts = 0, blockedAt = NULL WHERE id = ?",
   "UPDATE users SET failedAttempts = ?, ip = ? WHERE id = ?",
   "UPDATE users SET failedAttempts = ?, status = ?, blockedAt = ?, ip = ? WHERE id = ?",
+  "UPDATE users SET isOwner = 1 WHERE role = 'super_admin'",
   "UPDATE users SET lastLogin = ?, lastSeen = ?, status = ?, ip = ? WHERE id = ?",
   "UPDATE users SET lastSeen = ?, status = 'active', ip = COALESCE(NULLIF(ip, ''), ?) WHERE id = ?",
   "UPDATE users SET password = ? WHERE id = ?",
@@ -657,6 +658,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "VACUUM",
   "create",
   "delete",
+  "drop-shadow(0 0 6px rgba(15, 76, 129, 0.45))",
+  "drop-shadow(0 0 6px rgba(243, 112, 33, 0.5))",
+  "drop-shadow(0 0 6px rgba(245, 158, 11, 0.55))",
   "insert",
   "select",
   "select-all-debtors",
@@ -1000,8 +1004,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS chat_messages ( id TEXT PRIMARY KEY, role TEXT, content TEXT, timestamp TEXT, userId TEXT )"
   ],
   [
-    "6cea738d3e8d18cdd5d290d69e49d13cafcb966efe67a65a49a23109d8c226dd",
-    "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, legalRepresentative TEXT, legalRepRole TEXT )"
+    "746f5f1073079b3289692b92482991c2b7619b144b1cee5658495e1e0954b115",
+    "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, spouseBirthDate TEXT, spouseOccupation TEXT, spouseIncome REAL, spouseDataRefused INTEGER DEFAULT 0, spouseDataRefusedAt TEXT, spouseDataRefusedBy TEXT, spouseConsentAt TEXT, spouseConsentBy TEXT, legalRepresentative TEXT, legalRepRole TEXT )"
   ],
   [
     "e8f579d0595debb4ef76ec98c407eccb4609897a3aefa6deb24943df1ebd1f07",
@@ -1064,8 +1068,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS credit_writeoffs ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL UNIQUE, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL, entryId TEXT NOT NULL, createdAt TEXT NOT NULL )"
   ],
   [
-    "ea1217863348361b78d2b40d925f555e8a3bd12e843254fd4175c890df829e2e",
-    "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, productId TEXT, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )"
+    "51938afccfa6f0f8b7200a390eb5fdda2cd94ebec15548bc5453256b831e29bd",
+    "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, productId TEXT, amortizationMethod TEXT DEFAULT 'FLAT', requestedBy TEXT, requestedAt TEXT, approvedBy TEXT, approvalNotes TEXT, supplierId TEXT, supplierProfitRate REAL, reinforcedAmount REAL DEFAULT 0, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )"
   ],
   [
     "2777cdd03e0ebd2be15beeacf0f37a3b504220a8a3655a76018f7da6a6038cf2",
@@ -1168,16 +1172,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS suppliers ( id TEXT PRIMARY KEY, name TEXT NOT NULL, phone TEXT, email TEXT, nif TEXT, address TEXT, notes TEXT, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive')), createdAt TEXT DEFAULT (datetime('now')), deletedAt TEXT, deletedBy TEXT, usuario_id TEXT )"
   ],
   [
-    "f5e2410a52dd57965449aac4a1e1ca7b42028b3eba74404d682d52dc0d829328",
-    "CREATE TABLE IF NOT EXISTS sync_conflicts ( id TEXT PRIMARY KEY, entityType TEXT NOT NULL, entityId TEXT, operation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')), createdAt TEXT NOT NULL, resolvedAt TEXT, resolvedBy TEXT )"
+    "d2498879618fa5ce7fc2f7b6688d339ebdcac912f6a97eac119530e83280940d",
+    "CREATE TABLE IF NOT EXISTS sync_conflicts ( id TEXT PRIMARY KEY, entityType TEXT NOT NULL, entityId TEXT, operation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'rejected')), createdAt TEXT NOT NULL, resolvedAt TEXT, resolvedBy TEXT, resolutionNote TEXT )"
   ],
   [
     "5d5960cf0e5df56f24b3389dde347912c7a7b1a4d08f39cb27582f7870aeb4c4",
     "CREATE TABLE IF NOT EXISTS user_limits ( id TEXT PRIMARY KEY, userId TEXT, role TEXT CHECK(role IN ('admin', 'manager')), maxTransaction REAL NOT NULL, dailyLimit REAL NOT NULL, monthlyLimit REAL NOT NULL, restrictionsEnabled INTEGER DEFAULT 1, updatedAt TEXT NOT NULL )"
   ],
   [
-    "815c67b228927bae516cea2d35c32871351e606acdbdfac23ba883605792adc8",
-    "CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT, permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT )"
+    "d9db2542bf05588aad4de913338590113a317897bb0819c175d178f4bbb65e1b",
+    "CREATE TABLE IF NOT EXISTS users ( id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT, permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT, isOwner INTEGER DEFAULT 0 )"
   ],
   [
     "eef7f5875b59714a33c7ed793ae5d543500dc9209df111bb04b6d8d2b532027d",
@@ -2664,8 +2668,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC"
   ],
   [
-    "a7770ae43efe294accb7439f93d4deb0dbfef90fd94fa5ba13c32b6a83e142a7",
-    "SELECT id, entityType, entityId, createdAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 100"
+    "d55ff255f7875bf8d6c275c9fe7f382d59db0d31891b377f49c7f365d8c1ff28",
+    "SELECT id, entityType, entityId, operation, createdAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 100"
   ],
   [
     "e98f48b365d100b404c42775a95dd65679921d01273ee2fcbe61191b4324fa4b",
@@ -2700,8 +2704,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'"
   ],
   [
-    "013f69d21f2481982cae2f0924904102580bd89319865f28ad733692f0285d48",
-    "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000"
+    "1308df400a7c24c53059236ef3d0be65f01f195fa81bcdd6e6f1202f40acaf89",
+    "SELECT id, operation, entityType FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000"
   ],
   [
     "7b32ef771c56302234aae2c40b39a0be2cb247e6a7f1d269334a70014da865d9",
@@ -3240,6 +3244,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE users SET failedAttempts = ?, status = ?, blockedAt = ?, ip = ? WHERE id = ?"
   ],
   [
+    "cd3fd6dd924c645c0282626df0a91cb2cbb8a69dfd5684595ee075b74914e0fa",
+    "UPDATE users SET isOwner = 1 WHERE role = 'super_admin'"
+  ],
+  [
     "71afed51b7d3de3684d3fa807de4f93f642a1192c1387b32a1688ca8218a10a4",
     "UPDATE users SET lastLogin = ?, lastSeen = ?, status = ?, ip = ? WHERE id = ?"
   ],
@@ -3290,6 +3298,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6197595503f01ee2a34e403fe08d2e1d9d0c14cf1cdfc2b74739895dc9a15a04",
     "delete"
+  ],
+  [
+    "67ead3a05e5c893e4f57806dd4a94e86844f4818d7044c53b2007030bb4f5057",
+    "drop-shadow(0 0 6px rgba(15, 76, 129, 0.45))"
+  ],
+  [
+    "1443bbc7c4e6a5bcff66593d335976fa56dc1ff91f681f6e08f0808f6ae1c880",
+    "drop-shadow(0 0 6px rgba(243, 112, 33, 0.5))"
+  ],
+  [
+    "fbf0ba40b204172acfdb2e3a793a85df3054fe275dd11c8ec10abddfe543905d",
+    "drop-shadow(0 0 6px rgba(245, 158, 11, 0.55))"
   ],
   [
     "1e22560cee2c4b727c6a117792e04a6769efbe2395f8e2528c603a153a446477",
