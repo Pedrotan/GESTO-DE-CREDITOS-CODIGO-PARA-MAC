@@ -50,5 +50,8 @@ public_key.json
 ._*
 **/._*
 
-# Segredos de produção: nunca no git (usar .env.production.example como modelo)
-.env.production
+# Segredos: nenhum ficheiro .env vai para o git (o repositório é público). Modelo: .env.production.example
+.env
+.env.*
+!.env.production.example
+!.env.example

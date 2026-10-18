@@ -135,6 +135,8 @@ const COMPROMISED_SECRET_HASHES = new Set([
   '80fd577b61f3bc5e7f1e2497334bede06ee9a0cf6bea35b5f05bc3747727cc96',
   '35574a7acd5d91ca90053c1b547afe6108f4ef1aca97435e0ba91cca136a879e',
   '42e176773064b57748020c9f06c52b35b1c30be18631808e476707c2fd53bf53',
+  // .env publicado no repositório público (commit b470712, 16/10/2026).
+  '3f0c734140c67b086b82eb4418c195cd0dcdf4a634ce286f44307ac0d71bc94e',
 ]);
 
 export const isCompromisedSecret = (value) =>
