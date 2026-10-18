@@ -57,6 +57,11 @@ async function main() {
         await request(ledger, { type: 'exec', sql: `
             CREATE TABLE credits (id TEXT PRIMARY KEY, currentBalance INTEGER NOT NULL);
             CREATE TABLE payments (id TEXT PRIMARY KEY, creditId TEXT NOT NULL, amount INTEGER NOT NULL);
+            CREATE TABLE audit_logs (
+                id TEXT PRIMARY KEY, timestamp TEXT, userId TEXT, userName TEXT, action TEXT, entity TEXT,
+                details TEXT, previousState TEXT, newState TEXT, metadata TEXT
+            );
+            CREATE TABLE closed_months (id TEXT PRIMARY KEY);
             CREATE TABLE accounting_entries (
                 id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, paymentId TEXT,
                 previousHash TEXT NOT NULL, integrityHash TEXT NOT NULL

@@ -557,7 +557,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
       {!collapsed && (
         <div className="shrink-0 border-t border-sidebar-border/60 p-3">
           <div className="rounded-xl bg-sidebar-accent/30 backdrop-blur-md p-3 border border-white/5">
-            <p className="text-[11px] font-bold text-sidebar-primary uppercase tracking-wider mb-0.5">Versão 3.0.2</p>
+            <p className="text-[11px] font-bold text-sidebar-primary uppercase tracking-wider mb-0.5">Versão 3.0.3</p>
             <p className="text-[10px] text-sidebar-foreground/50 font-medium truncate">
               © 2026 Tango Gestão ERP
             </p>

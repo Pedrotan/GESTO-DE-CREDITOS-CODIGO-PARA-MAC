@@ -7,6 +7,7 @@ import Database from 'better-sqlite3-multiple-ciphers';
 import path from 'path';
 import fs from 'fs';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
+import { migrateNativeSimulations } from './migracoes-simulacoes';
 
 const {
     dbPath,
@@ -462,6 +463,12 @@ try {
     } else {
         db = openDatabaseWithOptions();
     }
+
+    // Executa também quando a base já está pronta e o renderer não repete createTables().
+    const simulationBackup = `${dbPath}.before-flat-3.0.3.bak`;
+    if (migrateNativeSimulations(db, () => {
+        if (!fs.existsSync(simulationBackup)) db.prepare('VACUUM INTO ?').run(simulationBackup);
+    })) log('[Migration] Simulações atualizadas para FLAT; cópia de segurança preservada.');
 
     log('[DB Worker] Database initialized at:', {
         dbPath,
