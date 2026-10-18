@@ -148,6 +148,9 @@ const getDeviceId = () => {
     return value;
 };
 
+// Abre a fila na versão desta aplicação. Se o navegador já a tiver numa versão mais recente (correu aqui outra
+// versão da aplicação), abre-a como está em vez de falhar: a versão mais recente tem sempre as tabelas desta. Sem
+// isto o login ficava bloqueado com "The requested version (2) is less than the existing version (3)".
 const openQueue = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, 2);
     request.onupgradeneeded = () => {
@@ -157,7 +160,12 @@ const openQueue = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
         if (!database.objectStoreNames.contains(INCOMING_STORE)) database.createObjectStore(INCOMING_STORE, { keyPath: 'id' });
     };
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+        if (request.error?.name !== 'VersionError') { reject(request.error); return; }
+        const existing = indexedDB.open(DB_NAME);
+        existing.onsuccess = () => resolve(existing.result);
+        existing.onerror = () => reject(existing.error);
+    };
 });
 
 const putOperations = async (operations: SyncOperation[], store = STORE_NAME) => {
