@@ -1,3 +1,4 @@
+import { reinforcementInterest, selectReinforcementInstallment } from '@/bibliotecas/reforco-capital';
 import { formatCurrency } from '@/bibliotecas/formatters';
 import type { LimitActor } from '@/bibliotecas/alcadas';
 import { ServicoAlcadas } from '@/servicos/ServicoAlcadas';
@@ -409,9 +410,14 @@ export class ServicoFinanceiro {
      * (guarda na base de dados); acima da alçada, ou se o volume se esgotar entretanto por outra operação em
      * simultâneo, o crédito fica pendente na fila de Aprovações com o motivo e o nível exigido.
      */
-    static async addCredit(credit: Credit, actor?: LimitActor | null, context: { productId?: string | null; effortRate?: number | null } = {}): Promise<Credit & { escalationReason?: string }> {
+    static async addCredit(credit: Credit, actor?: LimitActor | null, context: { productId?: string | null; effortRate?: number | null; reinforcementOf?: string } = {}): Promise<Credit & { escalationReason?: string }> {
         await assertFinancialConnection('registar o crédito');
-        if (actor) {
+        if (context.reinforcementOf) {
+            const source = await db.get<any>('SELECT id, clientId, status FROM credits WHERE id = ? AND deletedAt IS NULL', [context.reinforcementOf]);
+            if (!actor || !source || source.clientId !== credit.clientId || !['active', 'overdue'].includes(source.status) || credit.status !== 'pending_approval' || source.id === credit.id) throw new Error('O reforço separado exige um contrato activo do mesmo cliente e aprovação própria.');
+            credit = { ...credit, approvalNotes: `Reforço como novo contrato do crédito ${source.id}. ${credit.approvalNotes || ''}` };
+        }
+        if (actor && !context.reinforcementOf) {
             // Regra já definida: só há novo crédito depois de liquidado o anterior (e sem pedido pendente).
             const existing = await db.all<any>(`SELECT clientId, status, principalAmount, currentBalance, totalDue, createdAt, startDate, deletedAt
                 FROM credits WHERE clientId = ? AND deletedAt IS NULL`, [credit.clientId]).catch(() => []);
@@ -603,13 +609,16 @@ export class ServicoFinanceiro {
     }
 
     static async reinforceCredit(input: {
-        idempotencyKey: string; credit: Credit; amount: number; interestAmount: number;
+        idempotencyKey: string; credit: Credit; amount: number; interestAmount: number; installmentId: string;
         processedBy: string; userId?: string; notes?: string;
     }): Promise<AccountingEntry> {
         await assertFinancialConnection('reforçar o crédito');
         if (!/^[a-zA-Z0-9:_-]{8,128}$/u.test(input.idempotencyKey)) throw new Error('Chave idempotente inválida.');
         const amountMinor = toMinorUnits(input.amount, 'Reforço');
-        const interestMinor = toMinorUnits(input.interestAmount, 'Juro do reforço');
+        const storedCredit = await db.get<any>('SELECT * FROM credits WHERE id = ? AND deletedAt IS NULL', [input.credit.id]);
+        if (!storedCredit || !['active', 'overdue'].includes(storedCredit.status)) throw new Error('Só é possível reforçar créditos activos ou em mora.');
+        const interestMinor = toMinorUnits(reinforcementInterest(input.amount, Number(storedCredit.interestRate), storedCredit.amortizationMethod || 'FLAT'), 'Juro do reforço');
+        if (interestMinor !== toMinorUnits(input.interestAmount, 'Juro indicado')) throw new Error('Os juros do reforço divergiram da taxa do contrato. Atualize os dados.');
         await this.assertNotFrozen();
         await this.assertCashAvailable(amountMinor, 'o reforço de capital');
         const timestamp = new Date();
@@ -622,12 +631,11 @@ export class ServicoFinanceiro {
         }, await this.previousAccountingHash(), timestamp);
         entry.sourceId = input.idempotencyKey;
 
-        const schedule = await db.all<any>(`SELECT id, principalMinor, interestMinor, paidPrincipalMinor,
+        const schedule = await db.all<any>(`SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor,
             paidInterestMinor, status, version FROM credit_installments
             WHERE creditId = ? ORDER BY installmentNumber`, [input.credit.id]);
-        const open = schedule.filter(item => item.status !== 'paid');
-        if (open.length === 0) throw new Error('O crédito não possui prestações abertas para receber o reforço.');
-        const distribute = (total: number, index: number) => Math.floor(total / open.length) + (index < total % open.length ? 1 : 0);
+        const selected = selectReinforcementInstallment(schedule, input.installmentId);
+        const open = [selected];
         const auditId = crypto.randomUUID();
         const current = await this.loadCreditBalances(input.credit.id, input.credit.version ?? 0);
         const principalAfterMinor = current.principalMinor + amountMinor;
@@ -640,7 +648,7 @@ export class ServicoFinanceiro {
                       (id, creditId, amountMinor, interestMinor, idempotencyKey, notes, createdBy, createdAt)
                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
                 params: [crypto.randomUUID(), input.credit.id, amountMinor, interestMinor, input.idempotencyKey,
-                    input.notes || null, input.userId || null, timestamp.toISOString()], expectChanges: 1
+                    [`Prestação: ${selected.id}; mês: ${selected.dueDate.slice(0, 7)}`, input.notes].filter(Boolean).join(' — '), input.userId || null, timestamp.toISOString()], expectChanges: 1
             },
             {
                 sql: `UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?,
@@ -651,11 +659,11 @@ export class ServicoFinanceiro {
                     interestAfterMinor / 100, interestAfterMinor, totalDueAfterMinor / 100, totalDueAfterMinor,
                     amountMinor / 100, input.credit.id, current.version], expectChanges: 1
             },
-            ...open.map((item, index) => ({
+            ...open.map(item => ({
                 sql: `UPDATE credit_installments SET principalMinor = ?, interestMinor = ?, version = version + 1
                       WHERE id = ? AND version = ?`,
-                params: [Number(item.principalMinor) + distribute(amountMinor, index),
-                    Number(item.interestMinor) + distribute(interestMinor, index), item.id, Number(item.version)], expectChanges: 1
+                params: [Number(item.principalMinor) + amountMinor,
+                    Number(item.interestMinor) + interestMinor, item.id, Number(item.version)], expectChanges: 1
             })),
             this.accountingInsert(entry),
             ...this.ledgerStatements(entry),
@@ -664,7 +672,7 @@ export class ServicoFinanceiro {
                       VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?)`,
                 params: [auditId, timestamp.toISOString(), input.userId || null, input.processedBy,
                     `Reforço de capital registado no crédito ${input.credit.id}`,
-                    JSON.stringify({ creditId: input.credit.id, idempotencyKey: input.idempotencyKey, amountMinor, interestMinor })]
+                    JSON.stringify({ creditId: input.credit.id, idempotencyKey: input.idempotencyKey, amountMinor, interestMinor, installmentId: selected.id, dueMonth: selected.dueDate.slice(0, 7) })]
             }
         ]);
         return entry as AccountingEntry;

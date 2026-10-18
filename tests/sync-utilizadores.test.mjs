@@ -8,6 +8,8 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import initSqlJs from 'sql.js';
 import bcrypt from 'bcryptjs';
+import { applyRemoteGroups } from '../src/bibliotecas/sync-operacoes.ts';
+import { withCompanyIdentity } from '../src/bibliotecas/identidade-empresa-sync.ts';
 
 // Utilizadores do computador da empresa até ao login da versão web, de ponta a ponta:
 // computador (lista cifrada) → /api/sync (guarda a última lista) → navegador (decifra, grava) → bcrypt.
@@ -99,6 +101,7 @@ const cloud = await bundle('src/servicos/ServicoSincronizacaoCloud.ts', {
     '@/bibliotecas/ligacao-financeira': 'export const setFinancialConnectionProbe = () => {};',
     '@/bibliotecas/adaptador-sqlite': `export const sqlite = {
         all: (sql, params) => globalThis.__sqlite.all(sql, params),
+        run: (sql, params) => globalThis.__sqlite.run(sql, params),
         transaction: statements => globalThis.__sqlite.transaction(statements),
     };`,
     '@/servicos/ServicoRelatorioUso': 'export const reportUsageIfDue = async () => {};',
@@ -114,13 +117,16 @@ const cloud = await bundle('src/servicos/ServicoSincronizacaoCloud.ts', {
 const SQL = await initSqlJs();
 // Esquema da versão web (createdAt e name obrigatórios, username único).
 const USERS_SCHEMA = `
+    CREATE TABLE shared_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT);
+    CREATE TABLE company_settings (id INTEGER PRIMARY KEY, nif TEXT, name TEXT, address TEXT, logo TEXT, reportLogo TEXT, watermarkLogo TEXT);
     CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE,
         password TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT,
         permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT, failedAttempts INTEGER DEFAULT 0,
         twoFactorEnabled BOOLEAN DEFAULT 0, twoFactorSecret TEXT, blockedAt TEXT, mfaRecoveryCodes TEXT);
-    CREATE TABLE sync_conflicts (id TEXT PRIMARY KEY, operation TEXT, status TEXT, createdAt TEXT);`;
+    CREATE TABLE sync_conflicts (id TEXT PRIMARY KEY, operation TEXT, entityType TEXT, entityId TEXT, status TEXT, createdAt TEXT, resolutionNote TEXT, resolvedAt TEXT);`;
 
 const sqliteFor = database => ({
+    run: async (sql, params = []) => database.run(sql, params),
     all: async (sql, params = []) => {
         const statement = database.prepare(sql);
         statement.bind(params.map(value => value ?? null));
@@ -305,4 +311,110 @@ test('lista cifrada com outro Código de Acesso é identificada como ilegível',
     globalThis.localStorage.setItem('tango_active_tenant_code', SERVER_CODE);
     const outcome = await cloud.receiveUsersFromCloud();
     assert.equal(outcome.state, 'unreadable');
+});
+
+test('web reenvia dados existentes e o desktop recebe clientes, créditos e pagamentos', async () => {
+    server.ops = [];
+    server.rosters.clear();
+    const schema = `CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT);
+        CREATE TABLE credits (id TEXT PRIMARY KEY, clientId TEXT REFERENCES clients(id), amount INTEGER);
+        CREATE TABLE payments (id TEXT PRIMARY KEY, creditId TEXT REFERENCES credits(id), amount INTEGER);`;
+    const web = useDevice();
+    web.run(schema);
+    web.run("INSERT INTO clients VALUES ('c1', 'Cliente web')");
+    web.run("INSERT INTO credits VALUES ('cr1', 'c1', 250000)");
+    web.run("INSERT INTO payments VALUES ('p1', 'cr1', 23519)");
+    // Uma versão anterior já tinha marcado o bootstrap, mesmo sem estes dados na nuvem.
+    localStorage.setItem('cloud_sync_bootstrap_v3:default', 'true');
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    const sent = await cloud.syncCloudNow();
+    cloud.stopCloudSync();
+    assert.equal(sent.success, true, sent.message);
+    assert.ok(sent.pushed >= 3);
+
+    const desktop = useDevice({ electronAPI: database => ({
+        syncApplyRemote: groups => applyRemoteGroups(groups, {
+            sqlById: new Map(),
+            tableColumns: async table => new Set((await sqliteFor(database).all(`PRAGMA table_info("${table}")`)).map(row => row.name)),
+            transaction: statements => sqliteFor(database).transaction(statements),
+        }),
+    }) });
+    desktop.run(schema);
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    const received = await cloud.syncCloudNow();
+    assert.equal(received.success, true, received.message);
+    assert.equal(cloud.getLastCloudSyncStatus().state, 'synced');
+    cloud.stopCloudSync();
+    assert.equal((await sqliteFor(desktop).all('SELECT name FROM clients'))[0]?.name, 'Cliente web');
+    assert.equal((await sqliteFor(desktop).all('SELECT amount FROM credits'))[0]?.amount, 250000);
+    assert.equal((await sqliteFor(desktop).all('SELECT amount FROM payments'))[0]?.amount, 23519);
+});
+
+test('identidade do desktop entra na fila cifrada e chega ao cabeçalho e relatórios da web', async () => {
+    server.ops = []; server.rosters.clear();
+    const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+j7WQAAAAASUVORK5CYII=';
+    const desktop = useDevice({electronAPI: () => ({syncApplyRemote: async () => ({applied:0,conflicts:0})})});
+    desktop.run('INSERT INTO company_settings (id,nif,name,address,logo,reportLogo) VALUES (1,?,?,?,?,?)', [TENANT,'Empresa de teste','Morada da empresa',png,png]);
+    cloud.startCloudSync({url:location.origin,apiKey:SERVER_CODE,tenantId:TENANT});
+    const seeded = await cloud.syncCloudNow();
+    assert.equal(seeded.success,true,seeded.message);
+    assert.ok(await cloud.getPendingSyncCount() >= 5, 'o bootstrap da identidade tem de entrar na fila real');
+    const sent = await cloud.syncCloudNow();
+    assert.equal(sent.success,true,sent.message);
+    assert.ok(sent.pushed >= 5);
+    assert.ok(server.ops.length >= 5);
+    cloud.stopCloudSync();
+    const web = useDevice();
+    cloud.startCloudSync({url:location.origin,apiKey:SERVER_CODE,tenantId:TENANT});
+    const received = await cloud.syncCloudNow();
+    cloud.stopCloudSync();
+    assert.equal(received.success,true,received.message);
+    const settings = await withCompanyIdentity(sqliteFor(web),{nif:TENANT,name:'Empresa',address:''},TENANT);
+    assert.equal(settings.name,'Empresa de teste');
+    assert.equal(settings.address,'Morada da empresa');
+    assert.equal(settings.logo,png);
+    assert.equal(settings.reportLogo,png);
+});
+
+test('HTTP 200 sem confirmação da API mantém a fila e não apresenta sincronizado', async () => {
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    database.run("INSERT INTO clients VALUES ('offline', 'Por enviar')");
+    const previousFetch = globalThis.fetch;
+    globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({}) });
+    try {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        const result = await cloud.syncCloudNow();
+        assert.equal(result.success, false);
+        assert.equal(cloud.getLastCloudSyncStatus().state, 'error');
+        assert.ok(await cloud.getPendingSyncCount() > 0);
+    } finally {
+        cloud.stopCloudSync();
+        globalThis.fetch = previousFetch;
+    }
+});
+
+test('carga ilegível fica retida após avançar o cursor e recupera com a chave correcta', async () => {
+    server.ops = [];
+    server.rosters.clear();
+    const source = useDevice({ electronAPI: desktopApi });
+    source.run(`INSERT INTO users (id, name, email, password, role, createdAt)
+        VALUES ('retido', 'Retido', 'retido@empresa.ao', 'hash', 'admin', '2026-01-01')`);
+    const encrypted = await desktopApi(source).syncUsersPayload({ apiKey: 'TG-ZZZZ-YYYY', tenantId: TENANT, deviceId: 'outro', knownIds: [] });
+    server.ops.push({ seq: ++server.seq, tenant_hash: sha256(TENANT), operation_id: encrypted.id, device_id: 'outro', payload: encrypted.payload });
+    useDevice({ electronAPI: desktopApi });
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    try {
+        const first = await cloud.syncCloudNow();
+        assert.equal(first.skipped, 1);
+        assert.equal(cloud.getLastCloudSyncStatus().state, 'pending');
+        const again = await cloud.syncCloudNow();
+        assert.equal(again.skipped, 1, 'a operação não desaparece quando o servidor já não a devolve');
+        cloud.stopCloudSync();
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT, extraKeys: ['TG-ZZZZ-YYYY'] });
+        const recovered = await cloud.syncCloudNow();
+        assert.equal(recovered.skipped, 0);
+    } finally {
+        cloud.stopCloudSync();
+    }
 });

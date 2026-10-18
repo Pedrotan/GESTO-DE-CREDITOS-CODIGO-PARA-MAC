@@ -142,9 +142,12 @@
 ; --- Custom Init (runs before install begins) ---
 !macro customInit
   ; Fechar a aplicação aberta antes de instalar (e antes de mover os seus dados).
-  nsExec::ExecToLog 'taskkill /f /im "Tango Gestao de Creditos.exe" /t'
-  nsExec::ExecToLog 'taskkill /f /im "TangoERP.exe" /t'
-  nsExec::ExecToLog 'taskkill /f /im "TangoMasterGen.exe" /t'
+  !if "${APP_ID}" == "com.sistema.tangomaster"
+    nsExec::ExecToLog 'taskkill /f /im "TangoMasterGen.exe" /t'
+  !else
+    nsExec::ExecToLog 'taskkill /f /im "Tango Gestao de Creditos.exe" /t'
+    nsExec::ExecToLog 'taskkill /f /im "TangoERP.exe" /t'
+  !endif
   Sleep 1000
 
   StrCpy $TangoHasData "0"

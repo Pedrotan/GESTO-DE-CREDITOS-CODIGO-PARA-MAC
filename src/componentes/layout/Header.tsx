@@ -83,15 +83,17 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   const cloudStatusLabel = cloudStatus.state === 'synced' ? 'Sincronizado'
     : cloudStatus.state === 'error' ? (pendingLabel || 'Sem sincronizar')
       : cloudStatus.state === 'syncing' ? 'A sincronizar'
-        : pendingLabel || 'Modo Cloud';
+        : cloudStatus.conflicts ? `${cloudStatus.conflicts} conflito${cloudStatus.conflicts === 1 ? '' : 's'}`
+          : cloudStatus.skipped ? 'Itens por recuperar'
+            : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
   const lastSyncText = cloudStatus.at ? ` Última tentativa: ${new Date(cloudStatus.at).toLocaleTimeString('pt-AO')}.` : '';
   const syncIndicatorTitle = serverInfo?.isRunning ? 'Servidor da rede local activo'
     : dbAdapterMode === 'remote' ? 'Ligado a um servidor da rede local'
       : cloudLinked
         ? cloudStatus.state === 'error'
-          ? `Sincronização com a versão web falhou: ${(cloudStatus.message || 'erro').replace(/.+$/, '')}. Vai tentar de novo automaticamente.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
+          ? `Sincronização com a versão web falhou: ${cloudStatus.message || 'erro'}. Vai tentar de novo automaticamente.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
           : cloudStatus.state === 'synced' ? `Sincronizado com a versão web.${lastSyncText}`
-            : `A sincronizar com a versão web.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}`
+            : `${cloudStatus.message || 'A sincronizar com a versão web.'}${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
         : window.electronAPI ? 'Modo Local: clique para ligar este computador à versão web' : 'Modo Local';
   const canOpenCloudLink = Boolean(window.electronAPI) && !serverInfo?.isRunning && dbAdapterMode !== 'remote' && !cloudLinked;
   const [isDark, setIsDark] = useState(document.documentElement.classList.contains('dark'));

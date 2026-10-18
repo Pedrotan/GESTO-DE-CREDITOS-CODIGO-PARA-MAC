@@ -7,7 +7,7 @@ import { licenseAllowsIntranet, useIntranetClientStatus, useLicenseInfo } from '
 
 /**
  * Ícone da rede local (intranet), ao lado do da Internet. Só aparece quando a licença permite que outros
- * computadores se liguem a este pela rede local (escalão empresarial ou módulo «intranet» no plano).
+ * computadores se liguem a este pela rede local (módulo «intranet» explicitamente atribuído).
  * Mostra se este computador é o servidor ou um posto cliente e se a ligação à rede local está activa;
  * ao passar o rato: postos ligados e endereço do servidor.
  */
@@ -17,7 +17,7 @@ export function IndicadorIntranet() {
     const isServer = Boolean(serverInfo?.isRunning);
     const isClient = !isServer && dbAdapterMode === 'remote';
     const clientState = useIntranetClientStatus(isClient);
-    if (!licenseAllowsIntranet(license)) return null;
+    if (!window.electronAPI || !licenseAllowsIntranet(license)) return null;
 
     const posts = Array.isArray(connectedClients) ? connectedClients.filter((item: any) => item?.status !== 'offline') : [];
     const serverAddress = isServer

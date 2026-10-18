@@ -1,4 +1,5 @@
 import { LegalCase } from '@/tipos/contencioso';
+import { withCompanyIdentity } from '@/bibliotecas/identidade-empresa-sync';
 import { RepositorioContencioso } from '@/repositorios/RepositorioContencioso';
 import { db } from '@/bibliotecas/bd';
 import { formatCurrency } from '@/bibliotecas/formatters';
@@ -84,7 +85,7 @@ export class ServicoContencioso {
         const [client, credit, rawSettings] = await Promise.all([
             db.get<any>('SELECT * FROM clients WHERE id = ?', [legalCase.clientId]),
             db.get<any>('SELECT * FROM credits WHERE id = ?', [legalCase.creditId]),
-            db.get<any>('SELECT * FROM company_settings WHERE id = 1')
+            db.get<any>('SELECT * FROM company_settings WHERE id = 1').then(row => withCompanyIdentity(db, row))
         ]);
 
         const { default: jsPDF } = await import('@/bibliotecas/pdf-documento');

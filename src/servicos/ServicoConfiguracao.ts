@@ -1,10 +1,12 @@
 import { RepositorioDefinicoesEmpresa } from '@/repositorios/RepositorioDefinicoesEmpresa';
+import { withCompanyIdentity } from '@/bibliotecas/identidade-empresa-sync';
+import { db } from '@/bibliotecas/bd';
 import { CompanySettings } from '@/tipos/base-dados';
 import bcrypt from 'bcryptjs';
 
 export class ServicoConfiguracao {
     static async getSettings(): Promise<any | null> {
-        return await RepositorioDefinicoesEmpresa.findById(1);
+        return withCompanyIdentity(db, await RepositorioDefinicoesEmpresa.findById(1));
     }
 
     static async updateSettings(updates: Partial<CompanySettings>, currentSettings: CompanySettings): Promise<{ newSettings: CompanySettings, changes: string[] }> {

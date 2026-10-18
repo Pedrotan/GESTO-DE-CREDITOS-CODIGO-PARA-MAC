@@ -76,7 +76,7 @@ export interface ElectronAPI {
     listDevices: () => Promise<{ deviceId: string; name: string; type: string; description: string }[]>;
 
     // Server API
-    startServer: (passkey: string) => Promise<{ success: boolean; error?: string }>;
+    startServer: (passkey: string, legacyKey?: string) => Promise<{ success: boolean; error?: string }>;
     stopServer: () => Promise<{ success: boolean; error?: string }>;
     getIpAddress: () => Promise<string>;
     verifyWhatsApp: (phone: string) => Promise<{ registered: boolean; error?: string }>;
@@ -90,7 +90,7 @@ export interface ElectronAPI {
     getNetworkInfo: () => Promise<any>;
     fetchServerConfig: (params: { url: string; passkey: string }) => Promise<any>;
     setSharedConfig: (config: any) => Promise<any>;
-    promoteToMaster: (passkey?: string) => Promise<any>;
+    promoteToMaster: (passkey?: string, legacyKey?: string) => Promise<any>;
     getMeshPriority: () => Promise<number>;
     selectImage: () => Promise<string | null>;
     saveAvatar: (userId: string, base64Data: string) => Promise<string>;

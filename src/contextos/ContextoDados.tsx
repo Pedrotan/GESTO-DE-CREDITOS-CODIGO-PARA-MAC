@@ -1,3 +1,6 @@
+import { reinforcementInterest } from '@/bibliotecas/reforco-capital';
+import { withCompanyIdentity, publishCompanyIdentity, companyIdentityTenant } from '@/bibliotecas/identidade-empresa-sync';
+import { portableCompanyImage } from '@/bibliotecas/imagem-portatil';
 import { automaticStatusChangeText } from '@/bibliotecas/estado-cliente';
 import { formatCurrency } from '@/bibliotecas/formatters';
 import React, { createContext, useContext, useState, ReactNode, useEffect, useCallback, useRef } from 'react';
@@ -66,6 +69,7 @@ import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { LegalCase, Warranty } from '@/tipos/contencioso';
 import { getActiveAccountIdFromStorage, getScopedLocalStorageItem, scopedStorageKey, setScopedLocalStorageItem } from '@/bibliotecas/contas';
 import { guardarSegredo, segredoPasskeyConta, semSegredos } from '@/bibliotecas/cofre-segredos';
+import { assertLocalServerAccess } from '@/bibliotecas/intranet-policy';
 
 export interface AdvancedReportData {
     monthlyRevenue: { month: string; amount: number }[];
@@ -96,14 +100,14 @@ interface ContextoDadosType {
     deleteClient: (id: string, user?: { id: string; name: string }) => Promise<void>;
     addDocumentToClient: (clientId: string, doc: any, user?: { id: string; name: string }) => Promise<void>;
     deleteDocumentFromClient: (clientId: string, docId: string, user?: { id: string; name: string }) => Promise<void>;
-    addCredit: (credit: Credit, user?: { id: string; name: string }, context?: { productId?: string | null; effortRate?: number | null }) => Promise<Credit & { escalationReason?: string }>;
+    addCredit: (credit: Credit, user?: { id: string; name: string }, context?: { productId?: string | null; effortRate?: number | null; reinforcementOf?: string }) => Promise<Credit & { escalationReason?: string }>;
     updateCredit: (id: string, updates: Partial<Credit>, user?: { id: string; name: string }) => Promise<void>;
     adjustCreditCharges: (id: string, accruedInterest: number, lateInterest: number,
         reason: string, idempotencyKey: string, user?: { id: string; name: string }) => Promise<void>;
     reinforceCredit: (
         creditId: string,
         amount: number,
-        options?: { interestRate?: number; notes?: string; idempotencyKey?: string },
+        options?: { installmentId: string; notes?: string; idempotencyKey?: string },
         user?: { id: string; name: string }
     ) => Promise<void>;
     deleteCredit: (id: string, user?: { id: string; name: string }, justification?: string) => Promise<void>;
@@ -593,7 +597,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 await db.init();
                 syncDictionary().catch(err => console.warn("[Dictionary Sync Error]", err));
                 return Promise.all([
-                    db.get<any>('SELECT * FROM company_settings WHERE id = 1'),
+                    db.get<any>('SELECT * FROM company_settings WHERE id = 1').then(row => withCompanyIdentity(db, row)),
                     db.all<any>('SELECT id, name, email, username, role, avatar, status, permissions FROM users')
                 ]);
             };
@@ -602,6 +606,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             const [Definicoes, loadedUsers] = Array.isArray(result) ? result : [null, null];
 
             if (Definicoes) {
+                for (const field of Definicoes._identityClearedImages || []) {
+                    const backup = field === 'logo' ? 'company_logo_backup' : field === 'reportLogo' ? 'company_report_logo_backup' : 'company_watermark_logo_backup';
+                    localStorage.removeItem(scopedStorageKey(backup));
+                }
                 const safeParse = (val: string, fallback: any) => {
                     try { return val ? JSON.parse(val) : fallback; } catch (e) { return fallback; }
                 };
@@ -945,6 +953,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             ...newSettings,
             licenseKey: resolveLicenseKey(newSettings.licenseKey)
         };
+        for (const field of ['logo', 'reportLogo', 'watermarkLogo'] as const) {
+            if (updates[field] === null) {
+                const backup = field === 'logo' ? 'company_logo_backup' : field === 'reportLogo' ? 'company_report_logo_backup' : 'company_watermark_logo_backup';
+                localStorage.removeItem(scopedStorageKey(backup));
+            }
+        }
         const hydratedSettings = await hydrateLogos(effectiveSettings);
 
         // Guardar cópias de segurança dedicadas dos logotipos para nunca serem perdidos
@@ -960,6 +974,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
         setCompanySettings(hydratedSettings);
         setScopedLocalStorageItem('cached_company_settings', JSON.stringify(semSegredos(effectiveSettings)));
+        await publishCompanyIdentity(db, companyIdentityTenant(hydratedSettings), hydratedSettings, {
+            fields: Object.keys(updates), image: portableCompanyImage,
+        });
         // Só os campos alterados, com o valor anterior e o novo (segredos e imagens nunca entram no registo).
         const SECRET_SETTING = /password|rescueKey|passkey|apiKey|licenseKey|smtpPassword/i;
         const changedKeys = Object.keys(updates).filter(key => JSON.stringify((companySettings as any)[key] ?? null) !== JSON.stringify((updates as any)[key] ?? null));
@@ -1444,7 +1461,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         performAutoSync();
     };
 
-    const addCredit = async (credit: Credit, user?: { id: string; name: string }, context: { productId?: string | null; effortRate?: number | null } = {}) => {
+    const addCredit = async (credit: Credit, user?: { id: string; name: string }, context: { productId?: string | null; effortRate?: number | null; reinforcementOf?: string } = {}) => {
         try {
             const targetUserId = activeContextUserId || user?.id || authUser?.id;
             const creditWithUser = { ...credit, usuario_id: targetUserId };
@@ -1490,7 +1507,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const reinforceCredit = async (
         creditId: string,
         amount: number,
-        options?: { interestRate?: number; notes?: string; idempotencyKey?: string },
+        options?: { installmentId: string; notes?: string; idempotencyKey?: string },
         user?: { id: string; name: string }
     ) => {
         const credit = credits.find(c => c.id === creditId);
@@ -1502,20 +1519,23 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             throw new Error('O valor do reforço tem de ser maior que zero.');
         }
 
-        const taxa = options?.interestRate ?? credit.interestRate;
-        const jurosReforco = Math.round(amount * (taxa / 100));
+        const jurosReforco = reinforcementInterest(amount, credit.interestRate, credit.amortizationMethod);
 
         const principalAntes = credit.principalAmount;
         const atualizado: Partial<Credit> = {
             principalAmount: principalAntes + amount,
+            principalAmountMinor: Math.round((principalAntes + amount) * 100),
             currentBalance: credit.currentBalance + amount,
+            currentBalanceMinor: Math.round((credit.currentBalance + amount) * 100),
             accruedInterest: (credit.accruedInterest || 0) + jurosReforco,
+            accruedInterestMinor: Math.round(((credit.accruedInterest || 0) + jurosReforco) * 100),
             totalDue: (credit.totalDue || 0) + amount + jurosReforco,
+            totalDueMinor: Math.round(((credit.totalDue || 0) + amount + jurosReforco) * 100),
             reinforcedAmount: (credit.reinforcedAmount || 0) + amount,
         };
 
         const entry = await ServicoFinanceiro.reinforceCredit({
-            idempotencyKey: options?.idempotencyKey || crypto.randomUUID(), credit, amount,
+            idempotencyKey: options?.idempotencyKey || crypto.randomUUID(), credit, amount, installmentId: options?.installmentId || '',
             interestAmount: jurosReforco, processedBy: user?.name || authUser?.name || 'Sistema',
             userId: user?.id || authUser?.id, notes: options?.notes
         });
@@ -2255,10 +2275,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const toggleServerMode = async (enabled: boolean) => {
-        if (!(window as any).electronAPI) return;
+        if (!(window as any).electronAPI) assertLocalServerAccess(false, null);
+        if (enabled) assertLocalServerAccess(true, await validateLicense(companySettings.licenseKey || '', companySettings.nif));
 
         if (enabled) {
-            const result = await (window as any).electronAPI.startServer(companySettings.syncPasskey);
+            const result = await (window as any).electronAPI.startServer(companySettings.syncPasskey, resolveLicenseKey(companySettings.licenseKey));
             if (result.success) {
                 setServerInfo({
                     isRunning: true,
@@ -2296,14 +2317,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const promoteToMaster = async (passkey?: string) => {
-        if (!(window as any).electronAPI) {
-            await toggleServerMode(true);
-            setScopedLocalStorageItem('is_master', 'true');
-            return;
-        }
+        assertLocalServerAccess(Boolean((window as any).electronAPI), await validateLicense(companySettings.licenseKey || '', companySettings.nif));
 
         try {
-            const result = await (window as any).electronAPI.promoteToMaster(passkey);
+            const result = await (window as any).electronAPI.promoteToMaster(passkey, resolveLicenseKey(companySettings.licenseKey));
             if (result.success) {
                 setGlobalDbMode('local');
                 setDbAdapterModeState('local');

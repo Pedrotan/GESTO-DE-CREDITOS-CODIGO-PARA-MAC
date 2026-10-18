@@ -238,7 +238,7 @@ const api = Object.freeze({
         type ? ensureText(type, 'Tipo', 32).trim() : undefined
     ),
 
-    startServer: (passkey?: string) => ipcRenderer.invoke('start-server', passkey ? ensureText(passkey, 'Chave', 256) : undefined),
+    startServer: (passkey?: string, legacyKey?: string) => ipcRenderer.invoke('start-server', passkey ? ensureText(passkey, 'Chave', 256) : undefined, legacyKey ? ensureText(legacyKey, 'Licença', 16384) : undefined),
     stopServer: () => ipcRenderer.invoke('stop-server'),
     setSharedConfig: (config: any) => ipcRenderer.invoke('set-shared-config', config),
     getIpAddress: () => ipcRenderer.invoke('get-ip-address'),
@@ -274,7 +274,7 @@ const api = Object.freeze({
     securityEventsAck: () => ipcRenderer.invoke('security-events-ack'),
     securityStatus: () => ipcRenderer.invoke('security-status'),
 
-    promoteToMaster: (passkey?: string) => ipcRenderer.invoke('promote-to-master', passkey ? ensureText(passkey, 'Chave', 256) : undefined),
+    promoteToMaster: (passkey?: string, legacyKey?: string) => ipcRenderer.invoke('promote-to-master', passkey ? ensureText(passkey, 'Chave', 256) : undefined, legacyKey ? ensureText(legacyKey, 'Licença', 16384) : undefined),
     getMeshPriority: () => ipcRenderer.invoke('get-mesh-priority'),
 
     sendEmail: (params: { smtpSettings: any, emailOptions: any }) => ipcRenderer.invoke('send-email', params),

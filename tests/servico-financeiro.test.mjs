@@ -156,9 +156,10 @@ test('reforço soma ao saldo persistido e não ao enviado pela interface', async
     const ServicoFinanceiro = await loadService();
     const database = await createDatabase();
     await ServicoFinanceiro.addCredit(credit);
+    const before = database.prepare('SELECT * FROM credit_installments ORDER BY installmentNumber').all();
     await ServicoFinanceiro.reinforceCredit({
         idempotencyKey: 'reforco-0001', credit: { ...credit, currentBalance: 1, totalDue: 1, version: 0 },
-        amount: 300, interestAmount: 30, processedBy: 'Operador', userId: 'u1'
+        amount: 300, interestAmount: 30, installmentId: before[1].id, processedBy: 'Operador', userId: 'u1'
     });
     const row = database.prepare(`SELECT principalAmountMinor, currentBalanceMinor, accruedInterestMinor, totalDueMinor,
         reinforcedAmount FROM credits WHERE id = 'cr1'`).get();
@@ -166,6 +167,38 @@ test('reforço soma ao saldo persistido e não ao enviado pela interface', async
         principalAmountMinor: 150_000, currentBalanceMinor: 150_000, accruedInterestMinor: 33_000,
         totalDueMinor: 183_000, reinforcedAmount: 300
     });
+    const after = database.prepare('SELECT * FROM credit_installments ORDER BY installmentNumber').all();
+    assert.deepEqual(after[0], before[0]);
+    assert.deepEqual(after[2], before[2]);
+    assert.equal(after[1].principalMinor, before[1].principalMinor + 30_000);
+    assert.equal(after[1].interestMinor, before[1].interestMinor + 3_000);
+    assert.match(database.prepare('SELECT notes FROM credit_reinforcements').get().notes, /Prestação:/);
+    await assert.rejects(ServicoFinanceiro.reinforceCredit({
+        idempotencyKey: 'reforco-invalid', credit: { ...credit, version: 1 },
+        amount: 300, interestAmount: 30, installmentId: 'outra-prestacao', processedBy: 'Operador'
+    }), /Selecione uma prestação/);
+    assert.equal(database.prepare('SELECT COUNT(*) AS n FROM credit_reinforcements').get().n, 1);
+});
+
+test('reforço separado mantém o anterior e cria pedido com juros próprios; origem inválida é recusada', async () => {
+    const service = await loadService();
+    const database = await createDatabase();
+    await service.addCredit(credit);
+    database.prepare("INSERT INTO users(id,name,email,password,role,createdAt) VALUES ('sa','Super Admin','sa@example.invalid','x','super_admin',?)").run(new Date().toISOString());
+    const actor = { id: 'sa', name: 'Super Admin', role: 'super_admin' };
+    const before = database.prepare("SELECT * FROM credits WHERE id='cr1'").get();
+    const pending = { ...credit, id: 'cr2', status: 'pending_approval', principalAmount: 200, currentBalance: 200,
+        interestRate: 15, accruedInterest: 30, totalDue: 230, requestedBy: 'sa', approvalNotes: 'Acordo de reforço' };
+    const saved = await service.addCredit(pending, actor, { reinforcementOf: 'cr1' });
+    assert.equal(saved.status, 'pending_approval');
+    assert.equal(saved.principalAmount, 200);
+    assert.equal(saved.accruedInterest, 30);
+    assert.deepEqual(database.prepare("SELECT * FROM credits WHERE id='cr1'").get(), before);
+    assert.match(database.prepare("SELECT approvalNotes FROM credits WHERE id='cr2'").get().approvalNotes, /cr1/);
+    assert.equal(database.prepare("SELECT COUNT(*) AS n FROM contracts WHERE id='cr2'").get().n, 0);
+    await assert.rejects(service.addCredit({ ...pending, id: 'cr3' }, actor, { reinforcementOf: 'inexistente' }), /exige um contrato/);
+    await assert.rejects(service.addCredit({ ...pending, id: 'cr4', status: 'active' }, actor, { reinforcementOf: 'cr1' }), /exige um contrato/);
+    database.close();
 });
 
 test('juros já reconhecidos são liquidados sem reconhecer receita duas vezes e o estorno repõe as contas originais', async () => {

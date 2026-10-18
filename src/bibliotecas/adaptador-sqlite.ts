@@ -1,3 +1,4 @@
+import { SIMULATIONS_FLAT_MIGRATION } from '@/bibliotecas/migracao-simulacoes';
 import { auditSqlHash } from '@/bibliotecas/cadeia-auditoria';
 import initSqlJs, { Database } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
@@ -856,7 +857,7 @@ const createTables = async () => {
             amount REAL DEFAULT 0,
             term INTEGER DEFAULT 0,
             interestRate REAL DEFAULT 0,
-            method TEXT CHECK(method IN ('price', 'sac')),
+            method TEXT CHECK(method IN ('price', 'sac', 'flat')),
             riskProfile TEXT CHECK(riskProfile IN ('low', 'medium', 'high')),
             totalPayment REAL DEFAULT 0,
             monthlyPayment REAL DEFAULT 0,
@@ -1387,6 +1388,17 @@ const createTables = async () => {
     await safeAddColumn("simulations", "details", "TEXT");
     await safeAddColumn("simulations", "convertedCreditId", "TEXT");
     await safeAddColumn("simulations", "updatedAt", "TEXT");
+    const simulationSchema = await querySql("SELECT sql FROM sqlite_master WHERE type='table' AND name='simulations'");
+    if (!String((simulationSchema as any[])?.[0]?.sql || '').includes("'flat'")) {
+        if (isElectron) {
+            await (window as any).electronAPI.dbTransaction(SIMULATIONS_FLAT_MIGRATION.map(sql => ({ sql, params: [] })));
+        } else {
+            db!.run('BEGIN TRANSACTION');
+            try { for (const sql of SIMULATIONS_FLAT_MIGRATION) db!.run(sql); db!.run('COMMIT'); }
+            catch (error) { db!.run('ROLLBACK'); throw error; }
+        }
+    }
+
     await safeAddColumn("collection_messages", "legalTriggered", "INTEGER DEFAULT 0");
     await safeAddColumn("collection_messages", "attemptNumber", "INTEGER DEFAULT 1");
     await safeAddColumn("collection_messages", "totalDue", "REAL DEFAULT 0");

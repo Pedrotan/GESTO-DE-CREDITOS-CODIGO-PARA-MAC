@@ -17,7 +17,6 @@ for (const dir of ['release', 'release-admin']) {
 }
 
 const steps = [
-    ['Fechar aplicações abertas', 'npm run stop-apps'],
     ['Limpar builds anteriores', 'npm run clean:win'],
     ['Instalador Tango ERP', 'npm run build:erp'],
     ['Instalador Tango Master', 'npm run build:master'],

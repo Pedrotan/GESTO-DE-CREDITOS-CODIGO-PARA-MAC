@@ -120,6 +120,7 @@ import { ConflictReview } from '@/componentes/sync/ConflictReview';
 import { ConfiguracaoSimulador } from '@/componentes/simulador/ConfiguracaoSimulador';
 import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
 import { canManageInterestTiers } from '@/bibliotecas/taxas-juro';
+import { assertLocalServerAccess, canHostLocalServer } from '@/bibliotecas/intranet-policy';
 
 const SUPPORT_PHONE = "+244 941537486";
 const SYSTEM_NAME = "Tango Gestão de Créditos";
@@ -156,6 +157,7 @@ export default function Settings() {
     const [license, setLicense] = useState<any>({ tier: 'singular', isValid: false, type: 'trial' });
     const [previewLicense, setPreviewLicense] = useState<any>({ tier: 'singular', isValid: false, type: 'trial' });
     const isDesktopApp = typeof window !== 'undefined' && !!(window as any).electronAPI;
+    const localServerAllowed = canHostLocalServer(isDesktopApp, multiTenantLicense);
     const [isSingular, setIsSingular] = useState(true);
     const [machineId, setMachineId] = useState('Carregando...');
 
@@ -565,6 +567,7 @@ export default function Settings() {
 
     const handleToggleServerMode = async (enabled: boolean) => {
         try {
+            if (enabled) assertLocalServerAccess(isDesktopApp, multiTenantLicense);
             if (enabled) {
                 // Verificar se outro servidor está potencialmente ativo na rede
                 // Vamos tentar verificar o URL de sincronização configurado atualmente se parecer local
@@ -3097,7 +3100,7 @@ export default function Settings() {
                         <CardContent className="space-y-6">
 
                             {/* Modo Servidor LAN */}
-                            <div className="rounded-lg border bg-slate-50 p-4 border-l-4 border-l-blue-500">
+                            {isDesktopApp && (localServerAllowed || serverInfo?.isRunning) && <div className="rounded-lg border bg-slate-50 p-4 border-l-4 border-l-blue-500">
                                 <div className="flex items-center justify-between mb-2">
                                     <div className="space-y-0.5">
                                         <Label className="text-base font-semibold text-blue-900">Modo Servidor (Esta Máquina)</Label>
@@ -3108,7 +3111,7 @@ export default function Settings() {
                                     <Switch
                                         checked={serverInfo?.isRunning || false}
                                         onCheckedChange={handleToggleServerMode}
-                                        disabled={!isAdmin}
+                                        disabled={!isAdmin || (!localServerAllowed && !serverInfo?.isRunning)}
                                     />
                                 </div>
 
@@ -3224,15 +3227,14 @@ export default function Settings() {
                                         </div>
                                     </div>
                                 )}
-                            </div>
-
-                            <div className="relative flex py-6 items-center">
+                            </div>}
+                            {localServerAllowed && <div className="relative flex py-6 items-center">
                                 <div className="flex-grow border-t border-slate-200"></div>
                                 <span className="flex-shrink-0 mx-4 text-slate-500 text-[10px] font-bold uppercase tracking-[0.2em]">OU CONECTAR COMO CLIENTE</span>
                                 <div className="flex-grow border-t border-slate-200"></div>
-                            </div>
+                            </div>}
 
-                            <div className="space-y-4">
+                            {localServerAllowed ? <div className="space-y-4">
                                 <div className="flex items-center gap-2 mb-2">
                                     <Laptop className="h-4 w-4 text-primary" />
                                     <h3 className="text-sm font-bold">Configuração de Máquina Escrava (Cliente)</h3>
@@ -3242,6 +3244,7 @@ export default function Settings() {
                                 </p>
                             </div>
 
+                            : <p className="text-sm text-muted-foreground">{isDesktopApp ? 'A rede local requer o módulo intranet no plano. A sincronização com a versão web continua disponível pela nuvem.' : 'A versão web utiliza a VPS para sincronizar com os computadores. O Modo Servidor da rede local é ativado apenas no desktop com um plano que inclua intranet.'}</p>}
                             <div className="flex items-center justify-between rounded-lg border p-4">
                                 <div className="space-y-0.5">
                                     <Label className="text-base">Sincronização Cloud</Label>
@@ -3257,7 +3260,7 @@ export default function Settings() {
                             </div>
                             <div className="grid gap-2">
                                 <Label htmlFor="syncUrl" className="flex items-center justify-between">
-                                    <span>URL da API (Servidor Local ou Nuvem)</span>
+                                    <span>{localServerAllowed ? 'URL da API (Servidor Local ou Nuvem)' : 'URL da API (Nuvem)'}</span>
                                     {formData.syncEnabled && !serverInfo?.isRunning && (
                                         <button
                                             type="button"
@@ -3273,7 +3276,7 @@ export default function Settings() {
                                     id="syncUrl"
                                     value={formData.syncUrl}
                                     onChange={handleInputChange}
-                                    placeholder="http://192.168.1.X:3000/sync"
+                                    placeholder={localServerAllowed ? 'http://192.168.1.X:3000/sync' : 'https://tangogestaoecreditos.tech'}
                                     disabled={!formData.syncEnabled || !isSuperAdmin}
                                     className={cn(formData.syncEnabled && !formData.syncUrl && "border-amber-300 bg-amber-50/20")}
                                 />

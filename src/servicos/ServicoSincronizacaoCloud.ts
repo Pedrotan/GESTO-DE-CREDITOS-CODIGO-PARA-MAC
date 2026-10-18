@@ -1,4 +1,6 @@
-import { getScopedLocalStorageItem, scopedStorageKey } from '@/bibliotecas/contas';
+import { scopedStorageKey } from '@/bibliotecas/contas';
+import { publishCompanyIdentity, readCompanyIdentity } from '@/bibliotecas/identidade-empresa-sync';
+import { portableCompanyImage } from '@/bibliotecas/imagem-portatil';
 import { lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGREDO_CODIGO_EMPRESA } from '@/bibliotecas/cofre-segredos';
 import { secureCloudUrl } from '@/servicos/ServicoLigacaoNuvem';
 import { setFinancialConnectionProbe } from '@/bibliotecas/ligacao-financeira';
@@ -49,13 +51,16 @@ const authHeaders = (config: CloudSyncConfig): Record<string, string> =>
 const DB_NAME = 'TangoCloudSyncQueue';
 const STORE_NAME = 'operations';
 const INCOMING_STORE = 'incoming';
+const UNREADABLE_STORE = 'unreadable';
+type EncryptedPending = { id: string; payload: string; tenantId: string; url: string; createdAt: string };
 const DEVICE_KEY = 'tango_cloud_device_id';
 const CURSOR_KEY = 'cloud_sync_cursor_v1';
 // v2: reenvia uma fotografia completa (inclui dados financeiros, antes retidos) para os outros dispositivos.
 // v3: reenvia de novo, cifrada com a chave actual da empresa: o histórico antigo pode ter sido cifrado com
 // chaves anteriores que os dispositivos novos não conseguem ler.
 export const CLOUD_SYNC_BOOTSTRAP_KEY = 'cloud_sync_bootstrap_v3';
-const REPROCESS_KEY = 'cloud_sync_reprocess_v2';
+// Reparação bidireccional: também a web reenvia os registos locais que possam não ter entrado no histórico.
+const REPAIR_SNAPSHOT_KEY = 'cloud_sync_repair_snapshot_v4';
 // Última lista de utilizadores enviada por este computador (só se reenvia quando muda).
 // v2: reenvia uma vez, marcada como lista completa, para o servidor a guardar à parte para a versão web.
 const USERS_DIGEST_KEY = 'cloud_sync_users_digest_v2';
@@ -152,12 +157,13 @@ const getDeviceId = () => {
 // versão da aplicação), abre-a como está em vez de falhar: a versão mais recente tem sempre as tabelas desta. Sem
 // isto o login ficava bloqueado com "The requested version (2) is less than the existing version (3)".
 const openQueue = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, 2);
+    const request = indexedDB.open(DB_NAME, 3);
     request.onupgradeneeded = () => {
         const database = request.result;
         if (!database.objectStoreNames.contains(STORE_NAME)) database.createObjectStore(STORE_NAME, { keyPath: 'id' });
         // Operações recebidas cuja transacção ainda não chegou completa.
         if (!database.objectStoreNames.contains(INCOMING_STORE)) database.createObjectStore(INCOMING_STORE, { keyPath: 'id' });
+        if (!database.objectStoreNames.contains(UNREADABLE_STORE)) database.createObjectStore(UNREADABLE_STORE, { keyPath: 'id' });
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => {
@@ -168,7 +174,7 @@ const openQueue = (): Promise<IDBDatabase> => new Promise((resolve, reject) => {
     };
 });
 
-const putOperations = async (operations: SyncOperation[], store = STORE_NAME) => {
+const putOperations = async <T extends { id: string }>(operations: T[], store = STORE_NAME) => {
     if (!operations.length) return;
     const database = await openQueue();
     await new Promise<void>((resolve, reject) => {
@@ -181,9 +187,9 @@ const putOperations = async (operations: SyncOperation[], store = STORE_NAME) =>
     database.close();
 };
 
-const readAll = async (store: string): Promise<SyncOperation[]> => {
+const readAll = async <T extends { createdAt: string } = SyncOperation>(store: string): Promise<T[]> => {
     const database = await openQueue();
-    const values = await new Promise<SyncOperation[]>((resolve, reject) => {
+    const values = await new Promise<T[]>((resolve, reject) => {
         const request = database.transaction(store, 'readonly').objectStore(store).getAll();
         request.onsuccess = () => resolve((request.result || []).sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
         request.onerror = () => reject(request.error);
@@ -246,8 +252,8 @@ const toStatementCommand = (sql: string, params: unknown[], expectChanges?: numb
 };
 
 const syncIsActive = () => !applyingRemote
-    && getScopedLocalStorageItem('sync_enabled') === 'true'
-    && isCloudSyncUrl(getScopedLocalStorageItem('sync_url'));
+    && !!activeConfig
+    && isCloudSyncUrl(activeConfig.url);
 
 export const enqueueSyncOperation = async (sql: string, params: unknown[] = []) => {
     if (!syncIsActive() || !isSyncableOperation(sql)) return;
@@ -395,7 +401,8 @@ const BOOTSTRAP_FILE_TABLES: Record<string, number> = { payment_proofs: 5, credi
 // O servidor aceita até 2 MB por operação cifrada (base64 ≈ +35%): linhas maiores não se enviam.
 const MAX_SNAPSHOT_ROW_CHARS = 1_400_000;
 const createBootstrapOperations = async () => {
-    if (localStorage.getItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY)) === 'true') return;
+    if (localStorage.getItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY)) === 'true'
+        && localStorage.getItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY)) === 'true') return;
     const tables = await sqlite.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
     const deviceId = getDeviceId();
     const operations: SyncOperation[] = [];
@@ -434,6 +441,7 @@ const createBootstrapOperations = async () => {
     await putOperations(operations);
     if (oversized) console.warn(`[CloudSync] ${oversized} registos maiores do que o limite de envio ficaram só neste dispositivo.`);
     localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
+    localStorage.setItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY), 'true');
 };
 
 const tableColumnsCache = new Map<string, Set<string>>();
@@ -777,6 +785,7 @@ export const syncCloudNow = async () => {
             let totalConflicts = 0;
             let totalSkipped = 0;
             let usersSent = false;
+            let hasMoreRemote = false;
             let usersRoster: UsersRosterOutcome | undefined;
             const profile = await companyProfile();
             // Navegador: pede sempre a lista de utilizadores do computador (só vem de novo quando mudou, ou
@@ -814,7 +823,11 @@ export const syncCloudNow = async () => {
                     signal: AbortSignal.timeout(requestTimeout(requestBody.length + MAX_PULL_BYTES))
                 });
                 const body = await response.json().catch(() => ({}));
-                if (!response.ok) throw Object.assign(new Error(body.message || body.error || `Erro de sincronização (${response.status}).`), { status: response.status, code: body.code });
+                if (!response.ok || body.success !== true) throw Object.assign(new Error(body.message || body.error || `Resposta inválida do servidor de sincronização (${response.status}).`), { status: response.status, code: body.code });
+                if (!Array.isArray(body.operations) || typeof body.hasMore !== 'boolean'
+                    || !Number.isSafeInteger(Number(body.cursor)) || Number(body.cursor) < cursor) {
+                    throw new Error('Resposta de sincronização incompleta. As alterações locais foram mantidas para nova tentativa.');
+                }
                 await deleteOperations(queued.map(operation => operation.id));
                 if (round === 0 && usersOut?.digest) {
                     localStorage.setItem(scopedStorageKey(USERS_DIGEST_KEY), usersOut.digest);
@@ -831,19 +844,30 @@ export const syncCloudNow = async () => {
                 }
 
                 const incoming: SyncOperation[] = [];
-                for (const item of body.operations || []) {
+                const retained = (await readAll<EncryptedPending>(UNREADABLE_STORE))
+                    .filter(item => item.tenantId === config.tenantId && item.url === config.url);
+                const encrypted = new Map([...retained, ...body.operations].map(item => [item.id, item]));
+                const decodedIds: string[] = [];
+                const unreadable: EncryptedPending[] = [];
+                for (const item of encrypted.values()) {
                     // Uma operação cifrada com uma chave antiga não pode bloquear a sincronização de tudo o resto.
                     try {
                         incoming.push(await decryptWithAny(item.payload, readKeys));
+                        decodedIds.push(item.id);
                     } catch {
-                        totalSkipped += 1;
+                        unreadable.push({ id: item.id, payload: item.payload, tenantId: config.tenantId, url: config.url, createdAt: new Date().toISOString() });
                     }
                 }
+                // Guardar a carga cifrada antes de avançar o cursor: uma chave corrigida pode recuperá-la.
+                await putOperations(unreadable, UNREADABLE_STORE);
                 const result = await applyOperations(incoming);
+                await deleteOperations(decodedIds, UNREADABLE_STORE);
+                totalSkipped = unreadable.length;
                 totalPulled += result.applied;
                 totalConflicts += result.conflicts;
                 cursor = Number(body.cursor || cursor);
                 localStorage.setItem(scopedStorageKey(CURSOR_KEY), String(cursor));
+                hasMoreRemote = body.hasMore;
                 if (!body.hasMore && !more) break;
             }
             if (usersRoster) lastUsersRoster = usersRoster;
@@ -864,24 +888,61 @@ export const syncCloudNow = async () => {
                         body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, pull: false, operations: [{ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) }] }),
                         signal: AbortSignal.timeout(requestTimeout(JSON.stringify(change.rows).length * 2))
                     });
-                    if (response.ok) {
+                    const acknowledgement = await response.json().catch(() => ({}));
+                    if (response.ok && acknowledgement.success === true) {
                         localStorage.setItem(scopedStorageKey(USERS_STATE_KEY), JSON.stringify(change.fingerprints));
                         totalPushed += 1;
                     }
                 }
             }
 
+            // Dependências podem ter chegado numa página posterior (cliente antes de crédito, por exemplo).
+            totalPulled += await reprocessRetainedOperations();
+            // Primeiro recebe o perfil existente. Só depois completa os campos ainda não partilhados:
+            // uma instalação nova/vazia nunca substitui a identidade que já está na nuvem.
+            let identityError: string | undefined;
+            if (window.electronAPI) {
+                try {
+                    const settings = (await sqlite.all<Record<string, unknown>>('SELECT * FROM company_settings WHERE id = 1'))[0];
+                    if (settings) for (const field of ['logo', 'reportLogo', 'watermarkLogo']) {
+                        const backup = field === 'logo' ? 'company_logo_backup' : field === 'reportLogo' ? 'company_report_logo_backup' : 'company_watermark_logo_backup';
+                        if (!settings[field]) settings[field] = localStorage.getItem(scopedStorageKey(backup));
+                    }
+                    const identityStore = { all: sqlite.all, run: async (sql: string, params: unknown[] = []) => {
+                        const result = await sqlite.run(sql, params);
+                        await enqueueSyncOperation(sql, params);
+                        return result;
+                    } };
+                    if (settings && await publishCompanyIdentity(identityStore, config.tenantId, settings, { seed: true, image: portableCompanyImage })) scheduleSync(1000);
+                } catch (error) {
+                    identityError = `Identidade visual por sincronizar: ${error instanceof Error ? error.message : 'não foi possível preparar os dados da empresa'}`;
+                }
+            }
+            const identity = await readCompanyIdentity(sqlite, config.tenantId);
+            const identityKey = scopedStorageKey(`cloud_identity_seen_v1:${config.tenantId}:${config.url}`);
+            const identityDigest = JSON.stringify(identity);
+            if (Object.keys(identity).length && localStorage.getItem(identityKey) !== identityDigest) {
+                totalPulled += 1;
+                localStorage.setItem(identityKey, identityDigest);
+            }
             if ((totalPulled || totalConflicts) && config.onRemoteApplied) await config.onRemoteApplied();
             void reportUsageIfDue({
                 url: normalizeBaseUrl(config.url), apiKey: config.sessionAuth ? '' : config.apiKey, tenantId: config.tenantId,
                 deviceId: getDeviceId(), query: (sql, params) => sqlite.all(sql, params), appVersion: `${window.electronAPI ? 'PC' : 'Web'} 3.0.2`,
             });
-            if (totalSkipped) console.warn(`[CloudSync] ${totalSkipped} operações antigas cifradas com outra chave foram ignoradas.`);
+            if (totalSkipped) console.warn(`[CloudSync] ${totalSkipped} operações cifradas permanecem guardadas para recuperação.`);
             const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped, usersRoster };
             failureCount = 0;
             retryNotBefore = 0;
-            const pending = await getPendingSyncCount().catch(() => 0);
-            emitStatus({ state: pending ? 'pending' : 'synced', pending, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped, usersSent, usersRoster: lastUsersRoster, at: new Date().toISOString() });
+            const pending = await getPendingSyncCount();
+            const waiting = (await readAll(INCOMING_STORE)).length;
+            const conflicts = Number((await sqlite.all<{ total: number }>("SELECT COUNT(*) AS total FROM sync_conflicts WHERE status = 'pending'"))[0]?.total || 0);
+            const incomplete = pending > 0 || waiting > 0 || hasMoreRemote || conflicts > 0 || totalSkipped > 0 || Boolean(identityError);
+            const message = identityError || (totalSkipped ? `${totalSkipped} operações cifradas aguardam recuperação e continuam guardadas. As operações legíveis continuam a sincronizar. Pode tratar-se de histórico cifrado com um Código de Acesso anterior.`
+                : conflicts ? `${conflicts} alterações aguardam resolução de conflitos.`
+                    : incomplete ? 'Ainda existem alterações por enviar ou receber.' : undefined);
+            emitStatus({ state: incomplete ? 'pending' : 'synced', message, pending: pending + waiting, pushed: totalPushed, pulled: totalPulled, conflicts, skipped: totalSkipped, usersSent, usersRoster: lastUsersRoster, at: new Date().toISOString() });
+            if (hasMoreRemote || pending) scheduleSync(1000);
             return result;
         } catch (error: any) {
             const message = error?.name === 'TimeoutError' ? 'O servidor demorou muito a responder.'

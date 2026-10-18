@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import './portal-entrada.css';
 import { apagarChavesSincronizacao, apagarSegredo, guardarChavesSincronizacao, guardarSegredo, lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGREDO_CODIGO_EMPRESA } from '@/bibliotecas/cofre-segredos';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -91,6 +92,12 @@ export const LigacaoEmpresaWeb = () => {
 
     const [step, setStep] = useState<Step>('welcome');
     const [logoError, setLogoError] = useState(false);
+    const [activeFeature, setActiveFeature] = useState(0);
+    const portalFeatures = [
+        { title: 'Créditos', text: 'Da simulação ao contrato, acompanhe cada etapa do crédito num único lugar.' },
+        { title: 'Sincronização', text: 'Continue o trabalho na web e no desktop, com os dados da sua organização ligados à nuvem.' },
+        { title: 'Controlo', text: 'Consulte pagamentos, relatórios e histórico para acompanhar a atividade da sua empresa.' },
+    ];
     const [nifType, setNifType] = useState<NifType>('COLECTIVO');
     const [nif, setNif] = useState(() => localStorage.getItem('tango_active_tenant_id') || '');
     const [companyName, setCompanyName] = useState('');
@@ -384,9 +391,9 @@ export const LigacaoEmpresaWeb = () => {
     );
 
     return (
-        <div className="fixed inset-0 z-[9999] flex flex-col justify-between overflow-y-auto bg-white text-slate-900 font-sans selection:bg-[#5514d8]/20 selection:text-[#5514d8]">
+        <div className="tango-portal fixed inset-0 z-[9999] flex flex-col overflow-y-auto bg-white text-slate-900 font-sans selection:bg-[#5514d8]/20 selection:text-[#5514d8]">
             {/* HERO SECTION: Rich Royal Violet Gradient (Matching Image 1) */}
-            <div className="relative w-full bg-gradient-to-br from-[#5314d4] via-[#631af0] to-[#450cc7] text-white overflow-hidden pb-12 sm:pb-16 lg:pb-24">
+            <div className="portal-hero relative w-full flex-1 shrink-0 bg-gradient-to-br from-[#5314d4] via-[#631af0] to-[#450cc7] text-white overflow-hidden pb-12 sm:pb-16 lg:pb-24">
                 
                 {/* Visual Decorative Accent 1: Dot Matrix Grid (Upper Left - Image 1 Style) */}
                 <div className="pointer-events-none absolute top-6 left-6 grid grid-cols-6 gap-2.5 opacity-30 select-none">
@@ -470,7 +477,7 @@ export const LigacaoEmpresaWeb = () => {
                 </header>
 
                 {/* Main Hero Container */}
-                <div className="relative z-10 mx-auto max-w-7xl px-4 sm:px-8 pt-6 sm:pt-10 lg:pt-14">
+                <div className="portal-content relative z-10 mx-auto w-full max-w-7xl px-5 sm:px-8 py-8 sm:py-12 lg:py-16">
                     <div className="grid items-center gap-10 lg:grid-cols-12 lg:gap-12">
                         
                         {/* Left Column: Human, Elegant Typography & Pill Action Buttons */}
@@ -484,7 +491,7 @@ export const LigacaoEmpresaWeb = () => {
 
                             {/* Headline (Direct, human, non-generic) */}
                             <h1 className="text-3xl sm:text-4xl lg:text-5xl font-black text-white leading-[1.15] tracking-tight">
-                                A melhor ferramenta para impulsionar a gestão de crédito do seu negócio.
+                                O seu negócio avança. A gestão acompanha.
                             </h1>
 
                             {/* Subtitle */}
@@ -528,11 +535,17 @@ export const LigacaoEmpresaWeb = () => {
                                     <span>Auditoria e Conformidade</span>
                                 </div>
                             </div>
+                            <div className="portal-features rounded-2xl border border-white/20 bg-white/10 p-5 backdrop-blur-md">
+                                <div className="flex flex-wrap gap-2" aria-label="Funcionalidades do Tango">
+                                    {portalFeatures.map((feature, index) => <button key={feature.title} type="button" aria-pressed={activeFeature === index} onClick={() => setActiveFeature(index)} className={`portal-feature-tab rounded-xl px-3 py-2 text-sm font-semibold ${activeFeature === index ? 'bg-white text-purple-800 shadow-md' : 'text-white hover:bg-white/15'}`}>{feature.title}</button>)}
+                                </div>
+                                <p key={activeFeature} aria-live="polite" className="portal-feature-copy mt-4 min-h-[3rem] text-sm leading-relaxed text-purple-100">{portalFeatures[activeFeature].text}</p>
+                            </div>
                         </div>
 
                         {/* Right Column: Clean White Interactive Portal Card */}
                         <div className="lg:col-span-5">
-                            <div className="relative overflow-hidden rounded-3xl bg-white p-6 sm:p-8 text-slate-800 shadow-2xl shadow-purple-950/40 border border-white/80 transition-all duration-300">
+                            <div className="portal-access-card relative overflow-hidden rounded-3xl bg-white p-6 sm:p-8 text-slate-800 shadow-2xl shadow-purple-950/40 border border-white/80 transition-all duration-300">
                                 
                                 {/* Inner Subtle Purple Accent Top Line */}
                                 <div className="absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r from-[#5314d4] via-[#7c3aed] to-[#631af0]" />
@@ -950,24 +963,8 @@ export const LigacaoEmpresaWeb = () => {
                 </div>
             </div>
 
-            {/* ORGANIC SMOOTH WAVE SVG (Image 1 Signature Style) */}
-            <div className="relative w-full -mt-1 overflow-hidden leading-none z-10 select-none pointer-events-none">
-                <svg
-                    viewBox="0 0 1440 240"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-full h-20 sm:h-32 lg:h-44 block"
-                    preserveAspectRatio="none"
-                >
-                    <path
-                        d="M0,120 C320,240 420,60 760,140 C1080,220 1260,80 1440,150 L1440,240 L0,240 Z"
-                        fill="#ffffff"
-                    />
-                </svg>
-            </div>
-
             {/* CRISP WHITE FOOTER (Matching Image 1's airy white lower section) */}
-            <footer className="relative z-10 w-full bg-white py-6 px-4 sm:px-8 border-t border-slate-100">
+            <footer className="relative z-10 w-full shrink-0 bg-white py-6 px-4 sm:px-8 border-t border-slate-100">
                 <div className="mx-auto flex max-w-7xl flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-500">
                     <div className="text-center sm:text-left">
                         <p className="font-semibold text-slate-700">

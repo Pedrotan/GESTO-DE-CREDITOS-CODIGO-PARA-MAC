@@ -163,6 +163,7 @@ export interface LicensePayload {
     exp: string;          // Expiration ISO Date
     iat: string;          // Issue Date ISO
     devices?: number;
+    features?: Record<string, unknown>;
     client?: string;
     nif?: string;
 }
@@ -189,14 +190,9 @@ export interface LicenseInfo {
 
 /**
  * A licença inclui o módulo? O plano no servidor pode dizê-lo explicitamente (funcionalidades); sem isso:
- * a rede local (intranet) vem com o escalão empresarial e o Multi-Empresas só quando o plano o inclui.
+ * a intranet e o Multi-Empresas exigem os respetivos módulos explícitos na licença.
  */
-export const licenseAllowsFeature = (info: LicenseInfo | null | undefined, feature: 'intranet' | 'multi_empresa'): boolean => {
-    if (!info?.isValid) return false;
-    const explicit = info.features?.[feature];
-    if (typeof explicit === 'boolean') return explicit;
-    return feature === 'intranet' ? info.tier === 'empresarial' : false;
-};
+export { allowsLicensedFeature as licenseAllowsFeature } from './intranet-policy';
 
 /**
  * Gets the secure Machine ID via Electron IPC
@@ -347,6 +343,7 @@ const validateLegacyLicense = async (key: string, companyNif: string): Promise<L
                 expirationDate: expirationDate,
                 activationDate: issuedAt,
                 maxDevices: data.devices,
+                features: data.features && typeof data.features === 'object' ? data.features : {},
                 status: isExpired ? 'expired' : 'active',
                 daysRemaining: daysRem,
                 machineId: data.mid,

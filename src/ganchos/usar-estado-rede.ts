@@ -57,15 +57,18 @@ export function useInternetStatus(): InternetState {
 
 /** Licença em vigor, actualizada quando a licença da nuvem muda. */
 export function useLicenseInfo(licenseKey: string | null | undefined): LicenseInfo | null {
-    const [info, setInfo] = useState<LicenseInfo | null>(null);
+    const [entry, setEntry] = useState<{ key: string; info: LicenseInfo } | null>(null);
     useEffect(() => {
         let cancelled = false;
-        const load = () => { void validateLicense(licenseKey || '').then(value => { if (!cancelled) setInfo(value); }).catch(() => undefined); };
+        const load = () => {
+            setEntry(null);
+            void validateLicense(licenseKey || '').then(value => { if (!cancelled) setEntry({ key: licenseKey || '', info: value }); }).catch(() => undefined);
+        };
         load();
         window.addEventListener(CLOUD_LICENSE_EVENT, load);
         return () => { cancelled = true; window.removeEventListener(CLOUD_LICENSE_EVENT, load); };
     }, [licenseKey]);
-    return info;
+    return entry?.key === (licenseKey || '') ? entry.info : null;
 }
 
 export const licenseAllowsIntranet = (info: LicenseInfo | null) => licenseAllowsFeature(info, 'intranet');

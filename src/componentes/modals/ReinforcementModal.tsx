@@ -1,4 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
+import { db } from '@/bibliotecas/bd';
+import { Input } from '@/componentes/ui/input';
+import { reinforcementInterest } from '@/bibliotecas/reforco-capital';
+import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
 import { Credit } from '@/tipos/credito';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
@@ -23,11 +27,16 @@ interface ReinforcementModalProps {
  * O contrato mantém-se; sobe o capital e o reforço gera juros à mesma taxa.
  */
 export function ReinforcementModal({ isOpen, onClose, credit }: ReinforcementModalProps) {
-    const { reinforceCredit } = useData();
+    const { reinforceCredit, addCredit, credits } = useData();
     const { user } = useAuth();
     const { toast } = useToast();
 
     const [valor, setValor] = useState(0);
+    const [mode, setMode] = useState('existing');
+    const [installmentId, setInstallmentId] = useState('');
+    const [schedule, setSchedule] = useState<Array<{id: string; dueDate: string; installmentNumber: number; status: string}>>([]);
+    const [rate, setRate] = useState(0);
+    const [term, setTerm] = useState(1);
     const [notas, setNotas] = useState('');
     const [aGravar, setAGravar] = useState(false);
     const [erro, setErro] = useState<string | null>(null);
@@ -37,21 +46,47 @@ export function ReinforcementModal({ isOpen, onClose, credit }: ReinforcementMod
         if (isOpen) { setValor(0); setNotas(''); setErro(null); idempotencyKeyRef.current = crypto.randomUUID(); }
     }, [isOpen]);
 
+    useEffect(() => {
+        if (!isOpen || !credit) return;
+        let cancelled = false;
+        setMode('existing'); setInstallmentId(''); setSchedule([]); setRate(credit.interestRate); setTerm(1);
+        db.all<{id: string; dueDate: string; installmentNumber: number; status: string}>('SELECT id, installmentNumber, dueDate, status FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber', [credit.id])
+            .then(rows => { if (!cancelled) setSchedule(rows.filter(row => row.status !== 'paid')); })
+            .catch(() => { if (!cancelled) setErro('Não foi possível carregar as prestações. Volte a abrir o formulário.'); });
+        return () => { cancelled = true; };
+    }, [isOpen, credit?.id]);
     if (!credit) return null;
 
-    const taxa = credit.interestRate;
-    const jurosReforco = Math.round(valor * (taxa / 100));
+    const taxa = mode === 'existing' ? credit.interestRate : rate;
+    const jurosReforco = valor > 0 && Number.isFinite(taxa) && taxa >= 0 ? reinforcementInterest(valor, taxa, mode === 'new' ? 'FLAT' : credit.amortizationMethod) : 0;
     const capitalConsolidado = credit.principalAmount + valor;
     const totalConsolidado = (credit.totalDue || 0) + valor + jurosReforco;
 
     const confirmar = async () => {
         if (valor <= 0) { setErro('Introduza um valor de reforço maior que zero.'); return; }
+        if (aGravar) return;
+        if (mode === 'existing' && !installmentId) { setErro('Escolha o mês e a prestação do reforço.'); return; }
+        if (mode === 'new' && (!Number.isFinite(rate) || rate < 0 || !Number.isInteger(term) || term < 1 || term > 600)) { setErro('Verifique a taxa e o prazo.'); return; }
         setAGravar(true);
         try {
+            if (mode === 'new') {
+                const start = new Date();
+                const plan = buildInstallmentSchedule({ principalMinor: Math.round(valor * 100), installments: term, startDate: start, method: 'FLAT', flatInterestMinor: Math.round(jurosReforco * 100) });
+                const created = await addCredit({ id: `CR-${idempotencyKeyRef.current}`, clientId: credit.clientId, clientName: credit.clientName,
+                    principalAmount: valor, currentBalance: valor, interestRate: rate, lateInterestRate: credit.lateInterestRate,
+                    installments: term, paidInstallments: 0, startDate: start, dueDate: new Date(plan[plan.length - 1].dueDate),
+                    status: 'pending_approval', requestedBy: user?.id, requestedAt: start, daysOverdue: 0,
+                    accruedInterest: jurosReforco, lateInterest: 0, totalDue: valor + jurosReforco, amortizationMethod: 'FLAT',
+                    creditNumber: credits.filter(row => row.clientId === credit.clientId && !row.deletedAt).length + 1,
+                    createdAt: start, productId: credit.productId, approvalNotes: notas,
+                }, user ? { id: user.id, name: user.name } : undefined, { productId: credit.productId, reinforcementOf: credit.id });
+                toast({ title: 'Novo contrato enviado para aprovação', description: created.id });
+                onClose(); return;
+            }
             await reinforceCredit(
                 credit.id,
                 valor,
-                { notes: notas || undefined, idempotencyKey: idempotencyKeyRef.current },
+                { installmentId, notes: notas || undefined, idempotencyKey: idempotencyKeyRef.current },
                 user ? { id: user.id, name: user.name } : undefined
             );
             toast({
@@ -76,7 +111,7 @@ export function ReinforcementModal({ isOpen, onClose, credit }: ReinforcementMod
                             Reforço de Capital
                         </DialogTitle>
                         <DialogDescription>
-                            Acrescenta capital a este crédito sem abrir um novo contrato.
+                            Escolha entre agregar a uma prestação ou criar um contrato independente.
                         </DialogDescription>
                     </DialogHeader>
 
@@ -97,6 +132,26 @@ export function ReinforcementModal({ isOpen, onClose, credit }: ReinforcementMod
                         </div>
 
                         <div className="space-y-2">
+                            <Label htmlFor="reinforcement-mode">Como aplicar o reforço?</Label>
+                            <select id="reinforcement-mode" value={mode} onChange={e => setMode(e.target.value)} className="h-11 w-full rounded-md border bg-background px-3" disabled={aGravar}>
+                                <option value="existing">Agregar ao crédito existente, à mesma taxa</option>
+                                <option value="new">Novo contrato, com juros próprios</option>
+                            </select>
+                            {mode === 'existing' ? <div className="space-y-2">
+                                <Label htmlFor="reinforcement-month">Mês de cobrança do reforço / prestação</Label>
+                                <select id="reinforcement-month" value={installmentId} onChange={e => setInstallmentId(e.target.value)} className="h-11 w-full rounded-md border bg-background px-3" disabled={aGravar}>
+                                    <option value="">Escolha o mês e a prestação</option>
+                                    {schedule.map(row => <option key={row.id} value={row.id}>{row.dueDate.slice(0, 7)} · {row.installmentNumber}.ª prestação</option>)}
+                                </select>
+                                <p className="text-xs text-muted-foreground">Desembolso registado hoje. Capital e juros adicionais cobrados apenas na prestação escolhida. Os outros meses não são alterados. Em PRICE/SAC, a taxa anual é convertida para um mês.</p>
+                            </div> : <div className="space-y-2 rounded-lg border p-3">
+                                <p className="text-sm">Novo contrato FLAT, com juros e prazo próprios. O crédito anterior mantém o seu saldo e cronograma.</p>
+                                <Label htmlFor="reinforcement-rate">Taxa total do novo prazo (%)</Label>
+                                <Input id="reinforcement-rate" type="number" min={0} step="0.01" value={rate} onChange={e => setRate(Number(e.target.value))} disabled={aGravar} />
+                                <Label htmlFor="reinforcement-term">Prazo do novo contrato (meses)</Label>
+                                <Input id="reinforcement-term" type="number" min={1} max={600} value={term} onChange={e => setTerm(Number(e.target.value))} disabled={aGravar} />
+                                <p className="text-xs text-muted-foreground">Sujeito a aprovação. Após aprovação, haverá dois créditos e o pagamento exigirá escolher o contrato.</p>
+                            </div>}
                             <Label htmlFor="valor-reforco">Valor do Reforço</Label>
                             <CurrencyInput
                                 id="valor-reforco"
@@ -116,16 +171,16 @@ export function ReinforcementModal({ isOpen, onClose, credit }: ReinforcementMod
                                         <span className="font-bold">{formatCurrency(valor)}</span>
                                     </div>
                                     <div className="flex justify-between">
-                                        <span className="text-muted-foreground">Juros do reforço ({taxa}%)</span>
+                                        <span className="text-muted-foreground">Juros do reforço {mode === 'existing' && credit.amortizationMethod && credit.amortizationMethod !== 'FLAT' ? `(TAN ${taxa}%, 1 mês)` : `(${taxa}% do prazo)`}</span>
                                         <span className="font-bold">{formatCurrency(jurosReforco)}</span>
                                     </div>
                                     <div className="flex justify-between border-t border-emerald-200 pt-1.5 dark:border-emerald-900/50">
-                                        <span className="text-muted-foreground">Capital consolidado</span>
-                                        <span className="font-black">{formatCurrency(capitalConsolidado)}</span>
+                                        <span className="text-muted-foreground">{mode === 'existing' ? 'Capital consolidado' : 'Capital do novo contrato'}</span>
+                                        <span className="font-black">{formatCurrency(mode === 'existing' ? capitalConsolidado : valor)}</span>
                                     </div>
                                     <div className="flex justify-between">
                                         <span className="text-muted-foreground">Total em dívida</span>
-                                        <span className="font-black">{formatCurrency(totalConsolidado)}</span>
+                                        <span className="font-black">{formatCurrency(mode === 'existing' ? totalConsolidado : valor + jurosReforco)}</span>
                                     </div>
                                 </div>
                             </div>
@@ -145,9 +200,9 @@ export function ReinforcementModal({ isOpen, onClose, credit }: ReinforcementMod
 
                     <div className="flex shrink-0 justify-end gap-3 border-t border-border p-4">
                         <Button variant="outline" onClick={onClose} disabled={aGravar}>Cancelar</Button>
-                        <Button onClick={confirmar} disabled={aGravar || valor <= 0} className="gap-2">
+                        <Button onClick={confirmar} disabled={aGravar || valor <= 0 || (mode === 'existing' && !installmentId)} className="gap-2">
                             {aGravar && <Loader2 className="h-4 w-4 animate-spin" />}
-                            Registar Reforço
+                            {mode === 'new' ? 'Enviar novo contrato para aprovação' : 'Registar Reforço'}
                         </Button>
                     </div>
                 </DialogContent>

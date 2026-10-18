@@ -28,6 +28,7 @@ import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, isPrimaryOwner, PAGE_PER
 import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-tokens';
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
+import { assertIntranetLicense } from './intranet-license';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
 installStructuredConsole('tango-electron-main');
@@ -1214,7 +1215,13 @@ const licensePublicKeys = () => {
   }
   return keys.filter(Boolean);
 };
-const startServerInternal = async (passkey) => {
+let readLocalServerLicenseKey: (() => Promise<string>) | null = null;
+const startServerInternal = async (passkey, providedLegacyKey?: string) => {
+  const status = cloudLicenseStatusNow();
+  const legacyKey = status.licenca && status.licenca.plano !== 'trial'
+    ? '' : (typeof providedLegacyKey === 'string' && providedLegacyKey ? providedLegacyKey : await readLocalServerLicenseKey?.());
+  assertIntranetLicense(status, legacyKey || '', licensePublicKeys());
+  if (typeof passkey !== 'string' || passkey.length < 12) throw new Error('Defina uma chave de sincronização com pelo menos 12 caracteres.');
   if (server) return { success: true, message: "Servidor já se encontra em execução." };
   currentSyncPasskey = passkey || null;
   startAdvertising(passkey);
@@ -1953,11 +1960,11 @@ ${attachment.content}
       throw e;
     }
   });
-  ipcMain.handle("start-server", async (event, passkey) => {
+  ipcMain.handle("start-server", async (event, passkey, legacyKey) => {
     assertTrustedIpcSender(event);
     assertUserPermission(event, "manage_settings");
     if (typeof passkey !== "string" || passkey.length < 12) throw new Error("Defina uma chave de sincronizacao com pelo menos 12 caracteres.");
-    return startServerInternal(passkey);
+    return startServerInternal(passkey, legacyKey);
   });
   ipcMain.handle("stop-server", async (event) => {
     assertTrustedIpcSender(event);
@@ -2078,11 +2085,10 @@ ${attachment.content}
       });
     });
   });
-  ipcMain.handle("promote-to-master", async (event, passkey) => {
+  ipcMain.handle("promote-to-master", async (event, passkey, legacyKey) => {
     assertTrustedIpcSender(event);
     assertUserPermission(event, "manage_settings");
-    if (server) return { success: true, isMaster: true };
-    const result: any = await startServerInternal(passkey);
+    const result: any = await startServerInternal(passkey, legacyKey);
     if (result.success) broadcastToClients("mesh-reorganized", { newMaster: getLocalNetworkInfo().hostname });
     return { ...result, isMaster: true };
   });
@@ -2941,6 +2947,10 @@ app.whenReady().then(async () => {
       if (reservedHere) firstUserCreationReserved = false;
       throw error;
     }
+  };
+  readLocalServerLicenseKey = async () => {
+    const settings: any = await runQuery("get", "SELECT licenseKey FROM company_settings WHERE id = 1");
+    return String(settings?.licenseKey || '');
   };
   securityQuery = runQuery;
   flushPendingSecurityEvents();

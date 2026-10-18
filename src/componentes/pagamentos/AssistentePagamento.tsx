@@ -52,6 +52,7 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
     const [step, setStep] = useState(0);
     const [clientId, setClientId] = useState('');
     const [creditId, setCreditId] = useState('');
+    const [confirmedContract, setConfirmedContract] = useState('');
     const [valueDateKey, setValueDateKey] = useState(luandaTodayKey());
     const [amount, setAmount] = useState(0);
     const [method, setMethod] = useState<PaymentMethod>('cash');
@@ -85,6 +86,7 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
         inFlight.current = false;
         const credit = initialCreditId ? credits.find(item => item.id === initialCreditId) : undefined;
         initialCreditApplied.current = Boolean(credit) || !initialCreditId;
+        setConfirmedContract('');
         setStep(credit ? 1 : 0); setClientId(credit?.clientId || ''); setCreditId(credit?.id || ''); setValueDateKey(luandaTodayKey());
         setAmount(0); setMethod('cash'); setReference(''); setProof(null); setPreview(null); setPreviewError('');
         setErrors([]); setWarnings([]); setAcknowledged(false); setSubmitting(false);
@@ -112,6 +114,8 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
         subLabel: `Em dívida ${formatCurrency(credit.totalDue)} · ${credit.paidInstallments}/${credit.installments} prestações pagas`, keywords: credit.id,
     })), [payable, clientId, numbers]);
     const credit = payable.find(item => item.id === creditId);
+    const sameClientCredits = payable.filter(item => item.clientId === (credit?.clientId || clientId));
+    const mustConfirmContract = sameClientCredits.length > 1 && confirmedContract !== creditId;
 
     // Pré-visualização: prestações em dívida e mora até à data-valor; imputação do valor indicado.
     useEffect(() => {
@@ -133,6 +137,7 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
 
     const draft: PaymentDraft = { creditId, valueDateKey, amount, method, reference, proof };
     const stepErrors = (): string[] => {
+        if (mustConfirmContract) return ['Existem vários créditos activos. Escolha e confirme o contrato que pretende pagar.'];
         if (step === 0 && !creditId) return ['Escolha o cliente e o contrato.'];
         if (step === 1) {
             const list: string[] = [];
@@ -156,6 +161,7 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
 
     const confirm = async () => {
         if (inFlight.current) return;
+        if (mustConfirmContract) { setErrors(['Confirme qual dos créditos activos está a pagar.']); setStep(0); return; }
         inFlight.current = true;
         setSubmitting(true);
         setErrors([]);
@@ -202,6 +208,11 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
                 </ol>
 
                 <div className="min-h-[260px] space-y-4 py-2">
+                    {sameClientCredits.length > 1 && <div role="alert" className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+                        <p className="font-semibold">Este cliente tem {sameClientCredits.length} créditos activos. Qual está a pagar?</p>
+                        <SearchableSelect options={contractOptions} value={creditId} onValueChange={value => { setCreditId(value); setConfirmedContract(''); }} placeholder="Escolher o contrato a pagar" />
+                        {creditId && <label className="flex items-start gap-2"><Checkbox checked={!mustConfirmContract} onCheckedChange={checked => setConfirmedContract(checked === true ? creditId : '')} /><span>Confirmo o pagamento do contrato {numbers.get(creditId) || creditId}. Este valor não será aplicado aos outros créditos.</span></label>}
+                    </div>}
                     {step === 0 && (
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div className="space-y-1.5">
