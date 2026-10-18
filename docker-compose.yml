@@ -58,7 +58,8 @@ services:
     volumes:
       - ./server.mjs:/app/server.mjs:ro
       - ./vercel-api:/app/vercel-api:ro
-      - ./vercel-web:/app/vercel-web:ro
+      # O site (vercel-web) NÃO é montado da VPS: vem sempre do build da imagem. Montar a pasta do servidor
+      # escondia o site acabado de gerar e servia uma versão antiga (ex.: preload antigo, erro de versão da BD local).
     depends_on:
       db:
         condition: service_healthy
