@@ -38,6 +38,8 @@ interface ContextoAutenticacaoType {
     user: User | null;
     users: User[];
     hasUsers: boolean;
+    /** O processo principal considera a configuração inicial concluída (utilizadores + empresa configurada). */
+    setupComplete: boolean;
     login: (emailOrUsername: string, password: string) => Promise<boolean>;
     logout: () => Promise<void>;
     addUser: (user: Omit<User, 'id' | 'lastLogin'> & { password: string }) => Promise<void>;
@@ -90,6 +92,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     const [users, setUsers] = useState<User[]>([]);
     const [hasUsers, setHasUsers] = useState(false);
+    const [setupComplete, setSetupComplete] = useState(false);
     const pendingTwoFactorUser = useRef<User | null>(null);
     /** Fecho da sessão anterior ainda em curso (o logout não espera por ele). */
     const pendingLogout = useRef<Promise<void> | null>(null);
@@ -129,8 +132,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                         if (!schemaStatus?.ready) {
                             try { await db.init(); }
                             catch (e) { console.warn('[Auth] Migrações de arranque falharam:', e); }
+                            // As migrações podem completar a configuração (ex.: data de instalação): voltar a perguntar.
+                            try { bootstrap = await electronApi.userAuthBootstrapStatus(); } catch { /* mantém o anterior */ }
                         }
                         setHasUsers(Boolean(bootstrap?.hasUsers));
+                        setSetupComplete(Boolean((bootstrap as any)?.setupComplete));
                         setUser(null);
                         sessionStorage.removeItem('user');
                         return;
@@ -147,8 +153,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 if (electronApi) {
                     const status = initialStatus || (await electronApi.userAuthStatus());
                     if (!status.authenticated || !status.user) {
-                        const currentBootstrap = bootstrap || (await electronApi.userAuthBootstrapStatus());
-                        setHasUsers(currentBootstrap.hasUsers);
+                        const currentBootstrap = await electronApi.userAuthBootstrapStatus().catch(() => bootstrap);
+                        setHasUsers(Boolean(currentBootstrap?.hasUsers));
+                        setSetupComplete(Boolean((currentBootstrap as any)?.setupComplete));
                         setUser(null);
                         sessionStorage.removeItem('user');
                         return;
@@ -257,7 +264,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 // a contagem do processo principal (base da conta activa) decide o aviso.
                 try {
                     const bootstrap = await window.electronAPI?.userAuthBootstrapStatus?.();
-                    if (bootstrap) setHasUsers(Boolean(bootstrap.hasUsers));
+                    if (bootstrap) { setHasUsers(Boolean(bootstrap.hasUsers)); setSetupComplete(Boolean((bootstrap as any).setupComplete)); }
                 } catch (bootstrapError) {
                     console.warn('[Auth] userAuthBootstrapStatus falhou:', bootstrapError);
                 }
@@ -1333,6 +1340,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 user,
                 users,
                 hasUsers,
+                setupComplete,
                 login,
                 logout,
                 addUser,

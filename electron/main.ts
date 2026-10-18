@@ -3139,7 +3139,11 @@ app.whenReady().then(async () => {
   ipcMain.handle("user-auth-bootstrap-status", async (event) => {
     assertTrustedIpcSender(event);
     const row: any = await runQuery("get", "SELECT COUNT(*) AS total FROM users");
-    return { hasUsers: Number(row?.total || 0) > 0 };
+    const hasUsers = Number(row?.total || 0) > 0;
+    // setupComplete: a mesma decisão que protege as gravações (utilizadores + empresa com nome e data de instalação).
+    // Com dados de uma instalação anterior a interface não deve repetir o onboarding, cujas gravações seriam recusadas
+    // sem sessão ("Sessão inexistente ou expirada"): vai directamente para o login.
+    return { hasUsers, setupComplete: hasUsers && !(await isFirstSetup()) };
   });
   // Identidade pública da empresa para o ecrã de login (antes de haver sessão): só nome, logotipo e se o
   // modo multi-empresa está activo. Nunca devolve chaves, palavras-passe ou dados de clientes.

@@ -12,6 +12,7 @@ import Swal from 'sweetalert2';
 import 'sweetalert2/dist/sweetalert2.min.css';
 import { PasswordStrengthIndicator } from '@/componentes/ui/PasswordStrengthIndicator';
 import { validatePasswordStrength } from '@/bibliotecas/password-validator';
+import bcrypt from 'bcryptjs';
 import { db } from '@/bibliotecas/bd';
 import { cn } from '@/bibliotecas/utils';
 import { appAdapter } from '@/bibliotecas/adaptador-aplicacao';
@@ -70,7 +71,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
     const activeAccountId = getActiveAccountIdFromStorage();
     const isSecondaryAccount = activeAccountId !== 'default';
     const { companySettings, updateCompanySettings } = useData();
-    const { user, updateUser, users, hasUsers, addUser, syncUsersFromMaster } = useAuth();
+    const { user, updateUser, users, hasUsers, setupComplete, addUser, syncUsersFromMaster } = useAuth();
     const [step, setStep] = useState(isSecondaryAccount ? 4 : (isPublicWebBuild ? 2 : 1));
     const [dismissed, setDismissed] = useState(false);
     // Enquanto a configuração termina, o assistente fica visível (mesmo depois de criado o administrador)
@@ -457,7 +458,9 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
         return null;
     }
 
-    const isFullySetup = Boolean(localStorage.getItem(ONBOARDING_KEY) || (hasUsers && hasConfiguredCompany));
+    // setupComplete vem do processo principal (computador): com dados de uma instalação anterior a configuração já está
+    // feita e o onboarding não se repete — as gravações dele seriam recusadas sem sessão. Vai-se directamente ao login.
+    const isFullySetup = Boolean(localStorage.getItem(ONBOARDING_KEY) || (hasUsers && hasConfiguredCompany) || setupComplete);
 
     const isTangoMaster = typeof window !== 'undefined' && window.location.hash.includes('tango-master');
     const isOnboardingRoute = typeof window !== 'undefined' && window.location.hash.includes('onboarding');
@@ -560,73 +563,76 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                 console.warn('[OnboardingWizard] Submissão central:', centralErr);
             }
 
-            // Licenças, incluindo demonstrações, são sempre emitidas e assinadas pelo Tango Master.
-            const finalLicenseKey = companySettings.licenseKey;
+            // Administrador da empresa.
+            const saveAdmin = async () => {
+                const loginEmail = adminEmail.trim().toLowerCase();
+                const loginUsername = adminUsername.trim().toLowerCase();
+                const adminDisplayName = adminName || adminUsername || 'Administrador';
+                if (user?.id) {
+                    // Onboarding reaberto com sessão iniciada: actualiza o próprio utilizador.
+                    await updateUser(user.id, { email: loginEmail, username: loginUsername || undefined, password: adminPassword, name: adminDisplayName }, true);
+                } else {
+                    // Sem sessão (primeira configuração). Antes do login a lista de utilizadores ainda não está carregada, por
+                    // isso procura-se na base: num computador com dados de uma instalação anterior pode já existir este login
+                    // (criar outro falharia com "UNIQUE constraint failed"). Só se usam comandos autorizados pelo processo
+                    // principal: criar o super administrador, ou mudar a palavra-passe do super administrador existente.
+                    const sameLogin = await db.get<{ id: string }>('SELECT id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ? LIMIT 1',
+                        [loginEmail, loginUsername || loginEmail]).catch(() => undefined);
+                    if (sameLogin?.id) {
+                        const existing = await db.get<{ role: string }>('SELECT role FROM users WHERE id = ?', [sameLogin.id]).catch(() => undefined);
+                        if (existing?.role !== 'super_admin') {
+                            throw new Error('Já existe um utilizador com este e-mail ou nome de utilizador (dados de uma instalação anterior). Use outro e-mail e nome de utilizador, ou reinstale escolhendo "Instalação limpa".');
+                        }
+                        // O super administrador da instalação anterior passa a entrar com a palavra-passe agora indicada.
+                        await db.run('UPDATE users SET password = ? WHERE id = ?', [bcrypt.hashSync(adminPassword.trim(), 10), sameLogin.id]);
+                    } else {
+                        await addUser({
+                            name: adminDisplayName,
+                            email: loginEmail,
+                            username: loginUsername || undefined,
+                            password: adminPassword,
+                            role: 'super_admin',
+                            avatar: (adminUsername || 'AD').substring(0, 2).toUpperCase()
+                        });
+                    }
+                }
 
-            // Save Company Settings (Single Call with Timeout Protection)
-            const saveSettingsPromise = updateCompanySettings({
-                ...companySettings,
-                name: companyName,
-                nif: nif || companySettings.nif,
-                enableMultiTenant: isSecondaryAccount ? true : enableMultiTenant,
-                installDate: new Date().toISOString(),
-                licenseKey: finalLicenseKey
-            });
+            };
 
-            // Timeout após 65 segundos (para coincidir e exceder o timeout de 60s do backend)
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error("Timeout ao salvar definições. A base de dados pode estar bloqueada ou lenta.")), 65000)
-            );
+            const saveSettings = async () => {
+                // Licenças, incluindo demonstrações, são sempre emitidas e assinadas pelo Tango Master.
+                const finalLicenseKey = companySettings.licenseKey;
 
-            await Promise.race([saveSettingsPromise, timeoutPromise]);
+                // Save Company Settings (Single Call with Timeout Protection)
+                const saveSettingsPromise = updateCompanySettings({
+                    ...companySettings,
+                    name: companyName,
+                    nif: nif || companySettings.nif,
+                    enableMultiTenant: isSecondaryAccount ? true : enableMultiTenant,
+                    installDate: new Date().toISOString(),
+                    licenseKey: finalLicenseKey
+                });
+
+                // Timeout após 65 segundos (para coincidir e exceder o timeout de 60s do backend)
+                const timeoutPromise = new Promise((_, reject) =>
+                    setTimeout(() => reject(new Error("Timeout ao salvar definições. A base de dados pode estar bloqueada ou lenta.")), 65000)
+                );
+
+                await Promise.race([saveSettingsPromise, timeoutPromise]);
+
+            };
+
+            // A ordem depende do que já existe, porque gravar o nome da empresa e a data de instalação, ou criar o primeiro
+            // utilizador quando a empresa já está configurada, encerra a "primeira configuração" no processo principal; a
+            // partir daí as gravações exigem sessão iniciada ("Sessão inexistente ou expirada").
+            //  - Base sem utilizadores (instalação nova): definições primeiro, depois cria-se o administrador.
+            //  - Base com utilizadores de uma instalação anterior: administrador primeiro, depois as definições.
+            const priorUsers = Number((await db.get<{ total: number }>('SELECT COUNT(*) AS total FROM users').catch(() => undefined))?.total || 0);
+            if (priorUsers > 0) { await saveAdmin(); await saveSettings(); }
+            else { await saveSettings(); await saveAdmin(); }
 
             // Wait for database persistence stability
             await new Promise(resolve => setTimeout(resolve, 500));
-
-            // Update Super Admin Credentials
-            let targetAdminId = user?.id;
-
-            console.log('🔍 Onboarding: Procurando admin existente...');
-            console.log('   - user?.id:', user?.id);
-            console.log('   - users array length:', users.length);
-
-            if (!targetAdminId) {
-                // Find existing super admin to takeover (including dev emergency admin)
-                const existingAdmin = users.find(u => u.role === 'super_admin') ||
-                    users.find(u => u.email === 'admin@dev.local') ||
-                    users.find(u => u.id === 'dev-admin-emergency');
-                if (existingAdmin) {
-                    targetAdminId = existingAdmin.id;
-                    console.log('   Admin existente encontrado:', existingAdmin.email, '(ID:', targetAdminId, ')');
-                } else {
-                    console.log('    Nenhum admin existente encontrado');
-                }
-            }
-
-            if (targetAdminId) {
-                console.log(' Atualizando admin existente (ID:', targetAdminId, ')');
-                const usernameValue = adminUsername.trim();
-                await updateUser(targetAdminId, {
-                    email: adminEmail.trim().toLowerCase(),
-                    username: usernameValue ? usernameValue.toLowerCase() : undefined,
-                    password: adminPassword,
-                    name: adminName || adminUsername || 'Administrador'
-                }, true); // true = isInitialCreation (não criar notificação)
-                console.log(' Admin atualizado com sucesso!');
-            } else {
-                // FALLBACK: Create user if not found
-                console.log('Criando novo admin...');
-                const usernameValue = adminUsername.trim();
-                await addUser({
-                    name: adminName || adminUsername || 'Administrador',
-                    email: adminEmail.trim().toLowerCase(),
-                    username: usernameValue ? usernameValue.toLowerCase() : undefined,
-                    password: adminPassword,
-                    role: 'super_admin',
-                    avatar: (adminUsername || 'AD').substring(0, 2).toUpperCase()
-                });
-                console.log(' Novo admin criado com sucesso!');
-            }
 
             setIsLoading(false);
 
