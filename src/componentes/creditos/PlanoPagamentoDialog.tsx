@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { CalendarDays, CheckCircle2, FileDown, ListOrdered, User, Wallet } from 'lucide-react';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -59,8 +59,15 @@ export function PlanoPagamentoDialog({ open, onOpenChange, initialClientId, init
     const [selectedTierId, setSelectedTierId] = useState<string | null>(null);
     const [storedInstallments, setStoredInstallments] = useState<StoredInstallment[]>([]);
 
+    // Só recomeça quando abre (ou quando pedem outro cliente/contrato). Antes recomeçava sempre que os créditos
+    // eram recarregados e apagava o valor, a data e o escalão já escolhidos.
+    const startedFor = useRef<string | null>(null);
+    const latestApplied = useRef(false);
     useEffect(() => {
-        if (!open) return;
+        if (!open) { startedFor.current = null; return; }
+        const target = `${initialClientId || ''}|${initialCreditId || ''}`;
+        if (startedFor.current === target) return;
+        startedFor.current = target;
         const cid = initialClientId || '';
         setClientId(cid);
         if (initialCreditId) {
@@ -70,13 +77,28 @@ export function PlanoPagamentoDialog({ open, onOpenChange, initialClientId, init
                 .filter(credit => credit.clientId === cid && !['cancelled', 'rejected'].includes(credit.status) && !credit.deletedAt)
                 .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
             setCreditId(latest ? latest.id : NEW_SIMULATION);
+            latestApplied.current = Boolean(latest);
         } else {
             setCreditId(NEW_SIMULATION);
         }
+        if (initialCreditId || !cid) latestApplied.current = true;
         setAmount(0);
         setStartDate(today());
         setSelectedTierId(null);
-    }, [open, initialClientId, initialCreditId, credits]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- os créditos são lidos só no momento em que abre
+    }, [open, initialClientId, initialCreditId]);
+
+    // Créditos ainda a carregar quando abriu: escolhe o contrato mais recente do cliente quando chegam, uma vez,
+    // e só se o utilizador ainda estiver na simulação inicial.
+    useEffect(() => {
+        if (!open || latestApplied.current || !initialClientId) return;
+        const latest = credits
+            .filter(credit => credit.clientId === initialClientId && !['cancelled', 'rejected'].includes(credit.status) && !credit.deletedAt)
+            .sort((a, b) => new Date(b.startDate).getTime() - new Date(a.startDate).getTime())[0];
+        if (!latest) return;
+        latestApplied.current = true;
+        setCreditId(previous => previous === NEW_SIMULATION ? latest.id : previous);
+    }, [open, initialClientId, credits]);
 
     const client = clients.find(item => item.id === clientId);
     const clientCredits = useMemo(() => credits

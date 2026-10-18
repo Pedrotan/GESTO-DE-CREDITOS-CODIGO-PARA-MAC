@@ -1,7 +1,7 @@
 
 import { MoneyInput } from '@/componentes/ui/CurrencyInput';
 import { formatCurrency } from '@/bibliotecas/formatters';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/componentes/ui/dialog';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -51,8 +51,16 @@ export function GeneratePaymentModal({
         ? clients.filter(c => c.name.toLowerCase().includes(searchClient.toLowerCase()) || c.nif.includes(searchClient))
         : clients.slice(0, 5); // Show first 5 if no search
 
+    // Só recomeça quando abre. Antes recomeçava sempre que os créditos ou os gateways eram recarregados
+    // (sincronização, foco da janela) e perdia a referência e o QR já gerados.
+    const started = useRef(false);
+    const clientApplied = useRef(false);
     useEffect(() => {
-        if (isOpen) {
+        if (!isOpen) { started.current = false; return; }
+        if (started.current) return;
+        started.current = true;
+        clientApplied.current = false;
+        {
             setStep('form');
             setAmount(preselectedAmount || 0);
             setCreditId(preselectedCreditId || 'manual');
@@ -63,9 +71,10 @@ export function GeneratePaymentModal({
             // If credit is preselected, set client automatically
             if (preselectedCreditId) {
                 const credit = credits.find(c => c.id === preselectedCreditId);
-                if (credit) setSelectedClientId(credit.clientId);
+                if (credit) { setSelectedClientId(credit.clientId); clientApplied.current = true; }
             } else {
                 setSelectedClientId('');
+                clientApplied.current = true;
             }
 
             // Auto-select first bank gateway if available
@@ -74,7 +83,21 @@ export function GeneratePaymentModal({
                 setGatewayId(bankGateway.id);
             }
         }
-    }, [isOpen, preselectedAmount, preselectedCreditId, credits, activeGateways]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- os dados são lidos só no momento em que abre
+    }, [isOpen]);
+
+    // Dados que só chegam depois de abrir: cliente do crédito pré-seleccionado e gateway bancário por omissão,
+    // aplicados uma vez e sem sobrepor o que o utilizador já escolheu.
+    useEffect(() => {
+        if (!isOpen || clientApplied.current || !preselectedCreditId) return;
+        const credit = credits.find(c => c.id === preselectedCreditId);
+        if (credit) { clientApplied.current = true; setSelectedClientId(previous => previous || credit.clientId); }
+    }, [isOpen, preselectedCreditId, credits]);
+    useEffect(() => {
+        if (!isOpen || gatewayId) return;
+        const bankGateway = activeGateways.find(g => g.provider === 'bank_transfer');
+        if (bankGateway) setGatewayId(bankGateway.id);
+    }, [isOpen, activeGateways, gatewayId]);
 
     const handleGenerate = async () => {
         if (!amount || !gatewayId) {

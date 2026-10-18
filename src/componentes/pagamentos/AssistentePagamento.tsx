@@ -70,16 +70,37 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
     const today = luandaTodayKey();
     const canBackdate = ServicoControloAcesso.temPermissao(actor as any, 'pagamentos.data_retroativa');
 
+    // O assistente só recomeça quando abre (ou quando pedem outro contrato). Antes recomeçava também sempre que a
+    // lista de créditos era recarregada — sincronização com a nuvem, voltar à janela, registo noutro dispositivo — e
+    // o pagamento voltava ao passo 1 a meio, com tudo o que já tinha sido preenchido apagado.
+    const startedFor = useRef<string | null>(null);
+    const initialCreditApplied = useRef(false);
     useEffect(() => {
-        if (!open) return;
+        if (!open) { startedFor.current = null; return; }
+        const target = initialCreditId || '';
+        if (startedFor.current === target) return;
+        startedFor.current = target;
         const uuid = crypto.randomUUID();
         identity.current = { id: `pag-${uuid}`, key: `wizard:${uuid}` };
         inFlight.current = false;
         const credit = initialCreditId ? credits.find(item => item.id === initialCreditId) : undefined;
+        initialCreditApplied.current = Boolean(credit) || !initialCreditId;
         setStep(credit ? 1 : 0); setClientId(credit?.clientId || ''); setCreditId(credit?.id || ''); setValueDateKey(luandaTodayKey());
         setAmount(0); setMethod('cash'); setReference(''); setProof(null); setPreview(null); setPreviewError('');
         setErrors([]); setWarnings([]); setAcknowledged(false); setSubmitting(false);
-    }, [open, initialCreditId, credits]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- os créditos são lidos só no momento em que abre
+    }, [open, initialCreditId]);
+
+    // Aberto a partir de um contrato cujos dados ainda estavam a carregar: preenche-o quando chegam, uma única vez,
+    // e só se o utilizador ainda não tiver avançado nem escolhido outro contrato.
+    useEffect(() => {
+        if (!open || !initialCreditId || initialCreditApplied.current) return;
+        const credit = credits.find(item => item.id === initialCreditId);
+        if (!credit) return;
+        initialCreditApplied.current = true;
+        if (step !== 0 || creditId) return;
+        setClientId(credit.clientId); setCreditId(credit.id); setStep(1);
+    }, [open, initialCreditId, credits, step, creditId]);
 
     const payable = useMemo(() => credits.filter(credit => PAYABLE.includes(credit.status) && !credit.deletedAt), [credits]);
     const clientOptions = useMemo(() => {
