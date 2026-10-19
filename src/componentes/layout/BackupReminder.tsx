@@ -16,7 +16,7 @@ import { useState } from 'react';
 
 export function BackupReminder() {
     const { user } = useAuth();
-    const { companySettings, addNotification, notifications, clients, credits, payments } = useData();
+    const { companySettings, addNotification, markNotificationAsRead, notifications, clients, credits, payments } = useData();
     const navigate = useNavigate();
 
     // Lógica de "Fluxo de Dados": Verificar se existem registros relevantes
@@ -123,6 +123,14 @@ export function BackupReminder() {
         localStorage.setItem('backup_reminder_snooze_until', newSnoozeTime.toString());
         setIsOpen(false);
     };
+
+    // Backup feito (neste ou noutro computador, recebido pela nuvem): o lembrete pendente deixa de fazer sentido.
+    useEffect(() => {
+        if (isOverdue) return;
+        for (const n of notifications || []) {
+            if (n.title === 'Lembrete de Backup' && !n.read) markNotificationAsRead(n.id).catch(() => undefined);
+        }
+    }, [isOverdue, notifications, markNotificationAsRead]);
 
     // Close if it's no longer overdue or if snooze is active (handled by checkStatus logic, but good for cleanup)
     useEffect(() => {

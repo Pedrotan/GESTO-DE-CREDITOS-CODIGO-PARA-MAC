@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { IDENTITY_PREFIX, SETTINGS_PREFIX, publishCompanyIdentity, publishCompanyProfile, readCompanyIdentity, readCompanySettings, withCompanyIdentity } from '../src/bibliotecas/identidade-empresa-sync.ts';
+import { IDENTITY_PREFIX, SETTINGS_PREFIX, publishCompanyIdentity, publishCompanyProfile, publishCompanySettings, readCompanyIdentity, readCompanySettings, withCompanyIdentity } from '../src/bibliotecas/identidade-empresa-sync.ts';
 import { applyRemoteGroups } from '../src/bibliotecas/sync-operacoes.ts';
 
 const TENANT = '5001032771';
@@ -140,4 +140,19 @@ test('definições partilhadas de outra empresa, segredos ou valores inválidos 
     }
     assert.deepEqual(await readCompanySettings(store, TENANT), {});
     database.close();
+});
+
+test('último backup feito num computador chega aos outros e à web; a data mais recente ganha', async () => {
+    const pc = device(), web = device();
+    // Backup automático: só a linha local muda; a semente da sincronização publica a data nova.
+    assert.equal(await publishCompanySettings(pc.store, TENANT, { nif: TENANT, lastBackupDate: '2026-10-19T08:00:00.000Z' }, { seed: true }), 1);
+    await deliver(pc, web);
+    const merged = await withCompanyIdentity(web.store, { nif: TENANT, lastBackupDate: '' }) as Record<string, unknown>;
+    assert.equal(merged.lastBackupDate, '2026-10-19T08:00:00.000Z');
+    // Uma data local mais antiga não volta atrás, nem ao publicar nem ao ler.
+    assert.equal(await publishCompanySettings(web.store, TENANT, { nif: TENANT, lastBackupDate: '2026-10-01T08:00:00.000Z' }, { fields: ['lastBackupDate'] }), 0);
+    assert.equal((await withCompanyIdentity(web.store, { nif: TENANT, lastBackupDate: '2026-10-01T08:00:00.000Z' }) as Record<string, unknown>).lastBackupDate, '2026-10-19T08:00:00.000Z');
+    // Um backup local mais recente ainda não sincronizado prevalece na leitura.
+    assert.equal((await withCompanyIdentity(web.store, { nif: TENANT, lastBackupDate: '2026-10-20T08:00:00.000Z' }) as Record<string, unknown>).lastBackupDate, '2026-10-20T08:00:00.000Z');
+    pc.database.close(); web.database.close();
 });

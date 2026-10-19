@@ -79,11 +79,17 @@ const SETTING_DEFAULTS: Record<string, string | number> = {
     enableWarrantiesModule: 1, enableWarrantiesModuleAdminOnly: 0, enableLegalModule: 1, enableLegalModuleAdminOnly: 0,
     enableScoringModule: 1, enableScoringModuleAdminOnly: 0, enableSuppliersModule: 0, enableSuppliersModuleAdminOnly: 0,
     defaultSimulationInterestRate: 3.5, defaultSimulationAdminFee: 2.0, defaultSimulationIof: 0.38,
+    // Último backup feito em qualquer computador: o lembrete desaparece em todos (a data mais recente ganha).
+    lastBackupDate: '',
 };
 export const SETTINGS_FIELDS = Object.keys(SETTING_DEFAULTS);
 type SettingValue = string | number;
 
 function normalizeSetting(field: string, value: unknown): SettingValue | undefined {
+    if (field === 'lastBackupDate') {
+        const time = typeof value === 'string' && value ? Date.parse(value) : NaN;
+        return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
+    }
     if (value === undefined || value === null) return field === 'customClauses' ? '' : undefined;
     if (JSON_SETTINGS.has(field)) {
         try {
@@ -134,8 +140,12 @@ export async function publishCompanySettings(store: Store, tenant: string, setti
         if (options.fields && !options.fields.includes(field)) continue;
         const value = normalizeSetting(field, settings[field]);
         if (value === undefined || (field in previous && previous[field] === value)) continue;
-        const seed = options.seed || (options.base && normalizeSetting(field, (options.base as Record<string, unknown>)[field]) === value);
-        if (seed && (field in previous || value === SETTING_DEFAULTS[field])) continue;
+        if (field === 'lastBackupDate') {
+            if (field in previous && String(previous[field]) >= String(value)) continue;
+        } else {
+            const seed = options.seed || (options.base && normalizeSetting(field, (options.base as Record<string, unknown>)[field]) === value);
+            if (seed && (field in previous || value === SETTING_DEFAULTS[field])) continue;
+        }
         await store.run(UPSERT_IDENTITY, [`${SETTINGS_PREFIX}${field}`, JSON.stringify({ tenantId: tenant, value }), options.now || new Date().toISOString(), 'company-settings']);
         written += 1;
     }
@@ -162,6 +172,8 @@ export async function withCompanyIdentity<T extends Record<string, unknown>>(sto
     const id = tenant || companyIdentityTenant(settings);
     const identity = await readCompanyIdentity(store, id);
     const shared = await readCompanySettings(store, id);
+    const localBackup = normalizeSetting('lastBackupDate', settings.lastBackupDate);
+    if (localBackup && (!shared.lastBackupDate || String(shared.lastBackupDate) < localBackup)) shared.lastBackupDate = localBackup;
     return { ...settings, ...shared, ...identity, _identityClearedImages: Object.keys(identity).filter(field => IMAGES.has(field) && identity[field] === null) };
 }
 
