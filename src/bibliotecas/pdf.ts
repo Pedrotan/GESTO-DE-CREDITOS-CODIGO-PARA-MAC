@@ -6,6 +6,7 @@ import { Client, Credit } from '@/tipos/credito';
 import { formatCurrency, formatDate, formatDateTime } from './formatters';
 import { AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
 import { ANGOLAN_BANKS, getBankLogoUrl, identifyBankFromIBAN } from '@/bibliotecas/ibanHelper';
+import { PROMESSA_CLAUSES_TEMPLATE, PROMESSA_CONTRACT_TITLE, companyShortName, promessaPlaceholderValues } from '@/bibliotecas/contrato-promessa';
 
 const translateRiskLevel = (risk: string): string => {
     const levels: Record<string, string> = {
@@ -300,36 +301,30 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
     setPdfWatermark(doc, config.watermarkLogo || getMasterPdfWatermark());
 
     // =========================================================================
+    // 1. MOTIVO DO TOPO DIREITO: MOLDURA EM "L" INVERTIDO (LINHA FINA) + CIRCUIT DOTS
     // =========================================================================
-    // 1. MOTIVO GEOMÉTRICO DO TOPO DIREITO: MOLDURA EM "L" INVERTIDO + CIRCUIT DOTS
-    // =========================================================================
+    // As molduras laterais são linhas finas com a mesma espessura das linhas do cabeçalho, com um remate
+    // (pequeno traço perpendicular) em cada ponta solta.
+    const railW = 0.85;
+    const railInset = 5;
+    const railCap = 3.2;
+    const rightRailX = pageWidth - railInset;
+    const leftRailX = railInset;
     const topCutW = isLandscape ? 110 : 85;
-    const barThick = isLandscape ? 9 : 11;
-    const topHorizInnerW = isLandscape ? 82 : 62;
     const vertBarH = isLandscape ? 60 : 78;
+    const drawRailCap = (x: number, y: number, vertical: boolean) => {
+        if (vertical) doc.line(x, y - railCap / 2, x, y + railCap / 2);
+        else doc.line(x - railCap / 2, y, x + railCap / 2, y);
+    };
 
-    // Moldura L Invertida (Laranja Primário #F37021)
-    doc.setFillColor(primary[0], primary[1], primary[2]);
-    // 1. Cunha chanfrada no canto superior esquerdo da barra horizontal (45° de cima-esquerda para baixo-direita)
-    doc.triangle(
-        pageWidth - topCutW, 0,
-        pageWidth - topHorizInnerW, 0,
-        pageWidth - topHorizInnerW, barThick,
-        'F'
-    );
-    // 2. Barra horizontal superior
-    doc.rect(pageWidth - topHorizInnerW, 0, topHorizInnerW, barThick, 'F');
-    // 3. Barra vertical direita (corpo superior)
-    doc.rect(pageWidth - barThick, barThick, barThick, vertBarH - 2 * barThick, 'F');
-    // 4. Cunha chanfrada inferior da barra vertical (45° de cima-esquerda para baixo-direita)
-    doc.triangle(
-        pageWidth - barThick, vertBarH - barThick,
-        pageWidth, vertBarH - barThick,
-        pageWidth, vertBarH,
-        'F'
-    );
+    // Moldura L Invertida (Laranja Primário #F37021): linha superior, canto e descida pela margem direita.
+    doc.setDrawColor(primary[0], primary[1], primary[2]);
+    doc.setLineWidth(railW);
+    doc.lines([[rightRailX - (pageWidth - topCutW), 0], [0, vertBarH - railInset]], pageWidth - topCutW, railInset, [1, 1], 'S', false);
+    drawRailCap(pageWidth - topCutW, railInset, true);
+    drawRailCap(rightRailX, vertBarH, false);
 
-    // 3 Linhas Circuit com Nós Circulares (Dots) na base branca sob a barra
+    // 3 Linhas Circuit com Nós Circulares (Dots) na base branca sob a moldura
     // Conforme a imagem de referência: linha superior mais longa (nó mais à esquerda),
     // linha média mais curta (nó recuado), linha inferior intermediária.
     const dot1X = isLandscape ? pageWidth - 85 : pageWidth - 70;
@@ -342,56 +337,53 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
     // Linha 1: Nó e Linha Laranja (Superior)
     doc.setFillColor(primary[0], primary[1], primary[2]);
     doc.setDrawColor(primary[0], primary[1], primary[2]);
-    doc.setLineWidth(0.85);
+    doc.setLineWidth(railW);
     doc.circle(dot1X, dot1Y, 1.8, 'F');
-    doc.line(dot1X, dot1Y, pageWidth - barThick, dot1Y);
+    doc.line(dot1X, dot1Y, rightRailX, dot1Y);
 
     // Linha 2: Nó e Linha Carvão Escuro (Média)
     doc.setFillColor(dark[0], dark[1], dark[2]);
     doc.setDrawColor(dark[0], dark[1], dark[2]);
-    doc.setLineWidth(0.85);
+    doc.setLineWidth(railW);
     doc.circle(dot2X, dot2Y, 1.8, 'F');
-    doc.line(dot2X, dot2Y, pageWidth - barThick, dot2Y);
+    doc.line(dot2X, dot2Y, rightRailX, dot2Y);
 
     // Linha 3: Nó e Linha Laranja (Inferior)
     doc.setFillColor(primary[0], primary[1], primary[2]);
     doc.setDrawColor(primary[0], primary[1], primary[2]);
-    doc.setLineWidth(0.85);
+    doc.setLineWidth(railW);
     doc.circle(dot3X, dot3Y, 1.8, 'F');
-    doc.line(dot3X, dot3Y, pageWidth - barThick, dot3Y);
+    doc.line(dot3X, dot3Y, rightRailX, dot3Y);
 
     // =========================================================================
-    // 2. MOTIVO GEOMÉTRICO DA MARGEM ESQUERDA: CHEVRONS A 45° + BARRA VERTICAL
+    // 2. MOTIVO DA MARGEM ESQUERDA: CHEVRONS A 45° + LINHA VERTICAL (LINHAS FINAS)
     // =========================================================================
     const midY = isLandscape ? 62 : 92;
-    const bandThick = 7.5;
     const bandH = 8.5;
     const gap = 2.8;
+    const footBarH = 8.5;
+    const footBarY = pageHeight - footBarH;
 
-    // Faixa 1 (Superior - Carvão Escuro #2B2D2F) inclinada a 45°
+    // Traço 1 (Superior - Carvão Escuro #2B2D2F) inclinado a 45°, com remate na ponta
     const c1Y = midY;
-    doc.setFillColor(dark[0], dark[1], dark[2]);
-    doc.triangle(0, c1Y, bandThick, c1Y + bandThick, bandThick, c1Y + bandThick + bandH, 'F');
-    doc.triangle(0, c1Y, bandThick, c1Y + bandThick + bandH, 0, c1Y + bandH, 'F');
+    doc.setDrawColor(dark[0], dark[1], dark[2]);
+    doc.setLineWidth(railW);
+    doc.line(0, c1Y, leftRailX, c1Y + leftRailX);
+    drawRailCap(leftRailX, c1Y + leftRailX, false);
 
-    // Faixa 2 (Média - Laranja Primário #F37021) inclinada a 45°
+    // Traço 2 (Médio - Laranja Primário #F37021) inclinado a 45°, com remate na ponta
     const c2Y = c1Y + bandH + gap;
-    doc.setFillColor(primary[0], primary[1], primary[2]);
-    doc.triangle(0, c2Y, bandThick, c2Y + bandThick, bandThick, c2Y + bandThick + bandH, 'F');
-    doc.triangle(0, c2Y, bandThick, c2Y + bandThick + bandH, 0, c2Y + bandH, 'F');
+    doc.setDrawColor(primary[0], primary[1], primary[2]);
+    doc.line(0, c2Y, leftRailX, c2Y + leftRailX);
+    drawRailCap(leftRailX, c2Y + leftRailX, false);
 
-    // Faixa 3 (Inferior - Laranja Primário): Barra vertical contínua até o rodapé
-    // Inicia com chanfro a 45° idêntico à imagem de referência
+    // Traço 3 (Inferior - Laranja Primário): entra a 45° e desce pela margem até à barra do rodapé
     const c3Y = c2Y + bandH + gap;
-    doc.setFillColor(primary[0], primary[1], primary[2]);
-    doc.triangle(0, c3Y, bandThick, c3Y + bandThick, 0, c3Y + bandThick, 'F');
-    doc.rect(0, c3Y + bandThick, bandThick, pageHeight - (c3Y + bandThick), 'F');
+    doc.lines([[leftRailX, leftRailX], [0, footBarY - (c3Y + leftRailX)]], 0, c3Y, [1, 1], 'S', false);
 
     // =========================================================================
     // 3. MOTIVO GEOMÉTRICO DO RODAPÉ (BARRA CHANFRADA, FAIXA DIAGONAL E CARVÃO)
     // =========================================================================
-    const footBarH = 8.5;
-    const footBarY = pageHeight - footBarH;
     const cut1X = isLandscape ? pageWidth - 100 : 142;
     const stripeW = 9;
     const gapW = 3.2;
@@ -401,10 +393,10 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
     const silverY = footBarY - silverH;
     const cutSilverX = cut1X - 6;
     doc.setFillColor(241, 245, 249);
-    doc.rect(bandThick, silverY, cutSilverX - bandThick - silverH, 0.7, 'F');
+    doc.rect(leftRailX, silverY, cutSilverX - leftRailX - silverH, 0.7, 'F');
     doc.triangle(cutSilverX - silverH, silverY, cutSilverX, silverY + 0.7, cutSilverX - silverH, silverY + 0.7, 'F');
     doc.setFillColor(lightSilver[0], lightSilver[1], lightSilver[2]);
-    doc.rect(bandThick, silverY + 0.7, cutSilverX - bandThick - (silverH - 0.7), 1.5, 'F');
+    doc.rect(leftRailX, silverY + 0.7, cutSilverX - leftRailX - (silverH - 0.7), 1.5, 'F');
     doc.triangle(cutSilverX - (silverH - 0.7), silverY + 0.7, cutSilverX, footBarY, cutSilverX, silverY + 0.7, 'F');
 
     // 2. Barra Principal Inferior (Laranja Primário #F37021) com corte a 45°
@@ -918,6 +910,7 @@ export const fillContractPlaceholders = (text: string, contract: any, settings?:
         '{{EMPRESA}}': config.name || '',
         '{{NIF_EMPRESA}}': config.nif || '',
         '{{REF}}': contract?.id || '',
+        ...promessaPlaceholderValues(contract, config),
     };
     return String(text || '').replace(/\{\{[A-Z_]+\}\}/g, token => values[token] ?? token);
 };
@@ -1087,198 +1080,167 @@ export const generateContractPDF = (
     doc.save(`Contrato-${contract.id}.pdf`);
 };
 
+/** Termos editados do contrato-promessa, guardados no campo `terms` do contrato na chave `promessa`. */
+export const parsePromessaTerms = (raw: any): { title?: string; clauses?: string } | null => {
+    if (!raw) return null;
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        const saved = parsed?.promessa;
+        if (saved && typeof saved === 'object' && saved.clauses) return { title: saved.title ? String(saved.title) : undefined, clauses: String(saved.clauses) };
+    } catch {
+        // Texto livre antigo na coluna.
+    }
+    return null;
+};
+
+/** Junta os termos do contrato-promessa ao JSON de `terms`, sem perder os termos editados do contrato principal. */
+export const mergePromessaTerms = (raw: any, promessa: { title: string; clauses: string; updatedAt?: string; updatedBy?: string | null }): string => {
+    let base: Record<string, any> = {};
+    try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) base = parsed;
+    } catch {
+        base = {};
+    }
+    return JSON.stringify({ ...base, promessa });
+};
+
+export { PROMESSA_CLAUSES_TEMPLATE, PROMESSA_CONTRACT_TITLE };
+
+/**
+ * Contrato de mútuo e financiamento de microcrédito ("Contrato-Promessa"). O texto parte do modelo
+ * PROMESSA_CLAUSES_TEMPLATE (ou da versão editada) e os campos {{...}} são preenchidos com os dados da empresa,
+ * do cliente e do crédito.
+ */
 export const generatePromessaContractPDF = (
     contract: any,
     settings?: any,
     userName?: string,
-    extendedDetails?: {
-        fatherName?: string;
-        motherName?: string;
-        birthPlace?: string;
-        province?: string;
-        municipality?: string;
-        street?: string;
-        biIssueDate?: string;
-        isForeigner?: boolean;
-        nationality?: string;
-        documentType?: string;
-        documentNumber?: string;
-    },
-    returnType: 'save' | 'blob' = 'save'
+    returnType: 'save' | 'blob' = 'save',
+    options: { title?: string; clauses?: string } = {}
 ) => {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
     const orange = resolveBrandPrimary(config.primaryColor);
-    const black = BRAND_CHARCOAL;
+    const dark = resolveBrandDark(config.secondaryColor);
+    const muted: [number, number, number] = [100, 116, 139];
+    const saved = parsePromessaTerms(contract?.terms);
+    const fill = (text: string) => fillContractPlaceholders(text, contract, settings);
+    const title = fill((options.title ?? saved?.title ?? PROMESSA_CONTRACT_TITLE).trim() || PROMESSA_CONTRACT_TITLE);
+    const body = fill(options.clauses ?? saved?.clauses ?? PROMESSA_CLAUSES_TEMPLATE);
+    const values = promessaPlaceholderValues(contract, config);
+    const shortName = companyShortName(config.name) || 'CREDORA';
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const left = 18;
+    const right = pageWidth - 14;
+    const width = right - left;
+    const fontSize = 9.3;
+    const lineH = 4.4;
+    const continuationTop = 44;
 
     applyBranding(doc, config, userName);
+    let y = brandingHeaderBottom(doc) + 6;
 
-    doc.setTextColor(0, 0, 0);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text('CONTRATO-PROMESSA', 105, 45, { align: 'center' });
+    // Protocolo de desembolso: número do contrato e data, à direita.
+    const boxW = 58;
+    doc.setFillColor(248, 250, 252); doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.3);
+    doc.roundedRect(right - boxW, y, boxW, 17, 1.8, 1.8, 'FD');
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text('PROTOCOLO DE DESEMBOLSO', right - 3, y + 4.5, { align: 'right' });
+    doc.setFontSize(7); doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text('Nº DO CONTRATO', right - 3, y + 8.4, { align: 'right' });
+    doc.setFont('courier', 'bold'); doc.setFontSize(8.5); doc.setTextColor(orange[0], orange[1], orange[2]);
+    doc.text(fitPdfText(doc, String(contract?.id || '—'), boxW - 6, 8.5), right - 3, y + 12.2, { align: 'right' });
+    doc.setFont('courier', 'normal'); doc.setFontSize(7.5); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(`Data: ${values['{{DATA_CONTRATO}}']}`, right - 3, y + 15.6, { align: 'right' });
+    y += 24;
 
-    let cursorY = 60;
-    const margin = 20;
-    const maxWidth = 170;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5); doc.setTextColor(dark[0], dark[1], dark[2]);
+    const titleLines = doc.splitTextToSize(title.toUpperCase(), width - 10);
+    doc.text(titleLines, pageWidth / 2, y, { align: 'center' });
+    y += (titleLines.length - 1) * 5.5 + 3;
+    doc.setDrawColor(orange[0], orange[1], orange[2]); doc.setLineWidth(0.6);
+    doc.line(pageWidth / 2 - 22, y, pageWidth / 2 + 22, y);
+    y += 7;
 
-    const parseAdditionalClauses = (value: any): string => {
-        if (!value) return '';
-        if (Array.isArray(value)) {
-            return value
-                .map((item) => typeof item === 'string' ? item : (item?.content || item?.text || item?.clause || ''))
-                .filter(Boolean)
-                .join('\n');
-        }
-        if (typeof value === 'object') return value.content || value.text || '';
-
-        const raw = String(value).trim();
-        if (!raw || raw === '[]') return '';
-        if (raw.startsWith('[') || raw.startsWith('{')) {
-            try { return parseAdditionalClauses(JSON.parse(raw)); } catch (e) { return raw; }
-        }
-        return raw;
-    };
-
-    const addParagraph = (text: string, isBold: boolean = false, align: 'left' | 'center' | 'justify' = 'justify') => {
-        doc.setFont("helvetica", isBold ? "bold" : "normal");
-        doc.setFontSize(10);
-        doc.setTextColor(30, 30, 30);
-        const splitText = doc.splitTextToSize(text, maxWidth);
-
-        if (isBold && text.toLowerCase().includes('cl') && cursorY > 225) {
-            doc.addPage();
-            applyBranding(doc, config, userName, true);
-            doc.setTextColor(30, 30, 30);
-            cursorY = 44;
-        }
-
-        if (cursorY + (splitText.length * 5) > 270) {
-            doc.addPage();
-            applyBranding(doc, config, userName, true);
-            doc.setTextColor(30, 30, 30);
-            cursorY = 44;
-        }
-
-        if (align === 'justify') {
-            splitText.forEach((line: string, index: number) => {
-                const isLastLine = index === splitText.length - 1;
-                doc.text(line, margin, cursorY + (index * 5), {
-                    align: isLastLine ? 'left' : 'justify',
-                    maxWidth: maxWidth
-                });
-            });
-        } else {
-            // @ts-ignore
-            doc.text(splitText, align === 'center' ? 105 : margin, cursorY, { align: align });
-        }
-        cursorY += (splitText.length * 5) + 3;
-    };
-
-    addParagraph('Entre:', true);
-    addParagraph(`ANA DA PURIFICAÇÃO NZAU MABICA, maior, filha de Alexandre Mabica e de Maria Malonda Nzau, natural de Cabinda, Província de Cabinda, titular do BI n.º 003211299CA035, emitido aos 13/01/2021, pelo Arquivo Nacional de Identificação Civil e Criminal, doravante denominada por Promitente Credora/Primeira Outorgante.`);
-
-    addParagraph('E', true);
-
-    const docLabel = extendedDetails?.isForeigner
-        ? (extendedDetails?.documentType || 'Passaporte/C.R.')
-        : 'BI';
-    const docNumber = extendedDetails?.documentNumber || contract.clientNif || '_________________________';
-    const nationalityText = extendedDetails?.isForeigner && extendedDetails?.nationality
-        ? `, de nacionalidade ${extendedDetails.nationality.toUpperCase()}`
-        : '';
-    const birthLocation = extendedDetails?.birthPlace
-        ? `natural de ${extendedDetails.birthPlace}, Província de ${extendedDetails.province || '______'}${nationalityText}`
-        : `natural de ____________, Província de ____________${nationalityText}`;
-
-    addParagraph(`${(contract.clientName || '_________________________').toUpperCase()}, maior, filho/a de ${extendedDetails?.fatherName || '__________________________________'} e de ${extendedDetails?.motherName || '____________________________________'}, ${birthLocation}, residente em ${extendedDetails?.street || contract.clientAddress || '________________________'}, Município de ${extendedDetails?.municipality || '_______________'}, titular do ${docLabel} n.º ${docNumber}, emitido aos ${extendedDetails?.biIssueDate || '____________'}, adiante designado por Promitente Devedor/Segundo Outorgante.`);
-
-    addParagraph('Cláusula 1.ª', true, 'center');
-    addParagraph('(Objecto)', false, 'center');
-    addParagraph('O presente Contrato visa regular a promessa de recebimento de valores pecuniários estabelecida entre os entes acima identificados, pelo que o Promitente-Devedor recebe uma quantia monetária abaixo descrita.');
-
-    addParagraph('Cláusula 2ª', true, 'center');
-    addParagraph('(Valor e prazo)', false, 'center');
-    addParagraph(`1.- A quantia monetária entregue é de ${formatCurrency(contract.value || contract.principalAmount || 0, config.currency)}, e que as partes manifestam livremente e de boa-fé vincularem-se a este facto;`);
-    addParagraph('2.- A DEVEDORA, tem a obrigação de restituir o valor num prazo de 30 dias, a contar com a data da emissão e assinatura deste contrato;');
-    addParagraph(`3.- Em virtude do prazo, o que leva morosidade no processo de devolução do valor, as partes acordam livremente o acréscimo de uma taxa de ${contract.interestRate || contract.defaultInterestRate || '____'}% no valor supra para o cumprimento da prestação debitória.`);
-
-    addParagraph('Cláusula 3.ª', true, 'center');
-    addParagraph('(Comunicação)', false, 'center');
-    addParagraph('As partes devem comunicar-se pela seguinte via:');
-    addParagraph('Promitente Credor', true);
-    addParagraph(`Tel.: ${config.phone || '923 414 621'}`);
-    addParagraph('Promitente Devedor', true);
-    addParagraph(`Tel.: ${contract.clientPhone || '_______________________'}`);
-
-    addParagraph('Cláusula 4.ª', true, 'center');
-    addParagraph('(Cumprimento)', false, 'center');
-    addParagraph('1.- O Promitente Devedor assume a obrigação de cumprir integralmente com a prestação debitória no prazo acordado, nos termos da Cláusula 2ª;');
-    addParagraph('2.- o inadimplemento do presente Contrato no prazo mencionado constantes no número um da presente cláusula dará lugar a juros de mora previstos nos termos do artigo 804.º e seguintes do Código Civil, despoletar a obrigação do pagamento de juros de mora legais na ordem 10% por cada mês de atraso e que incidem sobre o montante total em dívida;');
-    addParagraph('3.- Tais valores pecuniários deverão ser devolvidos da seguinte forma:');
-    addParagraph('a).- Prestação Única.');
-    addParagraph('4.- Deve ser creditado na seguinte conta bancária:');
-    addParagraph(`IBAN: ${config.bankingInfo ? 'Ver Coordenadas Bancárias da Empresa' : '0005 0000 1119.889. 261.1011.5'}`, true);
-    addParagraph(`Titular: ${config.name || 'Ana da Purificação Nzau Mabica'}`, true);
-
-    addParagraph('Cláusula 5.ª', true, 'center');
-    addParagraph('(Foro)', false, 'center');
-    addParagraph('1.- Em caso de litígios as partes indicam o Centro de Resolução de Litígios ou Tribunal da Comarca de Belas como órgãos competentes para resolução de conflitos.');
-    addParagraph('2.- Registando-se litígio, o presente acordo servirá de título executivo nos termos do Código do Processo Civil vigente no ordenamento jurídico angolano.');
-
-    addParagraph('Cláusula 6.ª', true, 'center');
-    addParagraph('(Data e entrada em vigor)', false, 'center');
-    addParagraph('O presente Contrato entra imediatamente em vigor com a assinatura das Partes, feito em duas vias originais.');
-
-    const additionalClauses = parseAdditionalClauses(config.customClauses);
-    if (additionalClauses) {
-        addParagraph('Clausulas Adicionais', true, 'center');
-        additionalClauses.split('\n').forEach((line) => {
-            if (!line.trim()) {
-                cursorY += 2;
-                return;
-            }
-            addParagraph(line.trim(), line.toLowerCase().includes('cl'));
-        });
-    }
-
-    cursorY += 10;
-    const today = new Date();
-    const day = today.getDate();
-    const months = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-    const month = months[today.getMonth()];
-    const year = today.getFullYear();
-    addParagraph(`${(extendedDetails?.province || config.location || 'Luanda')}, aos ${day} de ${month} de ${year}.`, false, 'center');
-
-    const signatureY = cursorY + 30;
-    if (signatureY > 270) {
+    const newPage = () => {
         doc.addPage();
         applyBranding(doc, config, userName, true);
-        cursorY = 50;
-    } else {
-        cursorY = signatureY;
+        y = continuationTop;
+    };
+    const ensure = (height: number) => { if (y + height > contentBottom(doc)) newPage(); };
+
+    const lines = String(body).split('\n');
+    lines.forEach((raw, index) => {
+        const line = raw.trim();
+        if (!line) { y += 2.2; return; }
+        const isClause = /^CL[ÁA]USULA\b/iu.test(line);
+        const isHeading = isClause || (line.endsWith(':') && line === line.toUpperCase() && line.length <= 80);
+        const isBullet = line.startsWith('•');
+        const text = isBullet ? line.replace(/^•\s*/, '') : line;
+        const indent = isBullet ? 5 : 0;
+        const setStyle = () => {
+            doc.setFont('helvetica', isHeading ? 'bold' : 'normal');
+            doc.setFontSize(fontSize);
+            if (isClause) doc.setTextColor(dark[0], dark[1], dark[2]); else doc.setTextColor(30, 30, 30);
+        };
+        setStyle();
+        const split: string[] = doc.splitTextToSize(text, width - indent);
+        // Um título não fica sozinho no fundo da página: leva consigo pelo menos a primeira linha seguinte.
+        const hasNext = lines.slice(index + 1).some(item => item.trim());
+        ensure(split.length * lineH + (isHeading && hasNext ? lineH * 2 : 0));
+        // A moldura de uma página nova altera a letra: repor antes de escrever.
+        setStyle();
+        if (isClause) y += 1.2;
+        if (isBullet) {
+            doc.setFillColor(orange[0], orange[1], orange[2]);
+            doc.circle(left + 1.6, y - 1.1, 0.6, 'F');
+        }
+        split.forEach((part, i) => {
+            const last = i === split.length - 1;
+            if (isHeading || last) doc.text(part, left + indent, y + i * lineH);
+            else doc.text(part, left + indent, y + i * lineH, { align: 'justify', maxWidth: width - indent });
+        });
+        y += split.length * lineH + (isHeading ? 0.4 : 0.8);
+    });
+
+    // Fecho e assinaturas (mantidos juntos na mesma página).
+    const closing = `Em conformidade de vontades, as partes assinam o presente instrumento físico em duas vias originais de igual e idêntica força em ${values['{{CIDADE_EMPRESA}}']}.`;
+    ensure(58);
+    y += 3;
+    doc.setDrawColor(226, 232, 240); doc.setLineWidth(0.3);
+    doc.line(left, y, right, y);
+    y += 6;
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(8.6); doc.setTextColor(muted[0], muted[1], muted[2]);
+    const closingLines = doc.splitTextToSize(closing, width - 10);
+    doc.text(closingLines, pageWidth / 2, y, { align: 'center' });
+    y += closingLines.length * 4 + 16;
+
+    const colW = 70;
+    const col1 = left + 6 + colW / 2;
+    const col2 = right - 6 - colW / 2;
+    doc.setDrawColor(dark[0], dark[1], dark[2]); doc.setLineWidth(0.3);
+    doc.line(col1 - colW / 2, y, col1 + colW / 2, y);
+    doc.line(col2 - colW / 2, y, col2 + colW / 2, y);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(dark[0], dark[1], dark[2]);
+    doc.text(fitPdfText(doc, `PELA CREDORA (${shortName.toUpperCase()})`, colW, 9), col1, y + 5, { align: 'center' });
+    doc.text('O MUTUÁRIO (CLIENTE)', col2, y + 5, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text('Assinatura autorizada e Carimbo oficial', col1, y + 9.5, { align: 'center' });
+    doc.text('Assinatura legível (conforme B.I.)', col2, y + 9.5, { align: 'center' });
+    if (contract?.clientName) {
+        doc.setFontSize(7.5);
+        doc.text(fitPdfText(doc, String(contract.clientName).toUpperCase(), colW, 7.5), col2, y + 13.5, { align: 'center' });
     }
-
-    doc.setDrawColor(BRAND_CHARCOAL[0], BRAND_CHARCOAL[1], BRAND_CHARCOAL[2]);
-    doc.line(30, cursorY, 90, cursorY);
-    doc.line(120, cursorY, 180, cursorY);
-
-    doc.setFontSize(8);
-    doc.setTextColor(BRAND_CHARCOAL[0], BRAND_CHARCOAL[1], BRAND_CHARCOAL[2]);
-    doc.setFont("helvetica", "bold");
-    doc.text('PROMITENTE CREDORA', 60, cursorY + 5, { align: 'center' });
-    doc.text('PROMITENTE DEVEDOR', 150, cursorY + 5, { align: 'center' });
-
-    doc.setFont("helvetica", "normal");
-    doc.text('Ana da Purificação Nzau Mabica', 60, cursorY + 10, { align: 'center' });
-    doc.text((contract.clientName || '').toUpperCase(), 150, cursorY + 10, { align: 'center' });
+    y += 20;
+    doc.setFont('courier', 'normal'); doc.setFontSize(7); doc.setTextColor(muted[0], muted[1], muted[2]);
+    doc.text(`© ${new Date().getFullYear()} ${shortName} – Processado informaticamente de forma segura.`, pageWidth / 2, y, { align: 'center' });
 
     if (returnType === 'blob') {
         const blob = doc.output('blob');
         return URL.createObjectURL(blob);
-    } else {
-        doc.save(`Contrato-Promessa-${contract.id || 'doc'}.pdf`);
     }
+    doc.save(`Contrato-Promessa-${contract?.id || 'doc'}.pdf`);
 };
 
 export const generateAuditLogPDF = (logs: any[], settings?: any, userInfo?: { name?: string, role?: string }) => {

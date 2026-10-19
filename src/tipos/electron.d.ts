@@ -33,6 +33,8 @@ export interface ElectronAPI {
     syncApplyRemote?: (groups: import('@/bibliotecas/sync-operacoes').RemoteGroup[]) => Promise<import('@/bibliotecas/sync-operacoes').ApplyResult>;
     syncUsersPayload?: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null; knownIds?: string[] }) => Promise<{ digest: string; id: string | null; payload: string | null; ids: string[] }>;
     syncUsersApply?: (roster: { columns: string[]; rows: unknown[][]; deleted?: string[] }) => Promise<{ applied: number; deleted: number }>;
+    cloudLinkBegin?: (input: { nif: string; accessCode: string; urls: string[] }) => Promise<{ url: string; tenantId: string; companyName: string; syncPasskey: string; multiTenant: boolean | null }>;
+    cloudLinkEnd?: () => Promise<{ success: boolean }>;
     dbLoad: () => Promise<Uint8Array | null>;
     dbSave: (data: Uint8Array) => Promise<boolean>;
     dbImport: (data: Uint8Array, confirmation: string) => Promise<{ success: boolean }>;

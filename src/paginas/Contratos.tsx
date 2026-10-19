@@ -66,6 +66,7 @@ import {
     CONTRACT_PLACEHOLDERS,
     DEFAULT_CONTRACT_TITLE,
     generateContractPDF,
+    mergePromessaTerms,
     parseContractTerms,
     resolveContractClauses,
 } from '@/bibliotecas/pdf';
@@ -332,7 +333,10 @@ export default function Contracts() {
         setIsSavingTerms(true);
         try {
             const previous = parseContractTerms(selectedContract.terms);
-            const terms = JSON.stringify({ title: editor.title.trim(), clauses: editor.clauses, updatedAt: new Date().toISOString(), updatedBy: user?.name || null });
+            // Os termos do contrato-promessa (chave "promessa") ficam no mesmo campo e não se perdem.
+            let promessa: unknown;
+            try { const raw = selectedContract.terms; promessa = (typeof raw === "string" ? JSON.parse(raw || "{}") : raw)?.promessa; } catch { promessa = undefined; }
+            const terms = JSON.stringify({ title: editor.title.trim(), clauses: editor.clauses, updatedAt: new Date().toISOString(), updatedBy: user?.name || null, ...(promessa ? { promessa } : {}) });
             await updateContract(selectedContract.id, { terms });
             setSelectedContract((prev: any) => prev ? { ...prev, terms } : prev);
             setEditor(prev => ({ ...prev, edited: true }));
@@ -346,6 +350,21 @@ export default function Contracts() {
             toast({ title: 'Não foi possível guardar', description: 'Verifique as permissões e tente novamente.', variant: 'destructive' });
         } finally {
             setIsSavingTerms(false);
+        }
+    };
+
+    const promessaCredit = useMemo(() => promessaModal.contract ? contractPdfData(promessaModal.contract) : null, [promessaModal.contract, contractPdfData]);
+
+    const handleSavePromessaTerms = async ({ title, clauses }: { title: string; clauses: string }) => {
+        const contract = promessaModal.contract;
+        if (!contract) return;
+        const current = contracts.find(item => item.id === contract.id)?.terms ?? contract.terms;
+        const terms = mergePromessaTerms(current, { title, clauses, updatedAt: new Date().toISOString(), updatedBy: user?.name || null });
+        await updateContract(contract.id, { terms });
+        setPromessaModal(prev => prev.contract ? { ...prev, contract: { ...prev.contract, terms } } : prev);
+        if (user) {
+            await ServicoAuditoria.addLog("update", "credit", `Texto do contrato-promessa ${contract.id} editado`, user.id, user.name,
+                null, { title, clauses }, { contractId: contract.id, origin: "promessa_editor" }).catch(() => undefined);
         }
     };
 
@@ -560,10 +579,11 @@ export default function Contracts() {
             <PromessaDetailsModal
                 isOpen={promessaModal.isOpen}
                 onClose={() => setPromessaModal({ isOpen: false, contract: null, client: null })}
-                credit={promessaModal.contract}
+                credit={promessaCredit}
                 client={promessaModal.client}
                 companySettings={companySettings}
                 userName={user?.name}
+                onSaveTerms={handleSavePromessaTerms}
             />
 
             {/* Modal de Detalhes dos Contratos do Cliente */}

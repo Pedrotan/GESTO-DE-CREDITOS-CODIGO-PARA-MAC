@@ -1008,6 +1008,20 @@ export const stopCloudSync = () => {
     emitStatus({ state: 'idle' });
 };
 
+/**
+ * Computador novo ligado a uma empresa que já existe na nuvem: recebe tudo desde o início e não envia a sua
+ * base (vazia) como fotografia inicial. A impressão da chave fica registada para a próxima sincronização não
+ * tratar esta chave como "nova" e reenviar tudo.
+ */
+export const prepareCloudReceiver = async (config: { tenantId: string; apiKey: string }) => {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${config.tenantId}:${config.apiKey}`)));
+    localStorage.setItem(scopedStorageKey(KEY_FINGERPRINT_KEY), bytesToBase64(digest).slice(0, 24));
+    localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
+    localStorage.setItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY), 'true');
+    localStorage.setItem(scopedStorageKey(CURSOR_KEY), '0');
+    localStorage.removeItem(scopedStorageKey(USERS_DIGEST_KEY));
+};
+
 /** Computador: volta a enviar a lista completa de utilizadores na próxima sincronização (ex.: ao religar à web). */
 export const resendUsersOnNextSync = () => {
     localStorage.removeItem(scopedStorageKey(USERS_DIGEST_KEY));

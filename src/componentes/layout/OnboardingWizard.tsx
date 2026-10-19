@@ -5,7 +5,7 @@ import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
-import { Building2, ArrowRight, ShieldCheck, UserCog, Lock, Loader2, CheckCircle, ShieldAlert, Sparkles, CircleCheck, Eye, EyeOff, Laptop, Globe, Wifi, Database, Search, X, Check, Layers, Server, MonitorSmartphone, Info, Landmark, KeyRound, CircleCheckBig, ChevronLeft, ChevronRight, LockKeyhole, Phone } from 'lucide-react';
+import { Building2, ArrowRight, ShieldCheck, UserCog, Lock, Loader2, CheckCircle, ShieldAlert, Sparkles, CircleCheck, Eye, EyeOff, Laptop, Globe, Wifi, Database, Search, X, Check, Layers, Server, MonitorSmartphone, Info, Landmark, KeyRound, CircleCheckBig, ChevronLeft, ChevronRight, LockKeyhole, Phone, Cloud } from 'lucide-react';
 import { Checkbox } from '@/componentes/ui/checkbox';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import Swal from 'sweetalert2';
@@ -22,9 +22,11 @@ import { isPublicWebBuild } from '@/bibliotecas/ambiente';
 import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { isCompanyActiveLocally, submitOnboardingCentral } from '@/servicos/ServicoIdentidadeEmpresa';
 import { acceptSystemTerms, setOnboardingOpen } from '@/bibliotecas/termos-sistema';
+import { LigacaoNuvemOnboarding } from '@/componentes/layout/LigacaoNuvemOnboarding';
 type StepMeta = { label: string; title: string; description: string; icon: React.ComponentType<{ className?: string }> };
 const STEP_META: Record<number, StepMeta> = {
-    1: { label: 'Tipo de instalação', title: 'Como vai usar este computador?', description: 'Escolha se este é o computador principal da empresa ou um posto que se liga a um servidor já existente.', icon: Server },
+    1: { label: 'Tipo de instalação', title: 'Como vai usar este computador?', description: 'Configure a empresa do zero, ligue-a à empresa que já existe na nuvem ou use um servidor da rede local.', icon: Server },
+    1.7: { label: 'Empresa na nuvem', title: 'Ligar a empresa na nuvem', description: 'NIF e Código de Acesso emitido pelo Tango Master Gen: os dados e os utilizadores da empresa são descarregados para este computador.', icon: Cloud },
     1.5: { label: 'Servidor local', title: 'Ligação ao servidor local', description: 'Siga as instruções para ligar este computador ao servidor Master na rede Wi-Fi.', icon: Wifi },
     2: { label: 'Sobre nós', title: 'Propriedade e suporte', description: 'Quem desenvolve o sistema e como nos pode contactar.', icon: Info },
     3: { label: 'Privacidade', title: 'Privacidade e protecção de dados', description: 'Conformidade com a Lei n.º 22/11 (Lei da Protecção de Dados Pessoais de Angola).', icon: ShieldCheck },
@@ -34,11 +36,17 @@ const STEP_META: Record<number, StepMeta> = {
     7: { label: 'Concluído', title: 'Está tudo pronto', description: 'A configuração inicial ficou concluída. Já pode começar a trabalhar.', icon: CircleCheckBig },
 };
 
-const INSTALL_OPTIONS: Array<{ mode: 'standard' | 'connect'; icon: React.ComponentType<{ className?: string }>; title: string; text: string; points: string[]; tile: string; badge?: string }> = [
+type InstallMode = 'standard' | 'cloud' | 'connect';
+const INSTALL_OPTIONS: Array<{ mode: InstallMode; icon: React.ComponentType<{ className?: string }>; title: string; text: string; points: string[]; tile: string; badge?: string }> = [
     {
-        mode: 'standard', icon: Server, title: 'Instalação principal', badge: 'Recomendado', tile: 'bg-blue-50 text-blue-700 ring-blue-100',
-        text: 'Este computador guarda os dados da empresa e os outros postos ligam-se a ele.',
-        points: ['Base de dados local e protegida', 'Ligação à versão web', 'Cópias de segurança automáticas'],
+        mode: 'standard', icon: Server, title: 'Configuração do zero', badge: 'Empresa nova', tile: 'bg-blue-50 text-blue-700 ring-blue-100',
+        text: 'Configura a empresa neste computador e cria o administrador do sistema.',
+        points: ['Dados da instituição e administrador', 'Base de dados local e protegida', 'Cópias de segurança automáticas'],
+    },
+    {
+        mode: 'cloud', icon: Cloud, title: 'Ligar a empresa na nuvem', tile: 'bg-violet-50 text-violet-700 ring-violet-100',
+        text: 'A empresa já usa o Tango (web ou outro computador): descarrega os dados e os utilizadores.',
+        points: ['NIF e Código de Acesso', 'Sem repetir a configuração', 'Entra com os utilizadores da empresa'],
     },
     {
         mode: 'connect', icon: MonitorSmartphone, title: 'Ligar a um servidor', tile: 'bg-sky-50 text-sky-700 ring-sky-100',
@@ -92,7 +100,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
             window.removeEventListener('storage', handleAuthUpdate);
         };
     }, []);
-    const [onboardingMode, setOnboardingMode] = useState<'standard' | 'connect'>('standard');
+    const [onboardingMode, setOnboardingMode] = useState<InstallMode>('standard');
     const [serverIp, setServerIp] = useState('');
     const [syncPasskey, setSyncPasskey] = useState('');
     const [cloudTenant, setCloudTenant] = useState('');
@@ -474,7 +482,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
 
     const handleNext = async () => {
         if (step === 1) {
-            setStep(2);
+            setStep(onboardingMode === 'cloud' ? 1.7 : onboardingMode === 'connect' ? 1.5 : 2);
         } else if (step === 2) {
             setStep(3);
         } else if (step === 3) {
@@ -525,6 +533,33 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
             }
             setStep(7);
         }
+    };
+
+    // "Ligar a empresa na nuvem" concluído: dados e utilizadores já estão neste computador; segue para o login.
+    const handleCloudLinked = async ({ companyName: linkedName, pulled, users: linkedUsers }: { companyName: string; pulled: number; users: number }) => {
+        setIsFinishing(true);
+        await Swal.fire({
+            title: 'Empresa Ligada!',
+            html: `Este computador está agora ligado a <strong>${linkedName.replace(/[<>&"]/g, '')}</strong>.<br/><br/>` +
+                `<span style="color:#64748b;font-size:13px;">Foram recebidas ${pulled} actualizações da nuvem e ${linkedUsers} ${linkedUsers === 1 ? 'utilizador' : 'utilizadores'}. Inicie sessão com as suas credenciais da empresa.</span>`,
+            icon: 'success',
+            confirmButtonText: 'Continuar para o Login',
+            confirmButtonColor: '#2563eb',
+            allowOutsideClick: false,
+            allowEscapeKey: false,
+            customClass: {
+                popup: 'tango-swal-popup rounded-3xl p-6 shadow-2xl font-sans',
+                title: 'text-2xl font-bold tracking-tight text-slate-900',
+                htmlContainer: 'text-sm sm:text-base text-slate-600 leading-relaxed font-normal',
+                confirmButton: 'px-6 py-3 rounded-xl font-bold text-white shadow-md text-sm sm:text-base transition-all hover:scale-105'
+            }
+        });
+        localStorage.setItem(ONBOARDING_KEY, 'true');
+        localStorage.setItem('tango_company_status', 'ACTIVE');
+        localStorage.setItem('last_app_version', CURRENT_APP_VERSION);
+        setDismissed(true);
+        window.location.hash = '#/entrar';
+        window.location.reload();
     };
 
     const handleComplete = async () => {
@@ -838,11 +873,11 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
 
     if (!showOnboarding) return null;
 
-    const stepIndex = Math.max(0, visibleSteps.indexOf(step === 1.5 ? 1 : step));
+    const stepIndex = Math.max(0, visibleSteps.indexOf(step === 1.5 || step === 1.7 ? 1 : step));
     const currentMeta = STEP_META[step] || STEP_META[1];
     const CurrentIcon = currentMeta.icon;
     // Voltar ao passo anterior (não depois de concluído).
-    const previousStep: number | undefined = step === 7 ? undefined : step === 1.5 ? 1 : visibleSteps[stepIndex - 1];
+    const previousStep: number | undefined = step === 7 ? undefined : step === 1.5 || step === 1.7 ? 1 : visibleSteps[stepIndex - 1];
     const progress = Math.round(((stepIndex + 1) / visibleSteps.length) * 100);
 
     return (
@@ -971,13 +1006,14 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                 <div className={cn("bg-background flex-1 min-h-0 overflow-y-auto", isSecondaryAccount ? "p-5 sm:p-6" : "p-5 sm:p-8")}>
                     {step === 1 ? (
                         <div className="flex h-full flex-col justify-center gap-6 py-1 animate-fade-in">
-                            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" role="radiogroup" aria-label="Tipo de instalação">
+                            <div className="grid grid-cols-1 gap-4 md:grid-cols-3" role="radiogroup" aria-label="Tipo de instalação">
                                 {INSTALL_OPTIONS.map(option => {
                                     const Icon = option.icon;
                                     const selected = onboardingMode === option.mode;
                                     const choose = () => {
                                         setOnboardingMode(option.mode);
                                         if (option.mode === 'connect') setStep(1.5);
+                                        else if (option.mode === 'cloud') setStep(1.7);
                                         else handleNext();
                                     };
                                     return (
@@ -1061,6 +1097,8 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                 </button>
                             </div>
                         </div>
+                    ) : step === 1.7 ? (
+                        <LigacaoNuvemOnboarding onBack={() => setStep(1)} onLinked={handleCloudLinked} />
                     ) : step === 1.5 ? (
                         <div className="space-y-8 animate-fade-in flex flex-col items-center justify-center py-4 h-full">
                             <div className="text-center space-y-2 mb-4 w-full max-w-md">
@@ -1649,7 +1687,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                         )}
 
                         <div className="w-full max-w-[250px]">
-                            {step < 7 ? (
+                            {step === 1.7 ? null : step < 7 ? (
                                 <Button
                                     className="group h-12 w-full justify-between rounded-xl bg-[#0f1c47] pl-5 pr-2 text-[15px] font-semibold text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.12),0_8px_20px_-8px_rgba(15,28,71,0.6)] transition-all hover:bg-[#182b6b] active:scale-[0.99] disabled:bg-slate-300 disabled:shadow-none"
                                     disabled={

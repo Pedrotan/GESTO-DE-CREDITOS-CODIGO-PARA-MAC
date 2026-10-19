@@ -201,6 +201,12 @@ const api = Object.freeze({
         if (!roster || typeof roster !== 'object') throw new TypeError('Lista de utilizadores inválida.');
         return ipcRenderer.invoke('sync-users-apply', JSON.parse(JSON.stringify({ columns: roster.columns, rows: roster.rows, deleted: roster.deleted || [] })));
     },
+    // Onboarding "Ligar a empresa na nuvem": o processo principal confirma o código no servidor (ver cloud-link-begin).
+    cloudLinkBegin: (input: { nif: string; accessCode: string; urls: string[] }) => ipcRenderer.invoke('cloud-link-begin', {
+        nif: String(input?.nif || ''), accessCode: String(input?.accessCode || ''),
+        urls: Array.isArray(input?.urls) ? input.urls.slice(0, 5).map(String) : [],
+    }),
+    cloudLinkEnd: () => ipcRenderer.invoke('cloud-link-end'),
 
     dbLoad: () => ipcRenderer.invoke('db-load'),
     dbSave: (data: Uint8Array) => ipcRenderer.invoke('db-save', data),

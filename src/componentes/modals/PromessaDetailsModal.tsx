@@ -1,20 +1,20 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
     Dialog,
     DialogContent,
     DialogHeader,
     DialogTitle,
-    DialogFooter,
     DialogDescription,
 } from '@/componentes/ui/dialog';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
+import { Textarea } from '@/componentes/ui/textarea';
 import { Credit } from '@/tipos/credito';
-import { generatePromessaContractPDF } from '@/bibliotecas/pdf';
+import { CONTRACT_PLACEHOLDERS, generatePromessaContractPDF, parsePromessaTerms } from '@/bibliotecas/pdf';
+import { PROMESSA_CLAUSES_TEMPLATE, PROMESSA_CONTRACT_TITLE, PROMESSA_PLACEHOLDERS } from '@/bibliotecas/contrato-promessa';
 import { CompanySettings } from '@/tipos/base-dados';
-import { Eye, Download, Loader2 } from 'lucide-react';
-import { Switch } from '@/componentes/ui/switch';
+import { Braces, Download, Loader2, RotateCcw, Save } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 
@@ -22,33 +22,35 @@ interface PromessaDetailsModalProps {
     isOpen: boolean;
     onClose: () => void;
     credit: Credit | null;
-    client: any | null; // Pass the client object to pre-fill address etc.
+    client: any | null; // Cliente do contrato, para pré-preencher a identificação.
     companySettings: CompanySettings;
     userName?: string;
+    /** Guarda o título e o texto editados neste contrato (usados nos PDF seguintes). */
+    onSaveTerms?: (terms: { title: string; clauses: string }) => Promise<void>;
 }
 
-const angolaData: Record<string, string[]> = {
-    "Bengo": ["Ambriz", "Bula Atumba", "Dande", "Dembos", "Nambuangongo", "Pango Aluquém"],
-    "Benguela": ["Baía Farta", "Benguela", "Bocoio", "Caimbambo", "Catumbela", "Chongorói", "Ganda", "Lobito", "Quisange", "Balombo"],
-    "Bié": ["Andulo", "Camacupa", "Catabola", "Chitembo", "Chinguar", "Cuemba", "Cunhinga", "Cuíto", "Nharea"],
-    "Cabinda": ["Belize", "Buco-Zau", "Cabinda", "Cacongo"],
-    "Cuando": ["Menongue", "Cuchi", "Cuangar", "Calai"],
-    "Cubango": ["Mavinga", "Dirico", "Rivungo", "Cuito Cuanavale"],
-    "Cuanza Norte": ["Ambaca", "Banga", "Bolongongo", "Cambambe", "Cazengo", "Golungo Alto", "Gonguembo", "Lucala", "Quiculungo", "Samba Caju", "Aldeia Nova", "Caculo Cabaça", "Cerca", "Massangano", "Tango", "Luinga", "Terreiro"],
-    "Cuanza Sul": ["Amboim", "Cassongue", "Cela", "Conda", "Ebo", "Libolo", "Mussende", "Porto Amboim", "Quibala", "Quilenda", "Seles", "Sumbe"],
-    "Cunene": ["Cahama", "Cuanhama", "Curoca", "Cuvelai", "Namacunde", "Ombadja"],
-    "Huambo": ["Bailundo", "Caála", "Catchiungo", "Chicala-Cholohanga", "Chinjenje", "Ecunha", "Huambo", "Londuimbali", "Longonjo", "Mungo", "Ucuma"],
-    "Huíla": ["Caconda", "Cacula", "Caluquembe", "Chibia", "Chicomba", "Chipindo", "Cuvango", "Humpata", "Jamba", "Lubango", "Matala", "Quilengues", "Quipungo", "Gambos"],
-    "Icolo e Bengo": ["Icolo e Bengo", "Quiçama"],
-    "Luanda": ["Luanda", "Belas", "Cacuaco", "Cazenga", "Kilamba Kiaxi", "Talatona", "Viana"],
-    "Lunda Norte": ["Capenda-Camulemba", "Caungula", "Chitato", "Cuilo", "Cuango", "Lubalo", "Lucapa", "Lóvua", "Xá-Muteba", "Cambulo"],
-    "Lunda Sul": ["Cacolo", "Dala", "Muconda", "Saurimo"],
-    "Malanje": ["Cacuso", "Calandula", "Cambundi-Catemba", "Cangandala", "Caombo", "Cuaba Nzoji", "Cunda-dia-Baze", "Luquembo", "Malanje", "Marimba", "Massango", "Mucari", "Quela", "Quirima"],
-    "Moxico": ["Luena", "Camanongue", "Léua", "Lucusse", "Luchazes", "Cameia"],
-    "Moxico Leste": ["Cazombo", "Alto Zambeze", "Bundas", "Lumeje"],
-    "Namibe": ["Bibala", "Camucuio", "Moçâmedes", "Virei", "Tômbwa"],
-    "Uíge": ["Alto Cauale", "Ambuila", "Bembe", "Buengas", "Bungo", "Damba", "Milunga", "Mucaba", "Negage", "Puri", "Quimbabele", "Quitexe", "Sanza Pombo", "Songo", "Uíge", "Maquela do Zombo"],
-    "Zaire": ["Cuimba", "M'banza Kongo", "Noqui", "N'zeto", "Soyo", "Sumbula"]
+const MARITAL_STATUS: Record<string, string> = {
+    SOLTEIRO: 'Solteiro(a)',
+    CASADO: 'Casado(a)',
+    DIVORCIADO: 'Divorciado(a)',
+    VIUVO: 'Viúvo(a)',
+    UNIAO_DE_FACTO: 'União de Facto',
+};
+
+const PLACEHOLDERS = [...CONTRACT_PLACEHOLDERS, ...PROMESSA_PLACEHOLDERS];
+
+type Details = { maritalStatus: string; documentNumber: string; nif: string; address: string; phone: string; email: string };
+
+const detailsFromClient = (client: any): Details => {
+    const isBi = !client?.documentType || client.documentType === 'BI';
+    return {
+        maritalStatus: client?.maritalStatus || '',
+        documentNumber: isBi ? (client?.nif || '') : '',
+        nif: client?.nif || '',
+        address: client?.address || '',
+        phone: client?.phone || '',
+        email: client?.email || '',
+    };
 };
 
 export function PromessaDetailsModal({
@@ -57,93 +59,55 @@ export function PromessaDetailsModal({
     credit,
     client,
     companySettings,
-    userName
+    userName,
+    onSaveTerms,
 }: PromessaDetailsModalProps) {
-    const [details, setDetails] = useState({
-        fatherName: '',
-        motherName: '',
-        birthPlace: '',
-        province: 'Luanda',
-        municipality: 'Luanda',
-        street: '',
-        biIssueDate: '',
-        isForeigner: false,
-        nationality: '',
-        documentType: 'Passaporte',
-        documentNumber: ''
-    });
-    const [isLoading, setIsLoading] = useState(false);
+    const [details, setDetails] = useState<Details>(() => detailsFromClient(client));
+    const [title, setTitle] = useState(PROMESSA_CONTRACT_TITLE);
+    const [clauses, setClauses] = useState(PROMESSA_CLAUSES_TEMPLATE);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [isSaving, setIsSaving] = useState(false);
+    const [saveMessage, setSaveMessage] = useState<string | null>(null);
+    const clausesRef = useRef<HTMLTextAreaElement>(null);
 
+    // Ao abrir: dados do cliente e o texto guardado neste contrato (ou o modelo padrão).
     useEffect(() => {
-        if (isOpen && client) {
-            setDetails({
-                fatherName: '',
-                motherName: '',
-                birthPlace: '',
-                province: 'Luanda',
-                municipality: 'Luanda',
-                street: client.address || '',
-                biIssueDate: '',
-                isForeigner: false,
-                nationality: '',
-                documentType: 'Passaporte',
-                documentNumber: client.nif || ''
-            });
-            setPreviewUrl(null);
-        }
-    }, [isOpen, client]);
+        if (!isOpen) return;
+        const saved = parsePromessaTerms((credit as any)?.terms);
+        setDetails(detailsFromClient(client));
+        setTitle(saved?.title || PROMESSA_CONTRACT_TITLE);
+        setClauses(saved?.clauses || PROMESSA_CLAUSES_TEMPLATE);
+        setSaveMessage(null);
+        // Só ao abrir ou ao trocar de contrato: guardar o texto não apaga o que está a ser editado.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isOpen, client?.id, credit?.id]);
 
-    const handleProvinceChange = (province: string) => {
-        const firstMuni = angolaData[province]?.[0] || '';
-        setDetails({ ...details, province, municipality: firstMuni });
-    };
+    const pdfData = useCallback(() => ({
+        ...credit,
+        clientName: client?.name || credit?.clientName,
+        clientNif: details.nif,
+        clientDocumentNumber: details.documentNumber,
+        clientMaritalStatus: MARITAL_STATUS[details.maritalStatus] || details.maritalStatus,
+        clientAddress: details.address,
+        clientPhone: details.phone,
+        clientEmail: details.email,
+        lateInterestRate: (credit as any)?.lateInterestRate ?? client?.lateInterestRate,
+    }), [credit, client, details]);
 
-    const handleGenerate = (action: 'preview' | 'download') => {
-        if (!credit || !client) return;
-
-        setIsLoading(true);
-        try {
-            const dataToUse = {
-                ...credit,
-                clientName: client.name,
-                clientAddress: details.street || client.address,
-                clientNif: details.isForeigner ? details.documentNumber : (client.nif || details.documentNumber),
-                clientPhone: client.phone
-            };
-
-            const returnType = action === 'preview' ? 'blob' : 'save';
-
-            const result = generatePromessaContractPDF(
-                dataToUse,
-                companySettings,
-                userName,
-                details,
-                returnType
-            );
-
-            if (action === 'preview' && result) {
-                console.log("[PromessaDetailsModal] PDF Preview URL generated successfully:", result);
-
-                // Revoke old URL if it exists
-                if (previewUrl) {
-                    try { URL.revokeObjectURL(previewUrl); } catch (e) { }
-                }
-
-                setPreviewUrl(result as string);
+    // Pré-visualização em tempo real: regenera 500 ms depois da última alteração.
+    useEffect(() => {
+        if (!isOpen || !credit) return;
+        const timer = window.setTimeout(() => {
+            try {
+                const url = generatePromessaContractPDF(pdfData(), companySettings, userName, 'blob', { title, clauses });
+                if (url) setPreviewUrl(url as string);
+            } catch (error) {
+                console.error('[PromessaDetailsModal] Falha ao gerar a pré-visualização:', error);
             }
+        }, 500);
+        return () => window.clearTimeout(timer);
+    }, [isOpen, credit, pdfData, companySettings, userName, title, clauses]);
 
-            if (action === 'download') {
-                onClose();
-            }
-        } catch (error) {
-            console.error("Error generating PDF:", error);
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    // Cleanup on unmount or URL change
     useEffect(() => {
         return () => {
             if (previewUrl) {
@@ -152,200 +116,130 @@ export function PromessaDetailsModal({
         };
     }, [previewUrl]);
 
+    const insertPlaceholder = (token: string) => {
+        const textarea = clausesRef.current;
+        const start = textarea?.selectionStart ?? clauses.length;
+        const end = textarea?.selectionEnd ?? clauses.length;
+        setClauses(clauses.slice(0, start) + token + clauses.slice(end));
+        requestAnimationFrame(() => {
+            textarea?.focus();
+            textarea?.setSelectionRange(start + token.length, start + token.length);
+        });
+    };
+
+    const handleDownload = () => {
+        if (!credit) return;
+        try {
+            generatePromessaContractPDF(pdfData(), companySettings, userName, 'save', { title, clauses });
+        } catch (error) {
+            console.error('[PromessaDetailsModal] Falha ao gerar o PDF:', error);
+        }
+    };
+
+    const handleSave = async () => {
+        if (!onSaveTerms) return;
+        if (clauses.trim().length < 20) {
+            setSaveMessage('O texto do contrato não pode ficar vazio.');
+            return;
+        }
+        setIsSaving(true);
+        try {
+            await onSaveTerms({ title: title.trim() || PROMESSA_CONTRACT_TITLE, clauses });
+            setSaveMessage('Texto guardado neste contrato.');
+        } catch (error) {
+            console.error('[PromessaDetailsModal] Falha ao guardar:', error);
+            setSaveMessage('Não foi possível guardar. Verifique as permissões.');
+        } finally {
+            setIsSaving(false);
+        }
+    };
+
+    const field = (key: keyof Details, label: string, placeholder = '') => (
+        <div className="space-y-1">
+            <Label className="text-xs">{label}</Label>
+            <Input className="h-8 text-sm" value={details[key]} placeholder={placeholder}
+                onChange={(e) => setDetails(prev => ({ ...prev, [key]: e.target.value }))} />
+        </div>
+    );
+
     return (
-        <Dialog open={isOpen} onOpenChange={onClose}>
-            <DialogContent className={previewUrl ? "w-[98vw] max-w-[98vw] h-[96vh] flex flex-col p-0 overflow-hidden" : "max-w-xl"}>
-                <DialogHeader className={previewUrl ? "px-6 py-4 border-b m-0" : "px-6 pt-6"}>
-                    <div className="flex items-center justify-between mr-8">
-                        <div>
-                            <DialogTitle>Dados do Contrato Promessa</DialogTitle>
-                            <DialogDescription>
-                                Preencha os dados adicionais para completar o contrato.
-                            </DialogDescription>
-                        </div>
-                        <div className="flex items-center gap-2 bg-slate-50 p-2 rounded-lg border border-slate-100">
-                            <Label htmlFor="foreigner-mode" className="text-xs font-bold text-slate-600">Cidadão Estrangeiro?</Label>
-                            <Switch
-                                id="foreigner-mode"
-                                checked={details.isForeigner}
-                                onCheckedChange={(val) => {
-                                    setDetails(prev => ({
-                                        ...prev,
-                                        isForeigner: val,
-                                        documentNumber: (val && !prev.documentNumber) ? (client?.nif || prev.documentNumber) : prev.documentNumber
-                                    }));
-                                }}
-                            />
-                        </div>
-                    </div>
+        <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+            <DialogContent className="flex h-[96vh] w-[98vw] max-w-[98vw] flex-col gap-0 overflow-hidden p-0">
+                <DialogHeader className="m-0 border-b px-6 py-4">
+                    <DialogTitle>Contrato de Mútuo e Financiamento de Microcrédito</DialogTitle>
+                    <DialogDescription>
+                        Os dados da empresa, do cliente e do crédito são preenchidos automaticamente. Pode editar o texto; a pré-visualização actualiza-se enquanto escreve.
+                    </DialogDescription>
                 </DialogHeader>
 
-                {previewUrl ? (
-                    <div className="min-h-0 flex-1 w-full relative bg-slate-100">
-                        <PdfCanvasViewer source={previewUrl} />
-                    </div>
-                ) : (
-                    <div className="grid gap-4 py-4 px-6 overflow-y-auto max-h-[70vh]">
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>Nome do Pai</Label>
-                                <Input
-                                    value={details.fatherName}
-                                    onChange={(e) => setDetails({ ...details, fatherName: e.target.value })}
-                                    placeholder="Nome completo do pai"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>Nome da Mãe</Label>
-                                <Input
-                                    value={details.motherName}
-                                    onChange={(e) => setDetails({ ...details, motherName: e.target.value })}
-                                    placeholder="Nome completo da mãe"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>Naturalidade</Label>
-                                <Input
-                                    value={details.birthPlace}
-                                    onChange={(e) => setDetails({ ...details, birthPlace: e.target.value })}
-                                    placeholder="Ex: Luanda"
-                                />
-                            </div>
-                            <div className="space-y-2">
-                                <Label>{details.isForeigner ? 'Identificação / Validade' : 'Data Emissão BI'}</Label>
-                                <Input
-                                    type={details.isForeigner ? 'text' : 'date'}
-                                    value={details.biIssueDate}
-                                    onChange={(e) => setDetails({ ...details, biIssueDate: e.target.value })}
-                                    placeholder={details.isForeigner ? "Ex: Válido até 12/2030" : ""}
-                                />
-                            </div>
-                        </div>
-
-                        {!details.isForeigner && (
-                            <div className="space-y-2 animate-in fade-in slide-in-from-top-2">
-                                <Label>Número do BI (Cidadão Nacional)</Label>
-                                <Input
-                                    value={details.documentNumber}
-                                    onChange={(e) => {
-                                        let val = e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, '');
-                                        if (val.length > 14) val = val.substring(0, 14);
-
-                                        // Auto-mask: 9 numbers + 2 letters + 3 numbers
-                                        let formatted = '';
-                                        for (let i = 0; i < val.length; i++) {
-                                            if (i < 9) {
-                                                if (/[0-9]/.test(val[i])) formatted += val[i];
-                                            } else if (i < 11) {
-                                                if (/[A-Z]/.test(val[i])) formatted += val[i];
-                                            } else {
-                                                if (/[0-9]/.test(val[i])) formatted += val[i];
-                                            }
-                                        }
-                                        setDetails({ ...details, documentNumber: formatted });
-                                    }}
-                                    placeholder="000000000XX000"
-                                    maxLength={14}
-                                    className="font-mono"
-                                />
-                                <p className="text-[10px] text-muted-foreground italic">Formato: 9 números, 2 letras, 3 números</p>
-                            </div>
-                        )}
-
-                        {details.isForeigner && (
-                            <div className="grid grid-cols-3 gap-4 animate-in fade-in slide-in-from-top-2">
-                                <div className="space-y-2">
-                                    <Label>Tipo de Doc.</Label>
-                                    <Select value={details.documentType} onValueChange={(v) => setDetails({ ...details, documentType: v })}>
-                                        <SelectTrigger>
-                                            <SelectValue />
-                                        </SelectTrigger>
+                <div className="flex min-h-0 flex-1">
+                    <aside className="flex w-full max-w-[480px] shrink-0 flex-col border-r bg-background">
+                        <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+                            <p className="text-sm font-bold">Identificação do mutuário</p>
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="space-y-1">
+                                    <Label className="text-xs">Estado civil</Label>
+                                    <Select value={details.maritalStatus || undefined} onValueChange={(v) => setDetails(prev => ({ ...prev, maritalStatus: v }))}>
+                                        <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Seleccione" /></SelectTrigger>
                                         <SelectContent>
-                                            <SelectItem value="Passaporte">Passaporte</SelectItem>
-                                            <SelectItem value="Cartão de Residente">Cartão Residente</SelectItem>
+                                            {Object.entries(MARITAL_STATUS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
                                         </SelectContent>
                                     </Select>
                                 </div>
-                                <div className="space-y-2">
-                                    <Label>Nº Documento</Label>
-                                    <Input
-                                        value={details.documentNumber}
-                                        onChange={(e) => setDetails({ ...details, documentNumber: e.target.value })}
-                                        placeholder="Número do doc."
-                                    />
-                                </div>
-                                <div className="space-y-2">
-                                    <Label>Nacionalidade</Label>
-                                    <Input
-                                        value={details.nationality}
-                                        onChange={(e) => setDetails({ ...details, nationality: e.target.value })}
-                                        placeholder="Ex: Portuguesa"
-                                    />
-                                </div>
+                                {field('documentNumber', 'N.º do B.I. / documento', '000000000XX000')}
+                                {field('nif', 'NIF')}
+                                {field('phone', 'Contacto')}
                             </div>
-                        )}
+                            {field('address', 'Morada', 'Rua, bairro, município, província')}
+                            {field('email', 'Email')}
 
-                        <div className="space-y-2">
-                            <Label>Endereço Completo (Rua/Bairro)</Label>
-                            <Input
-                                value={details.street}
-                                onChange={(e) => setDetails({ ...details, street: e.target.value })}
-                                placeholder="Rua, Casa nº, Bairro..."
-                            />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                                <Label>Província</Label>
-                                <Select value={details.province} onValueChange={handleProvinceChange}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {Object.keys(angolaData).map(p => (
-                                            <SelectItem key={p} value={p}>{p}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                            <div className="mt-2 space-y-1">
+                                <Label htmlFor="promessa-title" className="text-xs">Título do documento</Label>
+                                <Input id="promessa-title" className="h-8 font-semibold" value={title} maxLength={140} onChange={(e) => setTitle(e.target.value)} />
                             </div>
-                            <div className="space-y-2">
-                                <Label>Município</Label>
-                                <Select value={details.municipality} onValueChange={(v) => setDetails({ ...details, municipality: v })}>
-                                    <SelectTrigger>
-                                        <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {(angolaData[details.province] || []).map(m => (
-                                            <SelectItem key={m} value={m}>{m}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                            <div className="space-y-1.5">
+                                <p className="flex items-center gap-1 text-xs font-semibold text-muted-foreground"><Braces className="h-3.5 w-3.5" /> Inserir dados do contrato</p>
+                                <div className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
+                                    {PLACEHOLDERS.map(item => (
+                                        <button key={item.token} type="button" title={item.token} onClick={() => insertPlaceholder(item.token)}
+                                            className="rounded-md border bg-muted/60 px-2 py-1 text-[11px] font-medium hover:bg-muted">
+                                            {item.label}
+                                        </button>
+                                    ))}
+                                </div>
                             </div>
+                            <div className="flex min-h-[320px] flex-1 flex-col space-y-1">
+                                <Label htmlFor="promessa-clauses" className="text-xs">
+                                    Texto do contrato (linhas com "CLÁUSULA" e títulos em maiúsculas terminados em ":" saem a negrito; "•" cria uma alínea)
+                                </Label>
+                                <Textarea id="promessa-clauses" ref={clausesRef} value={clauses} spellCheck
+                                    onChange={(e) => setClauses(e.target.value)}
+                                    className="min-h-[320px] flex-1 resize-none font-mono text-xs leading-relaxed" />
+                            </div>
+                            {saveMessage && <p className="text-xs text-muted-foreground">{saveMessage}</p>}
                         </div>
+                        <div className="flex flex-wrap gap-2 border-t p-3">
+                            <Button variant="outline" size="sm" onClick={() => { setTitle(PROMESSA_CONTRACT_TITLE); setClauses(PROMESSA_CLAUSES_TEMPLATE); }}>
+                                <RotateCcw className="mr-2 h-3.5 w-3.5" /> Repor modelo
+                            </Button>
+                            {onSaveTerms && (
+                                <Button variant="outline" size="sm" onClick={handleSave} disabled={isSaving}>
+                                    {isSaving ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : <Save className="mr-2 h-3.5 w-3.5" />}
+                                    Guardar texto
+                                </Button>
+                            )}
+                            <Button size="sm" className="ml-auto" onClick={handleDownload}>
+                                <Download className="mr-2 h-3.5 w-3.5" /> Baixar PDF
+                            </Button>
+                        </div>
+                    </aside>
+                    <div className="relative min-h-0 flex-1 bg-slate-100">
+                        {previewUrl
+                            ? <PdfCanvasViewer source={previewUrl} />
+                            : <div className="flex h-full items-center justify-center text-sm text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" /> A gerar a pré-visualização…</div>}
                     </div>
-                )}
-
-                <DialogFooter className="flex gap-2">
-                    {previewUrl ? (
-                        <Button variant="outline" onClick={() => setPreviewUrl(null)}>
-                            Voltar para Edição
-                        </Button>
-                    ) : (
-                        <Button variant="outline" onClick={() => handleGenerate('preview')} disabled={isLoading}>
-                            {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Eye className="h-4 w-4 mr-2" />}
-                            Visualizar
-                        </Button>
-                    )}
-                    <Button onClick={() => handleGenerate('download')} disabled={isLoading}>
-                        {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-                        Baixar PDF
-                    </Button>
-                </DialogFooter>
+                </div>
             </DialogContent>
         </Dialog>
     );
 }
-

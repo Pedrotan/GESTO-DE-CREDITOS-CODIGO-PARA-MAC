@@ -1044,12 +1044,16 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
 };
 // Tabelas que o assistente de configuração inicial grava antes de existir o primeiro utilizador (sem sessão).
 const FIRST_SETUP_TABLES = new Set(["company_settings", "audit_logs"]);
-const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>, firstSetup = false) => {
+// Identidade partilhada da empresa (nome, NIF, logótipos em shared_settings): gravada com as definições na
+// configuração inicial e na ligação à nuvem (ver cloud-link-begin). Só estas chaves, nunca outras partilhadas.
+const isCompanyIdentityWrite = (table: string, statement: { sql: string; params?: unknown[] }) =>
+  table === "shared_settings" && /^\s*INSERT\s/i.test(statement.sql) && String(statement.params?.[0] ?? "").startsWith("company_identity_v1:");
+const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>, firstSetup = false, cloudLink = false) => {
   if (financialSchemaBootstrapOpen) return;
   for (const statement of statements) {
     const table = mutationTable(statement.sql);
     if (!table || ["credits", "payments", "accounting_entries", "ledger_transactions", "ledger_lines", "credit_installments", "users"].includes(table)) continue;
-    if (firstSetup && FIRST_SETUP_TABLES.has(table)) continue;
+    if ((firstSetup || cloudLink) && (FIRST_SETUP_TABLES.has(table) || isCompanyIdentityWrite(table, statement))) continue;
     if (table === 'closed_months' && /^\s*DELETE\s/i.test(statement.sql)) {
       const actor = assertUserPermission(event, 'manage_fiscal');
       if (!['admin', 'super_admin'].includes(String(actor.role))) throw new Error('Apenas administradores podem reabrir períodos.');
@@ -2884,6 +2888,13 @@ app.whenReady().then(async () => {
       return true;
     }
   };
+  // Computador novo ligado a uma empresa que já existe na nuvem (onboarding "Ligar a empresa na nuvem"). Antes do
+  // primeiro login não há sessão: o processo principal confirma o NIF e o Código de Acesso no servidor e só então
+  // autoriza, por tempo limitado e apenas para esta janela, a recepção dos dados da empresa (operações e
+  // utilizadores) e a gravação das definições de sincronização. Só durante a configuração inicial.
+  let cloudLinkGrant: { senderId: number; tenantId: string; expiresAt: number } | null = null;
+  const hasCloudLinkGrant = (event: Electron.IpcMainInvokeEvent) =>
+    Boolean(cloudLinkGrant && cloudLinkGrant.senderId === event.sender.id && Date.now() < cloudLinkGrant.expiresAt);
   const assertUserSqlAuthorized = async (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>) => {
     let reservedHere = false;
     try {
@@ -3155,6 +3166,64 @@ app.whenReady().then(async () => {
     // sem sessão ("Sessão inexistente ou expirada"): vai directamente para o login.
     return { hasUsers, setupComplete: hasUsers && !(await isFirstSetup()) };
   });
+  // Onboarding "Ligar a empresa na nuvem": confirma o NIF e o Código de Acesso no servidor (pelos servidores
+  // conhecidos, em cascata) e abre a autorização de recepção dos dados para esta janela (ver cloudLinkGrant).
+  ipcMain.handle("cloud-link-begin", async (event, input) => {
+    assertTrustedIpcSender(event);
+    if (!(await isFirstSetup())) throw new Error("Este computador já está configurado. Inicie sessão e ligue-o à nuvem a partir do sistema.");
+    const nif = String(input?.nif || "").replace(/[^a-z0-9]/gi, "").toUpperCase();
+    const accessCode = String(input?.accessCode || "").trim().toUpperCase();
+    if (nif.length < 9 || nif.length > 20) throw new Error("Indique o NIF da empresa.");
+    if (accessCode.length < 4 || accessCode.length > 100) throw new Error("Introduza o Código de Acesso da empresa.");
+    const servers: string[] = [];
+    for (const raw of Array.isArray(input?.urls) ? input.urls.slice(0, 5) : []) {
+      try {
+        const url = new URL(String(raw));
+        const localTest = !app.isPackaged && url.protocol === "http:" && ["localhost", "127.0.0.1"].includes(url.hostname);
+        if ((url.protocol === "https:" || localTest) && !servers.includes(url.origin)) servers.push(url.origin);
+      } catch { /* endereço inválido: ignorado */ }
+    }
+    if (!servers.length) throw new Error("A ligação à nuvem exige um servidor HTTPS.");
+    let lastMessage = "Não foi possível comunicar com o servidor. Verifique a ligação à Internet.";
+    for (const base of servers) {
+      let response: Response;
+      let data: any = {};
+      try {
+        response = await fetch(`${base}/api/verify-company`, {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ nif, accessCode }), signal: AbortSignal.timeout(15_000),
+        });
+        data = await response.json().catch(() => ({}));
+      } catch (error: any) {
+        lastMessage = error?.name === "TimeoutError"
+          ? "O servidor demorou muito a responder. Verifique a ligação à Internet."
+          : "Não foi possível comunicar com o servidor. Verifique a ligação à Internet.";
+        continue;
+      }
+      if (!response.ok || data?.success === false) {
+        lastMessage = String(data?.message || `O servidor recusou a ligação (${response.status}).`);
+        // Resposta definitiva (código errado, empresa não registada, licença): os servidores seguintes têm outra base.
+        if (response.status < 500) break;
+        continue;
+      }
+      const tenantId = String(data.tenantId || nif);
+      if (tenantId.replace(/[^a-z0-9]/gi, "").toUpperCase() !== nif) throw new Error("O Código de Acesso pertence a outra empresa.");
+      cloudLinkGrant = { senderId: event.sender.id, tenantId, expiresAt: Date.now() + 30 * 60_000 };
+      await writeAuthAudit({ id: "cloud-link", name: "Ligação à nuvem (configuração inicial)" }, "cloud_link_started",
+        `Computador novo ligado à empresa ${String(data.companyName || tenantId)} (NIF ${tenantId}) na nuvem.`, { tenantId, server: base });
+      return {
+        url: base, tenantId, companyName: String(data.companyName || ""),
+        syncPasskey: String(data.syncPasskey || data.accessCode || accessCode),
+        multiTenant: typeof data.multiTenant === "boolean" ? data.multiTenant : null,
+      };
+    }
+    throw new Error(lastMessage);
+  });
+  ipcMain.handle("cloud-link-end", async (event) => {
+    assertTrustedIpcSender(event);
+    if (cloudLinkGrant?.senderId === event.sender.id) cloudLinkGrant = null;
+    return { success: true };
+  });
   // Identidade pública da empresa para o ecrã de login (antes de haver sessão): só nome, logotipo e se o
   // modo multi-empresa está activo. Nunca devolve chaves, palavras-passe ou dados de clientes.
   ipcMain.handle("company-public-info", async (event) => {
@@ -3288,7 +3357,7 @@ app.whenReady().then(async () => {
     const request = validateSqlRequest("execute", sql, params);
     assertRendererSqlAllowlisted([request], financialSchemaBootstrapOpen);
     assertFinancialSqlAuthorized(event, [request]);
-    assertGenericSqlAuthorized(event, [request], !financialSchemaBootstrapOpen && await isFirstSetup());
+    assertGenericSqlAuthorized(event, [request], !financialSchemaBootstrapOpen && await isFirstSetup(), hasCloudLinkGrant(event));
     await assertLedgerNotFrozen([request]);
     await assertApprovalBatch(event,[request],runQuery);
     const reservedFirstUser = await assertUserSqlAuthorized(event, [request]);
@@ -3317,14 +3386,14 @@ app.whenReady().then(async () => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("query", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
+    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
     return runQuery("query", request.sql, request.params);
   });
   ipcMain.handle("db-get", async (event, sql, params) => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("get", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
+    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
     return runQuery("get", request.sql, request.params);
   });
   ipcMain.handle("db-exec", async (event, sql) => {
@@ -3345,7 +3414,7 @@ app.whenReady().then(async () => {
     const safeStatements = validateDbTransaction(statements);
     assertRendererSqlAllowlisted(safeStatements, financialSchemaBootstrapOpen);
     assertFinancialSqlAuthorized(event, safeStatements);
-    assertGenericSqlAuthorized(event, safeStatements, !financialSchemaBootstrapOpen && await isFirstSetup());
+    assertGenericSqlAuthorized(event, safeStatements, !financialSchemaBootstrapOpen && await isFirstSetup(), hasCloudLinkGrant(event));
     await assertLedgerNotFrozen(safeStatements);
     await assertApprovalBatch(event,safeStatements,runQuery);
     const reservedFirstUser = await assertUserSqlAuthorized(event, safeStatements);
@@ -3365,7 +3434,7 @@ app.whenReady().then(async () => {
   // chave da empresa. O SQL é resolvido aqui (allowlist/esquema), nunca aceite em texto do renderer.
   ipcMain.handle("sync-apply-remote", async (event, groups) => {
     assertTrustedIpcSender(event);
-    userAuth.assertAuthenticated(event.sender.id);
+    if (!hasCloudLinkGrant(event)) userAuth.assertAuthenticated(event.sender.id);
     if (financialSchemaBootstrapOpen) throw new Error("A base de dados ainda está a ser preparada.");
     if (!Array.isArray(groups) || groups.length > 500) throw new TypeError("Lote de sincronização inválido.");
     const columnsCache = new Map<string, Set<string>>();
@@ -3442,7 +3511,9 @@ app.whenReady().then(async () => {
   // super administrador. Cada recepção fica na auditoria.
   ipcMain.handle("sync-users-apply", async (event, roster) => {
     assertTrustedIpcSender(event);
-    const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
+    const currentUser: any = hasCloudLinkGrant(event)
+      ? { id: "cloud-link", name: "Ligação à nuvem (configuração inicial)" }
+      : userAuth.assertAuthenticated(event.sender.id);
     const incomingColumns: string[] = Array.isArray(roster?.columns) ? roster.columns.slice(0, 80).map(String) : [];
     const incomingRows: unknown[] = Array.isArray(roster?.rows) ? roster.rows.slice(0, 2000) : [];
     const deleted: string[] = Array.isArray(roster?.deleted) ? roster.deleted.slice(0, 2000).map(String) : [];
