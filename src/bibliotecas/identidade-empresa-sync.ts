@@ -1,4 +1,4 @@
-// Só identidade empresarial. Licenças, permissões, SMTP, chaves e caminhos locais nunca entram aqui.
+// Identidade empresarial e definições de empresa partilhadas. Licenças, permissões, SMTP, chaves e caminhos locais nunca entram aqui.
 export const IDENTITY_PREFIX = 'company_identity_v1:';
 export const IDENTITY_FIELDS = ['name', 'nif', 'address', 'phone', 'email', 'whatsapp', 'website', 'location',
     'segment', 'slogan', 'currency', 'primaryColor', 'secondaryColor', 'logo', 'reportLogo', 'watermarkLogo'] as const;
@@ -68,12 +68,101 @@ export async function publishCompanyIdentity(store: Store, tenant: string, setti
     return written;
 }
 
-/** A apresentação usa a identidade partilhada; a configuração privada continua nesta máquina. */
+// Definições de empresa partilhadas (coordenadas bancárias, contratos, signatários, módulos e simulador), no formato
+// da linha de company_settings. Nunca segredos: SMTP, chave de resgate, chaves de sincronização e licença ficam de fora.
+export const SETTINGS_PREFIX = 'company_settings_v1:';
+const JSON_SETTINGS = new Set<string>(['bankingInfo', 'contractTemplates', 'authorizedSigners']);
+// Valor por omissão de cada campo: uma instalação nova não semeia a nuvem com valores que nunca foram configurados.
+const SETTING_DEFAULTS: Record<string, string | number> = {
+    bankingInfo: '[]', contractTemplates: '[]', authorizedSigners: '[]', customClauses: '', digitalSignatureEnabled: 1,
+    enableGatewaysModule: 1, enableGatewaysModuleAdminOnly: 0, enableProfileActivity: 1, enableProfileActivityAdminOnly: 0,
+    enableWarrantiesModule: 1, enableWarrantiesModuleAdminOnly: 0, enableLegalModule: 1, enableLegalModuleAdminOnly: 0,
+    enableScoringModule: 1, enableScoringModuleAdminOnly: 0, enableSuppliersModule: 0, enableSuppliersModuleAdminOnly: 0,
+    defaultSimulationInterestRate: 3.5, defaultSimulationAdminFee: 2.0, defaultSimulationIof: 0.38,
+};
+export const SETTINGS_FIELDS = Object.keys(SETTING_DEFAULTS);
+type SettingValue = string | number;
+
+function normalizeSetting(field: string, value: unknown): SettingValue | undefined {
+    if (value === undefined || value === null) return field === 'customClauses' ? '' : undefined;
+    if (JSON_SETTINGS.has(field)) {
+        try {
+            const parsed = typeof value === 'string' ? JSON.parse(value || '[]') : value;
+            const json = JSON.stringify(parsed);
+            return Array.isArray(parsed) && json.length <= 900_000 ? json : undefined;
+        } catch { return undefined; }
+    }
+    if (field === 'customClauses') return typeof value === 'string' && value.length <= 200_000 ? value : undefined;
+    if (field.startsWith('default')) {
+        const number = typeof value === 'string' && value.trim() ? Number(value) : value;
+        return typeof number === 'number' && Number.isFinite(number) && number >= 0 && number <= 1000 ? number : undefined;
+    }
+    if (value === true || value === 1 || value === '1' || value === 'true') return 1;
+    if (value === false || value === 0 || value === '0' || value === 'false') return 0;
+    return undefined;
+}
+
+export async function readCompanySettings(store: Store, tenant: string): Promise<Record<string, SettingValue>> {
+    const result: Record<string, SettingValue> = {};
+    if (!normalizeTenant(tenant)) return result;
+    const rows = await store.all<Row>('SELECT key, value, updatedAt FROM shared_settings WHERE key LIKE ?', [`${SETTINGS_PREFIX}%`]);
+    for (const row of rows) {
+        const field = row.key.slice(SETTINGS_PREFIX.length);
+        if (!SETTINGS_FIELDS.includes(field)) continue;
+        try {
+            const envelope = JSON.parse(row.value);
+            if (normalizeTenant(envelope.tenantId) !== normalizeTenant(tenant)) continue;
+            const value = normalizeSetting(field, envelope.value);
+            if (value !== undefined) result[field] = value;
+        } catch { /* Carga incompatível não substitui a definição local. */ }
+    }
+    return result;
+}
+
+/**
+ * `base` é o estado antes da gravação: um campo que o utilizador não alterou (formulário inteiro gravado, talvez
+ * carregado antes de chegar a versão da nuvem) é tratado como semente e nunca substitui o valor já partilhado.
+ */
+export async function publishCompanySettings(store: Store, tenant: string, settings: Record<string, unknown>, options: {
+    fields?: readonly string[]; seed?: boolean; now?: string; base?: object;
+} = {}): Promise<number> {
+    if (options.fields && !options.fields.some(field => SETTINGS_FIELDS.includes(field))) return 0;
+    if (!normalizeTenant(tenant) || normalizeTenant(settings.nif) !== normalizeTenant(tenant)) throw new Error('As definições da empresa não correspondem à conta de sincronização.');
+    const previous = await readCompanySettings(store, tenant);
+    let written = 0;
+    for (const field of SETTINGS_FIELDS) {
+        if (options.fields && !options.fields.includes(field)) continue;
+        const value = normalizeSetting(field, settings[field]);
+        if (value === undefined || (field in previous && previous[field] === value)) continue;
+        const seed = options.seed || (options.base && normalizeSetting(field, (options.base as Record<string, unknown>)[field]) === value);
+        if (seed && (field in previous || value === SETTING_DEFAULTS[field])) continue;
+        await store.run(UPSERT_IDENTITY, [`${SETTINGS_PREFIX}${field}`, JSON.stringify({ tenantId: tenant, value }), options.now || new Date().toISOString(), 'company-settings']);
+        written += 1;
+    }
+    return written;
+}
+
+/** Identidade e definições partilhadas, publicadas juntas (gravação das Definições e semente da sincronização). */
+export async function publishCompanyProfile(store: Store, tenant: string, settings: Record<string, unknown>, options: {
+    fields?: readonly string[]; seed?: boolean; now?: string; image?: (value: string) => Promise<string>; base?: object;
+} = {}): Promise<number> {
+    const { base: _base, ...identityOptions } = options;
+    const identity = await publishCompanyIdentity(store, tenant, settings, identityOptions);
+    return identity + await publishCompanySettings(store, tenant, settings, options);
+}
+
+/** Tudo o que é partilhado pela nuvem, para detectar alterações recebidas. */
+export async function readCompanyProfile(store: Store, tenant: string) {
+    return { ...await readCompanyIdentity(store, tenant), ...await readCompanySettings(store, tenant) };
+}
+
+/** A apresentação usa a identidade e as definições partilhadas; a configuração privada continua nesta máquina. */
 export async function withCompanyIdentity<T extends Record<string, unknown>>(store: Store, settings: T | null, tenant?: string): Promise<T | null> {
     if (!settings) return settings;
     const id = tenant || companyIdentityTenant(settings);
     const identity = await readCompanyIdentity(store, id);
-    return { ...settings, ...identity, _identityClearedImages: Object.keys(identity).filter(field => IMAGES.has(field) && identity[field] === null) };
+    const shared = await readCompanySettings(store, id);
+    return { ...settings, ...shared, ...identity, _identityClearedImages: Object.keys(identity).filter(field => IMAGES.has(field) && identity[field] === null) };
 }
 
 export const companyIdentityTenant = (settings: Record<string, unknown>) =>

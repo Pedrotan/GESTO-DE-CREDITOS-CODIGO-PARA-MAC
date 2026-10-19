@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { IDENTITY_PREFIX, publishCompanyIdentity, readCompanyIdentity, withCompanyIdentity } from '../src/bibliotecas/identidade-empresa-sync.ts';
+import { IDENTITY_PREFIX, SETTINGS_PREFIX, publishCompanyIdentity, publishCompanyProfile, readCompanyIdentity, readCompanySettings, withCompanyIdentity } from '../src/bibliotecas/identidade-empresa-sync.ts';
 import { applyRemoteGroups } from '../src/bibliotecas/sync-operacoes.ts';
 
 const TENANT = '5001032771';
@@ -82,5 +82,62 @@ test('dados de outra empresa, caminhos locais e colunas não permitidas nunca s�
         database.prepare('INSERT OR REPLACE INTO shared_settings VALUES (?,?,?,NULL)').run(`${IDENTITY_PREFIX}${field}`,JSON.stringify({tenantId,value}),'2026-10-18');
     }
     assert.deepEqual(await readCompanyIdentity(store,TENANT),{});
+    database.close();
+});
+
+test('coordenadas bancárias, modelos de contrato, signatários e módulos passam de um computador para outro sem segredos', async () => {
+    const pcA = device(), pcB = device();
+    const bank = [{ bank: 'Banco teste', iban: 'AO06 0000 0000 0000 0000 0000 0' }];
+    const templates = [{ id: 't1', name: 'Modelo A', content: 'Cláusula primeira' }];
+    await publishCompanyProfile(pcA.store, TENANT, {
+        nif: TENANT, bankingInfo: bank, contractTemplates: JSON.stringify(templates), authorizedSigners: ['Gerente'],
+        digitalSignatureEnabled: false, enableSuppliersModule: true, defaultSimulationInterestRate: 4.25, customClauses: 'Foro de Luanda',
+        smtpPassword: 'senha-local', rescueKey: 'resgate-local', syncPasskey: 'passe-local', syncApiKey: 'api-local', licenseKey: 'licenca-local',
+    }, { fields: ['bankingInfo', 'contractTemplates', 'authorizedSigners', 'digitalSignatureEnabled', 'enableSuppliersModule',
+        'defaultSimulationInterestRate', 'customClauses', 'smtpPassword', 'rescueKey', 'syncPasskey', 'syncApiKey', 'licenseKey'], now: '2026-10-19T10:00:00Z' });
+    assert.doesNotMatch(JSON.stringify(pcA.operations), /senha-local|resgate-local|passe-local|api-local|licenca-local/);
+    await deliver(pcA, pcB);
+    const merged = await withCompanyIdentity(pcB.store, { nif: TENANT, bankingInfo: '[]', contractTemplates: '[]', digitalSignatureEnabled: 1,
+        enableSuppliersModule: 0, smtpPassword: 'senha-b', syncPasskey: 'passe-b' }) as Record<string, unknown>;
+    assert.deepEqual(JSON.parse(String(merged.bankingInfo)), bank);
+    assert.deepEqual(JSON.parse(String(merged.contractTemplates)), templates);
+    assert.deepEqual(JSON.parse(String(merged.authorizedSigners)), ['Gerente']);
+    assert.equal(merged.digitalSignatureEnabled, 0);
+    assert.equal(merged.enableSuppliersModule, 1);
+    assert.equal(merged.defaultSimulationInterestRate, 4.25);
+    assert.equal(merged.customClauses, 'Foro de Luanda');
+    assert.equal(merged.smtpPassword, 'senha-b');
+    assert.equal(merged.syncPasskey, 'passe-b');
+    // Uma instalação nova com valores por omissão não semeia nem substitui o que já foi partilhado.
+    await publishCompanyProfile(pcB.store, TENANT, { nif: TENANT, bankingInfo: '[]', enableSuppliersModule: 0 }, { seed: true });
+    assert.deepEqual(JSON.parse(String((await readCompanySettings(pcB.store, TENANT)).bankingInfo)), bank);
+    assert.equal((await readCompanySettings(pcB.store, TENANT)).enableSuppliersModule, 1);
+    const fresh = device();
+    await publishCompanyProfile(fresh.store, TENANT, { nif: TENANT, bankingInfo: '[]', contractTemplates: '[]', enableGatewaysModule: 1,
+        digitalSignatureEnabled: 1, defaultSimulationIof: 0.38 }, { seed: true });
+    assert.deepEqual(await readCompanySettings(fresh.store, TENANT), {});
+    // Formulário inteiro gravado com valores antigos (carregado antes da sincronização) não substitui o partilhado.
+    await publishCompanyProfile(pcB.store, TENANT, { nif: TENANT, bankingInfo: '[]', enableSuppliersModule: false, enableLegalModule: false },
+        { fields: ['bankingInfo', 'enableSuppliersModule', 'enableLegalModule'], base: { nif: TENANT, bankingInfo: [], enableSuppliersModule: false, enableLegalModule: true } });
+    const afterStale = await readCompanySettings(pcB.store, TENANT);
+    assert.deepEqual(JSON.parse(String(afterStale.bankingInfo)), bank);
+    assert.equal(afterStale.enableSuppliersModule, 1);
+    assert.equal(afterStale.enableLegalModule, 0);
+    // Alteração no segundo computador volta ao primeiro; uma operação atrasada não a substitui.
+    await publishCompanyProfile(pcB.store, TENANT, { nif: TENANT, bankingInfo: [] }, { fields: ['bankingInfo'], now: '2026-10-19T12:00:00Z' });
+    await deliver(pcB, pcA);
+    await publishCompanyProfile(pcA.store, TENANT, { nif: TENANT, bankingInfo: bank }, { fields: ['bankingInfo'], now: '2026-10-19T11:00:00Z' });
+    assert.equal((await readCompanySettings(pcA.store, TENANT)).bankingInfo, '[]');
+    pcA.database.close(); pcB.database.close(); fresh.database.close();
+});
+
+test('definições partilhadas de outra empresa, segredos ou valores inválidos nunca são aplicados', async () => {
+    const { database, store } = device();
+    await assert.rejects(publishCompanyProfile(store, TENANT, { nif: '123', bankingInfo: [{ iban: 'x' }] }, { fields: ['bankingInfo'] }), /não correspondem/);
+    for (const [field, value, tenantId] of [['bankingInfo', '[{"iban":"x"}]', '123'], ['smtpPassword', 'injetada', TENANT],
+        ['contractTemplates', '{"não":"lista"}', TENANT], ['enableLegalModule', 'talvez', TENANT], ['defaultSimulationIof', -1, TENANT]] as const) {
+        database.prepare('INSERT OR REPLACE INTO shared_settings VALUES (?,?,?,NULL)').run(`${SETTINGS_PREFIX}${field}`, JSON.stringify({ tenantId, value }), '2026-10-19');
+    }
+    assert.deepEqual(await readCompanySettings(store, TENANT), {});
     database.close();
 });

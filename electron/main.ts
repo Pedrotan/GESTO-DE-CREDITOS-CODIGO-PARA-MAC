@@ -1044,10 +1044,11 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
 };
 // Tabelas que o assistente de configuração inicial grava antes de existir o primeiro utilizador (sem sessão).
 const FIRST_SETUP_TABLES = new Set(["company_settings", "audit_logs"]);
-// Identidade partilhada da empresa (nome, NIF, logótipos em shared_settings): gravada com as definições na
-// configuração inicial e na ligação à nuvem (ver cloud-link-begin). Só estas chaves, nunca outras partilhadas.
+// Identidade e definições partilhadas da empresa (nome, NIF, logótipos, coordenadas bancárias, contratos em
+// shared_settings): gravadas com as definições na configuração inicial e na ligação à nuvem (ver cloud-link-begin).
+// Só estas chaves, nunca outras partilhadas.
 const isCompanyIdentityWrite = (table: string, statement: { sql: string; params?: unknown[] }) =>
-  table === "shared_settings" && /^\s*INSERT\s/i.test(statement.sql) && String(statement.params?.[0] ?? "").startsWith("company_identity_v1:");
+  table === "shared_settings" && /^\s*INSERT\s/i.test(statement.sql) && /^company_(identity|settings)_v1:/.test(String(statement.params?.[0] ?? ""));
 const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>, firstSetup = false, cloudLink = false) => {
   if (financialSchemaBootstrapOpen) return;
   for (const statement of statements) {

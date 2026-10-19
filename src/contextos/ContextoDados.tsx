@@ -1,5 +1,5 @@
 import { reinforcementInterest } from '@/bibliotecas/reforco-capital';
-import { withCompanyIdentity, publishCompanyIdentity, companyIdentityTenant } from '@/bibliotecas/identidade-empresa-sync';
+import { withCompanyIdentity, publishCompanyProfile, companyIdentityTenant } from '@/bibliotecas/identidade-empresa-sync';
 import { portableCompanyImage } from '@/bibliotecas/imagem-portatil';
 import { automaticStatusChangeText } from '@/bibliotecas/estado-cliente';
 import { formatCurrency } from '@/bibliotecas/formatters';
@@ -974,8 +974,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
         setCompanySettings(hydratedSettings);
         setScopedLocalStorageItem('cached_company_settings', JSON.stringify(semSegredos(effectiveSettings)));
-        await publishCompanyIdentity(db, companyIdentityTenant(hydratedSettings), hydratedSettings, {
-            fields: Object.keys(updates), image: portableCompanyImage,
+        await publishCompanyProfile(db, companyIdentityTenant(hydratedSettings), hydratedSettings, {
+            fields: Object.keys(updates), image: portableCompanyImage, base: companySettings,
         });
         // Só os campos alterados, com o valor anterior e o novo (segredos e imagens nunca entram no registo).
         const SECRET_SETTING = /password|rescueKey|passkey|apiKey|licenseKey|smtpPassword/i;

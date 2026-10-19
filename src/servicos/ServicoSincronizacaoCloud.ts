@@ -1,5 +1,5 @@
 import { scopedStorageKey } from '@/bibliotecas/contas';
-import { publishCompanyIdentity, readCompanyIdentity } from '@/bibliotecas/identidade-empresa-sync';
+import { publishCompanyProfile, readCompanyProfile } from '@/bibliotecas/identidade-empresa-sync';
 import { portableCompanyImage } from '@/bibliotecas/imagem-portatil';
 import { lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGREDO_CODIGO_EMPRESA } from '@/bibliotecas/cofre-segredos';
 import { secureCloudUrl } from '@/servicos/ServicoLigacaoNuvem';
@@ -913,12 +913,12 @@ export const syncCloudNow = async () => {
                         await enqueueSyncOperation(sql, params);
                         return result;
                     } };
-                    if (settings && await publishCompanyIdentity(identityStore, config.tenantId, settings, { seed: true, image: portableCompanyImage })) scheduleSync(1000);
+                    if (settings && await publishCompanyProfile(identityStore, config.tenantId, settings, { seed: true, image: portableCompanyImage })) scheduleSync(1000);
                 } catch (error) {
                     identityError = `Identidade visual por sincronizar: ${error instanceof Error ? error.message : 'não foi possível preparar os dados da empresa'}`;
                 }
             }
-            const identity = await readCompanyIdentity(sqlite, config.tenantId);
+            const identity = await readCompanyProfile(sqlite, config.tenantId);
             const identityKey = scopedStorageKey(`cloud_identity_seen_v1:${config.tenantId}:${config.url}`);
             const identityDigest = JSON.stringify(identity);
             if (Object.keys(identity).length && localStorage.getItem(identityKey) !== identityDigest) {
