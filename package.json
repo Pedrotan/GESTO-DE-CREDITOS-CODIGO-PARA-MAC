@@ -15,7 +15,7 @@
   "main": "dist-electron/main.cjs",
   "scripts": {
     "dev": "vite --port 8081 --strictPort",
-    "rebuild": "electron-rebuild -f -w better-sqlite3-multiple-ciphers",
+    "rebuild": "electron-builder install-app-deps",
     "build": "node build.js",
     "build:web": "node scripts/build-vercel.mjs",
     "build:vps": "npm run build:web",
@@ -53,8 +53,12 @@
     "clean:win": "powershell -nop -c \"'dist','dist-electron','dist-admin','dist-electron-admin' | % { if (Test-Path $_) { rm $_ -Recurse -Force -EA 0 } }\"",
     "clean:artifacts": "powershell -noprofile -command \"$paths = @('release-admin', 'dist-admin', 'dist-electron-admin', 'release/win-unpacked'); foreach ($p in $paths) { if (Test-Path $p) { Remove-Item -Path $p -Recurse -Force -ErrorAction SilentlyContinue } }\"",
     "clean-data": "node scripts/clean-app-data.cjs",
-    "stop-apps:mac": "pkill -f 'Tango Gestão e Créditos ERP' || true",
-    "postinstall": "electron-builder install-app-deps"
+    "stop-apps:mac": "pkill -f 'Tango Gestao de Creditos' || true",
+    "postinstall": "electron-builder install-app-deps",
+    "build:mac:intel": "npm run build && npm run build:electron && electron-builder --mac --x64",
+    "build:mac:adhoc": "npm run build && npm run build:electron && electron-builder --mac --arm64 -c.mac.identity=-",
+    "build:master:mac:adhoc": "vite build --config vite.config.admin.ts && npm run build:electron:admin && electron-builder --config electron-builder-admin.json --mac --arm64 -c.mac.identity=-",
+    "check:mac": "node scripts/verificar-mac.mjs"
   },
   "dependencies": {
     "@djosekispy/nifvalidation": "github:Djosekispy/nifvalidation",
@@ -185,29 +189,20 @@
     "mac": {
       "target": [
         {
-          "target": "dmg",
-          "arch": [
-            "arm64"
-          ]
+          "target": "dmg"
         },
         {
-          "target": "pkg",
-          "arch": [
-            "arm64"
-          ]
+          "target": "zip"
         },
         {
-          "target": "zip",
-          "arch": [
-            "arm64"
-          ]
+          "target": "pkg"
         }
       ],
       "category": "public.app-category.finance",
       "icon": "build/icon.png",
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "hardenedRuntime": true,
-      "gatekeeperAssess": true,
+      "gatekeeperAssess": false,
       "entitlements": "build/entitlements.mac.plist",
       "entitlementsInherit": "build/entitlements.mac.plist"
     },
@@ -216,8 +211,7 @@
       "allowAnywhere": false,
       "allowCurrentUserHome": false,
       "allowRootDirectory": false,
-      "identity": null,
-      "scripts": "build/pkg-scripts"
+      "identity": null
     },
     "dmg": {
       "title": "${productName} ${version}",
