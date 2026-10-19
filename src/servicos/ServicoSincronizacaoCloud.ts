@@ -937,10 +937,12 @@ export const syncCloudNow = async () => {
             const pending = await getPendingSyncCount();
             const waiting = (await readAll(INCOMING_STORE)).length;
             const conflicts = Number((await sqlite.all<{ total: number }>("SELECT COUNT(*) AS total FROM sync_conflicts WHERE status = 'pending'"))[0]?.total || 0);
-            const incomplete = pending > 0 || waiting > 0 || hasMoreRemote || conflicts > 0 || totalSkipped > 0 || Boolean(identityError);
-            const message = identityError || (totalSkipped ? `${totalSkipped} operações cifradas aguardam recuperação e continuam guardadas. As operações legíveis continuam a sincronizar. Pode tratar-se de histórico cifrado com um Código de Acesso anterior.`
-                : conflicts ? `${conflicts} alterações aguardam resolução de conflitos.`
-                    : incomplete ? 'Ainda existem alterações por enviar ou receber.' : undefined);
+            // Operações antigas ilegíveis (cifradas com um Código de Acesso anterior) ficam guardadas para recuperação,
+            // mas não impedem a sincronização: não deixam o estado "pendente" para sempre nem alarmam o cabeçalho.
+            const incomplete = pending > 0 || waiting > 0 || hasMoreRemote || conflicts > 0 || Boolean(identityError);
+            const message = identityError || (conflicts ? `${conflicts} alterações aguardam resolução de conflitos.`
+                : incomplete ? 'Ainda existem alterações por enviar ou receber.'
+                    : totalSkipped ? `${totalSkipped} operações antigas, cifradas com um Código de Acesso anterior, continuam guardadas para recuperação.` : undefined);
             emitStatus({ state: incomplete ? 'pending' : 'synced', message, pending: pending + waiting, pushed: totalPushed, pulled: totalPulled, conflicts, skipped: totalSkipped, usersSent, usersRoster: lastUsersRoster, at: new Date().toISOString() });
             if (hasMoreRemote || pending) scheduleSync(1000);
             return result;

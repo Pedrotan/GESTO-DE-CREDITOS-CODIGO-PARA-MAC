@@ -407,7 +407,10 @@ test('carga ilegível fica retida após avançar o cursor e recupera com a chave
     try {
         const first = await cloud.syncCloudNow();
         assert.equal(first.skipped, 1);
-        assert.equal(cloud.getLastCloudSyncStatus().state, 'pending');
+        // Guardada para recuperação, mas não deixa o estado pendente para sempre (o cabeçalho mostra "Sincronizado").
+        assert.equal(cloud.getLastCloudSyncStatus().state, 'synced');
+        assert.equal(cloud.getLastCloudSyncStatus().skipped, 1);
+        assert.match(cloud.getLastCloudSyncStatus().message, /guardadas para recuperação/);
         const again = await cloud.syncCloudNow();
         assert.equal(again.skipped, 1, 'a operação não desaparece quando o servidor já não a devolve');
         cloud.stopCloudSync();

@@ -1,7 +1,7 @@
 import { useInternetStatus, useLicenseInfo } from '@/ganchos/usar-estado-rede';
 import { licenseAllowsFeature } from '@/bibliotecas/licenciamento';
 import { IndicadorIntranet } from './IndicadorIntranet';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getLastCloudSyncStatus, isCloudSyncUrl, type CloudSyncStatus } from '@/servicos/ServicoSincronizacaoCloud';
 import { OPEN_CLOUD_LINK_EVENT } from '@/componentes/layout/LigacaoNuvemDesktop';
 import { Bell, Search, User, LogOut, MessageSquare, AlertCircle, X, Wifi, WifiOff, Sun, Moon, Cloud, CloudOff, RefreshCw, Server, Menu, Download, UserCircle, BookOpen, Shield, History, Calendar, Mail, Globe, MapPin } from 'lucide-react';
@@ -84,20 +84,33 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
     : cloudStatus.state === 'error' ? (pendingLabel || 'Sem sincronizar')
       : cloudStatus.state === 'syncing' ? 'A sincronizar'
         : cloudStatus.conflicts ? `${cloudStatus.conflicts} conflito${cloudStatus.conflicts === 1 ? '' : 's'}`
-          : cloudStatus.skipped ? 'Itens por recuperar'
-            : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
+          : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
   const lastSyncText = cloudStatus.at ? ` Última tentativa: ${new Date(cloudStatus.at).toLocaleTimeString('pt-AO')}.` : '';
   const syncIndicatorTitle = serverInfo?.isRunning ? 'Servidor da rede local activo'
     : dbAdapterMode === 'remote' ? 'Ligado a um servidor da rede local'
       : cloudLinked
         ? cloudStatus.state === 'error'
           ? `Sincronização com a versão web falhou: ${cloudStatus.message || 'erro'}. Vai tentar de novo automaticamente.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
-          : cloudStatus.state === 'synced' ? `Sincronizado com a versão web.${lastSyncText}`
+          : cloudStatus.state === 'synced' ? `Sincronizado com a versão web.${cloudStatus.message ? ` ${cloudStatus.message}` : ''}${lastSyncText}`
             : `${cloudStatus.message || 'A sincronizar com a versão web.'}${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
         : window.electronAPI ? 'Modo Local: clique para ligar este computador à versão web' : 'Modo Local';
   const canOpenCloudLink = Boolean(window.electronAPI) && !serverInfo?.isRunning && dbAdapterMode !== 'remote' && !cloudLinked;
   const [isDark, setIsDark] = useState(document.documentElement.classList.contains('dark'));
   const [isMobileSearchOpen, setIsMobileSearchOpen] = useState(false);
+  // Largura real do cabeçalho (sem a barra lateral): os pontos de quebra do ecrã não sabem quanto espaço sobra.
+  // Os contactos só aparecem quando cabem por inteiro; nessa faixa a pesquisa e a Visão Global ficam em ícone.
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerWidth, setHeaderWidth] = useState(0);
+  useEffect(() => {
+    const element = headerRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => setHeaderWidth(Math.round(entry.contentRect.width)));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const showContacts = headerWidth >= 1560;
+  const searchInline = headerWidth >= (showContacts ? 1980 : 1150);
+  const contextLabelVisible = headerWidth >= (showContacts ? 2080 : 1500);
   const [isProfileOpen, setIsProfileOpen] = useState(false);
   const [avatarLoadFailed, setAvatarLoadFailed] = useState(false);
   const [isModulesOpen, setIsModulesOpen] = useState(false);
@@ -219,7 +232,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   }, [unreadCount]);
 
   return (
-    <header className="sticky top-0 z-30 flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/80 px-3 py-2 backdrop-blur-xl transition-all md:min-h-20 md:px-6">
+    <header ref={headerRef} className="sticky top-0 z-30 flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/80 px-3 py-2 backdrop-blur-xl transition-all md:min-h-20 md:px-6">
       <div className="flex min-w-0 shrink items-center gap-3">
         { /* Mobile Menu Toggle */}
         <Button
@@ -262,17 +275,17 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
         {/* Contactos da empresa: só em ecrãs muito largos, onde há espaço sem apertar os outros elementos.
             Todos os valores vêm das Configurações; o que não estiver
             preenchido não aparece, em vez de mostrar um marcador vazio. */}
-        <div className="hidden min-w-0 max-w-[26rem] items-center gap-5 text-xs text-foreground/85 min-[1800px]:flex">
+        <div className={cn("min-w-[17rem] shrink items-center gap-5 text-xs text-foreground/85", showContacts ? "flex" : "hidden")}>
           {(companySettings?.email || companySettings?.website) && (
-            <div className="flex min-w-0 flex-col gap-1.5 leading-none">
+            <div className="flex min-w-[9rem] max-w-[14rem] flex-col gap-1.5 leading-none">
               {companySettings?.email && (
-                <span className="flex min-w-0 items-center gap-2">
+                <span className="flex min-w-0 items-center gap-2" title={companySettings.email}>
                   <Mail className="h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
                   <span className="truncate">{companySettings.email}</span>
                 </span>
               )}
               {companySettings?.website && (
-                <span className="flex min-w-0 items-center gap-2">
+                <span className="flex min-w-0 items-center gap-2" title={companySettings.website}>
                   <Globe className="h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
                   <span className="truncate">{companySettings.website}</span>
                 </span>
@@ -281,7 +294,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           )}
 
           {(companySettings?.location || companySettings?.address) && (
-            <span className="flex min-w-0 items-center gap-2">
+            <span className="flex min-w-[6rem] max-w-[11rem] items-center gap-2" title={companySettings.location || companySettings.address}>
               <MapPin className="h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
               <span className="truncate">{companySettings.location || companySettings.address}</span>
             </span>
@@ -310,7 +323,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           <Button
             variant="ghost"
             size="icon"
-            className="shrink-0 text-muted-foreground xl:hidden"
+            className={cn("shrink-0 text-muted-foreground", searchInline && "hidden")}
             title="Pesquisar"
             onClick={() => setIsMobileSearchOpen(!isMobileSearchOpen)}
           >
@@ -318,14 +331,13 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           </Button>
 
           <div className={cn(
-            "xl:block",
-            isMobileSearchOpen ? "absolute top-12 right-0 w-[min(80vw,24rem)] bg-background border p-2 rounded-lg shadow-xl z-50 animate-in fade-in slide-in-from-top-2" : "hidden"
+            searchInline ? "block" : isMobileSearchOpen ? "absolute top-12 right-0 w-[min(80vw,24rem)] bg-background border p-2 rounded-lg shadow-xl z-50 animate-in fade-in slide-in-from-top-2" : "hidden"
           )}>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground hidden xl:block" />
+              <Search className={cn("absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground", searchInline ? "block" : "hidden")} />
               <Input
                 placeholder="Pesquisar..."
-                className="w-full bg-muted/50 xl:w-[210px] xl:pl-10 2xl:w-[240px] min-[1800px]:w-[300px] focus:bg-card transition-all duration-300"
+                className={cn("w-full bg-muted/50 focus:bg-card transition-all duration-300", searchInline && (headerWidth >= 2200 ? "w-[300px] pl-10" : "w-[220px] pl-10"))}
                 value={searchTerm}
                 onChange={(e) => handleSearch(e.target.value)}
                 onFocus={() => searchTerm.length >= 2 && setShowResults(true)}
@@ -419,7 +431,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                   )}
                 >
                   <User className="h-4 w-4 shrink-0" />
-                  <span className="hidden truncate max-w-[150px] min-[1800px]:inline">
+                  <span className={cn("truncate max-w-[150px]", contextLabelVisible ? "inline" : "hidden")}>
                     {activeContextUserId
                       ? `Modo: ${users.find(u => u.id === activeContextUserId)?.name || '...'}`
                       : "Visão Global"}

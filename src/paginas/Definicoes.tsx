@@ -512,11 +512,15 @@ export default function Settings() {
         }
     };
 
-    const handleAddSigner = (userId: string) => {
-        const current = Array.isArray(formData.authorizedSigners) ? formData.authorizedSigners : [];
-        if (!current.includes(userId)) {
-            setFormData(prev => ({ ...prev, authorizedSigners: [...current, userId] }));
-        }
+    const openSignerSelect = () => {
+        setTempSelectedSigners(Array.isArray(formData.authorizedSigners) ? [...formData.authorizedSigners] : []);
+        setIsUserSelectModalOpen(true);
+    };
+
+    const confirmSignerSelect = () => {
+        setFormData(prev => ({ ...prev, authorizedSigners: tempSelectedSigners }));
+        setIsUserSelectModalOpen(false);
+        toastNotify({ title: "Signatários actualizados", description: "Clique em Salvar Assinaturas para gravar." });
     };
 
     const handleRemoveSigner = (userId: string) => {
@@ -3360,7 +3364,7 @@ export default function Settings() {
                                     <div className="flex justify-between items-center">
                                         <Label>Signatários Autorizados</Label>
                                         <Button
-                                            onClick={() => setIsUserSelectModalOpen(true)}
+                                            onClick={openSignerSelect}
                                             disabled={!isAdmin}
                                             size="sm"
                                             className="gap-2"
@@ -3404,10 +3408,17 @@ export default function Settings() {
                                                                     </Badge>
                                                                 </TableCell>
                                                                 <TableCell>
-                                                                    <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full w-fit">
-                                                                        <CheckCircle2 className="h-3 w-3" />
-                                                                        Autorizado
-                                                                    </span>
+                                                                    <div className="flex flex-wrap items-center gap-1.5">
+                                                                        <span className="flex items-center gap-1.5 text-xs text-green-600 font-medium bg-green-50 px-2 py-0.5 rounded-full w-fit">
+                                                                            <CheckCircle2 className="h-3 w-3" />
+                                                                            Autorizado
+                                                                        </span>
+                                                                        {signerUser && !signerUser.signature && (
+                                                                            <span className="text-xs text-amber-700 font-medium bg-amber-50 px-2 py-0.5 rounded-full w-fit" title="Carregue a imagem da assinatura no Perfil do utilizador.">
+                                                                                Sem imagem de assinatura
+                                                                            </span>
+                                                                        )}
+                                                                    </div>
                                                                 </TableCell>
                                                                 <TableCell className="text-right">
                                                                     <Button
@@ -3616,6 +3627,45 @@ export default function Settings() {
                     </Card>
                 </TabsContent>
             </Tabs>
+
+            <Dialog open={isUserSelectModalOpen} onOpenChange={setIsUserSelectModalOpen}>
+                <DialogContent className="sm:max-w-[520px]">
+                    <DialogHeader>
+                        <DialogTitle>Signatários autorizados</DialogTitle>
+                        <DialogDescription>
+                            Escolha os utilizadores que podem assinar contratos. A imagem da assinatura de cada um é carregada no respectivo Perfil.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="max-h-[50vh] space-y-1 overflow-y-auto py-2">
+                        {users.filter(u => u.status !== 'blocked').length === 0 ? (
+                            <p className="py-6 text-center text-sm text-muted-foreground">Não existem utilizadores activos.</p>
+                        ) : users.filter(u => u.status !== 'blocked').map(u => {
+                            const checked = tempSelectedSigners.includes(u.id);
+                            return (
+                                <label key={u.id} className="flex cursor-pointer items-center gap-3 rounded-md border p-3 hover:bg-muted/50">
+                                    <Checkbox
+                                        checked={checked}
+                                        onCheckedChange={value => setTempSelectedSigners(prev => value
+                                            ? [...prev.filter(id => id !== u.id), u.id]
+                                            : prev.filter(id => id !== u.id && id !== u.name))}
+                                    />
+                                    <div className="min-w-0 flex-1">
+                                        <p className="truncate text-sm font-medium">{u.name}</p>
+                                        <p className="truncate text-xs text-muted-foreground">{u.email}</p>
+                                    </div>
+                                    <span className={cn('shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium', u.signature ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700')}>
+                                        {u.signature ? 'Assinatura carregada' : 'Sem assinatura'}
+                                    </span>
+                                </label>
+                            );
+                        })}
+                    </div>
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setIsUserSelectModalOpen(false)}>Cancelar</Button>
+                        <Button onClick={confirmSignerSelect}>Confirmar</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <AlertModal
                 isOpen={alertConfig.isOpen}
