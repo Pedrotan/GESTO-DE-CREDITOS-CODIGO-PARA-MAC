@@ -66,8 +66,11 @@ export type CloudLicenseStatus = {
 
 /** Tolerância para pequenos acertos do relógio (sincronização NTP, fusos). */
 export const CLOCK_TOLERANCE_MS = 10 * 60_000;
-/** Renovar o token ao abrir e depois de 24 horas, ou quando faltam menos de 2 dias para expirar. */
-export const HEARTBEAT_INTERVAL_MS = 24 * 3_600_000;
+/**
+ * Renovar o token ao abrir (sempre) e depois de 3 horas, ou quando faltam menos de 2 dias para expirar: os módulos
+ * activados no Tango Master Gen (ex.: Recursos Humanos) chegam ao computador no mesmo dia, não no dia seguinte.
+ */
+export const HEARTBEAT_INTERVAL_MS = 3 * 3_600_000;
 const RENEW_BEFORE_EXPIRY_MS = 2 * 86_400_000;
 
 export const DEFAULT_LICENSE_SERVER = 'https://tangogestaoecreditos.tech';

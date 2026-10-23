@@ -1750,8 +1750,9 @@ function registerCloudLicenseHandlers() {
     return { success: true, status };
   });
   if (!isTangoMaster) {
-    setTimeout(() => void cloudLicenseHeartbeat(), 15_000);
-    setInterval(() => void cloudLicenseHeartbeat(), 6 * 3_600_000);
+    // Ao abrir pede sempre o token actualizado (módulos e estado da licença mudados no Tango Master Gen).
+    setTimeout(() => void cloudLicenseHeartbeat(true), 15_000);
+    setInterval(() => void cloudLicenseHeartbeat(), 3_600_000);
     let lastNotifiedState = "";
     setInterval(() => {
       const status = cloudLicenseStatusNow();
