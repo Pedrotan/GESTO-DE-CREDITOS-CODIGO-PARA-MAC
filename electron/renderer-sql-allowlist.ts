@@ -58,6 +58,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_payments_status ON payments(status)",
   "CREATE INDEX IF NOT EXISTS idx_payments_usuario ON payments(usuario_id)",
   "CREATE INDEX IF NOT EXISTS idx_report_history_generatedAt ON report_history(generatedAt)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_ausencia_funcionario ON rh_ausencia(funcionario_id, data_inicio)",
   "CREATE INDEX IF NOT EXISTS idx_rh_contrato_funcionario ON rh_contrato(funcionario_id, estado)",
   "CREATE INDEX IF NOT EXISTS idx_rh_documento_funcionario ON rh_documento(funcionario_id, categoria)",
   "CREATE INDEX IF NOT EXISTS idx_rh_funcionario_rubrica ON rh_funcionario_rubrica(funcionario_id)",
@@ -129,19 +130,25 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS payments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientName TEXT NOT NULL, amount REAL NOT NULL, amountMinor INTEGER, paymentDate TEXT NOT NULL, method TEXT NOT NULL, reference TEXT, allocatedToPrincipal REAL DEFAULT 0, allocatedToPrincipalMinor INTEGER, allocatedToInterest REAL DEFAULT 0, allocatedToInterestMinor INTEGER, allocatedToLateInterest REAL DEFAULT 0, allocatedToLateInterestMinor INTEGER, idempotencyKey TEXT, processedBy TEXT NOT NULL, status TEXT DEFAULT 'confirmed' CHECK(status IN ('pending', 'confirmed', 'cancelled')), deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, FOREIGN KEY(creditId) REFERENCES credits(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS report_history ( id TEXT PRIMARY KEY, reportType TEXT NOT NULL, title TEXT NOT NULL, format TEXT NOT NULL CHECK(format IN ('pdf', 'xlsx')), filters TEXT, fileName TEXT NOT NULL, fileData TEXT, generatedAt TEXT NOT NULL, generatedBy TEXT NOT NULL, generatedById TEXT )",
   "CREATE TABLE IF NOT EXISTS report_schedules ( id TEXT PRIMARY KEY, reportType TEXT NOT NULL, recipients TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, lastRunMonth TEXT, lastRunAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, createdBy TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_ausencia ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL, dias REAL NOT NULL DEFAULT 0, horas REAL NOT NULL DEFAULT 0, motivo TEXT, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'anulada')), pedido_dispensa INTEGER NOT NULL DEFAULT 0, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, anulado_por TEXT, anulado_por_nome TEXT, anulado_em TEXT, motivo_anulacao TEXT, documento_emitido_id TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_cargo ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, departamento_id TEXT, salario_referencia_minor INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_contrato ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('indeterminado', 'determinado')), inicio TEXT NOT NULL, fim TEXT, periodo_experiencia_fim TEXT, salario_base_minor INTEGER NOT NULL CHECK(salario_base_minor >= 0), horas_semanais REAL NOT NULL DEFAULT 40, dias_ferias INTEGER NOT NULL DEFAULT 22, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'terminado')), motivo_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_departamento ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, responsavel_id TEXT, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_dependente ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, parentesco TEXT, data_nascimento TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_documento ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, categoria TEXT NOT NULL, nome TEXT NOT NULL, ficheiro_nome TEXT NOT NULL, mime TEXT NOT NULL, tamanho INTEGER NOT NULL DEFAULT 0, data_emissao TEXT, data_validade TEXT, confidencial INTEGER NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'substituido', 'arquivado')), substituido_por TEXT, carregado_por TEXT, carregado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_documento_emitido ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, modelo TEXT NOT NULL, ano INTEGER NOT NULL, sequencia INTEGER NOT NULL, numero TEXT NOT NULL, dados_json TEXT NOT NULL, emitido_por TEXT, emitido_por_nome TEXT, emitido_em TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS rh_documento_ficheiro ( documento_id TEXT PRIMARY KEY, data_url TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS rh_feriado ( id TEXT PRIMARY KEY, data TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT 'nacional' CHECK(tipo IN ('nacional', 'empresa')), recorrente INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_funcionario ( id TEXT PRIMARY KEY, numero_mecanografico TEXT NOT NULL, nome TEXT NOT NULL, data_nascimento TEXT, sexo TEXT, estado_civil TEXT, nif TEXT, bi_numero TEXT, bi_emissao TEXT, bi_validade TEXT, numero_inss TEXT, morada TEXT, telefone TEXT, email TEXT, iban TEXT, banco TEXT, data_admissao TEXT NOT NULL, data_saida TEXT, cargo_id TEXT, departamento_id TEXT, horario_id TEXT, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'suspenso', 'cessado')), foto_url TEXT, utilizador_id TEXT, reformado INTEGER NOT NULL DEFAULT 0, observacoes TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_funcionario_rubrica ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, rubrica_id TEXT NOT NULL, valor_minor INTEGER NOT NULL DEFAULT 0, quantidade REAL NOT NULL DEFAULT 1, inicio TEXT NOT NULL, fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_historico_salarial ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, contrato_id TEXT, salario_anterior_minor INTEGER, salario_novo_minor INTEGER NOT NULL, data_efeito TEXT NOT NULL, motivo TEXT NOT NULL, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_horario ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, entrada TEXT NOT NULL, saida TEXT NOT NULL, intervalo_min INTEGER NOT NULL DEFAULT 60, dias_semana TEXT NOT NULL DEFAULT '1,2,3,4,5', tolerancia_min INTEGER NOT NULL DEFAULT 10, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_irt_escalao ( id TEXT PRIMARY KEY, tabela_id TEXT NOT NULL, ordem INTEGER NOT NULL, limite_inferior_minor INTEGER NOT NULL, limite_superior_minor INTEGER, parcela_fixa_minor INTEGER NOT NULL DEFAULT 0, taxa REAL NOT NULL DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS rh_irt_tabela ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, lei_referencia TEXT NOT NULL, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_parametro ( id TEXT PRIMARY KEY, chave TEXT NOT NULL, valor TEXT NOT NULL, descricao TEXT, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_ponto ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, entrada TEXT, saida TEXT, horas_trabalhadas REAL NOT NULL DEFAULT 0, horas_extra REAL NOT NULL DEFAULT 0, minutos_atraso INTEGER NOT NULL DEFAULT 0, origem TEXT NOT NULL DEFAULT 'manual' CHECK(origem IN ('manual', 'importado', 'app')), observacoes TEXT, registado_por TEXT, registado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_rubrica ( id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')), forma TEXT NOT NULL DEFAULT 'fixo' CHECK(forma IN ('fixo', 'percentagem', 'quantidade')), percentagem REAL NOT NULL DEFAULT 0, incide_inss INTEGER NOT NULL DEFAULT 1, incide_irt INTEGER NOT NULL DEFAULT 1, limite_isento_irt_minor INTEGER NOT NULL DEFAULT 0, limite_isento_irt_pct REAL NOT NULL DEFAULT 0, conta_contabilistica TEXT, ordem_no_recibo INTEGER NOT NULL DEFAULT 100, sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_tipo_ausencia ( id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, justificada INTEGER NOT NULL DEFAULT 0, remunerada INTEGER NOT NULL DEFAULT 0, desconta_salario INTEGER NOT NULL DEFAULT 1, desconta_ferias INTEGER NOT NULL DEFAULT 0, exige_documento INTEGER NOT NULL DEFAULT 0, sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS schema_migrations ( version INTEGER PRIMARY KEY, name TEXT NOT NULL, appliedAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS shared_settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )",
   "CREATE TABLE IF NOT EXISTS simulations ( id TEXT PRIMARY KEY, reference TEXT, date TEXT NOT NULL, clientName TEXT, clientIncome REAL DEFAULT 0, amount REAL DEFAULT 0, term INTEGER DEFAULT 0, interestRate REAL DEFAULT 0, method TEXT CHECK(method IN ('price', 'sac', 'flat')), riskProfile TEXT CHECK(riskProfile IN ('low', 'medium', 'high')), totalPayment REAL DEFAULT 0, monthlyPayment REAL DEFAULT 0, aiAnalysis TEXT, usuario_id TEXT, createdAt TEXT NOT NULL )",
@@ -220,7 +227,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_reinforcement_idempotency ON credit_reinforcements(idempotencyKey)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(idempotencyKey) WHERE idempotencyKey IS NOT NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receipt ON payments(receiptYear, receiptSeq) WHERE receiptSeq IS NOT NULL",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_documento_emitido_numero ON rh_documento_emitido(modelo, ano, sequencia)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_funcionario_numero ON rh_funcionario(numero_mecanografico)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_ponto_dia ON rh_ponto(funcionario_id, data)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_rubrica_codigo ON rh_rubrica(codigo)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_username ON users(username)",
   "DELETE FROM calendar_tasks WHERE id = ?",
@@ -247,6 +256,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM payments WHERE id = ?",
   "DELETE FROM report_schedules WHERE id = ?",
   "DELETE FROM rh_dependente WHERE id = ? AND funcionario_id = ?",
+  "DELETE FROM rh_ponto WHERE id = ?",
   "DELETE FROM simulations WHERE id = ?",
   "DELETE FROM sqlite_sequence WHERE name IN ('clients', 'credits', 'payments', 'contracts', 'notifications', 'chat_messages', 'payment_gateways', 'payment_references')",
   "DELETE FROM users WHERE id = ?",
@@ -335,19 +345,25 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO payments (id, creditId, clientName, amount, amountMinor, paymentDate, method, reference, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor, idempotencyKey, processedBy, status, usuario_id, registeredAt, receiptYear, receiptSeq, allocationDetail, balanceAfterMinor, batchId, hasProof) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO report_history (id, reportType, title, format, filters, fileName, fileData, generatedAt, generatedBy, generatedById) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO report_schedules (id, reportType, recipients, enabled, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET reportType = excluded.reportType, recipients = excluded.recipients, enabled = excluded.enabled",
+  "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_cargo (id, nome, departamento_id, salario_referencia_minor, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_contrato (id, funcionario_id, tipo, inicio, fim, periodo_experiencia_fim, salario_base_minor, horas_semanais, dias_ferias, estado, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)",
   "INSERT INTO rh_departamento (id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_dependente (id, funcionario_id, nome, parentesco, data_nascimento, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)",
+  "INSERT INTO rh_documento_emitido (id, funcionario_id, modelo, ano, sequencia, numero, dados_json, emitido_por, emitido_por_nome, emitido_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_documento_ficheiro (documento_id, data_url) VALUES (?, ?)",
+  "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_funcionario_rubrica (id, funcionario_id, rubrica_id, valor_minor, quantidade, inicio, fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_historico_salarial (id, funcionario_id, contrato_id, salario_anterior_minor, salario_novo_minor, data_efeito, motivo, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_irt_escalao (id, tabela_id, ordem, limite_inferior_minor, limite_superior_minor, parcela_fixa_minor, taxa) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, ?)",
   "INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+  "INSERT INTO rh_ponto (id, funcionario_id, data, entrada, saida, horas_trabalhadas, horas_extra, minutos_atraso, origem, observacoes, registado_por, registado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET entrada = excluded.entrada, saida = excluded.saida, horas_trabalhadas = excluded.horas_trabalhadas, horas_extra = excluded.horas_extra, minutos_atraso = excluded.minutos_atraso, origem = excluded.origem, observacoes = excluded.observacoes, registado_por = excluded.registado_por, registado_por_nome = excluded.registado_por_nome, actualizado_em = excluded.criado_em",
   "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+  "INSERT INTO rh_tipo_ausencia (id, codigo, nome, justificada, remunerada, desconta_salario, desconta_ferias, exige_documento, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
   "INSERT INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)",
   "INSERT INTO shared_settings (key, value, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy WHERE excluded.updatedAt >= shared_settings.updatedAt",
   "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -367,10 +383,13 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT OR IGNORE INTO dictionary (word, language) VALUES (?, ?)",
   "INSERT OR IGNORE INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, 1)",
   "INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, ?, 0, ?)",
+  "INSERT OR IGNORE INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, 'nacional', 1, 1, ?, 'sistema')",
+  "INSERT OR IGNORE INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES ('horario-normal', 'Horário normal (08:00–17:00)', '08:00', '17:00', 60, '1,2,3,4,5', 10, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_irt_escalao (id, tabela_id, ordem, limite_inferior_minor, limite_superior_minor, parcela_fixa_minor, taxa) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, ?, 'sistema')",
+  "INSERT OR IGNORE INTO rh_tipo_ausencia (id, codigo, nome, justificada, remunerada, desconta_salario, desconta_ferias, exige_documento, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO sync_conflicts (id, entityType, entityId, operation, status, createdAt) VALUES (?, ?, ?, ?, 'pending', ?)",
   "INSERT OR IGNORE INTO user_limits (id, role, maxTransaction, dailyLimit, monthlyLimit, restrictionsEnabled, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR REPLACE INTO closed_months (id, month, year, capitalApplied, projectedProfit, realizedProfit, overdueAmount, liquidationRate, closedAt, closedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -463,20 +482,28 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed'",
   "SELECT * FROM payments WHERE deletedAt IS NULL ORDER BY paymentDate DESC",
   "SELECT * FROM report_schedules ORDER BY createdAt",
+  "SELECT * FROM rh_ausencia ORDER BY data_inicio DESC, criado_em DESC",
   "SELECT * FROM rh_contrato ORDER BY inicio DESC",
   "SELECT * FROM rh_contrato WHERE funcionario_id = ? AND estado = 'activo'",
   "SELECT * FROM rh_contrato WHERE funcionario_id = ? ORDER BY inicio DESC",
   "SELECT * FROM rh_documento ORDER BY criado_em DESC",
   "SELECT * FROM rh_documento WHERE funcionario_id = ? ORDER BY criado_em DESC",
+  "SELECT * FROM rh_documento_emitido ORDER BY emitido_em DESC",
+  "SELECT * FROM rh_documento_emitido WHERE funcionario_id = ? ORDER BY emitido_em DESC",
+  "SELECT * FROM rh_feriado ORDER BY substr(data, 6, 5)",
   "SELECT * FROM rh_funcionario ORDER BY nome",
   "SELECT * FROM rh_funcionario WHERE id = ?",
   "SELECT * FROM rh_funcionario_rubrica",
   "SELECT * FROM rh_funcionario_rubrica WHERE funcionario_id = ? ORDER BY inicio DESC",
   "SELECT * FROM rh_historico_salarial WHERE funcionario_id = ? ORDER BY data_efeito DESC, criado_em DESC",
+  "SELECT * FROM rh_horario ORDER BY nome",
   "SELECT * FROM rh_irt_escalao ORDER BY tabela_id, ordem",
   "SELECT * FROM rh_irt_escalao WHERE tabela_id = ? ORDER BY ordem",
+  "SELECT * FROM rh_ponto WHERE data LIKE ? ORDER BY data",
+  "SELECT * FROM rh_ponto WHERE id = ?",
   "SELECT * FROM rh_rubrica ORDER BY ordem_no_recibo, nome",
   "SELECT * FROM rh_rubrica WHERE id = ?",
+  "SELECT * FROM rh_tipo_ausencia ORDER BY sistema DESC, nome",
   "SELECT * FROM simulations ORDER BY date DESC",
   "SELECT * FROM suppliers WHERE deletedAt IS NULL",
   "SELECT * FROM suppliers WHERE id = ?",
@@ -505,6 +532,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT COUNT(*) as count FROM legal_cases WHERE stage = ?",
   "SELECT COUNT(*) as count FROM warranties WHERE status = ?",
   "SELECT MAX(receiptSeq) AS last FROM payments WHERE receiptYear = ?",
+  "SELECT MAX(sequencia) AS seq FROM rh_documento_emitido WHERE modelo = ? AND ano = ?",
   "SELECT SUM(debtAmount) as total FROM legal_cases WHERE stage != ?",
   "SELECT SUM(marketValue) as total FROM warranties WHERE status = ?",
   "SELECT a.* FROM accounting_entries a LEFT JOIN ledger_transactions t ON t.id = a.id WHERE t.id IS NULL ORDER BY a.rowid",
@@ -532,6 +560,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500",
   "SELECT enableMultiTenant FROM company_settings WHERE id = 1",
   "SELECT entityId FROM limit_escalations WHERE entityType = 'credit' AND status = 'pending'",
+  "SELECT estado FROM rh_processamento WHERE ano = ? AND mes = ? AND tipo = 'normal' AND estado <> 'aberto'",
   "SELECT fileName, fileData, format FROM report_history WHERE id = ?",
   "SELECT fileName, mimeType, dataUrl, uploadedAt, uploadedBy FROM payment_proofs WHERE paymentId = ?",
   "SELECT fileName, movements FROM accounting_bank_imports",
@@ -708,18 +737,25 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE payments SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ?, cancelApprovedBy = ?, originalState = ? WHERE id = ? AND deletedAt IS NULL AND status = 'confirmed'",
   "UPDATE payments SET status = 'confirmed', paymentDate = ?, allocatedToPrincipal = ?, allocatedToPrincipalMinor = ?, allocatedToInterest = ?, allocatedToInterestMinor = ?, allocatedToLateInterest = ?, allocatedToLateInterestMinor = ?, receiptYear = ?, receiptSeq = ?, allocationDetail = ?, balanceAfterMinor = ?, validatedAt = ?, validatedBy = ? WHERE id = ? AND status = 'pending' AND deletedAt IS NULL",
   "UPDATE report_schedules SET lastRunMonth = ?, lastRunAt = ?, lastError = ? WHERE id = ?",
+  "UPDATE rh_ausencia SET documento_emitido_id = ? WHERE id = ? AND documento_emitido_id IS NULL",
+  "UPDATE rh_ausencia SET estado = 'anulada', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, motivo_anulacao = ?, actualizado_em = ? WHERE id = ? AND estado <> 'anulada'",
+  "UPDATE rh_ausencia SET estado = 'aprovada', documento_id = COALESCE(?, documento_id), aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'pendente'",
+  "UPDATE rh_ausencia SET tipo_id = ?, documento_id = COALESCE(?, documento_id), motivo = ?, estado = 'aprovada', aprovado_por = COALESCE(aprovado_por, ?), aprovado_por_nome = COALESCE(aprovado_por_nome, ?), aprovado_em = COALESCE(aprovado_em, ?), actualizado_em = ? WHERE id = ?",
   "UPDATE rh_cargo SET nome = ?, departamento_id = ?, salario_referencia_minor = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_contrato SET estado = 'terminado', motivo_fim = ?, actualizado_em = ? WHERE funcionario_id = ? AND estado = 'activo'",
   "UPDATE rh_contrato SET estado = 'terminado', motivo_fim = ?, fim = COALESCE(fim, ?), actualizado_em = ? WHERE funcionario_id = ? AND estado = 'activo'",
   "UPDATE rh_departamento SET nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'",
   "UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'",
+  "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?",
   "UPDATE rh_funcionario SET estado = 'cessado', data_saida = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario_rubrica SET fim = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_irt_tabela SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL",
   "UPDATE rh_parametro SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL",
   "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_tipo_ausencia SET nome = ?, justificada = ?, remunerada = ?, desconta_salario = ?, desconta_ferias = ?, exige_documento = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
   "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
@@ -984,6 +1020,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "a02434a76e5a05ff3409d74718073abbaf20bd27aee2333bb865bbf7e3f1c46c",
     "CREATE INDEX IF NOT EXISTS idx_report_history_generatedAt ON report_history(generatedAt)"
+  ],
+  [
+    "72d6d090c27dfa39a254490f66e957b471a9eedf094b0373645b8fddadd192eb",
+    "CREATE INDEX IF NOT EXISTS idx_rh_ausencia_funcionario ON rh_ausencia(funcionario_id, data_inicio)"
   ],
   [
     "475c53ab4b4afa352ad6baa3786529c24e4193823321f6180e4b9732113e3df2",
@@ -1270,6 +1310,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS report_schedules ( id TEXT PRIMARY KEY, reportType TEXT NOT NULL, recipients TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, lastRunMonth TEXT, lastRunAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, createdBy TEXT )"
   ],
   [
+    "9bfaa4f59bedc599c48b5b1625f42fdc121107abfd8eb3dd704e6fc032450f3c",
+    "CREATE TABLE IF NOT EXISTS rh_ausencia ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL, dias REAL NOT NULL DEFAULT 0, horas REAL NOT NULL DEFAULT 0, motivo TEXT, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'anulada')), pedido_dispensa INTEGER NOT NULL DEFAULT 0, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, anulado_por TEXT, anulado_por_nome TEXT, anulado_em TEXT, motivo_anulacao TEXT, documento_emitido_id TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )"
+  ],
+  [
     "3d6d5e71f38cc2c65c66461df504e4454dbf92adb6af9734fe6ed859d0a0f850",
     "CREATE TABLE IF NOT EXISTS rh_cargo ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, departamento_id TEXT, salario_referencia_minor INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
   ],
@@ -1290,8 +1334,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_documento ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, categoria TEXT NOT NULL, nome TEXT NOT NULL, ficheiro_nome TEXT NOT NULL, mime TEXT NOT NULL, tamanho INTEGER NOT NULL DEFAULT 0, data_emissao TEXT, data_validade TEXT, confidencial INTEGER NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'substituido', 'arquivado')), substituido_por TEXT, carregado_por TEXT, carregado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )"
   ],
   [
+    "b47c029eef983d6d349e758e8634866ff8c6207291e63063d017634678aae194",
+    "CREATE TABLE IF NOT EXISTS rh_documento_emitido ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, modelo TEXT NOT NULL, ano INTEGER NOT NULL, sequencia INTEGER NOT NULL, numero TEXT NOT NULL, dados_json TEXT NOT NULL, emitido_por TEXT, emitido_por_nome TEXT, emitido_em TEXT NOT NULL )"
+  ],
+  [
     "4f6bd193231ceec99fec5c11c8ae311b3cb3bac38be9852c66edc6a51dc4e7ad",
     "CREATE TABLE IF NOT EXISTS rh_documento_ficheiro ( documento_id TEXT PRIMARY KEY, data_url TEXT NOT NULL )"
+  ],
+  [
+    "c0b9f190de586a06a77289d85848121cc9ae15a906fbff4ae83c0a1b7eeacc3b",
+    "CREATE TABLE IF NOT EXISTS rh_feriado ( id TEXT PRIMARY KEY, data TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT 'nacional' CHECK(tipo IN ('nacional', 'empresa')), recorrente INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT )"
   ],
   [
     "4644063745163ce7e3651fa37164cc5df9822513184678e3dbdf7cd01c8a9efe",
@@ -1306,6 +1358,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_historico_salarial ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, contrato_id TEXT, salario_anterior_minor INTEGER, salario_novo_minor INTEGER NOT NULL, data_efeito TEXT NOT NULL, motivo TEXT NOT NULL, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )"
   ],
   [
+    "467ae47ba39bffea7b9f118ad7f8e91d1221f24a7c935eb338eb8ddaf5546503",
+    "CREATE TABLE IF NOT EXISTS rh_horario ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, entrada TEXT NOT NULL, saida TEXT NOT NULL, intervalo_min INTEGER NOT NULL DEFAULT 60, dias_semana TEXT NOT NULL DEFAULT '1,2,3,4,5', tolerancia_min INTEGER NOT NULL DEFAULT 10, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
+  ],
+  [
     "1334d9e7e10c1e77cffc602ba9d6e3c4493057bf99fd23794d7c028dea009c9b",
     "CREATE TABLE IF NOT EXISTS rh_irt_escalao ( id TEXT PRIMARY KEY, tabela_id TEXT NOT NULL, ordem INTEGER NOT NULL, limite_inferior_minor INTEGER NOT NULL, limite_superior_minor INTEGER, parcela_fixa_minor INTEGER NOT NULL DEFAULT 0, taxa REAL NOT NULL DEFAULT 0 )"
   ],
@@ -1318,8 +1374,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_parametro ( id TEXT PRIMARY KEY, chave TEXT NOT NULL, valor TEXT NOT NULL, descricao TEXT, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )"
   ],
   [
+    "dd6a6f7e16e74a48c49c7d1a0f24df373f414f1fd9cb2fdb489c50d403931f33",
+    "CREATE TABLE IF NOT EXISTS rh_ponto ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, entrada TEXT, saida TEXT, horas_trabalhadas REAL NOT NULL DEFAULT 0, horas_extra REAL NOT NULL DEFAULT 0, minutos_atraso INTEGER NOT NULL DEFAULT 0, origem TEXT NOT NULL DEFAULT 'manual' CHECK(origem IN ('manual', 'importado', 'app')), observacoes TEXT, registado_por TEXT, registado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )"
+  ],
+  [
     "866e573590c683e3bf1da05bfb86523cccafb9228cd880c41fee4dc0c3fb296c",
     "CREATE TABLE IF NOT EXISTS rh_rubrica ( id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')), forma TEXT NOT NULL DEFAULT 'fixo' CHECK(forma IN ('fixo', 'percentagem', 'quantidade')), percentagem REAL NOT NULL DEFAULT 0, incide_inss INTEGER NOT NULL DEFAULT 1, incide_irt INTEGER NOT NULL DEFAULT 1, limite_isento_irt_minor INTEGER NOT NULL DEFAULT 0, limite_isento_irt_pct REAL NOT NULL DEFAULT 0, conta_contabilistica TEXT, ordem_no_recibo INTEGER NOT NULL DEFAULT 100, sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
+  ],
+  [
+    "7f530f02ff6aebc9087fc72350b4e39895af4b388ffaee882edb6bbf16693bf6",
+    "CREATE TABLE IF NOT EXISTS rh_tipo_ausencia ( id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, justificada INTEGER NOT NULL DEFAULT 0, remunerada INTEGER NOT NULL DEFAULT 0, desconta_salario INTEGER NOT NULL DEFAULT 1, desconta_ferias INTEGER NOT NULL DEFAULT 0, exige_documento INTEGER NOT NULL DEFAULT 0, sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
   ],
   [
     "ffe8b85a1bc705f71927a344605fdd12cb57cded74e477fdf8e4840468405c78",
@@ -1634,8 +1698,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receipt ON payments(receiptYear, receiptSeq) WHERE receiptSeq IS NOT NULL"
   ],
   [
+    "51febbf84019282a8013b96eef2a22603f80e7e09928b7d4c2063acd507ff9b7",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_documento_emitido_numero ON rh_documento_emitido(modelo, ano, sequencia)"
+  ],
+  [
     "48923778011da0dee5b4c5eeb286e14beabd5bdfcb29fdf896bb978af24a2273",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_funcionario_numero ON rh_funcionario(numero_mecanografico)"
+  ],
+  [
+    "0b43b96d3c65b4a3b0a539fa00e87472c8ecf742a503d3ef0ad6e2a12e50b43f",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_ponto_dia ON rh_ponto(funcionario_id, data)"
   ],
   [
     "c399e7bb549a80e7a27fe097cc44e5157c9c8dc8e013b6c988bb53a560f4fa0d",
@@ -1740,6 +1812,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "248f2b4d0a324bf8951bb2c8f1e8024e06ae167ce7fbba15ca91aa3389034ee1",
     "DELETE FROM rh_dependente WHERE id = ? AND funcionario_id = ?"
+  ],
+  [
+    "730127d136f4cb2e458d6b8517fd344215cbd39eb5a73f94d2f41f78e48dc869",
+    "DELETE FROM rh_ponto WHERE id = ?"
   ],
   [
     "14e1c6026d649c5bb9f60be32061a2474a599ca20827c988fff9a9bb6d1f948a",
@@ -2094,6 +2170,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO report_schedules (id, reportType, recipients, enabled, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET reportType = excluded.reportType, recipients = excluded.recipients, enabled = excluded.enabled"
   ],
   [
+    "b64745ff94c60dd5df27ccbcd12e324f3d6cd8f21211a346ae8269fc6c83bcf7",
+    "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "88376c21e6f5f7c6fddc5e988e2ff7e6e296fb1269f52e8a6ab62ec780d291de",
     "INSERT INTO rh_cargo (id, nome, departamento_id, salario_referencia_minor, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)"
   ],
@@ -2114,8 +2194,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
   ],
   [
+    "3aceab1c4adf3ee92566163b62049a5d34e763c4e1516525c87f42e9e891d560",
+    "INSERT INTO rh_documento_emitido (id, funcionario_id, modelo, ano, sequencia, numero, dados_json, emitido_por, emitido_por_nome, emitido_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "cc177c2ab188f31f10bdd8a917fc7a60aad8d17152a65743345ca627c95d1e27",
     "INSERT INTO rh_documento_ficheiro (documento_id, data_url) VALUES (?, ?)"
+  ],
+  [
+    "7cd1f6c4a628fd86f2f2690f0bb6b5de78b0cd747b2d4902fad96ad5d8e8b3b1",
+    "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)"
   ],
   [
     "50c7a85dd159988cf3805e7f28f223e3af10359786a402b4991053767e086afa",
@@ -2130,6 +2218,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_historico_salarial (id, funcionario_id, contrato_id, salario_anterior_minor, salario_novo_minor, data_efeito, motivo, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "e446b6625fe19a9cb51cde871d1d9b70c3d4cf2deeec2e5928fb3f626ee48d44",
+    "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)"
+  ],
+  [
     "9bb5ce95fa09b480b712ad693646b5631725993b6be87b5ac3b219e4e1e2bca0",
     "INSERT INTO rh_irt_escalao (id, tabela_id, ordem, limite_inferior_minor, limite_superior_minor, parcela_fixa_minor, taxa) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -2142,8 +2234,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)"
   ],
   [
+    "7c5edb6a7dbe2b1f02cee726ead60fceb8ea63d727027812a0be4d5f74a3edd5",
+    "INSERT INTO rh_ponto (id, funcionario_id, data, entrada, saida, horas_trabalhadas, horas_extra, minutos_atraso, origem, observacoes, registado_por, registado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET entrada = excluded.entrada, saida = excluded.saida, horas_trabalhadas = excluded.horas_trabalhadas, horas_extra = excluded.horas_extra, minutos_atraso = excluded.minutos_atraso, origem = excluded.origem, observacoes = excluded.observacoes, registado_por = excluded.registado_por, registado_por_nome = excluded.registado_por_nome, actualizado_em = excluded.criado_em"
+  ],
+  [
     "e753b4d1e00c94b49eaec9666206484bba190aa089ffd78b326a7df3f1744af2",
     "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
+  ],
+  [
+    "4c8650edb962a7e9a2d9a2f564364a556245b4e9119661543437231a073974e5",
+    "INSERT INTO rh_tipo_ausencia (id, codigo, nome, justificada, remunerada, desconta_salario, desconta_ferias, exige_documento, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
   ],
   [
     "f2995b6d402befe778f7c32e5550922de27dbb73ddc8b5db9d5bb0f94424df23",
@@ -2222,6 +2322,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, ?, 0, ?)"
   ],
   [
+    "9fa1aa35ecf12aed2bdceb8fbc1c8afdaf229eb96a6fcf648d6cf08a4092a4c9",
+    "INSERT OR IGNORE INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, 'nacional', 1, 1, ?, 'sistema')"
+  ],
+  [
+    "47d6f0e6739c3cc5adff7c7ab7f70f60724a0290f9589582f9a164125e2715c0",
+    "INSERT OR IGNORE INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES ('horario-normal', 'Horário normal (08:00–17:00)', '08:00', '17:00', 60, '1,2,3,4,5', 10, 1, ?, 'sistema')"
+  ],
+  [
     "33a6a69e477dfe054949176441c5f474aabf41a144e93485e5649337328ce007",
     "INSERT OR IGNORE INTO rh_irt_escalao (id, tabela_id, ordem, limite_inferior_minor, limite_superior_minor, parcela_fixa_minor, taxa) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -2236,6 +2344,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "e16374e668915efbf27cbce0b5bb7626dade1be79c95d1c48379c271017e4355",
     "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, ?, 'sistema')"
+  ],
+  [
+    "b6f8c4dcc2041333817ee64d4c82754986d312b734a5f0f3736f0599806513ab",
+    "INSERT OR IGNORE INTO rh_tipo_ausencia (id, codigo, nome, justificada, remunerada, desconta_salario, desconta_ferias, exige_documento, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 'sistema')"
   ],
   [
     "4ef80fff9ffd59097084f8874318a8bafadb834e59947ced18ebc6cd1517773b",
@@ -2606,6 +2718,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM report_schedules ORDER BY createdAt"
   ],
   [
+    "44432e14f4e58a1487796243ef6799142f1db41629ac24325d5bba683674a940",
+    "SELECT * FROM rh_ausencia ORDER BY data_inicio DESC, criado_em DESC"
+  ],
+  [
     "a491d3b4987818c2d61f751a14de41a92dfb95dbbe4adf3ac0cfa13eca64a03e",
     "SELECT * FROM rh_contrato ORDER BY inicio DESC"
   ],
@@ -2624,6 +2740,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "cc762411bd9a2434394dcfd839cc30f789e0c0a48c6936470060b04ac22cc041",
     "SELECT * FROM rh_documento WHERE funcionario_id = ? ORDER BY criado_em DESC"
+  ],
+  [
+    "6653fa81e92a5d2d603baf1b202fcf63f0decd8d2e29f14aaff66d403dd426da",
+    "SELECT * FROM rh_documento_emitido ORDER BY emitido_em DESC"
+  ],
+  [
+    "f6c3d678cce47280cfd3489ce2886effacee038235be3bc237fa86e6fe884239",
+    "SELECT * FROM rh_documento_emitido WHERE funcionario_id = ? ORDER BY emitido_em DESC"
+  ],
+  [
+    "a4dc26ed93de8b8021e6700095ac53dde56b3447d4b5aa107a4460484d74b703",
+    "SELECT * FROM rh_feriado ORDER BY substr(data, 6, 5)"
   ],
   [
     "e6330bd4aa5455ad62ae35da658058ba937610f0c119a5b9980694b11b7e08dc",
@@ -2646,6 +2774,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_historico_salarial WHERE funcionario_id = ? ORDER BY data_efeito DESC, criado_em DESC"
   ],
   [
+    "999b2fadc014af5c719829f6810b0ef1e4a647bbb7b5ecd0c0692a8a79cef31c",
+    "SELECT * FROM rh_horario ORDER BY nome"
+  ],
+  [
     "659c574ba8bc8f4ec05df1027e1399636c078ee05e6c2c75d072d5283c49f77d",
     "SELECT * FROM rh_irt_escalao ORDER BY tabela_id, ordem"
   ],
@@ -2654,12 +2786,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_irt_escalao WHERE tabela_id = ? ORDER BY ordem"
   ],
   [
+    "a503734d2bfc83f767784dec7db04c9d31d5ca4c58a4606d22d34ef0326c142a",
+    "SELECT * FROM rh_ponto WHERE data LIKE ? ORDER BY data"
+  ],
+  [
+    "99a78e99c7b50c8e7885b514bb300693a7f0c5378c6ebc830c7adb7fadb01583",
+    "SELECT * FROM rh_ponto WHERE id = ?"
+  ],
+  [
     "78873adf7bd5532f5be085584080fbb07d657ed039abeaa644773fff48825370",
     "SELECT * FROM rh_rubrica ORDER BY ordem_no_recibo, nome"
   ],
   [
     "566f2392092d162948fc5c959caa2c98e5fe474c9628108b5a4662924eedf8de",
     "SELECT * FROM rh_rubrica WHERE id = ?"
+  ],
+  [
+    "5ce0475a685fea9aee07e9e200e9abb7e1ee7f01385e8552459344f76710eebf",
+    "SELECT * FROM rh_tipo_ausencia ORDER BY sistema DESC, nome"
   ],
   [
     "e4c57be0f0c3a3009fffe5f3bfe5c983a98b9701c36e2805a03e031f7cf89660",
@@ -2774,6 +2918,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT MAX(receiptSeq) AS last FROM payments WHERE receiptYear = ?"
   ],
   [
+    "17b8cebd4ab4b92677edef877d5e417a0d4914a812a8f3f440712bc024f10424",
+    "SELECT MAX(sequencia) AS seq FROM rh_documento_emitido WHERE modelo = ? AND ano = ?"
+  ],
+  [
     "ee65254651850f48772b53ce1f86d00d4a79d7d436d030a4d49adc35a84287f1",
     "SELECT SUM(debtAmount) as total FROM legal_cases WHERE stage != ?"
   ],
@@ -2880,6 +3028,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "23fa4168af434358e45f29067d31a3e2c8d7105ca30066445be3f164fdb2c491",
     "SELECT entityId FROM limit_escalations WHERE entityType = 'credit' AND status = 'pending'"
+  ],
+  [
+    "c7df52d3221b659e3431812b48fcbfe00a15d0c5b6710d1df3308c0b168e8aeb",
+    "SELECT estado FROM rh_processamento WHERE ano = ? AND mes = ? AND tipo = 'normal' AND estado <> 'aberto'"
   ],
   [
     "52559f037a89b243c5b564e1925c6c6723d3255909f7105ec971ba7033ebe6c4",
@@ -3586,6 +3738,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE report_schedules SET lastRunMonth = ?, lastRunAt = ?, lastError = ? WHERE id = ?"
   ],
   [
+    "16ca4a31c7658f30b850d91b0de45a8b75e4c0e74694bd2392a38b4673118169",
+    "UPDATE rh_ausencia SET documento_emitido_id = ? WHERE id = ? AND documento_emitido_id IS NULL"
+  ],
+  [
+    "d0587b6957d3473263eeceec67e9f14008849f46f098f8c11ea0532f45b0e8dd",
+    "UPDATE rh_ausencia SET estado = 'anulada', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, motivo_anulacao = ?, actualizado_em = ? WHERE id = ? AND estado <> 'anulada'"
+  ],
+  [
+    "fc4198aabf52ce6122a1d9ab533e4d22f087dd560441f07e25f099f96521044a",
+    "UPDATE rh_ausencia SET estado = 'aprovada', documento_id = COALESCE(?, documento_id), aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'pendente'"
+  ],
+  [
+    "dcce42433518c3191a1286c60b2fd32a0dc29a57ff3296a2d2784275c5a48068",
+    "UPDATE rh_ausencia SET tipo_id = ?, documento_id = COALESCE(?, documento_id), motivo = ?, estado = 'aprovada', aprovado_por = COALESCE(aprovado_por, ?), aprovado_por_nome = COALESCE(aprovado_por_nome, ?), aprovado_em = COALESCE(aprovado_em, ?), actualizado_em = ? WHERE id = ?"
+  ],
+  [
     "70b17522712170f46d29befb8fcf22e93175745dd74701b3e763dc0e74383b86",
     "UPDATE rh_cargo SET nome = ?, departamento_id = ?, salario_referencia_minor = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
@@ -3610,6 +3778,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'"
   ],
   [
+    "ccfe9f9dafb2bd15a93d3fa2c30d35c1722bfd1d868d60f4658e8ff790e70e62",
+    "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?"
+  ],
+  [
     "91554a2daffb317a6380ec91e6d4e492c1d3e522d5ec700abc0ba427945f6fcf",
     "UPDATE rh_funcionario SET estado = 'cessado', data_saida = ?, actualizado_em = ? WHERE id = ?"
   ],
@@ -3622,6 +3794,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_funcionario_rubrica SET fim = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
+    "68302ce31775e48c49ff7d2e78566a71649e827b5bbd3a0693ee878dde64c49c",
+    "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
     "a116cbd1fd6fc0c6f82a9ba6ad2edaa8f135746e9839182e931cc19303a203a8",
     "UPDATE rh_irt_tabela SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL"
   ],
@@ -3632,6 +3808,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "ca4bfe7939b88a0018754073d7044641f42d2d6a77c6e7ba8ea93f7f49fa8596",
     "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "5d5dd6d186e54faa20ce797f30001ca5cc398a3f6ae1f7844e6bfe55b5e77f33",
+    "UPDATE rh_tipo_ausencia SET nome = ?, justificada = ?, remunerada = ?, desconta_salario = ?, desconta_ferias = ?, exige_documento = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "f10327fdeff9b931d3d425a969d8addf50641449157d526ae2fa1c81ee86f4e0",

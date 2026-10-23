@@ -5,6 +5,7 @@ import { Input } from '@/componentes/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { Plus, Search } from 'lucide-react';
 import { ServicoRH, type Contrato, type Funcionario } from '@/servicos/rh/ServicoRH';
+import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
 import { estadoBI } from '@/bibliotecas/rh/bi-validade';
 import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
@@ -48,6 +49,7 @@ export default function FuncionariosRH() {
             (!termo || [f.nome, f.numero_mecanografico, f.nif, f.bi_numero, f.telefone].some(v => v?.toLowerCase().includes(termo))));
     }, [funcionarios, pesquisa, estado, departamento]);
     const ficha = funcionarios.find(f => f.id === fichaId) || null;
+    const horarios = useCarregar(() => ServicoTempoRH.horarios(), [] as Awaited<ReturnType<typeof ServicoTempoRH.horarios>>);
 
     return (
         <MainLayout title="Funcionários" subtitle="Cadastro, contratos, histórico salarial e arquivo digital">
@@ -100,7 +102,7 @@ export default function FuncionariosRH() {
 
             {actor && (
                 <FormularioFuncionario open={formulario.aberto} funcionario={formulario.funcionario} actor={actor} departamentos={departamentos} cargos={cargos}
-                    anosValidadeBI={anosBI} onClose={() => setFormulario({ aberto: false, funcionario: null })} onSaved={() => void base.recarregar()} />
+                    anosValidadeBI={anosBI} horarios={horarios.dados} onClose={() => setFormulario({ aberto: false, funcionario: null })} onSaved={() => void base.recarregar()} />
             )}
             {ficha && (
                 <FichaFuncionario funcionario={ficha} departamentos={departamentos} cargos={cargos} rubricas={rubricas} funcionarios={funcionarios} actor={actor}

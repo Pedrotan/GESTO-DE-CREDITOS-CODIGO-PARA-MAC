@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { Edit, Plus, Trash2 } from 'lucide-react';
 import { ServicoRH, type ActorRH, type Cargo, type Departamento, type Rubrica } from '@/servicos/rh/ServicoRH';
+import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
+import type { TipoAusencia } from '@/bibliotecas/rh/ponto';
 import { parametroEmVigor, tabelaIrtEmVigor, type IrtEscalao, type ParametroRH } from '@/bibliotecas/rh/parametros-rh';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
@@ -30,6 +32,8 @@ export default function ConfiguracoesRH() {
     const [rubrica, setRubrica] = useState<Partial<Rubrica> | null>(null);
     const [departamento, setDepartamento] = useState<Partial<Departamento> | null>(null);
     const [cargo, setCargo] = useState<Partial<Cargo> | null>(null);
+    const tiposAusencia = useCarregar(() => ServicoTempoRH.tiposAusencia(), [] as TipoAusencia[]);
+    const [tipoAusencia, setTipoAusencia] = useState<Partial<TipoAusencia> | null>(null);
 
     const chaves = useMemo(() => [...new Set(parametros.map(p => p.chave))], [parametros]);
     const tabelaActual = tabelaIrtEmVigor(irt.dados.tabelas, hoje);
@@ -43,6 +47,7 @@ export default function ConfiguracoesRH() {
                     <TabsTrigger value="parametros">Parâmetros legais</TabsTrigger>
                     <TabsTrigger value="irt">Tabela do IRT</TabsTrigger>
                     <TabsTrigger value="rubricas">Rubricas</TabsTrigger>
+                    <TabsTrigger value="ausencias">Tipos de ausência</TabsTrigger>
                     <TabsTrigger value="estrutura">Departamentos e cargos</TabsTrigger>
                 </TabsList>
 
@@ -117,6 +122,26 @@ export default function ConfiguracoesRH() {
                     </div>
                 </TabsContent>
 
+                <TabsContent value="ausencias" className="space-y-3">
+                    <div className="flex items-center justify-between">
+                        <p className="text-xs text-slate-500">Tipos de falta e licença. Confirme os dias e a remuneração de cada licença na Lei Geral do Trabalho em vigor.</p>
+                        {configurar && <Button size="sm" onClick={() => setTipoAusencia({ justificada: 1, remunerada: 1, desconta_salario: 0 })}><Plus className="mr-1.5 h-4 w-4" /> Novo tipo</Button>}
+                    </div>
+                    <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
+                        <table className="w-full text-sm">
+                            <thead className="bg-slate-50 text-left text-[11px] uppercase text-slate-500 dark:bg-slate-900"><tr><th className="px-3 py-2">Código</th><th className="px-3 py-2">Nome</th><th className="px-3 py-2">Justificada</th><th className="px-3 py-2">Remunerada</th><th className="px-3 py-2">Desconta salário</th><th className="px-3 py-2">Exige documento</th><th /></tr></thead>
+                            <tbody>{tiposAusencia.dados.map(t => (
+                                <tr key={t.id} className={`border-t border-slate-100 dark:border-slate-800 ${t.activo ? '' : 'opacity-50'}`}>
+                                    <td className="px-3 py-2 font-mono text-xs">{t.codigo}</td><td className="px-3 py-2 font-semibold">{t.nome}</td>
+                                    <td className="px-3 py-2">{t.justificada ? 'Sim' : 'Não'}</td><td className="px-3 py-2">{t.remunerada ? 'Sim' : 'Não'}</td>
+                                    <td className="px-3 py-2">{t.desconta_salario ? 'Sim' : 'Não'}</td><td className="px-3 py-2">{t.exige_documento ? 'Sim' : 'Não'}</td>
+                                    <td className="px-3 py-2 text-right">{configurar && <Button size="icon" variant="ghost" onClick={() => setTipoAusencia(t)}><Edit className="h-4 w-4" /></Button>}</td>
+                                </tr>
+                            ))}</tbody>
+                        </table>
+                    </div>
+                </TabsContent>
+
                 <TabsContent value="estrutura" className="grid gap-4 lg:grid-cols-2">
                     <div className="space-y-2">
                         <div className="flex items-center justify-between"><h3 className="font-black">Departamentos</h3>{gerir && <Button size="sm" onClick={() => setDepartamento({ nome: '' })}><Plus className="mr-1.5 h-4 w-4" /> Novo</Button>}</div>
@@ -144,6 +169,7 @@ export default function ConfiguracoesRH() {
             {actor && novaTabela && <DialogoTabelaIrt base={irt.dados.escaloes.filter(e => e.tabela_id === tabelaActual?.id)} actor={actor} onClose={() => setNovaTabela(false)} onSaved={() => void irt.recarregar()} />}
             {actor && rubrica && <DialogoRubrica rubrica={rubrica} actor={actor} onClose={() => setRubrica(null)} onSaved={() => void base.recarregar()} />}
             {actor && departamento && <DialogoDepartamento departamento={departamento} funcionarios={base.dados.funcionarios} actor={actor} onClose={() => setDepartamento(null)} onSaved={() => void base.recarregar()} />}
+            {actor && tipoAusencia && <DialogoTipoAusencia tipo={tipoAusencia} actor={actor} onClose={() => setTipoAusencia(null)} onSaved={() => void tiposAusencia.recarregar()} />}
             {actor && cargo && <DialogoCargo cargo={cargo} departamentos={departamentos} actor={actor} onClose={() => setCargo(null)} onSaved={() => void base.recarregar()} />}
         </MainLayout>
     );
@@ -291,6 +317,28 @@ function DialogoCargo({ cargo, departamentos, actor, onClose, onSaved }: Base & 
                 </Campo>
                 <Campo label="Salário de referência"><CurrencyInput value={(c.salario_referencia_minor || 0) / 100} onValueChange={v => setC(p => ({ ...p, salario_referencia_minor: paraMinor(v) }))} /></Campo>
                 {c.id && <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={c.activo !== 0} onCheckedChange={v => setC(p => ({ ...p, activo: v ? 1 : 0 }))} /> Activo</label>}
+            </div>
+        </Moldura>
+    );
+}
+
+function DialogoTipoAusencia({ tipo, actor, onClose, onSaved }: Base & { tipo: Partial<TipoAusencia> }) {
+    const [t, setT] = useState(tipo);
+    const interruptor = (campo: keyof TipoAusencia, rotulo: string) => (
+        <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={Boolean(t[campo])} onCheckedChange={v => setT(p => ({ ...p, [campo]: v ? 1 : 0 }))} /> {rotulo}</label>
+    );
+    return (
+        <Moldura titulo={t.id ? `Editar ${t.nome}` : 'Novo tipo de ausência'} onClose={onClose}
+            onConfirm={async () => { const ok = await executar(() => ServicoTempoRH.guardarTipoAusencia(t, actor), 'Tipo de ausência guardado'); if (ok) onSaved(); return ok; }}>
+            <div className="grid gap-3 sm:grid-cols-2">
+                <Campo label="Código"><Input value={t.codigo || ''} disabled={Boolean(t.id)} onChange={e => setT(p => ({ ...p, codigo: e.target.value.toUpperCase() }))} /></Campo>
+                <Campo label="Nome"><Input value={t.nome || ''} onChange={e => setT(p => ({ ...p, nome: e.target.value }))} /></Campo>
+                {interruptor('justificada', 'Justificada')}
+                {interruptor('remunerada', 'Remunerada')}
+                {interruptor('desconta_salario', 'Desconta no salário')}
+                {interruptor('desconta_ferias', 'Conta como férias')}
+                {interruptor('exige_documento', 'Exige documento')}
+                {t.id && <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={t.activo !== 0} onCheckedChange={v => setT(p => ({ ...p, activo: v ? 1 : 0 }))} /> Activo</label>}
             </div>
         </Moldura>
     );

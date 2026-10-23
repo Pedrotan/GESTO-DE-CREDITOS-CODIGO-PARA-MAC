@@ -1054,7 +1054,13 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_rubrica: "hr_settings",
   rh_parametro: "hr_settings",
   rh_irt_tabela: "hr_settings",
-  rh_irt_escalao: "hr_settings"
+  rh_irt_escalao: "hr_settings",
+  rh_horario: "hr_settings",
+  rh_feriado: "hr_settings",
+  rh_tipo_ausencia: "hr_settings",
+  rh_ponto: "hr_manage",
+  rh_ausencia: "hr_manage",
+  rh_documento_emitido: "hr_manage"
 };
 // Tabelas que o assistente de configuração inicial grava antes de existir o primeiro utilizador (sem sessão).
 const FIRST_SETUP_TABLES = new Set(["company_settings", "audit_logs"]);

@@ -15,6 +15,7 @@ import { executar, paraMinor, SeloBI } from './comum-rh';
 type Props = {
     open: boolean; onClose: () => void; onSaved: () => void; actor: ActorRH;
     funcionario?: Funcionario | null; departamentos: Departamento[]; cargos: Cargo[]; anosValidadeBI: number;
+    horarios?: Array<{ id: string; nome: string; activo?: number }>;
 };
 
 const NENHUM = '__nenhum__';
@@ -24,7 +25,7 @@ function Campo({ label, children, className }: { label: string; children: React.
     return <div className={className}><Label className="text-xs font-bold text-slate-600 dark:text-slate-300">{label}</Label><div className="mt-1">{children}</div></div>;
 }
 
-export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionario, departamentos, cargos, anosValidadeBI }: Props) {
+export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionario, departamentos, cargos, anosValidadeBI, horarios = [] }: Props) {
     const [f, setF] = useState<Partial<Funcionario>>(vazio());
     const [contrato, setContrato] = useState({ tipo: 'indeterminado' as 'indeterminado' | 'determinado', inicio: luandaTodayKey(), fim: '', periodo_experiencia_fim: '', salario: 0, horas_semanais: 40, dias_ferias: 22 });
     const [comContrato, setComContrato] = useState(true);
@@ -128,6 +129,12 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                         }}>
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent><SelectItem value={NENHUM}>—</SelectItem>{cargos.filter(c => c.activo).map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}</SelectContent>
+                        </Select>
+                    </Campo>
+                    <Campo label="Horário">
+                        <Select value={f.horario_id || NENHUM} onValueChange={v => set('horario_id', v === NENHUM ? null : v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent><SelectItem value={NENHUM}>Horário normal</SelectItem>{horarios.filter(h => h.activo !== 0 && h.id !== 'horario-normal').map(h => <SelectItem key={h.id} value={h.id}>{h.nome}</SelectItem>)}</SelectContent>
                         </Select>
                     </Campo>
                     {funcionario && (

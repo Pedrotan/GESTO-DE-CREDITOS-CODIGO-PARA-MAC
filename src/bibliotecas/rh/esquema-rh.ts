@@ -175,3 +175,85 @@ export const rhSeedStatements = (now: string) => [
         params: [`rubrica-${r.codigo}`, r.codigo, r.nome, r.tipo, r.forma, r.inss, r.irt, r.isentoMinor || 0, r.isentoPct || 0, r.ordem, r.sistema || 0, now],
     })),
 ];
+
+// ── Fase 2: horários, feriados, livro de ponto, ausências e documentos emitidos ──
+export const RH_FASE2_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_horario (
+        id TEXT PRIMARY KEY, nome TEXT NOT NULL, entrada TEXT NOT NULL, saida TEXT NOT NULL, intervalo_min INTEGER NOT NULL DEFAULT 60,
+        dias_semana TEXT NOT NULL DEFAULT '1,2,3,4,5', tolerancia_min INTEGER NOT NULL DEFAULT 10, activo INTEGER NOT NULL DEFAULT 1,
+        criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS rh_feriado (
+        id TEXT PRIMARY KEY, data TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT 'nacional' CHECK(tipo IN ('nacional', 'empresa')),
+        recorrente INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT
+    )`,
+    // Um registo por funcionário e dia (id = funcionário:data, igual em todos os computadores).
+    `CREATE TABLE IF NOT EXISTS rh_ponto (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, entrada TEXT, saida TEXT,
+        horas_trabalhadas REAL NOT NULL DEFAULT 0, horas_extra REAL NOT NULL DEFAULT 0, minutos_atraso INTEGER NOT NULL DEFAULT 0,
+        origem TEXT NOT NULL DEFAULT 'manual' CHECK(origem IN ('manual', 'importado', 'app')), observacoes TEXT,
+        registado_por TEXT, registado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_ponto_dia ON rh_ponto(funcionario_id, data)`,
+    `CREATE TABLE IF NOT EXISTS rh_tipo_ausencia (
+        id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, justificada INTEGER NOT NULL DEFAULT 0, remunerada INTEGER NOT NULL DEFAULT 0,
+        desconta_salario INTEGER NOT NULL DEFAULT 1, desconta_ferias INTEGER NOT NULL DEFAULT 0, exige_documento INTEGER NOT NULL DEFAULT 0,
+        sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS rh_ausencia (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL,
+        dias REAL NOT NULL DEFAULT 0, horas REAL NOT NULL DEFAULT 0, motivo TEXT, documento_id TEXT,
+        estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'anulada')),
+        pedido_dispensa INTEGER NOT NULL DEFAULT 0, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT,
+        anulado_por TEXT, anulado_por_nome TEXT, anulado_em TEXT, motivo_anulacao TEXT, documento_emitido_id TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_ausencia_funcionario ON rh_ausencia(funcionario_id, data_inicio)`,
+    `CREATE TABLE IF NOT EXISTS rh_documento_emitido (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, modelo TEXT NOT NULL, ano INTEGER NOT NULL, sequencia INTEGER NOT NULL,
+        numero TEXT NOT NULL, dados_json TEXT NOT NULL, emitido_por TEXT, emitido_por_nome TEXT, emitido_em TEXT NOT NULL
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_documento_emitido_numero ON rh_documento_emitido(modelo, ano, sequencia)`,
+];
+
+/** Tipos de ausência iniciais (editáveis; confirmar dias e remuneração de cada licença na Lei Geral do Trabalho). */
+export const RH_TIPOS_AUSENCIA_INICIAIS: Array<{ codigo: string; nome: string; justificada: number; remunerada: number; desconta: number; ferias?: number; documento?: number }> = [
+    { codigo: 'F', nome: 'Falta injustificada', justificada: 0, remunerada: 0, desconta: 1 },
+    { codigo: 'FJ', nome: 'Falta justificada sem remuneração', justificada: 1, remunerada: 0, desconta: 1 },
+    { codigo: 'DOE', nome: 'Doença com atestado', justificada: 1, remunerada: 1, desconta: 0, documento: 1 },
+    { codigo: 'FAL', nome: 'Falecimento de familiar', justificada: 1, remunerada: 1, desconta: 0 },
+    { codigo: 'CAS', nome: 'Casamento', justificada: 1, remunerada: 1, desconta: 0 },
+    { codigo: 'L', nome: 'Licença de maternidade / paternidade', justificada: 1, remunerada: 1, desconta: 0, documento: 1 },
+    { codigo: 'D', nome: 'Dispensa autorizada', justificada: 1, remunerada: 1, desconta: 0 },
+    { codigo: 'FE', nome: 'Férias', justificada: 1, remunerada: 1, desconta: 0, ferias: 1 },
+];
+
+/** Feriados nacionais recorrentes (dia e mês); confirmar a lista em vigor. Carnaval e Sexta-feira Santa mudam de data todos os anos. */
+export const RH_FERIADOS_INICIAIS: Array<[string, string]> = [
+    ['01-01', 'Dia do Ano Novo'],
+    ['02-04', 'Dia do Início da Luta Armada de Libertação Nacional'],
+    ['03-08', 'Dia Internacional da Mulher'],
+    ['03-23', 'Dia da Libertação da África Austral'],
+    ['04-04', 'Dia da Paz e da Reconciliação Nacional'],
+    ['05-01', 'Dia Internacional do Trabalhador'],
+    ['09-17', 'Dia do Fundador da Nação e do Herói Nacional'],
+    ['11-02', 'Dia dos Finados'],
+    ['11-11', 'Dia da Independência Nacional'],
+    ['12-25', 'Dia de Natal e da Família'],
+];
+
+export const RH_SEED_TIPO_AUSENCIA_SQL = `INSERT OR IGNORE INTO rh_tipo_ausencia (id, codigo, nome, justificada, remunerada, desconta_salario, desconta_ferias, exige_documento, sistema, activo, criado_em, criado_por)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 'sistema')`;
+export const RH_SEED_FERIADO_SQL = `INSERT OR IGNORE INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por)
+    VALUES (?, ?, ?, 'nacional', 1, 1, ?, 'sistema')`;
+export const RH_SEED_HORARIO_SQL = `INSERT OR IGNORE INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por)
+    VALUES ('horario-normal', 'Horário normal (08:00–17:00)', '08:00', '17:00', 60, '1,2,3,4,5', 10, 1, ?, 'sistema')`;
+
+export const rhSeedFase2Statements = (now: string) => [
+    ...RH_TIPOS_AUSENCIA_INICIAIS.map(t => ({
+        sql: RH_SEED_TIPO_AUSENCIA_SQL,
+        params: [`ausencia-${t.codigo}`, t.codigo, t.nome, t.justificada, t.remunerada, t.desconta, t.ferias || 0, t.documento || 0, now],
+    })),
+    ...RH_FERIADOS_INICIAIS.map(([dia, nome]) => ({ sql: RH_SEED_FERIADO_SQL, params: [`feriado-${dia}`, `2000-${dia}`, nome, now] })),
+    { sql: RH_SEED_HORARIO_SQL, params: [now] },
+];

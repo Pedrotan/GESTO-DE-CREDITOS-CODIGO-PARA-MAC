@@ -13,6 +13,9 @@ export const dataPt = (valor: string | null | undefined) => (valor ? valor.slice
 const LIGACOES = [
     { path: '/rh/painel', label: 'Painel' },
     { path: '/rh/funcionarios', label: 'Funcionários' },
+    { path: '/rh/ponto', label: 'Livro de ponto' },
+    { path: '/rh/ausencias', label: 'Dispensas e licenças' },
+    { path: '/rh/calendario', label: 'Horários e calendário' },
     { path: '/rh/documentos', label: 'Documentos' },
     { path: '/rh/configuracoes', label: 'Configurações' },
 ];
@@ -20,7 +23,7 @@ const LIGACOES = [
 /** Barra de navegação entre as páginas do módulo. */
 export function NavegacaoRH({ extra }: { extra?: Array<{ path: string; label: string }> }) {
     const { pathname } = useLocation();
-    const ligacoes = [...LIGACOES.slice(0, 2), ...(extra || []), ...LIGACOES.slice(2)];
+    const ligacoes = [...LIGACOES.slice(0, 2), ...(extra || []).filter(e => !LIGACOES.some(l => l.path === e.path)), ...LIGACOES.slice(2)];
     return (
         <nav className="mb-5 flex flex-wrap gap-1.5 rounded-2xl border border-slate-200 bg-white p-1.5 dark:border-slate-800 dark:bg-slate-900">
             {ligacoes.map(item => (

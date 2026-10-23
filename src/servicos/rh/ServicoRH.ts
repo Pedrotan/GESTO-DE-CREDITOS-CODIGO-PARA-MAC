@@ -58,6 +58,8 @@ export const CATEGORIAS_CONFIDENCIAIS = new Set<CategoriaDocumento>(['saude', 'd
 const MIMES_DOCUMENTO = /^data:(application\/pdf|image\/(png|jpe?g)|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document);base64,/u;
 
 const agora = () => new Date().toISOString();
+/** Lista vazia quando a tabela ainda não existe (base de dados antiga a meio da migração). */
+const lista = <T,>(p: Promise<T[]>) => p.catch(() => [] as T[]);
 const texto = (valor: unknown) => (typeof valor === 'string' && valor.trim() ? valor.trim() : null);
 const data = (valor: unknown) => (typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}/u.test(valor) ? valor.slice(0, 10) : null);
 const minor = (valor: unknown) => {
@@ -76,7 +78,7 @@ export const auditoriaRH = (actor: ActorRH, action: string, details: string, met
 export class ServicoRH {
     // ── Estrutura ─────────────────────────────────────────────────────────────────
     static departamentos() {
-        return db.all<Departamento>('SELECT id, nome, responsavel_id, activo FROM rh_departamento ORDER BY nome').catch(() => []);
+        return lista(db.all<Departamento>('SELECT id, nome, responsavel_id, activo FROM rh_departamento ORDER BY nome'));
     }
 
     static async guardarDepartamento(input: { id?: string; nome: string; responsavel_id?: string | null; activo?: boolean }, actor: ActorRH) {
@@ -101,7 +103,7 @@ export class ServicoRH {
     }
 
     static cargos() {
-        return db.all<Cargo>('SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome').catch(() => []);
+        return lista(db.all<Cargo>('SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome'));
     }
 
     static async guardarCargo(input: { id?: string; nome: string; departamento_id?: string | null; salario_referencia_minor?: number; activo?: boolean }, actor: ActorRH) {
@@ -128,7 +130,7 @@ export class ServicoRH {
 
     // ── Funcionários ──────────────────────────────────────────────────────────────
     static funcionarios() {
-        return db.all<Funcionario>('SELECT * FROM rh_funcionario ORDER BY nome').catch(() => []);
+        return lista(db.all<Funcionario>('SELECT * FROM rh_funcionario ORDER BY nome'));
     }
 
     static funcionario(id: string) {
@@ -203,7 +205,7 @@ export class ServicoRH {
     }
 
     static dependentes(funcionarioId: string) {
-        return db.all<Dependente>('SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome', [funcionarioId]).catch(() => []);
+        return lista(db.all<Dependente>('SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome', [funcionarioId]));
     }
 
     static async adicionarDependente(funcionarioId: string, d: { nome: string; parentesco?: string; data_nascimento?: string }, actor: ActorRH) {
@@ -226,12 +228,12 @@ export class ServicoRH {
     // ── Contratos e histórico salarial ────────────────────────────────────────────
     static contratos(funcionarioId?: string) {
         return funcionarioId
-            ? db.all<Contrato>('SELECT * FROM rh_contrato WHERE funcionario_id = ? ORDER BY inicio DESC', [funcionarioId]).catch(() => [])
-            : db.all<Contrato>('SELECT * FROM rh_contrato ORDER BY inicio DESC').catch(() => []);
+            ? lista(db.all<Contrato>('SELECT * FROM rh_contrato WHERE funcionario_id = ? ORDER BY inicio DESC', [funcionarioId]))
+            : lista(db.all<Contrato>('SELECT * FROM rh_contrato ORDER BY inicio DESC'));
     }
 
     static historicoSalarial(funcionarioId: string) {
-        return db.all<HistoricoSalarial>('SELECT * FROM rh_historico_salarial WHERE funcionario_id = ? ORDER BY data_efeito DESC, criado_em DESC', [funcionarioId]).catch(() => []);
+        return lista(db.all<HistoricoSalarial>('SELECT * FROM rh_historico_salarial WHERE funcionario_id = ? ORDER BY data_efeito DESC, criado_em DESC', [funcionarioId]));
     }
 
     private static instrucoesContrato(funcionarioId: string, c: Pick<Contrato, 'tipo' | 'inicio' | 'fim' | 'periodo_experiencia_fim' | 'salario_base_minor' | 'horas_semanais' | 'dias_ferias'>,
@@ -283,7 +285,7 @@ export class ServicoRH {
 
     // ── Rubricas ──────────────────────────────────────────────────────────────────
     static rubricas() {
-        return db.all<Rubrica>('SELECT * FROM rh_rubrica ORDER BY ordem_no_recibo, nome').catch(() => []);
+        return lista(db.all<Rubrica>('SELECT * FROM rh_rubrica ORDER BY ordem_no_recibo, nome'));
     }
 
     static async guardarRubrica(r: Partial<Rubrica>, actor: ActorRH) {
@@ -319,11 +321,11 @@ export class ServicoRH {
     }
 
     static rubricasFuncionario(funcionarioId: string) {
-        return db.all<FuncionarioRubrica>('SELECT * FROM rh_funcionario_rubrica WHERE funcionario_id = ? ORDER BY inicio DESC', [funcionarioId]).catch(() => []);
+        return lista(db.all<FuncionarioRubrica>('SELECT * FROM rh_funcionario_rubrica WHERE funcionario_id = ? ORDER BY inicio DESC', [funcionarioId]));
     }
 
     static todasRubricasFuncionarios() {
-        return db.all<FuncionarioRubrica>('SELECT * FROM rh_funcionario_rubrica').catch(() => []);
+        return lista(db.all<FuncionarioRubrica>('SELECT * FROM rh_funcionario_rubrica'));
     }
 
     static async atribuirRubrica(funcionarioId: string, input: { rubrica_id: string; valor_minor: number; quantidade?: number; inicio: string; fim?: string | null }, actor: ActorRH) {
@@ -352,7 +354,7 @@ export class ServicoRH {
 
     // ── Parâmetros legais e tabela do IRT ─────────────────────────────────────────
     static parametros() {
-        return db.all<ParametroRH>('SELECT id, chave, valor, descricao, vigencia_inicio, vigencia_fim FROM rh_parametro ORDER BY chave, vigencia_inicio DESC').catch(() => []);
+        return lista(db.all<ParametroRH>('SELECT id, chave, valor, descricao, vigencia_inicio, vigencia_fim FROM rh_parametro ORDER BY chave, vigencia_inicio DESC'));
     }
 
     /**
@@ -378,13 +380,13 @@ export class ServicoRH {
     }
 
     static tabelasIrt() {
-        return db.all<IrtTabela>('SELECT id, ano, lei_referencia, vigencia_inicio, vigencia_fim FROM rh_irt_tabela ORDER BY vigencia_inicio DESC').catch(() => []);
+        return lista(db.all<IrtTabela>('SELECT id, ano, lei_referencia, vigencia_inicio, vigencia_fim FROM rh_irt_tabela ORDER BY vigencia_inicio DESC'));
     }
 
     static escaloesIrt(tabelaId?: string) {
         return tabelaId
-            ? db.all<IrtEscalao>('SELECT * FROM rh_irt_escalao WHERE tabela_id = ? ORDER BY ordem', [tabelaId]).catch(() => [])
-            : db.all<IrtEscalao>('SELECT * FROM rh_irt_escalao ORDER BY tabela_id, ordem').catch(() => []);
+            ? lista(db.all<IrtEscalao>('SELECT * FROM rh_irt_escalao WHERE tabela_id = ? ORDER BY ordem', [tabelaId]))
+            : lista(db.all<IrtEscalao>('SELECT * FROM rh_irt_escalao ORDER BY tabela_id, ordem'));
     }
 
     /** Nova versão da tabela do IRT (ex.: OGE 2027). A anterior termina na véspera; as antigas não mudam. */
@@ -416,8 +418,8 @@ export class ServicoRH {
     // ── Arquivo digital ───────────────────────────────────────────────────────────
     static documentos(funcionarioId?: string) {
         return funcionarioId
-            ? db.all<DocumentoRH>('SELECT * FROM rh_documento WHERE funcionario_id = ? ORDER BY criado_em DESC', [funcionarioId]).catch(() => [])
-            : db.all<DocumentoRH>('SELECT * FROM rh_documento ORDER BY criado_em DESC').catch(() => []);
+            ? lista(db.all<DocumentoRH>('SELECT * FROM rh_documento WHERE funcionario_id = ? ORDER BY criado_em DESC', [funcionarioId]))
+            : lista(db.all<DocumentoRH>('SELECT * FROM rh_documento ORDER BY criado_em DESC'));
     }
 
     static async ficheiroDocumento(documentoId: string) {
