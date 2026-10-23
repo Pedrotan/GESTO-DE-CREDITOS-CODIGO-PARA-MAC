@@ -65,11 +65,46 @@ const printPdfWithIframe = (pdfUrl: string, onError?: () => void) => {
   document.body.appendChild(iframe);
 };
 
+/**
+ * Páginas do PDF como imagens em fundo branco, no tamanho real (mm), para a impressão no computador. Imprimir o
+ * visualizador de PDF do Chromium numa janela escondida saía todo preto em algumas impressoras (o fundo escuro
+ * do visualizador); as imagens saem iguais ao documento em qualquer impressora, térmicas incluídas (203 ppp).
+ */
+export const rasterizePdfForPrint = async (pdfBytes: Uint8Array, dpi = 203) => {
+  const pdfjs = await import('pdfjs-dist');
+  const worker = await import('pdfjs-dist/build/pdf.worker.mjs?url');
+  pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
+  const pdf = await pdfjs.getDocument({ data: pdfBytes.slice() }).promise;
+  const pages: Array<{ dataUrl: string; widthMm: number; heightMm: number }> = [];
+  try {
+    for (let number = 1; number <= Math.min(pdf.numPages, 60); number++) {
+      const page = await pdf.getPage(number);
+      const base = page.getViewport({ scale: 1 });
+      const scale = Math.min(dpi / 72, 2600 / base.width);
+      const viewport = page.getViewport({ scale });
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.ceil(viewport.width);
+      canvas.height = Math.ceil(viewport.height);
+      const context = canvas.getContext('2d');
+      if (!context) throw new Error('Não foi possível preparar a página para impressão.');
+      context.fillStyle = '#ffffff';
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      await page.render({ canvasContext: context, viewport, background: '#ffffff' } as any).promise;
+      pages.push({ dataUrl: canvas.toDataURL('image/png'), widthMm: (base.width * 25.4) / 72, heightMm: (base.height * 25.4) / 72 });
+      page.cleanup();
+    }
+  } finally {
+    await pdf.destroy();
+  }
+  return pages;
+};
+
 export const printPdfFromUrl = async (
   pdfUrl: string,
   onError?: (message?: string) => void,
   onSuccess?: (printerName?: string, printersCount?: number) => void,
   fileName = 'documento.pdf',
+  options: { printerName?: string } = {},
 ) => {
   if (!pdfUrl) {
     onError?.('PDF indisponível para impressão.');
@@ -94,14 +129,11 @@ export const printPdfFromUrl = async (
 
     const pdfBytes = new Uint8Array(await response.arrayBuffer());
     const printers = window.electronAPI.getPrinters ? await window.electronAPI.getPrinters() : [];
-    const defaultPrinter = printers.find((printer) => printer.isDefault)?.name || printers[0]?.name;
+    const defaultPrinter = options.printerName || printers.find((printer) => printer.isDefault)?.name || printers[0]?.name;
 
-    const result = await window.electronAPI.printPdf({
-      pdfData: pdfBytes,
-      fileName,
-      printerName: defaultPrinter,
-      silent: true,
-    });
+    const result = window.electronAPI.printImages
+      ? await window.electronAPI.printImages({ pages: await rasterizePdfForPrint(pdfBytes), fileName, printerName: defaultPrinter, silent: true })
+      : await window.electronAPI.printPdf({ pdfData: pdfBytes, fileName, printerName: defaultPrinter, silent: true });
 
     if (!result?.success) {
       throw new Error(result?.error || 'A impressão não foi concluída.');

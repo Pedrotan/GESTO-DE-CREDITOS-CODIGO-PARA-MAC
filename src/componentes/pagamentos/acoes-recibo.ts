@@ -17,13 +17,13 @@ export async function downloadReceipt(row: PaymentRow, clients: any[], settings:
     return generateReceiptA4(row, client, settings, userName, 'save', kind === 'second');
 }
 
-export async function printReceipt(row: PaymentRow, clients: any[], settings: any, userName: string, kind: 'a4' | 'thermal', onError: (message?: string) => void) {
+export async function printReceipt(row: PaymentRow, clients: any[], settings: any, userName: string, kind: 'a4' | 'thermal', onError: (message?: string) => void, printerName?: string) {
     const client = receiptClientOf(row, clients);
     const file = kind === 'thermal'
         ? await generateReceiptThermal(row, client, settings, userName, 'datauri')
         : await generateReceiptA4(row, client, settings, userName, 'datauri');
     const url = URL.createObjectURL(dataUrlToBlob(file.dataUrl));
-    await printPdfFromUrl(url, onError, undefined, file.fileName);
+    await printPdfFromUrl(url, onError, undefined, file.fileName, { printerName });
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 

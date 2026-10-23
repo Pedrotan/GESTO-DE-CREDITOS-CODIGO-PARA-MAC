@@ -103,6 +103,7 @@ export interface ElectronAPI {
     sendEmail: (params: { smtpSettings: any, emailOptions: any }) => Promise<{ success: boolean; error?: string }>;
     composeNativeEmail: (params: { to: string; subject: string; body: string; attachment?: any }) => Promise<{ success: boolean; error?: string }>;
     getPrinters: () => Promise<Array<{ name: string; displayName?: string; description?: string; status?: number; isDefault?: boolean }>>;
+    printImages?: (params: { pages: Array<{ dataUrl: string; widthMm: number; heightMm: number }>; fileName?: string; printerName?: string; silent?: boolean }) => Promise<{ success: boolean; printerName?: string; printers?: any[]; error?: string }>;
     printPdf: (params: {
         pdfData: Uint8Array | number[] | string;
         fileName?: string;

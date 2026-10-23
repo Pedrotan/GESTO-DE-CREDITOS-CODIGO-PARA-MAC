@@ -30,6 +30,7 @@ import { useSavedFilters } from '@/componentes/pagamentos/filtros-guardados';
 import { TabelaPagamentos, type ViewMode } from '@/componentes/pagamentos/TabelaPagamentos';
 import { DetalhePagamento } from '@/componentes/pagamentos/DetalhePagamento';
 import { AssistentePagamento } from '@/componentes/pagamentos/AssistentePagamento';
+import { ImpressoraTermica } from '@/componentes/pagamentos/ImpressoraTermica';
 import { AnulacaoPagamento, AprovacoesAnulacao, type CancellationRequest } from '@/componentes/pagamentos/AnulacaoPagamento';
 import { ImportacaoPagamentos } from '@/componentes/pagamentos/ImportacaoPagamentos';
 import { EnvioAutomatico, GerarRelatorioDialog, HistoricoRelatorios, MenuRelatorios } from '@/componentes/pagamentos/RelatoriosPagamentos';
@@ -68,6 +69,7 @@ export default function Payments() {
     const [openAfterReload, setOpenAfterReload] = useState<string | null>(null);
     const [wizard, setWizard] = useState<{ open: boolean; creditId?: string }>({ open: false });
     const [cancelRow, setCancelRow] = useState<PaymentRow | null>(null);
+    const [thermalRow, setThermalRow] = useState<PaymentRow | null>(null);
     const [importOpen, setImportOpen] = useState(false);
     const [report, setReport] = useState<ReportKey | null>(null);
     const [historyOpen, setHistoryOpen] = useState(false);
@@ -147,7 +149,10 @@ export default function Payments() {
 
     // ── Acções ────────────────────────────────────────────────────────────────────────
     const receiptActions = {
-        print: (row: PaymentRow, kind: 'a4' | 'thermal') => printReceipt(row, data.clients, companySettings, actor.name, kind, message => notifyError('Impressão', message || 'Não foi possível imprimir.')).catch(error => notifyError('Impressão', error)),
+        // O talão de 80 mm passa primeiro pelo aviso de impressora térmica (ImpressoraTermica).
+        print: (row: PaymentRow, kind: 'a4' | 'thermal') => kind === 'thermal'
+            ? setThermalRow(row)
+            : printReceipt(row, data.clients, companySettings, actor.name, kind, message => notifyError('Impressão', message || 'Não foi possível imprimir.')).catch(error => notifyError('Impressão', error)),
         download: (row: PaymentRow, kind: 'a4' | 'thermal' | 'second') => downloadReceipt(row, data.clients, companySettings, actor.name, kind).catch(error => notifyError('Recibo', error)),
         whatsapp: (row: PaymentRow) => { try { sendReceiptWhatsApp(row, data.clients, companySettings?.name || ''); } catch (error) { notifyError('WhatsApp', error); } },
         email: async (row: PaymentRow) => {
@@ -310,6 +315,9 @@ export default function Payments() {
                 }}
             />
 
+            <ImpressoraTermica open={Boolean(thermalRow)} onOpenChange={open => { if (!open) setThermalRow(null); }}
+                onPrint={async printerName => { if (thermalRow) await printReceipt(thermalRow, data.clients, companySettings, actor.name, 'thermal', message => notifyError('Impressão', message || 'Não foi possível imprimir.'), printerName); }}
+                onDownload={async () => { if (thermalRow) await downloadReceipt(thermalRow, data.clients, companySettings, actor.name, 'thermal'); }} />
             <AnulacaoPagamento row={cancelRow} open={Boolean(cancelRow)} onOpenChange={open => { if (!open) setCancelRow(null); }}
                 threshold={data.config.cancelApprovalThreshold} actorId={actor.id} onConfirm={cancelPayment} />
 

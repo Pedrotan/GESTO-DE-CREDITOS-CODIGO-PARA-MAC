@@ -287,6 +287,9 @@ const api = Object.freeze({
     composeNativeEmail: (params: { to: string, subject: string, body: string, attachment?: any }) => ipcRenderer.invoke('compose-native-email', params),
     getPrinters: () => ipcRenderer.invoke('get-printers'),
     printPdf: (params: { pdfData: Uint8Array | number[] | string; fileName?: string; printerName?: string; silent?: boolean }) => ipcRenderer.invoke('print-pdf', params),
+    // Páginas já desenhadas como imagens (ver rasterizePdfForPrint em src/bibliotecas/pdfPrint.ts).
+    printImages: (params: { pages: Array<{ dataUrl: string; widthMm: number; heightMm: number }>; fileName?: string; printerName?: string; silent?: boolean }) =>
+        ipcRenderer.invoke('print-images', JSON.parse(JSON.stringify(params))),
 
     encryptData: (data: string) => ipcRenderer.invoke('encrypt-data', ensureText(data, 'Dados')),
     decryptData: (data: string) => ipcRenderer.invoke('decrypt-data', ensureText(data, 'Dados')),

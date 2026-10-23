@@ -2,7 +2,7 @@
 // Numeração sequencial por ano (RC 2026/000123), divisão capital/juros/mora, prestações pagas, capital em
 // dívida após o pagamento e QR code de verificação. Os recibos anulados mantêm o número e ficam marcados.
 import QRCode from 'qrcode';
-import jsPDF from '@/bibliotecas/pdf-documento';
+import jsPDF, { getMasterPdfWatermark, setPdfWatermark } from '@/bibliotecas/pdf-documento';
 import autoTable from '@/bibliotecas/pdf-tabela';
 import { applyBranding, brandingHeaderBottom, ensurePdfSpace, getCompanySettings, resolveBrandDark, resolveBrandPrimary, writeClosingNote } from './pdf';
 import { formatLuandaDate, formatLuandaDateTime, formatRegistration } from './fuso-angola';
@@ -161,19 +161,51 @@ export async function generateReceiptA4(row: PaymentRow, client: ReceiptClient, 
     return { fileName, dataUrl: '' };
 }
 
-/** Talão de 80 mm (largura útil 72 mm) para impressoras térmicas. A altura acompanha o conteúdo. */
+const isImageData = (value: unknown): value is string => typeof value === 'string' && /^data:image\/(png|jpe?g|webp);base64,/i.test(value);
+const imageFormat = (value: string) => /^data:image\/jpe?g/i.test(value) ? 'JPEG' : /^data:image\/webp/i.test(value) ? 'WEBP' : 'PNG';
+
+/** Empresa que desenvolve o sistema (rodapé dos talões). */
+const SYSTEM_DEVELOPER = 'Tango Gestão de Créditos · DIGITAL NORTE - Comércio e Prestação de Serviços, (SU), Lda';
+
+/**
+ * Talão de 80 mm (largura útil 72 mm) para impressoras térmicas. A altura acompanha o conteúdo.
+ * Cabeçalho com o logótipo e os dados da empresa, marca de água por baixo do conteúdo, emissão e operador
+ * no fim, e o agradecimento e quem desenvolveu o sistema em letra pequena no rodapé.
+ */
 export async function generateReceiptThermal(row: PaymentRow, client: ReceiptClient, settings: any, userName?: string, output: 'save' | 'datauri' = 'save') {
     if (!row.receipt) throw new Error('Este pagamento ainda não tem recibo (está pendente de validação).');
     const config = getCompanySettings(settings);
     const width = 80;
     const left = 4;
     const usable = width - 8;
-    const lines = 32 + row.installments.length * 4 + (row.status === 'cancelled' ? 16 : 0);
-    const height = Math.max(150, 118 + lines);
+    // Duas passagens: a primeira mede o conteúdo e a segunda gera o talão com a altura exacta (sem papel em branco).
+    const draw = async (height: number) => {
     const doc = new jsPDF({ unit: 'mm', format: [width, height] });
+    // Talão: sem moldura nem rodapé de contactos (o verificador de PDFs reconhece-o por esta marca).
     (doc as any).__receiptSlip = true;
+    // A marca de água deste talão é desenhada aqui, por baixo do conteúdo (e não por cima, à saída).
+    setPdfWatermark(doc, null);
     const code = receiptVerificationCode(row);
-    let y = 7;
+    const logo = [config.reportLogo, config.logo].find(isImageData);
+    const watermark = [config.watermarkLogo, getMasterPdfWatermark(), logo].find(isImageData);
+
+    // Marca de água: logótipo grande e muito claro ao centro do talão.
+    if (watermark) {
+        try {
+            const props = doc.getImageProperties(watermark);
+            const size = Math.min(56 / props.width, 56 / props.height);
+            const w = props.width * size;
+            const h = props.height * size;
+            doc.saveGraphicsState();
+            doc.setGState(new (doc.GState as unknown as { new (options: { opacity: number }): any })({ opacity: 0.07 }));
+            (doc as any).__drawingWatermark = true;
+            doc.addImage(watermark, imageFormat(watermark), (width - w) / 2, (height - h) / 2, w, h);
+            (doc as any).__drawingWatermark = false;
+            doc.restoreGraphicsState();
+        } catch { /* imagem inválida: talão sem marca de água */ }
+    }
+
+    let y = 6;
     const center = (text: string, size: number, bold = false) => {
         doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size);
         const wrapped = doc.splitTextToSize(pdfSafe(text), usable) as string[];
@@ -194,12 +226,37 @@ export async function generateReceiptThermal(row: PaymentRow, client: ReceiptCli
     };
     const rule = () => { doc.setDrawColor(120, 120, 120); doc.setLineWidth(0.15); doc.setLineDashPattern([0.8, 0.8], 0); doc.line(left, y - 1.6, width - left, y - 1.6); doc.setLineDashPattern([], 0); y += 1.6; };
 
+    // Cabeçalho: logótipo à esquerda e os dados da empresa ao lado (nome em letra moderada).
     doc.setTextColor(0, 0, 0);
-    center(config.name || 'Empresa', 9, true);
-    center(`NIF ${config.nif || '-'}`, 7);
-    center([config.address, config.location].filter(Boolean).join(', ') || 'Angola', 6.6);
-    center([config.phone, config.email].filter(Boolean).join(' | '), 6.6);
-    y += 1; rule();
+    let textX = left;
+    let logoBottom = y;
+    if (logo) {
+        try {
+            const props = doc.getImageProperties(logo);
+            const scale = Math.min(18 / props.width, 18 / props.height);
+            const w = props.width * scale;
+            const h = props.height * scale;
+            doc.addImage(logo, imageFormat(logo), left, y - 2, w, h);
+            textX = left + w + 2.5;
+            logoBottom = y - 2 + h;
+        } catch { /* sem logótipo */ }
+    }
+    const infoWidth = width - left - textX;
+    const info = (text: string, size: number, bold = false) => {
+        if (!text) return;
+        doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size);
+        const wrapped = (doc.splitTextToSize(pdfSafe(text), infoWidth) as string[]).slice(0, bold ? 3 : 2);
+        doc.text(wrapped, textX, y);
+        y += wrapped.length * size * 0.4 + 0.5;
+    };
+    info(config.name || 'Empresa', 7.2, true);
+    info(`NIF ${config.nif || '-'}`, 5.8);
+    info([config.address, config.location].filter(Boolean).join(', ') || 'Angola', 5.8);
+    info([config.phone && `Tel. ${config.phone}`, config.whatsapp && `WhatsApp ${config.whatsapp}`].filter(Boolean).join(' · '), 5.8);
+    info(config.email || '', 5.8);
+    info(config.website || '', 5.8);
+    y = Math.max(y, logoBottom + 1) + 2.5;
+    rule();
     center('RECIBO DE PAGAMENTO', 9.5, true);
     center(row.receipt, 9, true);
     if (row.status === 'cancelled') {
@@ -230,8 +287,8 @@ export async function generateReceiptThermal(row: PaymentRow, client: ReceiptCli
     line('TOTAL PAGO', formatKz(row.total), true);
     line('Capital em dívida', row.balanceAfter === null ? '-' : formatKz(row.balanceAfter));
     rule();
-    line('Operador', row.operator);
-    line('Emitido', formatLuandaDateTime(new Date()));
+    line('Emitido em', formatLuandaDateTime(new Date()));
+    line('Operador', userName || row.operator);
     y += 1;
     try {
         const qr = await QRCode.toDataURL(qrContent(row, config, code), { margin: 0, width: 240, errorCorrectionLevel: 'M' });
@@ -239,7 +296,15 @@ export async function generateReceiptThermal(row: PaymentRow, client: ReceiptCli
         y += 33;
     } catch { /* sem QR */ }
     center(`Verificação: ${code}`, 7, true);
-    center('Obrigado pela sua preferência.', 6.6);
+    y += 0.5;
+    doc.setTextColor(70, 70, 70);
+    center(`Obrigado pela sua preferência, ${row.clientName}!`, 5.2);
+    center(`Processado por ${SYSTEM_DEVELOPER}`, 4.6);
+    doc.setTextColor(0, 0, 0);
+    return { doc, end: y };
+    };
+    const probe = await draw(500);
+    const { doc } = await draw(Math.max(100, Math.ceil(probe.end + 5)));
     const fileName = `Talao-${row.receipt.replace(/[^\w]+/g, '-')}.pdf`;
     if (output === 'datauri') return { fileName, dataUrl: doc.output('datauristring') as string };
     doc.save(fileName);

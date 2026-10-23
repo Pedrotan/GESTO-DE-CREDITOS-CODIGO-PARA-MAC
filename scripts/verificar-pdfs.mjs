@@ -90,7 +90,8 @@ function instrument(doc) {
     const addImage = doc.addImage.bind(doc);
     doc.addImage = function (...args) {
         const [, , x, y, w, h] = typeof args[1] === 'string' ? args : [args[0], 'PNG', ...args.slice(1)];
-        if ([x, y, w, h].every(v => typeof v === 'number')) push({ kind: 'image', x0: x, y0: y, x1: x + w, y1: y + h });
+        // Marca de água (fundo semitransparente, desenhada antes do conteúdo) não conta como imagem sobreposta.
+        if (!doc.__drawingWatermark && [x, y, w, h].every(v => typeof v === 'number')) push({ kind: 'image', x0: x, y0: y, x1: x + w, y1: y + h });
         return addImage(...args);
     };
     for (const name of SHAPES) {

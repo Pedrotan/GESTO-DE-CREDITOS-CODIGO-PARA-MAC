@@ -1854,6 +1854,71 @@ ${attachment.content}
       return [];
     }
   });
+  // Impressão das páginas já desenhadas como imagens (fundo branco, tamanho real em mm). Substitui a impressão do
+  // visualizador de PDF numa janela escondida, que em algumas impressoras saía toda preta.
+  ipcMain.handle("print-images", async (event, input) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event);
+    let printWindow: BrowserWindow | null = null;
+    let tempHtmlPath = "";
+    try {
+      const pages = Array.isArray(input?.pages) ? input.pages.slice(0, 60) : [];
+      if (!pages.length) throw new Error("Documento vazio para impressão.");
+      let totalBytes = 0;
+      const clean = pages.map((page: any) => {
+        const dataUrl = String(page?.dataUrl || "");
+        if (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl)) throw new Error("Página inválida para impressão.");
+        const widthMm = Number(page?.widthMm);
+        const heightMm = Number(page?.heightMm);
+        if (!(widthMm >= 30 && widthMm <= 600 && heightMm >= 30 && heightMm <= 3000)) throw new Error("Tamanho de página inválido para impressão.");
+        totalBytes += dataUrl.length;
+        return { dataUrl, widthMm, heightMm };
+      });
+      if (totalBytes > 80 * 1024 * 1024) throw new Error("Documento demasiado grande para impressão.");
+      const printers = await event.sender.getPrintersAsync();
+      const printerName = String(input?.printerName || "");
+      const selectedPrinter = printerName
+        ? printers.find((printer) => printer.name === printerName || printer.displayName === printerName)
+        : printers.find((printer) => printer.isDefault) || printers[0];
+      if (!selectedPrinter) throw new Error(printerName ? `A impressora «${printerName}» não está disponível.` : "Nenhuma impressora disponível no sistema.");
+      const first = clean[0];
+      const html = `<!doctype html><html><head><meta charset="utf-8"><style>
+        @page { size: ${first.widthMm.toFixed(2)}mm ${first.heightMm.toFixed(2)}mm; margin: 0; }
+        html, body { margin: 0; padding: 0; background: #ffffff; }
+        img { display: block; width: 100%; height: auto; page-break-after: always; break-after: page; }
+        img:last-child { page-break-after: auto; break-after: auto; }
+      </style></head><body>${clean.map((page: { dataUrl: string }) => `<img src="${page.dataUrl}">`).join("")}</body></html>`;
+      const tempDir = path.join(os.tmpdir(), "tango-print");
+      if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+      tempHtmlPath = path.join(tempDir, `${Date.now()}-${crypto.randomUUID()}.html`);
+      fs.writeFileSync(tempHtmlPath, html, "utf8");
+      printWindow = new BrowserWindow({ show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, javascript: false } });
+      await printWindow.loadFile(tempHtmlPath);
+      await new Promise<void>((resolve, reject) => {
+        if (!printWindow) return reject(new Error("Janela de impressão indisponível."));
+        printWindow.webContents.print({
+          silent: input?.silent !== false,
+          printBackground: true,
+          deviceName: selectedPrinter.name,
+          margins: { marginType: "printableArea" },
+          pageSize: { width: Math.round(first.widthMm * 1000), height: Math.round(first.heightMm * 1000) },
+        }, (success, failureReason) => {
+          if (success) resolve();
+          else reject(new Error(failureReason || "A impressão não foi concluída."));
+        });
+      });
+      return {
+        success: true,
+        printerName: selectedPrinter.displayName || selectedPrinter.name,
+        printers: printers.map((printer) => ({ name: printer.name, displayName: printer.displayName || printer.name, isDefault: Boolean(printer.isDefault), status: printer.status })),
+      };
+    } catch (error: any) {
+      return { success: false, error: error?.message || String(error) };
+    } finally {
+      if (printWindow && !printWindow.isDestroyed()) printWindow.destroy();
+      if (tempHtmlPath) setTimeout(() => { try { if (fs.existsSync(tempHtmlPath)) fs.unlinkSync(tempHtmlPath); } catch { /* ficheiro temporário */ } }, 5e3);
+    }
+  });
   ipcMain.handle("print-pdf", async (event, { pdfData, fileName, printerName, silent = true }) => {
     assertTrustedIpcSender(event);
     assertUserPermission(event);

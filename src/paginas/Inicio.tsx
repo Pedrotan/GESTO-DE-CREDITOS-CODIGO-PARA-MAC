@@ -65,7 +65,11 @@ import { computePortfolioRisk, isDisbursedCredit } from '@/bibliotecas/risco-car
 import { subDays, subMonths, isAfter, isBefore, format, startOfMonth, endOfMonth, startOfWeek, endOfWeek, startOfQuarter, endOfQuarter, startOfYear, endOfYear } from 'date-fns';
 import { validateLicense, getMachineId } from '@/bibliotecas/licenciamento';
 import { useTangoAI } from '@/ganchos/usar-tango-ai';
-import { Sparkles, ShieldCheck, Key, Clock, Lightbulb, Zap, Brain, Fingerprint, X, RotateCcw } from 'lucide-react';
+import { Sparkles, ShieldCheck, Key, Clock, Lightbulb, Zap, Brain, Fingerprint, X, RotateCcw, Trash2 } from 'lucide-react';
+import { AnulacaoPagamento } from '@/componentes/pagamentos/AnulacaoPagamento';
+import { ServicoPagamentos } from '@/servicos/ServicoPagamentos';
+import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
+import { receiptLabel, type PaymentRow } from '@/bibliotecas/pagamentos-analise';
 import {
   BarChart,
   Bar,
@@ -85,8 +89,18 @@ import {
 } from 'recharts';
 
 export default function Dashboard() {
-  const { clients, credits, payments: allPayments, contracts, companySettings, warranties, legalCases } = useData();
+  const { clients, credits, payments: allPayments, contracts, companySettings, warranties, legalCases, refreshData } = useData();
   const { user } = useAuth();
+  // Eliminar um registo de lucro = anular o pagamento que o gerou (motivo obrigatório, estorno contabilístico e auditoria):
+  // deixa de contar nos lucros e nos relatórios, mas o rasto fica, como exige a auditoria.
+  const [profitCancel, setProfitCancel] = useState<any | null>(null);
+  const [cancelThreshold, setCancelThreshold] = useState(0);
+  const canCancelPayments = ServicoControloAcesso.temPermissao(user as any, 'pagamentos.anular_pagamento');
+  useEffect(() => { if (profitCancel) ServicoPagamentos.getConfig().then(config => setCancelThreshold(config.cancelApprovalThreshold)).catch(() => undefined); }, [profitCancel]);
+  const profitCancelRow = profitCancel ? ({
+    id: profitCancel.id, receipt: receiptLabel(profitCancel), clientName: profitCancel.clientName, total: Number(profitCancel.amount) || 0,
+    status: profitCancel.status === 'pending' ? 'pending' : 'confirmed', operatorId: profitCancel.usuario_id || '',
+  } as unknown as PaymentRow) : null;
   // Fonte única (A2): a mesma carteira da página de Créditos decide que créditos estão em curso e em atraso.
   const carteira = useCarteira();
   const sharedBook = useMemo(() => new Map(carteira.rows.filter(row => IN_PORTFOLIO.includes(row.stage)).map(row => [row.id, row])), [carteira.rows]);
@@ -380,6 +394,15 @@ export default function Dashboard() {
     );
   }, [payments, isWithinProfitPeriod]);
 
+  const cancelProfitPayment = async (row: PaymentRow, reason: string) => {
+    const actor = { ...(user as any), id: user?.id || 'system', name: user?.name || 'Sistema', role: user?.role || 'manager' };
+    const result = await ServicoPagamentos.cancel(row.id, reason, actor);
+    toast(result.status === 'requested'
+      ? { title: 'Pedido de eliminação enviado', description: `Acima de ${formatCurrency(cancelThreshold)}: outro administrador tem de aprovar a anulação em Pagamentos.` }
+      : { title: 'Registo de lucro eliminado', description: `${row.receipt || 'Pagamento'} anulado: deixa de contar nos lucros e nos relatórios; o estorno e o motivo ficam na auditoria.` });
+    await refreshData?.();
+  };
+
   const profitClientRows = useMemo(() => {
     const grouped = new Map<string, any>();
 
@@ -422,6 +445,14 @@ export default function Dashboard() {
 
     return Array.from(grouped.values()).sort((a, b) => b.totalProfit - a.totalProfit);
   }, [profitPayments, credits, clients, isValidDate]);
+
+  // Depois de eliminar um registo, o detalhe aberto mostra os dados actuais (ou fecha se o cliente já não tem lucros).
+  useEffect(() => {
+    setSelectedProfitClient((current: any) => {
+      if (!current) return current;
+      return profitClientRows.find(row => row.key === current.key) || null;
+    });
+  }, [profitClientRows]);
 
   const filteredProfitClientRows = useMemo(() => {
     const term = profitSearchTerm.trim().toLowerCase();
@@ -3100,7 +3131,7 @@ export default function Dashboard() {
         <DialogContent className={cn(
           "flex flex-col p-5 sm:p-7 overflow-hidden",
           detailsModal.type === 'profits'
-            ? "w-[96vw] max-w-7xl max-h-[92vh]"
+            ? "w-[98vw] max-w-[1600px] max-h-[94vh]"
             : detailsModal.type === 'invested'
               ? "w-[96vw] max-w-7xl max-h-[92vh]"
             : "max-w-4xl max-h-[85vh]"
@@ -3186,19 +3217,19 @@ export default function Dashboard() {
               </div>
 
               <div className="mt-4 min-h-0 flex-1 overflow-x-auto overflow-y-auto rounded-xl border bg-card shadow-xs">
-                <div className="min-w-[1050px] p-1 pb-4">
+                <div className="min-w-[900px] p-1 pb-4">
                   <Table>
                     <TableHeader className="sticky top-0 bg-muted/90 backdrop-blur-xs z-10">
                       <TableRow className="border-b">
-                        <TableHead className="min-w-[170px] whitespace-nowrap pl-4">Cliente</TableHead>
-                        <TableHead className="min-w-[110px] whitespace-nowrap">Registro</TableHead>
-                        <TableHead className="min-w-[90px] whitespace-nowrap text-center">Pagamentos</TableHead>
-                        <TableHead className="min-w-[150px] whitespace-nowrap text-right">Valor Recebido</TableHead>
-                        <TableHead className="min-w-[140px] whitespace-nowrap text-right text-emerald-600 dark:text-emerald-400">Juros</TableHead>
-                        <TableHead className="min-w-[120px] whitespace-nowrap text-right text-orange-600 dark:text-orange-400">Multas</TableHead>
-                        <TableHead className="min-w-[150px] whitespace-nowrap text-right text-primary font-bold">Lucro Total</TableHead>
-                        <TableHead className="min-w-[120px] whitespace-nowrap text-center">Último Pagamento</TableHead>
-                        <TableHead className="min-w-[130px] whitespace-nowrap text-right pr-4">Ação</TableHead>
+                        <TableHead className="whitespace-nowrap pl-4">Cliente</TableHead>
+                        <TableHead className="whitespace-nowrap">Registro</TableHead>
+                        <TableHead className="whitespace-nowrap text-center">Pagam.</TableHead>
+                        <TableHead className="whitespace-nowrap text-right">Valor Recebido</TableHead>
+                        <TableHead className="whitespace-nowrap text-right text-emerald-600 dark:text-emerald-400">Juros</TableHead>
+                        <TableHead className="whitespace-nowrap text-right text-orange-600 dark:text-orange-400">Multas</TableHead>
+                        <TableHead className="whitespace-nowrap text-right text-primary font-bold">Lucro Total</TableHead>
+                        <TableHead className="whitespace-nowrap text-center">Último Pag.</TableHead>
+                        <TableHead className="whitespace-nowrap text-right pr-4">Ação</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody className="divide-y">
@@ -3233,7 +3264,7 @@ export default function Dashboard() {
                                 onClick={() => setSelectedProfitClient(row)}
                               >
                                 <Eye className="h-4 w-4 text-primary" />
-                                Ver Detalhes
+                                Ver
                               </Button>
                               <Button
                                 size="sm"
@@ -3244,6 +3275,22 @@ export default function Dashboard() {
                               >
                                 <Download className="h-4 w-4" />
                               </Button>
+                              {canCancelPayments && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+                                  title="Eliminar um registo de lucro lançado por engano"
+                                  onClick={() => {
+                                    if (row.payments.length === 1) { setProfitCancel(row.payments[0]); return; }
+                                    setSelectedProfitClient(row);
+                                    toast({ title: 'Escolha o registo a eliminar', description: `${row.clientName} tem ${row.payments.length} pagamentos: use «Eliminar» na linha do pagamento lançado por engano.` });
+                                  }}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  Eliminar
+                                </Button>
+                              )}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -3618,7 +3665,7 @@ export default function Dashboard() {
       </Dialog>
 
       <Dialog open={!!selectedProfitClient} onOpenChange={(open) => !open && setSelectedProfitClient(null)}>
-        <DialogContent className="flex max-h-[92vh] w-[96vw] max-w-7xl flex-col p-5 sm:p-7 overflow-hidden">
+        <DialogContent className="flex max-h-[94vh] w-[98vw] max-w-[1600px] flex-col p-5 sm:p-7 overflow-hidden">
           <DialogHeader>
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
               <div>
@@ -3665,7 +3712,7 @@ export default function Dashboard() {
               </div>
 
               <div className="mt-4 min-h-0 flex-1 overflow-x-auto overflow-y-auto rounded-xl border bg-card shadow-xs">
-                <div className="min-w-[1100px] p-1 pb-4">
+                <div className="min-w-[1000px] p-1 pb-4">
                   <Table>
                     <TableHeader className="sticky top-0 bg-muted/90 backdrop-blur-xs z-10">
                       <TableRow className="border-b">
@@ -3677,7 +3724,8 @@ export default function Dashboard() {
                         <TableHead className="min-w-[160px] whitespace-nowrap font-bold text-xs uppercase text-right">Capital</TableHead>
                         <TableHead className="min-w-[150px] whitespace-nowrap font-bold text-xs uppercase text-right text-emerald-600 dark:text-emerald-400">Juros</TableHead>
                         <TableHead className="min-w-[130px] whitespace-nowrap font-bold text-xs uppercase text-right text-orange-600 dark:text-orange-400">Multas</TableHead>
-                        <TableHead className="min-w-[160px] whitespace-nowrap font-bold text-xs uppercase text-right text-primary pr-4">Lucro</TableHead>
+                        <TableHead className="min-w-[140px] whitespace-nowrap font-bold text-xs uppercase text-right text-primary pr-4">Lucro</TableHead>
+                        {canCancelPayments && <TableHead className="w-[120px] whitespace-nowrap font-bold text-xs uppercase text-right pr-4">Ação</TableHead>}
                       </TableRow>
                     </TableHeader>
                     <TableBody className="divide-y">
@@ -3719,6 +3767,20 @@ export default function Dashboard() {
                               <TableCell className="text-xs font-black text-primary text-sm whitespace-nowrap text-right pr-4">
                                 {formatCurrency(profit)}
                               </TableCell>
+                              {canCancelPayments && (
+                                <TableCell className="whitespace-nowrap text-right pr-4">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="gap-1.5 border-destructive/40 text-destructive hover:bg-destructive/10"
+                                    title="Eliminar este registo (anula o pagamento com motivo e estorno)"
+                                    onClick={() => setProfitCancel(payment)}
+                                  >
+                                    <Trash2 className="h-4 w-4" />
+                                    Eliminar
+                                  </Button>
+                                </TableCell>
+                              )}
                             </TableRow>
                           );
                         })}
@@ -3730,6 +3792,9 @@ export default function Dashboard() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AnulacaoPagamento row={profitCancelRow} open={Boolean(profitCancel)} onOpenChange={open => { if (!open) setProfitCancel(null); }}
+        threshold={cancelThreshold} actorId={user?.id || ''} onConfirm={cancelProfitPayment} />
 
       <Dialog open={!!pendingFinancialReport} onOpenChange={(open) => !open && setPendingFinancialReport(null)}>
         <DialogContent className="max-w-xl">
