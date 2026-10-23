@@ -152,6 +152,7 @@ const menuItems: MenuItem[] = [
       { icon: Users, label: 'Funcionários', path: '/rh/funcionarios', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Clock, label: 'Livro de Ponto', path: '/rh/ponto', permission: 'hr_view', licensedModule: 'rh' },
       { icon: CalendarDays, label: 'Horários e Calendário', path: '/rh/calendario', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: Plane, label: 'Férias', path: '/rh/ferias', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Plane, label: 'Dispensas e Licenças', path: '/rh/ausencias', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Banknote, label: 'Processamento Salarial', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh' },
       { icon: ReciboIcon, label: 'Recibos e Declarações', path: '/rh/recibos', permission: 'hr_view_salaries', licensedModule: 'rh' },

@@ -84,7 +84,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ClientDetailsModal } from '@/componentes/modals/ClientDetailsModal';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
-import { estadoBI, ROTULO_ESTADO_BI, type EstadoBI } from '@/bibliotecas/rh/bi-validade';
+import { clienteComBI, estadoBI, ROTULO_ESTADO_BI, type EstadoBI } from '@/bibliotecas/rh/bi-validade';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { exportToExcel } from '@/bibliotecas/ExcelHelper';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
@@ -280,7 +280,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
     const situacaoBI = useMemo(() => {
         const hoje = luandaTodayKey();
         return new Map(categoryClients
-            .filter(client => client.clientType !== 'EMPRESA' && client.documentType !== 'PASSAPORTE')
+            .filter(client => clienteComBI(client))
             .map(client => [client.id, estadoBI(client.expiryDate, hoje, parametrosBI.diasAviso)]));
     }, [categoryClients, parametrosBI.diasAviso]);
     const contagemBI = useMemo(() => {

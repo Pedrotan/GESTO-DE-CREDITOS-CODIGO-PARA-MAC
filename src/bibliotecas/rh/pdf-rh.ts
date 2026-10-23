@@ -236,3 +236,42 @@ export function ficheiroTransferencias(recibos: ReciboPdf[], descricao: string) 
         ...recibos.filter(r => r.liquido_minor > 0).map(r => [r.iban || 'SEM IBAN', `"${r.nome.replace(/"/gu, "'")}"`, (r.liquido_minor / 100).toFixed(2), `"${descricao}"`, r.numero_recibo].join(';'))];
     return `﻿${linhas.join('\r\n')}\r\n`;
 }
+
+export type DadosGuiaFerias = {
+    numero: string; emitidoEm: string; funcionario: { nome: string; numero: string; cargo?: string; departamento?: string };
+    ano: number; inicio: string; fim: string; dias: number; regresso: string; saldoRestante: number; aprovadoPor?: string | null;
+};
+
+/** Guia de férias numerada: período de gozo, dias úteis, data de regresso, saldo restante e assinaturas. */
+export function gerarGuiaFeriasPdf(d: DadosGuiaFerias, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF();
+    const config = getCompanySettings(settings);
+    const cor = resolveBrandPrimary(config.primaryColor);
+    applyBranding(doc, config, userName);
+    let y = brandingHeaderBottom(doc) + 14;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(15, 23, 42);
+    doc.text('GUIA DE FÉRIAS', 105, y, { align: 'center' });
+    doc.setFontSize(10); doc.setTextColor(cor[0], cor[1], cor[2]);
+    doc.text(`N.º ${d.numero}`, 105, y + 7, { align: 'center' });
+    y += 16;
+    autoTable(doc, {
+        startY: y, theme: 'grid', styles: { fontSize: 9.5, cellPadding: 2.4 },
+        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60, fillColor: [248, 250, 252] } },
+        body: [
+            ['Funcionário', `${d.funcionario.nome} (n.º ${d.funcionario.numero})`],
+            ['Cargo / departamento', [d.funcionario.cargo, d.funcionario.departamento].filter(Boolean).join(' · ') || '—'],
+            ['Férias do ano', String(d.ano)],
+            ['Período de gozo', `${dataPt(d.inicio)} a ${dataPt(d.fim)}`],
+            ['Dias úteis', String(d.dias)],
+            ['Data de regresso', dataPt(d.regresso)],
+            ['Saldo restante', `${d.saldoRestante} dia(s) útil(eis)`],
+            ['Aprovado por', d.aprovadoPor || '—'],
+            ['Emitida em', dataPt(d.emitidoEm)],
+        ],
+        didDrawPage: () => applyBranding(doc, config, userName, true),
+    });
+    const fim = (doc as any).lastAutoTable?.finalY || y + 70;
+    assinaturas(doc, fim + 32, ['O funcionário', 'O chefe', 'Recursos Humanos']);
+    writeClosingNote(doc, `Guia ${d.numero} emitida pelo sistema; os dias ficam marcados como férias no livro de ponto.`, fim + 40, config, userName, { line: false });
+    return terminar(doc, `Guia-ferias-${d.numero.replace(/[^\w]+/gu, '-')}.pdf`, saida);
+}

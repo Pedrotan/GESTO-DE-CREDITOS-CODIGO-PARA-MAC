@@ -1,4 +1,5 @@
 import { LembretesCobranca } from './LembretesCobranca';
+import { TarefaDiariaRH } from '@/componentes/rh/TarefaDiariaRH';
 import { ProcessamentoAlcadas } from './ProcessamentoAlcadas';
 import { VerificacaoContabilisticaDiaria } from './VerificacaoContabilisticaDiaria';
 import React, { ReactNode, useState, useEffect } from 'react';
@@ -85,6 +86,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
         <EnvioRelatoriosAgendados />
         <VerificacaoContabilisticaDiaria />
         <LembretesCobranca />
+        <TarefaDiariaRH />
         <ProcessamentoAlcadas />
         <LembreteFechoMes />
         <LigacaoNuvemDesktop />

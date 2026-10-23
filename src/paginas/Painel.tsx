@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { startOfMonth, subMonths, isWithinInterval, endOfMonth } from 'date-fns';
 import { toast } from '@/componentes/ui/use-toast';
+import { BannerAniversarios } from '@/componentes/rh/BannerAniversarios';
 
 const openCreditStatuses = new Set(['active', 'overdue', 'renegotiated', 'defaulted']);
 const isOpenCredit = (credit: { status: string; currentBalance?: number }) => (
@@ -156,6 +157,7 @@ export default function Dashboard() {
       title="Painel Geral"
       subtitle="Visão geral do sistema de crédito"
     >
+      <BannerAniversarios />
       <div className="flex justify-end mb-6 -mt-2">
         <Button
           onClick={() => setIsLicenseRenewalOpen(true)}

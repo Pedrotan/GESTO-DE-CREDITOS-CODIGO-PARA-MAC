@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -37,7 +38,10 @@ export default function FuncionariosRH() {
     const [estado, setEstado] = useState<string>('activo');
     const [departamento, setDepartamento] = useState<string>(TODOS);
     const [formulario, setFormulario] = useState<{ aberto: boolean; funcionario: Funcionario | null }>({ aberto: false, funcionario: null });
-    const [fichaId, setFichaId] = useState<string | null>(null);
+    const [parametrosUrl] = useSearchParams();
+    const [fichaId, setFichaId] = useState<string | null>(parametrosUrl.get('ficha'));
+    // Os alertas abrem a ficha do funcionário pelo endereço (?ficha=…).
+    useEffect(() => { const id = parametrosUrl.get('ficha'); if (id) setFichaId(id); }, [parametrosUrl]);
     const hoje = luandaTodayKey();
     const anosBI = valorNumerico(parametros, 'bi_anos_validade', hoje, 10);
     const maxMb = valorNumerico(parametros, 'documento_max_mb', hoje, 2);

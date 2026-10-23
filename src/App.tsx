@@ -59,6 +59,7 @@ const AusenciasRH = lazyWithReload(() => import("./paginas/rh/AusenciasRH"));
 const CalendarioRH = lazyWithReload(() => import("./paginas/rh/CalendarioRH"));
 const ProcessamentoRH = lazyWithReload(() => import("./paginas/rh/ProcessamentoRH"));
 const RecibosRH = lazyWithReload(() => import("./paginas/rh/RecibosRH"));
+const FeriasRH = lazyWithReload(() => import("./paginas/rh/FeriasRH"));
 const Scoring = lazyWithReload(() => import("./paginas/Scoring"));
 const SimuladorCredito = lazyWithReload(() => import("./paginas/SimuladorCredito"));
 const TermosPoliticas = lazyWithReload(() => import("./paginas/TermosPoliticas"));
@@ -359,6 +360,7 @@ const AppContent = () => {
               { path: '/rh/calendario', page: <CalendarioRH /> },
               { path: '/rh/processamento', page: <ProcessamentoRH /> },
               { path: '/rh/recibos', page: <RecibosRH /> },
+              { path: '/rh/ferias', page: <FeriasRH /> },
             ].map(({ path, page }) => (
               <Route key={path} path={path} element={<ProtectedRoute permission="hr_view"><GuardaModuloRH>{page}</GuardaModuloRH></ProtectedRoute>} />
             ))}

@@ -1063,7 +1063,9 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_documento_emitido: "hr_manage",
   rh_recibo: "hr_payroll",
   rh_recibo_linha: "hr_payroll",
-  rh_rubrica_pontual: "hr_payroll"
+  rh_rubrica_pontual: "hr_payroll",
+  // rh_alerta fica sem permissão própria: os alertas são derivados e a tarefa diária corre para qualquer utilizador autenticado.
+  rh_plano_ferias: "hr_manage"
 };
 // Processamento salarial: calcular exige hr_payroll; aprovar, pagar e fechar exigem hr_payroll_approve e o
 // utilizador autenticado como responsável (1.º parâmetro); aprovar o que o próprio calculou e reabrir um

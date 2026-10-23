@@ -257,3 +257,31 @@ export const rhSeedFase2Statements = (now: string) => [
     ...RH_FERIADOS_INICIAIS.map(([dia, nome]) => ({ sql: RH_SEED_FERIADO_SQL, params: [`feriado-${dia}`, `2000-${dia}`, nome, now] })),
     { sql: RH_SEED_HORARIO_SQL, params: [now] },
 ];
+
+// ── Fase 4: plano de férias e alertas ──
+export const RH_FASE4_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_plano_ferias (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, ano INTEGER NOT NULL, mes_previsto INTEGER CHECK(mes_previsto BETWEEN 1 AND 12),
+        data_inicio TEXT, data_fim TEXT, dias REAL NOT NULL DEFAULT 0,
+        estado TEXT NOT NULL DEFAULT 'planeado' CHECK(estado IN ('planeado', 'aprovado', 'em_gozo', 'gozado', 'anulado')),
+        subsidio_processado INTEGER NOT NULL DEFAULT 0, processamento_id TEXT, ausencia_id TEXT, guia_id TEXT, observacoes TEXT,
+        aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_plano_ferias_funcionario ON rh_plano_ferias(funcionario_id, ano)`,
+    // Alertas do painel: o id é a chave única (tipo + referência + data), para a tarefa diária nunca duplicar.
+    `CREATE TABLE IF NOT EXISTS rh_alerta (
+        id TEXT PRIMARY KEY, tipo TEXT NOT NULL, referencia_id TEXT, funcionario_id TEXT, mensagem TEXT NOT NULL, data_alerta TEXT NOT NULL,
+        destinatario_perfil TEXT NOT NULL DEFAULT 'rh', prioridade INTEGER NOT NULL DEFAULT 2, accao TEXT,
+        estado TEXT NOT NULL DEFAULT 'novo' CHECK(estado IN ('novo', 'lido', 'resolvido')),
+        lido_por TEXT, lido_em TEXT, resolvido_por TEXT, resolvido_em TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_alerta_estado ON rh_alerta(estado, destinatario_perfil)`,
+];
+
+export const RH_PARAMETROS_FASE4: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'prazo_entrega_dia', valor: '10', descricao: 'Dia do mês seguinte até ao qual se entregam o INSS e o IRT (confirmar os prazos em vigor)' },
+    { chave: 'alerta_prazos_dias', valor: '5', descricao: 'Dias de antecedência do alerta dos prazos de INSS e IRT' },
+];
+export const rhSeedFase4Statements = (now: string) => RH_PARAMETROS_FASE4.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));

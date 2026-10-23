@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -38,7 +39,9 @@ export default function ProcessamentoRH() {
     const { companySettings } = useData();
     const base = useBaseRH();
     const lista = useCarregar(() => ServicoSalariosRH.processamentos(), [] as Processamento[]);
-    const [seleccionado, setSeleccionado] = useState<string | null>(null);
+    const [parametrosUrl] = useSearchParams();
+    const [seleccionado, setSeleccionado] = useState<string | null>(parametrosUrl.get('id'));
+    useEffect(() => { const id = parametrosUrl.get('id'); if (id) setSeleccionado(id); }, [parametrosUrl]);
     const [abrir, setAbrir] = useState(false);
     const p = lista.dados.find(x => x.id === seleccionado) || null;
     const detalhe = useCarregar(async () => (p ? { recibos: await ServicoSalariosRH.recibos(p.id), pontuais: await ServicoSalariosRH.pontuais(p.id) } : { recibos: [] as Recibo[], pontuais: [] as RubricaPontual[] }),

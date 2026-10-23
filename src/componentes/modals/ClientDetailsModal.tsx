@@ -22,7 +22,7 @@ import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import { PaymentSlipModal } from './PaymentSlipModal';
 import { ClientCreditInstallments } from './ClientCreditInstallments';
 import { useState } from 'react';
-import { estadoBI } from '@/bibliotecas/rh/bi-validade';
+import { clienteComBI, estadoBI } from '@/bibliotecas/rh/bi-validade';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
 import { SeloBI } from '@/componentes/rh/comum-rh';
@@ -231,7 +231,7 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
                                             <span>{client.expiryDate}</span>
                                         </div>
                                     )}
-                                    {client.clientType !== 'EMPRESA' && client.documentType !== 'PASSAPORTE' && (
+                                    {clienteComBI(client) && (
                                         <div className="flex items-center gap-3">
                                             <ShieldAlert className="h-4 w-4 text-muted-foreground" />
                                             <span className="font-medium min-w-[80px]">Situação BI:</span>

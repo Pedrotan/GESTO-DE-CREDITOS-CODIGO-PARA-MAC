@@ -4,7 +4,7 @@ import initSqlJs, { Database } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
-import { RH_FASE1_SQL, RH_FASE2_SQL, rhSeedFase2Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
+import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
 import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
 
 let db: Database | null = null;
@@ -1164,6 +1164,12 @@ const createTables = async () => {
     // Recursos Humanos, fase 3: processamento salarial (os triggers de imutabilidade vêm do esquema protegido).
     await applyMigration(2026102303, 'rh-fase3-processamento-salarial', async () => {
         for (const statement of RH_FASE3_SQL) await executeSql(statement);
+    });
+    // Recursos Humanos, fase 4: plano de férias e alertas; validade do BI dos clientes com data do último alerta.
+    await applyMigration(2026102304, 'rh-fase4-ferias-e-alertas', async () => {
+        for (const statement of RH_FASE4_SQL) await executeSql(statement);
+        for (const seed of rhSeedFase4Statements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+        await safeAddColumn('clients', 'biAlertSentAt', 'TEXT');
     });
 
     // safeAddColumns for migrations

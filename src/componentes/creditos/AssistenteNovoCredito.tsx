@@ -27,7 +27,7 @@ import { CLIENT_STATUS_LABELS, clientDisplayStatus } from '@/bibliotecas/estado-
 import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import type { Credit } from '@/tipos/credito';
-import { estadoBI } from '@/bibliotecas/rh/bi-validade';
+import { clienteComBI, estadoBI } from '@/bibliotecas/rh/bi-validade';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
 
@@ -79,7 +79,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
 
     const client = clients.find((item: any) => item.id === clientId);
     const parametrosBI = useParametrosBI();
-    const biCliente = client && client.clientType !== 'EMPRESA' && client.documentType !== 'PASSAPORTE'
+    const biCliente = client && clienteComBI(client)
         ? estadoBI(client.expiryDate, luandaTodayKey(), parametrosBI.diasAviso) : null;
     const standing = useMemo(() => clientId ? clientCreditStanding(clientId, credits) : null, [clientId, credits]);
     const blockReason = useMemo(() => {

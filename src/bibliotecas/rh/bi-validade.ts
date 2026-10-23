@@ -73,3 +73,14 @@ export function validarDatasBI(emissao: string | null | undefined, validade: str
 export const ROTULO_ESTADO_BI: Record<EstadoBI, string> = {
     valido: 'Válido', a_expirar: 'A expirar', expirado: 'Expirado', sem_data: 'Sem validade',
 };
+
+/**
+ * O cliente identifica-se com BI angolano? Empresas (NIF de 10 dígitos), passaportes e estrangeiros ficam de
+ * fora. O tipo de titular e de documento não ficam guardados na base de dados, por isso decide-se pelo número.
+ */
+export function clienteComBI(c: { nif?: string | null; clientType?: string | null; documentType?: string | null; clientCategory?: string | null }) {
+    if (c.clientType === 'EMPRESA' || c.documentType === 'PASSAPORTE' || c.clientCategory === 'ESTRANGEIRO') return false;
+    if (c.clientType === 'PARTICULAR' && c.documentType === 'BI') return true;
+    const numero = (c.nif || '').replace(/[^A-Za-z0-9]/gu, '').toUpperCase();
+    return !numero || numero.startsWith('SEM') || /^\d{9}[A-Z]{2}\d{3}$/u.test(numero);
+}

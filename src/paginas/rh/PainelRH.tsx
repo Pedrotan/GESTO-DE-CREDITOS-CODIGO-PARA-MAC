@@ -1,12 +1,17 @@
-import { useMemo } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
-import { Cake, FileWarning, Hourglass, IdCard } from 'lucide-react';
-import { ServicoRH, type DocumentoRH } from '@/servicos/rh/ServicoRH';
-import { estadoBI } from '@/bibliotecas/rh/bi-validade';
-import { addDaysToKey, luandaTodayKey } from '@/bibliotecas/fuso-angola';
+import { Button } from '@/componentes/ui/button';
+import { Bell, Cake, CalendarClock, Check, FileWarning, Hourglass, Plane, Receipt } from 'lucide-react';
+import { ServicoAlertasRH, type AlertaRH } from '@/servicos/rh/ServicoAlertasRH';
+import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
+import { ServicoFeriasRH, type PlanoFeriasRH } from '@/servicos/rh/ServicoFeriasRH';
+import { estadoEfectivo } from '@/bibliotecas/rh/ferias';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
-import { Indicador, NavegacaoRH, dataPt, kz, useCarregar } from '@/componentes/rh/comum-rh';
+import { Indicador, NavegacaoRH, kz, useCarregar } from '@/componentes/rh/comum-rh';
+import { BannerAniversarios } from '@/componentes/rh/BannerAniversarios';
+import { EVENTO_ALERTAS_RH } from '@/componentes/rh/TarefaDiariaRH';
 import { useBaseRH } from './FuncionariosRH';
 
 /** Próximo aniversário (aaaa-mm-dd) a partir de hoje; 29/02 conta a 28/02 nos anos não bissextos. */
@@ -21,67 +26,65 @@ export function proximoAniversario(nascimento: string, hoje: string) {
     return '';
 }
 
-type Lembrete = { data: string; texto: string; tipo: 'aniversario' | 'contrato' | 'experiencia' | 'documento' | 'bi' };
-const ICONES = { aniversario: Cake, contrato: Hourglass, experiencia: Hourglass, documento: FileWarning, bi: IdCard };
+const ICONES: Record<string, typeof Bell> = { aniversario: Cake, aniversario_proximo: Cake, ferias: Plane, regresso: Plane, contrato: Hourglass, experiencia: Hourglass, documento: FileWarning, natal: Receipt, prazos: CalendarClock, faltas_pendentes: Bell };
+// Alertas de acção só ficam resolvidos quando a acção é feita; os informativos podem ser arquivados à mão.
+const INFORMATIVOS = new Set(['aniversario', 'aniversario_proximo', 'regresso']);
+const ROTULO_ACCAO: Record<string, string> = { ferias: 'Processar subsídio', contrato: 'Renovar contrato', experiencia: 'Ver contrato', documento: 'Carregar documento', natal: 'Processar subsídio de Natal', prazos: 'Ver processamento', faltas_pendentes: 'Ver faltas' };
 
 export default function PainelRH() {
-    const { salarios } = useActorRH();
+    const { actor, salarios } = useActorRH();
+    const navigate = useNavigate();
     const base = useBaseRH();
-    const documentos = useCarregar(() => ServicoRH.documentos(), [] as DocumentoRH[]);
+    const alertas = useCarregar(() => ServicoAlertasRH.abertos(), [] as AlertaRH[]);
+    const extra = useCarregar(async () => ({ ausencias: await ServicoTempoRH.ausencias(), planos: await ServicoFeriasRH.planos() }), { ausencias: [] as Awaited<ReturnType<typeof ServicoTempoRH.ausencias>>, planos: [] as PlanoFeriasRH[] });
+    useEffect(() => {
+        const recarregar = () => void alertas.recarregar();
+        window.addEventListener(EVENTO_ALERTAS_RH, recarregar);
+        return () => window.removeEventListener(EVENTO_ALERTAS_RH, recarregar);
+    }, [alertas.recarregar]);
     const { funcionarios, contratos, departamentos } = base.dados;
     const hoje = luandaTodayKey();
+    const mes = hoje.slice(0, 7);
 
     const activos = funcionarios.filter(f => f.estado === 'activo');
-    const contratosActivos = contratos.filter(c => c.estado === 'activo' && activos.some(f => f.id === c.funcionario_id));
-    const massaSalarial = contratosActivos.reduce((s, c) => s + c.salario_base_minor, 0);
-
-    const lembretes = useMemo(() => {
-        const lista: Lembrete[] = [];
-        const nome = (id: string) => funcionarios.find(f => f.id === id)?.nome || '—';
-        for (const f of activos) {
-            if (f.data_nascimento) {
-                const proximo = proximoAniversario(f.data_nascimento, hoje);
-                if (proximo && proximo <= addDaysToKey(hoje, 7)) lista.push({ data: proximo, tipo: 'aniversario', texto: proximo === hoje ? `Hoje é o aniversário de ${f.nome}. Feliz aniversário!` : `O aniversário de ${f.nome} é a ${dataPt(proximo)}.` });
-            }
-            const bi = estadoBI(f.bi_validade, hoje, 30);
-            if (bi.estado === 'expirado' || bi.estado === 'a_expirar') lista.push({ data: f.bi_validade!, tipo: 'bi', texto: `O BI de ${f.nome} ${bi.estado === 'expirado' ? 'expirou' : 'expira'} a ${dataPt(f.bi_validade)}.` });
-        }
-        for (const c of contratosActivos) {
-            if (c.fim && c.fim <= addDaysToKey(hoje, 60)) lista.push({ data: c.fim, tipo: 'contrato', texto: `O contrato de ${nome(c.funcionario_id)} termina a ${dataPt(c.fim)}.` });
-            if (c.periodo_experiencia_fim && c.periodo_experiencia_fim >= hoje && c.periodo_experiencia_fim <= addDaysToKey(hoje, 15))
-                lista.push({ data: c.periodo_experiencia_fim, tipo: 'experiencia', texto: `O período experimental de ${nome(c.funcionario_id)} termina a ${dataPt(c.periodo_experiencia_fim)}.` });
-        }
-        for (const d of documentos.dados) {
-            if (d.estado === 'activo' && d.data_validade && d.data_validade <= addDaysToKey(hoje, 30) && d.categoria !== 'identificacao')
-                lista.push({ data: d.data_validade, tipo: 'documento', texto: `O documento «${d.nome}» de ${nome(d.funcionario_id)} ${d.data_validade < hoje ? 'expirou' : 'expira'} a ${dataPt(d.data_validade)}.` });
-        }
-        return lista.sort((a, b) => a.data.localeCompare(b.data));
-    }, [activos, contratosActivos, documentos.dados, funcionarios, hoje]);
-
+    const massaSalarial = contratos.filter(c => c.estado === 'activo' && activos.some(f => f.id === c.funcionario_id)).reduce((s, c) => s + c.salario_base_minor, 0);
+    const deFerias = extra.dados.planos.filter(p => estadoEfectivo(p, hoje) === 'em_gozo').length;
+    const faltasMes = extra.dados.ausencias.filter(a => a.estado === 'aprovada' && a.tipo_id === 'ausencia-F' && a.data_inicio.startsWith(mes)).reduce((s, a) => s + a.dias, 0);
+    const lista = alertas.dados.filter(a => a.destinatario_perfil !== 'clientes' && a.tipo !== 'aniversario');
     const porDepartamento = departamentos.map(d => ({ nome: d.nome, total: activos.filter(f => f.departamento_id === d.id).length })).filter(d => d.total > 0);
 
+    const accao = (a: AlertaRH) => {
+        if (actor && a.estado === 'novo') void ServicoAlertasRH.marcarLido(a.id, actor);
+        if (a.accao) navigate(a.accao);
+    };
+
     return (
-        <MainLayout title="Painel de RH" subtitle="Efectivos, custos e lembretes do dia">
+        <MainLayout title="Painel de RH" subtitle="Efectivos, custos, alertas e lembretes do dia">
             <NavegacaoRH />
+            <BannerAniversarios />
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <Indicador titulo="Funcionários activos" valor={activos.length} nota={`${funcionarios.filter(f => f.estado === 'suspenso').length} suspenso(s)`} tom="emerald" />
-                <Indicador titulo="Admissões este ano" valor={funcionarios.filter(f => f.data_admissao?.startsWith(hoje.slice(0, 4))).length}
-                    nota={`${funcionarios.filter(f => f.data_saida?.startsWith(hoje.slice(0, 4))).length} saída(s)`} tom="sky" />
+                <Indicador titulo="De férias hoje" valor={deFerias} tom="sky" />
+                <Indicador titulo="Faltas injustificadas no mês" valor={faltasMes} tom={faltasMes ? 'red' : 'slate'} />
                 <Indicador titulo="Massa salarial (base)" valor={salarios ? kz(massaSalarial) : '•••'} nota="Soma dos salários base dos contratos activos" />
-                <Indicador titulo="Lembretes" valor={lembretes.length} nota="Próximos 7 a 60 dias" tom={lembretes.length ? 'orange' : 'slate'} />
             </div>
 
             <div className="mt-5 grid gap-4 lg:grid-cols-3">
                 <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900 lg:col-span-2">
-                    <h2 className="mb-3 font-black">Lembretes</h2>
-                    {lembretes.length === 0 ? <p className="text-sm text-slate-500">Sem lembretes.</p> : (
+                    <h2 className="mb-3 flex items-center gap-2 font-black"><Bell className="h-4 w-4" /> Alertas e lembretes <span className="rounded-full bg-orange-100 px-2 text-xs text-orange-700">{lista.filter(a => a.estado === 'novo').length} novo(s)</span></h2>
+                    {lista.length === 0 ? <p className="text-sm text-slate-500">Sem alertas abertos.</p> : (
                         <ul className="space-y-2">
-                            {lembretes.map((l, i) => {
-                                const Icone = ICONES[l.tipo];
+                            {lista.map(a => {
+                                const Icone = ICONES[a.tipo] || Bell;
                                 return (
-                                    <li key={i} className="flex items-start gap-3 rounded-xl bg-slate-50 px-3 py-2 text-sm dark:bg-slate-800/60">
-                                        <Icone className={`mt-0.5 h-4 w-4 shrink-0 ${l.tipo === 'aniversario' ? 'text-pink-500' : l.data < hoje ? 'text-red-500' : 'text-orange-500'}`} />
-                                        <span>{l.texto}</span>
+                                    <li key={a.id} className={`flex items-start gap-3 rounded-xl px-3 py-2 text-sm ${a.estado === 'novo' ? 'bg-orange-50 dark:bg-orange-950/30' : 'bg-slate-50 dark:bg-slate-800/60'}`}>
+                                        <Icone className={`mt-0.5 h-4 w-4 shrink-0 ${a.prioridade === 1 ? 'text-red-500' : a.prioridade === 2 ? 'text-orange-500' : 'text-sky-500'}`} />
+                                        <span className="flex-1">{a.mensagem}</span>
+                                        <span className="flex shrink-0 gap-1">
+                                            {a.accao && <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => accao(a)}>{ROTULO_ACCAO[a.tipo] || 'Abrir'}</Button>}
+                                            {actor && INFORMATIVOS.has(a.tipo) && <Button size="icon" variant="ghost" className="h-7 w-7" title="Arquivar" onClick={() => void ServicoAlertasRH.resolver(a.id, actor).then(() => alertas.recarregar())}><Check className="h-4 w-4" /></Button>}
+                                            {actor && !INFORMATIVOS.has(a.tipo) && a.estado === 'novo' && <Button size="icon" variant="ghost" className="h-7 w-7" title="Marcar como lido" onClick={() => void ServicoAlertasRH.marcarLido(a.id, actor).then(() => alertas.recarregar())}><Check className="h-4 w-4" /></Button>}
+                                        </span>
                                     </li>
                                 );
                             })}
