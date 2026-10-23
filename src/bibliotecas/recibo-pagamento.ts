@@ -7,6 +7,7 @@ import autoTable from '@/bibliotecas/pdf-tabela';
 import { applyBranding, brandingHeaderBottom, ensurePdfSpace, getCompanySettings, resolveBrandDark, resolveBrandPrimary, writeClosingNote } from './pdf';
 import { formatLuandaDate, formatLuandaDateTime, formatRegistration } from './fuso-angola';
 import { formatKz, type PaymentRow } from './pagamentos-analise';
+import { scopedStorageKey } from './contas';
 
 export type ReceiptClient = { name: string; nif?: string; phone?: string; address?: string };
 
@@ -163,6 +164,26 @@ export async function generateReceiptA4(row: PaymentRow, client: ReceiptClient, 
 
 const isImageData = (value: unknown): value is string => typeof value === 'string' && /^data:image\/(png|jpe?g|webp);base64,/i.test(value);
 const imageFormat = (value: string) => /^data:image\/jpe?g/i.test(value) ? 'JPEG' : /^data:image\/webp/i.test(value) ? 'WEBP' : 'PNG';
+/** Imagem utilizável no PDF: data URI (png/jpeg/webp) ou base64 sem prefixo (bases antigas). */
+const toImageData = (value: unknown): string | undefined => {
+    if (isImageData(value)) return value;
+    if (typeof value === 'string' && value.length > 100 && /^[A-Za-z0-9+/=]+$/.test(value.slice(0, 200))) return `data:image/png;base64,${value}`;
+    return undefined;
+};
+/** Cópia do logótipo guardada neste computador (a mesma que o recibo A4 usa quando as definições não a têm). */
+const storedImage = (key: string) => {
+    try { return typeof localStorage === 'undefined' ? undefined : toImageData(localStorage.getItem(scopedStorageKey(key))); } catch { return undefined; }
+};
+/** Emblema da marca (quadrado com «[|]»), como no cabeçalho dos PDF sem logótipo. */
+const drawBrandEmblem = (doc: any, x: number, y: number, size: number) => {
+    const k = size / 14;
+    doc.setFillColor(0, 0, 0);
+    doc.roundedRect(x, y, size, size, 1.8 * k, 1.8 * k, 'F');
+    doc.setFillColor(255, 255, 255);
+    for (const [bx, by, bw, bh] of [[2.8, 2.5, 1.6, 9], [2.8, 2.5, 3.2, 1.6], [2.8, 9.9, 3.2, 1.6], [6.4, 3.8, 1.2, 6.4], [9.6, 2.5, 1.6, 9], [8.0, 2.5, 3.2, 1.6], [8.0, 9.9, 3.2, 1.6]]) {
+        doc.rect(x + bx * k, y + by * k, bw * k, bh * k, 'F');
+    }
+};
 
 /** Empresa que desenvolve o sistema (rodapé dos talões). */
 const SYSTEM_DEVELOPER = 'Tango Gestão de Créditos · DIGITAL NORTE - Comércio e Prestação de Serviços, (SU), Lda';
@@ -209,8 +230,9 @@ export async function generateReceiptThermal(row: PaymentRow, client: ReceiptCli
     const fontSize = 7;
     const lineH = 3.15;
     const code = receiptVerificationCode(row);
-    const logo = [config.reportLogo, config.logo].find(isImageData);
-    const watermark = [config.watermarkLogo, getMasterPdfWatermark(), logo].find(isImageData);
+    // Mesmas origens do recibo A4: definições, cópias guardadas neste computador e marca de água do Master.
+    const logo = [config.reportLogo, config.logo].map(toImageData).find(Boolean) || storedImage('company_report_logo_backup') || storedImage('company_logo_backup');
+    const watermark = [config.watermarkLogo, getMasterPdfWatermark()].map(toImageData).find(Boolean) || storedImage('company_watermark_logo_backup') || logo;
     const slogan = String(settings?.slogan || settings?.segment || '').trim();
     const issuedAt = formatLuandaDateTime(new Date());
     const qr = await QRCode.toDataURL(qrContent(row, config, code), { margin: 0, width: 240, errorCorrectionLevel: 'M' }).catch(() => '');
@@ -222,6 +244,13 @@ export async function generateReceiptThermal(row: PaymentRow, client: ReceiptCli
         (doc as any).__receiptSlip = true;
         // A marca de água deste talão é desenhada aqui, por baixo do conteúdo (e não por cima, à saída).
         setPdfWatermark(doc, null);
+        if (!watermark) {
+            // Sem imagem: o emblema da marca, grande e muito claro, ao centro.
+            doc.saveGraphicsState();
+            doc.setGState(new (doc.GState as unknown as { new (options: { opacity: number }): any })({ opacity: 0.05 }));
+            drawBrandEmblem(doc, (width - 46) / 2, (height - 46) / 2, 46);
+            doc.restoreGraphicsState();
+        }
         if (watermark) {
             try {
                 const props = doc.getImageProperties(watermark);
@@ -262,23 +291,28 @@ export async function generateReceiptThermal(row: PaymentRow, client: ReceiptCli
                 doc.addImage(logo, imageFormat(logo), (width - w) / 2, y - 1.5, w, h);
                 y += h + 1.5;
             } catch { /* sem logótipo */ }
+        } else {
+            drawBrandEmblem(doc, (width - 13) / 2, y - 1.5, 13);
+            y += 13 + 1.5;
         }
         rule('=');
         centered((config.name || 'Empresa').toUpperCase(), true);
         if (slogan) centered(slogan);
         rule('=');
         field('NIF:', config.nif || '-');
-        if (config.address) field('Endereço:', config.address);
-        if (config.location) field('Cidade:', config.location);
+        // Contactos com os mesmos valores por omissão do recibo A4 (rodapé dos PDF).
+        const phone = config.phone || '+244 941 537 486';
+        field('Endereço:', config.address || 'Cuanza Norte, N´dalatando');
+        field('Cidade:', config.location || 'Angola');
         // Telefone e WhatsApp na mesma linha quando cabem (como no cupão); senão, um por linha, sem partir os números.
-        const phones = `Telefone: ${config.phone || '-'} | WhatsApp: ${config.whatsapp}`;
-        if (config.phone && config.whatsapp && phones.length <= SLIP_COLS) text(pdfSafe(phones));
+        const phones = `Telefone: ${phone} | WhatsApp: ${config.whatsapp}`;
+        if (config.whatsapp && phones.length <= SLIP_COLS) text(pdfSafe(phones));
         else {
-            if (config.phone) field('Telefone:', config.phone);
+            field('Telefone:', phone);
             if (config.whatsapp) field('WhatsApp:', config.whatsapp);
         }
-        if (config.email) field('Email:', config.email);
-        if (config.website) field('Site:', config.website);
+        field('Email:', config.email || 'geral@tango.co.ao');
+        field('Site:', config.website || 'www.tango.co.ao');
         rule('=');
         text(spread(issuedAt, `RECIBO: ${row.receipt.replace(/^RC\s*/, '')}`));
         text(spread(`CONTRATO: ${row.contract}`, row.reference ? `REF: ${row.reference}` : ''));
