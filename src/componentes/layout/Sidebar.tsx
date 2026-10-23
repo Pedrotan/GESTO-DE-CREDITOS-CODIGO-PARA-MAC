@@ -61,6 +61,8 @@ import {
   FolderOpen,
   Clock,
   Plane,
+  Banknote,
+  ReceiptText as ReciboIcon,
 } from 'lucide-react';
 import { useModuloRH } from '@/ganchos/usar-modulo-rh';
 import {
@@ -151,6 +153,8 @@ const menuItems: MenuItem[] = [
       { icon: Clock, label: 'Livro de Ponto', path: '/rh/ponto', permission: 'hr_view', licensedModule: 'rh' },
       { icon: CalendarDays, label: 'Horários e Calendário', path: '/rh/calendario', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Plane, label: 'Dispensas e Licenças', path: '/rh/ausencias', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: Banknote, label: 'Processamento Salarial', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh' },
+      { icon: ReciboIcon, label: 'Recibos e Declarações', path: '/rh/recibos', permission: 'hr_view_salaries', licensedModule: 'rh' },
       { icon: FolderOpen, label: 'Documentos', path: '/rh/documentos', permission: 'hr_view', licensedModule: 'rh' },
       { icon: SlidersHorizontal, label: 'Configurações de RH', path: '/rh/configuracoes', permission: 'hr_view', licensedModule: 'rh' },
     ],

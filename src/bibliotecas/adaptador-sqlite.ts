@@ -5,6 +5,7 @@ import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
 import { RH_FASE1_SQL, RH_FASE2_SQL, rhSeedFase2Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
+import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
 
 let db: Database | null = null;
 let sqlPromise: Promise<any> | null = null;
@@ -1159,6 +1160,10 @@ const createTables = async () => {
     await applyMigration(2026102302, 'rh-fase2-ponto-e-ausencias', async () => {
         for (const statement of RH_FASE2_SQL) await executeSql(statement);
         for (const seed of rhSeedFase2Statements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
+    // Recursos Humanos, fase 3: processamento salarial (os triggers de imutabilidade vêm do esquema protegido).
+    await applyMigration(2026102303, 'rh-fase3-processamento-salarial', async () => {
+        for (const statement of RH_FASE3_SQL) await executeSql(statement);
     });
 
     // safeAddColumns for migrations

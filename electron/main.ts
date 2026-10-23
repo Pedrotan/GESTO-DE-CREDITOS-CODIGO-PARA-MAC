@@ -1060,7 +1060,31 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_tipo_ausencia: "hr_settings",
   rh_ponto: "hr_manage",
   rh_ausencia: "hr_manage",
-  rh_documento_emitido: "hr_manage"
+  rh_documento_emitido: "hr_manage",
+  rh_recibo: "hr_payroll",
+  rh_recibo_linha: "hr_payroll",
+  rh_rubrica_pontual: "hr_payroll"
+};
+// Processamento salarial: calcular exige hr_payroll; aprovar, pagar e fechar exigem hr_payroll_approve e o
+// utilizador autenticado como responsável (1.º parâmetro); aprovar o que o próprio calculou e reabrir um
+// processamento aprovado ou pago são só para o Super Administrador.
+const assertPayrollSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statement: { sql: string; params?: unknown[] }) => {
+  const sql = statement.sql.replace(/\s+/g, " ");
+  const setClause = /^\s*UPDATE\b/i.test(sql) ? (sql.match(/\bSET\b(.*?)\bWHERE\b/i)?.[1] || "") : "";
+  const destino = setClause.match(/estado = '(\w+)'/)?.[1];
+  if (destino && ["aprovado", "pago", "fechado"].includes(destino)) {
+    const actor = assertUserPermission(event, "hr_payroll_approve");
+    if (statement.params?.[0] !== actor.id) throw new Error("A decisão do processamento salarial tem de ser do utilizador autenticado.");
+    if (destino === "aprovado" && !/calculado_por <> \?/.test(sql) && !(isPrimaryOwner(actor) || actor.role === "super_admin"))
+      throw new Error("O processamento salarial tem de ser aprovado por outra pessoa.");
+    return;
+  }
+  if (destino === "calculado" && /estado IN \('aprovado', 'pago'\)/.test(sql)) {
+    const actor = assertUserPermission(event, "hr_payroll_approve");
+    if (!(isPrimaryOwner(actor) || actor.role === "super_admin")) throw new Error("Só o Super Administrador reabre um processamento aprovado ou pago.");
+    return;
+  }
+  assertUserPermission(event, "hr_payroll");
 };
 // Tabelas que o assistente de configuração inicial grava antes de existir o primeiro utilizador (sem sessão).
 const FIRST_SETUP_TABLES = new Set(["company_settings", "audit_logs"]);
@@ -1124,6 +1148,7 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       const operator = /^\s*INSERT\s/i.test(statement.sql) ? statement.params?.[1] : statement.params?.[statement.params.length - 1];
       if (operator !== actor.id) throw new Error('Só pode abrir ou fechar o seu próprio caixa.');
     }
+    if (table === 'rh_processamento') assertPayrollSqlAuthorized(event, statement);
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
   }
 };

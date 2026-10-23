@@ -57,6 +57,8 @@ const ConfiguracoesRH = lazyWithReload(() => import("./paginas/rh/ConfiguracoesR
 const LivroPontoRH = lazyWithReload(() => import("./paginas/rh/LivroPontoRH"));
 const AusenciasRH = lazyWithReload(() => import("./paginas/rh/AusenciasRH"));
 const CalendarioRH = lazyWithReload(() => import("./paginas/rh/CalendarioRH"));
+const ProcessamentoRH = lazyWithReload(() => import("./paginas/rh/ProcessamentoRH"));
+const RecibosRH = lazyWithReload(() => import("./paginas/rh/RecibosRH"));
 const Scoring = lazyWithReload(() => import("./paginas/Scoring"));
 const SimuladorCredito = lazyWithReload(() => import("./paginas/SimuladorCredito"));
 const TermosPoliticas = lazyWithReload(() => import("./paginas/TermosPoliticas"));
@@ -355,6 +357,8 @@ const AppContent = () => {
               { path: '/rh/ponto', page: <LivroPontoRH /> },
               { path: '/rh/ausencias', page: <AusenciasRH /> },
               { path: '/rh/calendario', page: <CalendarioRH /> },
+              { path: '/rh/processamento', page: <ProcessamentoRH /> },
+              { path: '/rh/recibos', page: <RecibosRH /> },
             ].map(({ path, page }) => (
               <Route key={path} path={path} element={<ProtectedRoute permission="hr_view"><GuardaModuloRH>{page}</GuardaModuloRH></ProtectedRoute>} />
             ))}

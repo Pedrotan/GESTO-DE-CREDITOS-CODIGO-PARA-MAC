@@ -5,6 +5,7 @@ import { LIMITS_EXTENSION_SQL } from './esquema-alcadas.ts';
 import { PORTFOLIO_SCHEMA_SQL } from './esquema-carteira.ts';
 import { BANK_IMPORT_SCHEMA_SQL } from './esquema-extratos.ts';
 import { COLLECTION_SCHEMA_SQL } from './cobranca-operacional.ts';
+import { RH_SALARIOS_SCHEMA_SQL } from './rh/esquema-rh-salarios.ts';
 export const LEDGER_GENESIS_HASH = '0'.repeat(64);
 
 export const LEDGER_PROTECTION_SQL = [
@@ -15,6 +16,7 @@ export const LEDGER_PROTECTION_SQL = [
     ...AUDIT_EXTENSION_SQL,
     ...LIMITS_EXTENSION_SQL,
     ...PORTFOLIO_SCHEMA_SQL,
+    ...RH_SALARIOS_SCHEMA_SQL,
     `CREATE TABLE IF NOT EXISTS accounting_divergence_events (
         id TEXT PRIMARY KEY, issueKey TEXT NOT NULL, previousId TEXT NOT NULL DEFAULT '',
         source TEXT NOT NULL, description TEXT NOT NULL,

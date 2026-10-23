@@ -16,6 +16,8 @@ const LIGACOES = [
     { path: '/rh/ponto', label: 'Livro de ponto' },
     { path: '/rh/ausencias', label: 'Dispensas e licenças' },
     { path: '/rh/calendario', label: 'Horários e calendário' },
+    { path: '/rh/processamento', label: 'Processamento salarial' },
+    { path: '/rh/recibos', label: 'Recibos e declarações' },
     { path: '/rh/documentos', label: 'Documentos' },
     { path: '/rh/configuracoes', label: 'Configurações' },
 ];
