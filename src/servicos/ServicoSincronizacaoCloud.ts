@@ -397,7 +397,7 @@ const quoteIdentifier = (value: string) => `"${value.replace(/"/g, '""')}"`;
 // Lê por páginas (as tabelas com ficheiros em pequenas páginas) e cede a vez entre páginas: uma leitura única
 // de uma tabela grande ocupava a base mais de 60 s e as outras consultas falhavam por timeout.
 const BOOTSTRAP_PAGE_SIZE = 200;
-const BOOTSTRAP_FILE_TABLES: Record<string, number> = { payment_proofs: 5, credit_documents: 5 };
+const BOOTSTRAP_FILE_TABLES: Record<string, number> = { payment_proofs: 5, credit_documents: 5, rh_documento_ficheiro: 5 };
 // O servidor aceita até 2 MB por operação cifrada (base64 ≈ +35%): linhas maiores não se enviam.
 const MAX_SNAPSHOT_ROW_CHARS = 1_400_000;
 const createBootstrapOperations = async () => {

@@ -1,0 +1,177 @@
+// Esquema do módulo de Recursos Humanos. Cada empresa tem a sua base de dados (e o seu inquilino na nuvem),
+// por isso as tabelas não levam empresa_id. Valores em dinheiro em cêntimos (sufixo _minor), como no resto
+// do sistema; taxas em fracção (0.03 = 3%). Datas em texto ISO (aaaa-mm-dd). As tabelas sincronizam pela nuvem
+// como as restantes (operações da allowlist); os valores iniciais usam ids fixos para não duplicarem entre
+// computadores da mesma empresa.
+
+export const RH_FASE1_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_departamento (
+        id TEXT PRIMARY KEY, nome TEXT NOT NULL, responsavel_id TEXT, activo INTEGER NOT NULL DEFAULT 1,
+        criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS rh_cargo (
+        id TEXT PRIMARY KEY, nome TEXT NOT NULL, departamento_id TEXT, salario_referencia_minor INTEGER NOT NULL DEFAULT 0,
+        activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS rh_funcionario (
+        id TEXT PRIMARY KEY, numero_mecanografico TEXT NOT NULL, nome TEXT NOT NULL, data_nascimento TEXT, sexo TEXT,
+        estado_civil TEXT, nif TEXT, bi_numero TEXT, bi_emissao TEXT, bi_validade TEXT, numero_inss TEXT, morada TEXT,
+        telefone TEXT, email TEXT, iban TEXT, banco TEXT, data_admissao TEXT NOT NULL, data_saida TEXT,
+        cargo_id TEXT, departamento_id TEXT, horario_id TEXT,
+        estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'suspenso', 'cessado')),
+        foto_url TEXT, utilizador_id TEXT, reformado INTEGER NOT NULL DEFAULT 0, observacoes TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_funcionario_numero ON rh_funcionario(numero_mecanografico)`,
+    `CREATE TABLE IF NOT EXISTS rh_dependente (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, parentesco TEXT, data_nascimento TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS rh_contrato (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL,
+        tipo TEXT NOT NULL CHECK(tipo IN ('indeterminado', 'determinado')),
+        inicio TEXT NOT NULL, fim TEXT, periodo_experiencia_fim TEXT, salario_base_minor INTEGER NOT NULL CHECK(salario_base_minor >= 0),
+        horas_semanais REAL NOT NULL DEFAULT 40, dias_ferias INTEGER NOT NULL DEFAULT 22, documento_id TEXT,
+        estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'terminado')), motivo_fim TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_contrato_funcionario ON rh_contrato(funcionario_id, estado)`,
+    `CREATE TABLE IF NOT EXISTS rh_historico_salarial (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, contrato_id TEXT, salario_anterior_minor INTEGER,
+        salario_novo_minor INTEGER NOT NULL, data_efeito TEXT NOT NULL, motivo TEXT NOT NULL,
+        criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_historico_funcionario ON rh_historico_salarial(funcionario_id, data_efeito)`,
+    `CREATE TABLE IF NOT EXISTS rh_rubrica (
+        id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL,
+        tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')),
+        forma TEXT NOT NULL DEFAULT 'fixo' CHECK(forma IN ('fixo', 'percentagem', 'quantidade')),
+        percentagem REAL NOT NULL DEFAULT 0, incide_inss INTEGER NOT NULL DEFAULT 1, incide_irt INTEGER NOT NULL DEFAULT 1,
+        limite_isento_irt_minor INTEGER NOT NULL DEFAULT 0, limite_isento_irt_pct REAL NOT NULL DEFAULT 0,
+        conta_contabilistica TEXT, ordem_no_recibo INTEGER NOT NULL DEFAULT 100, sistema INTEGER NOT NULL DEFAULT 0,
+        activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_rubrica_codigo ON rh_rubrica(codigo)`,
+    `CREATE TABLE IF NOT EXISTS rh_funcionario_rubrica (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, rubrica_id TEXT NOT NULL, valor_minor INTEGER NOT NULL DEFAULT 0,
+        quantidade REAL NOT NULL DEFAULT 1, inicio TEXT NOT NULL, fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_funcionario_rubrica ON rh_funcionario_rubrica(funcionario_id)`,
+    `CREATE TABLE IF NOT EXISTS rh_parametro (
+        id TEXT PRIMARY KEY, chave TEXT NOT NULL, valor TEXT NOT NULL, descricao TEXT,
+        vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_parametro_chave ON rh_parametro(chave, vigencia_inicio)`,
+    `CREATE TABLE IF NOT EXISTS rh_irt_tabela (
+        id TEXT PRIMARY KEY, ano INTEGER NOT NULL, lei_referencia TEXT NOT NULL, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT
+    )`,
+    `CREATE TABLE IF NOT EXISTS rh_irt_escalao (
+        id TEXT PRIMARY KEY, tabela_id TEXT NOT NULL, ordem INTEGER NOT NULL, limite_inferior_minor INTEGER NOT NULL,
+        limite_superior_minor INTEGER, parcela_fixa_minor INTEGER NOT NULL DEFAULT 0, taxa REAL NOT NULL DEFAULT 0
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_irt_escalao_tabela ON rh_irt_escalao(tabela_id, ordem)`,
+    // Arquivo digital: metadados aqui, o ficheiro em rh_documento_ficheiro (sincronizado em páginas pequenas).
+    `CREATE TABLE IF NOT EXISTS rh_documento (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, categoria TEXT NOT NULL, nome TEXT NOT NULL,
+        ficheiro_nome TEXT NOT NULL, mime TEXT NOT NULL, tamanho INTEGER NOT NULL DEFAULT 0,
+        data_emissao TEXT, data_validade TEXT, confidencial INTEGER NOT NULL DEFAULT 0,
+        estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'substituido', 'arquivado')), substituido_por TEXT,
+        carregado_por TEXT, carregado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_documento_funcionario ON rh_documento(funcionario_id, categoria)`,
+    `CREATE TABLE IF NOT EXISTS rh_documento_ficheiro (
+        documento_id TEXT PRIMARY KEY, data_url TEXT NOT NULL
+    )`,
+];
+
+export const RH_DATA_INICIAL = '2026-01-01';
+
+/** Parâmetros legais e regras da empresa (valores iniciais, a validar com um contabilista certificado). */
+export const RH_PARAMETROS_INICIAIS: Array<{ chave: string; valor: string; descricao: string; inicio?: string }> = [
+    { chave: 'inss_trabalhador', valor: '0.03', descricao: 'Contribuição do trabalhador para a Segurança Social (descontada no recibo, deduzida antes do IRT)' },
+    { chave: 'inss_empresa', valor: '0.08', descricao: 'Contribuição da entidade empregadora (custo da empresa)' },
+    { chave: 'inss_reformado', valor: '0.08', descricao: 'Taxa do trabalhador reformado que volta ao activo' },
+    { chave: 'subsidio_ferias_pct', valor: '0.5', descricao: 'Subsídio de férias em fracção do salário base' },
+    { chave: 'subsidio_natal_pct', valor: '0.5', descricao: 'Subsídio de Natal em fracção do salário base' },
+    { chave: 'subsidio_natal_mes', valor: '11', descricao: 'Mês de pagamento do subsídio de Natal' },
+    { chave: 'dias_ferias_ano', valor: '22', descricao: 'Dias úteis de férias por ano' },
+    { chave: 'horas_dia', valor: '8', descricao: 'Horário normal (horas por dia)' },
+    { chave: 'divisor_dia', valor: '30', descricao: 'Divisor do valor-dia: 30 ou «uteis» (dias úteis do mês)' },
+    { chave: 'horas_extra_acrescimo', valor: '0.5', descricao: 'Acréscimo das horas extra em dia útil (0.5 = +50%)' },
+    { chave: 'horas_extra_feriado_acrescimo', valor: '1', descricao: 'Acréscimo das horas extra em feriado ou descanso (1 = +100%)' },
+    { chave: 'salario_minimo', valor: '100000', descricao: 'Salário mínimo nacional em Kz (confirmar o diploma em vigor)' },
+    { chave: 'alerta_ferias_dias', valor: '5', descricao: 'Dias de antecedência do alerta de férias (subsídio)' },
+    { chave: 'ferias_conflito_pct', valor: '30', descricao: 'Percentagem máxima de um departamento de férias ao mesmo tempo' },
+    { chave: 'documento_max_mb', valor: '2', descricao: 'Tamanho máximo de cada documento do arquivo (MB)' },
+    { chave: 'bi_dias_aviso', valor: '90', descricao: 'Clientes: dias antes da validade em que o BI passa a «a expirar»' },
+    { chave: 'bi_anos_validade', valor: '10', descricao: 'Clientes: anos de validade sugeridos quando a validade do BI não é preenchida' },
+    { chave: 'bi_credito_expirado', valor: 'aviso', descricao: 'Clientes: novo crédito com BI expirado — «aviso» ou «bloqueio»' },
+];
+
+/** Tabela do IRT 2026 (Grupo A), Lei n.º 14/25, de 30 de Dezembro (OGE 2026), Anexo I. Valores em cêntimos. */
+export const RH_IRT_2026 = {
+    id: 'irt-2026', ano: 2026, lei: 'Lei n.º 14/25, de 30 de Dezembro (OGE 2026), Anexo I', inicio: '2026-01-01',
+    escaloes: [
+        [0, 15_000_000, 0, 0],
+        [15_000_000, 20_000_000, 1_250_000, 0.16],
+        [20_000_000, 30_000_000, 3_125_000, 0.18],
+        [30_000_000, 50_000_000, 4_925_000, 0.19],
+        [50_000_000, 100_000_000, 8_725_000, 0.20],
+        [100_000_000, 150_000_000, 18_725_000, 0.21],
+        [150_000_000, 200_000_000, 29_225_000, 0.22],
+        [200_000_000, 250_000_000, 40_225_000, 0.23],
+        [250_000_000, 500_000_000, 51_725_000, 0.24],
+        [500_000_000, 1_000_000_000, 111_725_000, 0.245],
+        [1_000_000_000, null, 234_225_000, 0.25],
+    ] as Array<[number, number | null, number, number]>,
+};
+
+type RubricaInicial = {
+    codigo: string; nome: string; tipo: 'abono' | 'desconto'; forma: 'fixo' | 'percentagem' | 'quantidade';
+    inss: number; irt: number; isentoMinor?: number; isentoPct?: number; ordem: number; sistema?: number;
+};
+
+/** Catálogo inicial de rubricas. As «sistema» são usadas pelo motor de cálculo e não podem ser apagadas. */
+export const RH_RUBRICAS_INICIAIS: RubricaInicial[] = [
+    { codigo: 'SAL_BASE', nome: 'Salário base', tipo: 'abono', forma: 'fixo', inss: 1, irt: 1, ordem: 10, sistema: 1 },
+    { codigo: 'SUB_TRANSP', nome: 'Subsídio de transporte', tipo: 'abono', forma: 'fixo', inss: 1, irt: 1, isentoMinor: 3_000_000, ordem: 20 },
+    { codigo: 'SUB_ALIM', nome: 'Subsídio de alimentação', tipo: 'abono', forma: 'fixo', inss: 1, irt: 1, ordem: 30 },
+    { codigo: 'ABONO_FAM', nome: 'Abono de família', tipo: 'abono', forma: 'fixo', inss: 0, irt: 1, isentoPct: 0.05, ordem: 40 },
+    { codigo: 'HORAS_EXTRA', nome: 'Horas extra', tipo: 'abono', forma: 'quantidade', inss: 1, irt: 1, ordem: 50, sistema: 1 },
+    { codigo: 'PREMIO', nome: 'Prémio', tipo: 'abono', forma: 'fixo', inss: 1, irt: 1, ordem: 60 },
+    { codigo: 'SUB_FERIAS', nome: 'Subsídio de férias', tipo: 'abono', forma: 'percentagem', inss: 1, irt: 1, ordem: 70, sistema: 1 },
+    { codigo: 'SUB_NATAL', nome: 'Subsídio de Natal', tipo: 'abono', forma: 'percentagem', inss: 1, irt: 1, ordem: 80, sistema: 1 },
+    { codigo: 'FALTAS', nome: 'Faltas injustificadas', tipo: 'desconto', forma: 'quantidade', inss: 1, irt: 1, ordem: 100, sistema: 1 },
+    { codigo: 'ATRASOS', nome: 'Atrasos', tipo: 'desconto', forma: 'quantidade', inss: 1, irt: 1, ordem: 110, sistema: 1 },
+    { codigo: 'ADIANTAMENTO', nome: 'Adiantamento', tipo: 'desconto', forma: 'fixo', inss: 0, irt: 0, ordem: 200 },
+    { codigo: 'QUOTA', nome: 'Quota sindical', tipo: 'desconto', forma: 'fixo', inss: 0, irt: 0, ordem: 210 },
+    { codigo: 'CREDITO_INT', nome: 'Prestação de crédito interno', tipo: 'desconto', forma: 'fixo', inss: 0, irt: 0, ordem: 220 },
+];
+
+export const RH_SEED_PARAMETRO_SQL = `INSERT OR IGNORE INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por)
+    VALUES (?, ?, ?, ?, ?, NULL, ?, 'sistema')`;
+export const RH_SEED_IRT_TABELA_SQL = `INSERT OR IGNORE INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por)
+    VALUES (?, ?, ?, ?, NULL, ?, 'sistema')`;
+export const RH_SEED_IRT_ESCALAO_SQL = `INSERT OR IGNORE INTO rh_irt_escalao (id, tabela_id, ordem, limite_inferior_minor, limite_superior_minor, parcela_fixa_minor, taxa)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`;
+export const RH_SEED_RUBRICA_SQL = `INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt,
+    limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por)
+    VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, ?, 'sistema')`;
+
+/** Instruções (SQL + parâmetros) que semeiam os valores iniciais; idempotentes. */
+export const rhSeedStatements = (now: string) => [
+    ...RH_PARAMETROS_INICIAIS.map(p => ({
+        sql: RH_SEED_PARAMETRO_SQL,
+        params: [`param-${p.chave}-${p.inicio || RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, p.inicio || RH_DATA_INICIAL, now],
+    })),
+    { sql: RH_SEED_IRT_TABELA_SQL, params: [RH_IRT_2026.id, RH_IRT_2026.ano, RH_IRT_2026.lei, RH_IRT_2026.inicio, now] },
+    ...RH_IRT_2026.escaloes.map(([inferior, superior, parcela, taxa], index) => ({
+        sql: RH_SEED_IRT_ESCALAO_SQL,
+        params: [`${RH_IRT_2026.id}-${index + 1}`, RH_IRT_2026.id, index + 1, inferior, superior, parcela, taxa],
+    })),
+    ...RH_RUBRICAS_INICIAIS.map(r => ({
+        sql: RH_SEED_RUBRICA_SQL,
+        params: [`rubrica-${r.codigo}`, r.codigo, r.nome, r.tipo, r.forma, r.inss, r.irt, r.isentoMinor || 0, r.isentoPct || 0, r.ordem, r.sistema || 0, now],
+    })),
+];

@@ -50,6 +50,10 @@ const CentralWhatsApp = lazyWithReload(() => import("./paginas/CentralWhatsApp")
 const Garantias = lazyWithReload(() => import("./paginas/Garantias"));
 const Contencioso = lazyWithReload(() => import("./paginas/Contencioso"));
 const Fornecedores = lazyWithReload(() => import("./paginas/Fornecedores"));
+const PainelRH = lazyWithReload(() => import("./paginas/rh/PainelRH"));
+const FuncionariosRH = lazyWithReload(() => import("./paginas/rh/FuncionariosRH"));
+const DocumentosRH = lazyWithReload(() => import("./paginas/rh/DocumentosRH"));
+const ConfiguracoesRH = lazyWithReload(() => import("./paginas/rh/ConfiguracoesRH"));
 const Scoring = lazyWithReload(() => import("./paginas/Scoring"));
 const SimuladorCredito = lazyWithReload(() => import("./paginas/SimuladorCredito"));
 const TermosPoliticas = lazyWithReload(() => import("./paginas/TermosPoliticas"));
@@ -90,7 +94,15 @@ const ProtectedRoute = ({ children, permission }: { children: JSX.Element; permi
 
 import { db } from "@/bibliotecas/bd";
 import { ServicoControloAcesso } from "@/servicos/ServicoControloAcesso";
+import { useModuloRH } from "@/ganchos/usar-modulo-rh";
 import { AVAILABLE_PERMISSIONS } from "@/tipos/autenticacao";
+
+/** Páginas de RH: só com o módulo incluído na licença da empresa. */
+const GuardaModuloRH = ({ children }: { children: JSX.Element }) => {
+  const { activo, aCarregar } = useModuloRH();
+  if (aCarregar) return suspenseFallback;
+  return activo ? children : <Navigate to="/" replace />;
+};
 
 /** Ecrã mostrado quando o utilizador abre uma página para a qual não tem permissão. */
 const AcessoNegado = ({ permission }: { permission: string }) => {
@@ -331,6 +343,15 @@ const AppContent = () => {
                 </ProtectedRoute>
               }
             />
+            {[
+              { path: '/rh', page: <PainelRH /> },
+              { path: '/rh/painel', page: <PainelRH /> },
+              { path: '/rh/funcionarios', page: <FuncionariosRH /> },
+              { path: '/rh/documentos', page: <DocumentosRH /> },
+              { path: '/rh/configuracoes', page: <ConfiguracoesRH /> },
+            ].map(({ path, page }) => (
+              <Route key={path} path={path} element={<ProtectedRoute permission="hr_view"><GuardaModuloRH>{page}</GuardaModuloRH></ProtectedRoute>} />
+            ))}
             <Route
               path="/fornecedores"
               element={

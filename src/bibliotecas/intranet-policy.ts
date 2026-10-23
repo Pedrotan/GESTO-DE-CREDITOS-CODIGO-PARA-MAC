@@ -1,10 +1,10 @@
 export type FeatureLicense = { isValid: boolean; readOnly?: boolean; tier?: string; features?: Record<string, unknown> };
 
-export const allowsLicensedFeature = (license: FeatureLicense | null | undefined, feature: 'intranet' | 'multi_empresa') => {
+export const allowsLicensedFeature = (license: FeatureLicense | null | undefined, feature: 'intranet' | 'multi_empresa' | 'rh') => {
     if (!license?.isValid || license.readOnly) return false;
     const explicit = license.features?.[feature];
     if (typeof explicit === 'boolean') return explicit;
-    return false; // O escalão e o número de empresas não atribuem o módulo intranet.
+    return false; // O escalão e o número de empresas não atribuem os módulos (intranet, multi-empresa, RH).
 };
 
 export const canHostLocalServer = (desktop: boolean, license: FeatureLicense | null | undefined) =>

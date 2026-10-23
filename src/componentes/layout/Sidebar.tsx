@@ -57,7 +57,10 @@ import {
   Gavel,
   ShieldAlert,
   AlertTriangle,
+  Briefcase,
+  FolderOpen,
 } from 'lucide-react';
+import { useModuloRH } from '@/ganchos/usar-modulo-rh';
 import {
   Tooltip,
   TooltipContent,
@@ -83,6 +86,8 @@ interface MenuItem {
   adminOnly?: boolean;
   /** Submenus. O item pai deixa de navegar e passa a abrir/fechar a lista. */
   children?: MenuItem[];
+  /** Módulo activado pela licença (funcionalidade do plano no Tango Master Gen). */
+  licensedModule?: 'rh';
 }
 
 const menuItems: MenuItem[] = [
@@ -133,6 +138,18 @@ const menuItems: MenuItem[] = [
   { icon: ShieldCheck, label: 'Garantias', path: '/garantias', permission: 'manage_warranties', moduleKey: 'enableWarrantiesModule' },
   { icon: Activity, label: 'Análise de Risco', path: '/scoring', permission: 'view_reports', moduleKey: 'enableScoringModule' },
   { icon: Scale, label: 'Contencioso', path: '/contencioso', permission: 'manage_legal', moduleKey: 'enableLegalModule' },
+  {
+    icon: Briefcase,
+    label: 'Recursos Humanos',
+    path: '/rh',
+    licensedModule: 'rh',
+    children: [
+      { icon: LayoutDashboard, label: 'Painel de RH', path: '/rh/painel', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: Users, label: 'Funcionários', path: '/rh/funcionarios', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: FolderOpen, label: 'Documentos', path: '/rh/documentos', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: SlidersHorizontal, label: 'Configurações de RH', path: '/rh/configuracoes', permission: 'hr_view', licensedModule: 'rh' },
+    ],
+  },
   { icon: Trash2, label: 'Lixeira do Sistema', path: '/lixeira', permission: 'manage_settings' },
   {
     icon: Settings,
@@ -175,6 +192,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
   const { companySettings } = useData();
   const [isSingular, setIsSingular] = useState(true);
   const [openMenus, setOpenMenus] = useState<string[]>([]);
+  const moduloRH = useModuloRH().activo;
 
   /**
    * Um submenu pode apontar para uma aba (ex.: /definicoes?tab=backup).
@@ -193,6 +211,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
    * manage_limits, Auditoria exige view_audit_logs).
    */
   const isAllowed = useCallback((item: MenuItem): boolean => {
+    if (item.licensedModule === 'rh' && !moduloRH) return false;
     // Super Administrador ou conta principal têm sempre acesso irrestrito a todos os menus e páginas
     if (user?.role === 'super_admin' || isPrimaryOwner(user)) {
       if (item.moduleKey) {
@@ -220,7 +239,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
     }
 
     return true;
-  }, [companySettings, isSingular, user]);
+  }, [companySettings, isSingular, user, moduloRH]);
 
   /**
    * Submenus visíveis para este utilizador.

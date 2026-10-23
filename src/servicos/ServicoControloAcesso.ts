@@ -219,7 +219,14 @@ export class ServicoControloAcesso {
       manage_legal: ['contencioso.ver', 'contencioso.criar', 'contencioso.editar'],
       manage_users: ['utilizadores.ver', 'utilizadores.criar', 'utilizadores.editar', 'perfis.ver', 'sessoes.ver'],
       view_market: ['mercado.ver'],
-      use_simulator: ['simulador.ver']
+      use_simulator: ['simulador.ver'],
+      hr_view: ['rh_funcionarios.ver', 'rh_ponto.ver'],
+      hr_manage: ['rh_funcionarios.criar', 'rh_funcionarios.editar', 'rh_ponto.criar', 'rh_ponto.editar'],
+      hr_view_salaries: ['rh_salarios.ver'],
+      hr_confidential: ['rh_funcionarios.ver_sensiveis'],
+      hr_payroll: ['rh_salarios.criar'],
+      hr_payroll_approve: ['rh_salarios.aprovar', 'rh_salarios.fechar_periodo'],
+      hr_settings: ['rh_configuracoes.editar']
     };
     return mapa[legado] || [legado];
   }

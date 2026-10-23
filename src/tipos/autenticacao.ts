@@ -14,6 +14,7 @@ export type Role =
     | 'accountant'
     | 'legal'
     | 'internal_auditor'
+    | 'hr_manager'
     | string;
 
 export interface User {
@@ -101,6 +102,11 @@ export const ROLES: Record<string, { label: string; description: string; badgeCo
         description: 'Contencioso judicial e execução de garantias',
         badgeColor: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-200'
     },
+    hr_manager: {
+        label: 'Gestor de RH',
+        description: 'Funcionários, ponto, férias e cálculo dos salários',
+        badgeColor: 'bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-200'
+    },
     internal_auditor: {
         label: 'Auditor Interno',
         description: 'Acesso estritamente de leitura a todo o sistema e logs',
@@ -135,6 +141,14 @@ export const AVAILABLE_PERMISSIONS = [
     { id: 'view_chat', label: 'Chat Interno', description: 'Usar o chat interno da equipa' },
     { id: 'manage_suppliers', label: 'Página Fornecedores', description: 'Ver e gerir fornecedores' },
     { id: 'edit_credit_rate', label: 'Alterar a taxa do crédito', description: 'Mudar à mão a taxa do prazo ao conceder um crédito (fica registado na auditoria)' },
+    // Recursos Humanos (módulo activável por licença).
+    { id: 'hr_view', label: 'RH: Consultar', description: 'Ver o painel de RH, funcionários, livro de ponto e calendário' },
+    { id: 'hr_manage', label: 'RH: Gerir funcionários', description: 'Registar e editar funcionários, contratos, documentos, ponto e ausências' },
+    { id: 'hr_view_salaries', label: 'RH: Ver salários', description: 'Ver salários, rubricas, histórico salarial e recibos' },
+    { id: 'hr_confidential', label: 'RH: Documentos confidenciais', description: 'Ver documentos das categorias Saúde e Disciplinar' },
+    { id: 'hr_payroll', label: 'RH: Calcular salários', description: 'Abrir e calcular o processamento salarial e emitir recibos' },
+    { id: 'hr_payroll_approve', label: 'RH: Aprovar e fechar salários', description: 'Aprovar, pagar e fechar o processamento salarial (gera os lançamentos)' },
+    { id: 'hr_settings', label: 'RH: Configurações legais', description: 'Alterar parâmetros legais, tabela do IRT, rubricas, horários e tipos de ausência' },
 ];
 
 

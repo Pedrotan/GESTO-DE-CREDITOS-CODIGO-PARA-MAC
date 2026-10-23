@@ -10,6 +10,7 @@ export type AreaModulo =
   | 'financeiro'
   | 'fiscal'
   | 'relatorios'
+  | 'recursos_humanos'
   | 'administracao';
 
 export type AcaoPadrao = 'ver' | 'criar' | 'editar' | 'eliminar' | 'aprovar' | 'exportar';
@@ -377,6 +378,44 @@ export const MODULOS_SISTEMA: DefinicaoModulo[] = [
     acoesCriticas: ['eliminar', 'restaurar_lixeira'],
     caminho: '/lixeira',
     legadoId: 'manage_settings'
+  },
+
+  // 8. Recursos Humanos (módulo activável por licença)
+  {
+    id: 'rh_funcionarios',
+    nome: 'RH: Funcionários e documentos',
+    area: 'recursos_humanos',
+    acoesDisponiveis: ['ver', 'criar', 'editar', 'eliminar', 'exportar', 'ver_sensiveis'],
+    acoesCriticas: ['eliminar', 'ver_sensiveis'],
+    caminho: '/rh/funcionarios',
+    legadoId: 'hr_manage'
+  },
+  {
+    id: 'rh_ponto',
+    nome: 'RH: Livro de ponto e ausências',
+    area: 'recursos_humanos',
+    acoesDisponiveis: ['ver', 'criar', 'editar', 'aprovar', 'exportar'],
+    acoesCriticas: ['aprovar'],
+    caminho: '/rh/ponto',
+    legadoId: 'hr_manage'
+  },
+  {
+    id: 'rh_salarios',
+    nome: 'RH: Processamento salarial',
+    area: 'recursos_humanos',
+    acoesDisponiveis: ['ver', 'criar', 'aprovar', 'exportar', 'fechar_periodo', 'reabrir_periodo'],
+    acoesCriticas: ['aprovar', 'fechar_periodo', 'reabrir_periodo'],
+    caminho: '/rh/processamento',
+    legadoId: 'hr_payroll'
+  },
+  {
+    id: 'rh_configuracoes',
+    nome: 'RH: Configurações legais',
+    area: 'recursos_humanos',
+    acoesDisponiveis: ['ver', 'editar'],
+    acoesCriticas: ['editar'],
+    caminho: '/rh/configuracoes',
+    legadoId: 'hr_settings'
   }
 ];
 
@@ -411,6 +450,7 @@ export const ROTULOS_AREAS: Record<AreaModulo, { nome: string; descricao: string
   cobranca: { nome: 'Cobrança', descricao: 'Recebimentos, negociações e contencioso', cor: 'emerald' },
   financeiro: { nome: 'Financeiro e Contabilidade', descricao: 'Plano contabilístico, tesouraria e despesas', cor: 'purple' },
   fiscal: { nome: 'Fiscal', descricao: 'Relatórios AGT, SAF-T (AO) e facturação', cor: 'indigo' },
+  recursos_humanos: { nome: 'Recursos Humanos', descricao: 'Funcionários, ponto, férias e processamento salarial', cor: 'teal' },
   relatorios: { nome: 'Relatórios', descricao: 'Painéis analíticos, indicadores e auditoria de equipa', cor: 'blue' },
   administracao: { nome: 'Administração', descricao: 'Utilizadores, perfis, segurança e configurações', cor: 'rose' }
 };
@@ -447,6 +487,12 @@ export const CONFLITOS_SEGREGAO_FUNCOES: ConflitoSegregacao[] = [
     nome: 'Lançamento e Estorno Contabilístico',
     descricao: 'Lançamentos de diário não devem ser estornados pelo mesmo colaborador sem revisão.',
     permissoesConflitantes: ['contabilidade.criar', 'contabilidade.estornar_lancamento']
+  },
+  {
+    id: 'rh_calcular_aprovar_salarios',
+    nome: 'Cálculo e Aprovação de Salários',
+    descricao: 'Quem calcula o processamento salarial não deve aprovar o pagamento sem uma segunda validação.',
+    permissoesConflitantes: ['rh_salarios.criar', 'rh_salarios.aprovar']
   },
   {
     id: 'risco_analise_aprovacao',
@@ -746,6 +792,31 @@ export const PERFIS_PREDEFINIDOS: PerfilAcesso[] = [
       perdaoJurosKz: 0,
       anulacaoPagamentoKz: 0,
       abateCreditoKz: 2_000_000
+    },
+    exigeDoisFatores: false,
+    editavel: true,
+    predefinido: true
+  },
+  {
+    id: 'hr_manager',
+    codigo: 'GESTOR_RH',
+    nome: 'Gestor de RH',
+    descricao: 'Funcionários, contratos, documentos, livro de ponto, ausências e cálculo dos salários. A aprovação do processamento fica com outra pessoa.',
+    areaPrincipal: 'recursos_humanos',
+    corBadge: 'bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-200 dark:border-teal-900',
+    permissoesBase: [
+      'rh_funcionarios.ver', 'rh_funcionarios.criar', 'rh_funcionarios.editar', 'rh_funcionarios.exportar', 'rh_funcionarios.ver_sensiveis',
+      'rh_ponto.ver', 'rh_ponto.criar', 'rh_ponto.editar', 'rh_ponto.aprovar', 'rh_ponto.exportar',
+      'rh_salarios.ver', 'rh_salarios.criar', 'rh_salarios.exportar',
+      'rh_configuracoes.ver'
+    ],
+    alcadasPadrao: {
+      aprovacaoCreditoKz: 0,
+      desembolsoKz: 0,
+      perdaoJurosPct: 0,
+      perdaoJurosKz: 0,
+      anulacaoPagamentoKz: 0,
+      abateCreditoKz: 0
     },
     exigeDoisFatores: false,
     editavel: true,

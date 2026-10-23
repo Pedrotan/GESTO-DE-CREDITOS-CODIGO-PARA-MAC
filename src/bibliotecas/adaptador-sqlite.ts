@@ -4,6 +4,7 @@ import initSqlJs, { Database } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
+import { RH_FASE1_SQL, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
 
 let db: Database | null = null;
 let sqlPromise: Promise<any> | null = null;
@@ -1148,6 +1149,12 @@ const createTables = async () => {
     });
     await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receipt ON payments(receiptYear, receiptSeq) WHERE receiptSeq IS NOT NULL");
     await executeSql("CREATE INDEX IF NOT EXISTS idx_payments_batch ON payments(batchId)");
+
+    // Recursos Humanos, fase 1: funcionários, estrutura, contratos, arquivo digital e parâmetros legais.
+    await applyMigration(2026102301, 'rh-fase1-funcionarios-e-parametros', async () => {
+        for (const statement of RH_FASE1_SQL) await executeSql(statement);
+        for (const seed of rhSeedStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
 
     // safeAddColumns for migrations
     await safeAddColumn("users", "permissionExceptions", "TEXT");

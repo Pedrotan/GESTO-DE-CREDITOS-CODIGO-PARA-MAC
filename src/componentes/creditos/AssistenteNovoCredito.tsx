@@ -27,6 +27,9 @@ import { CLIENT_STATUS_LABELS, clientDisplayStatus } from '@/bibliotecas/estado-
 import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import type { Credit } from '@/tipos/credito';
+import { estadoBI } from '@/bibliotecas/rh/bi-validade';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
+import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
 
 const STEPS = ['Cliente', 'Simulação', 'Análise de risco', 'Documentos e garantias', 'Submeter'];
 const DOC_KINDS: Record<string, string> = { contrato: 'Contrato', livranca: 'Livrança', bi: 'Bilhete de Identidade', comprovativo: 'Comprovativo de rendimento', outro: 'Outro' };
@@ -75,6 +78,9 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
     }, [open, renewal, configLoading]);
 
     const client = clients.find((item: any) => item.id === clientId);
+    const parametrosBI = useParametrosBI();
+    const biCliente = client && client.clientType !== 'EMPRESA' && client.documentType !== 'PASSAPORTE'
+        ? estadoBI(client.expiryDate, luandaTodayKey(), parametrosBI.diasAviso) : null;
     const standing = useMemo(() => clientId ? clientCreditStanding(clientId, credits) : null, [clientId, credits]);
     const blockReason = useMemo(() => {
         if (!client) return null;
@@ -124,6 +130,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
         if (index === 0) {
             if (!client) return 'Escolha o cliente.';
             if (blockReason) return blockReason;
+            if (biCliente?.estado === 'expirado' && parametrosBI.creditoExpirado === 'bloqueio') return `${biCliente.texto}: actualize o BI do cliente antes de pedir um novo crédito.`;
         }
         if (index === 1) {
             if (!(form.principal > 0) || !(form.months > 0)) return 'Indique o montante e o prazo.';
@@ -213,11 +220,18 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                 {step === 0 && (
                     <div className="space-y-3">
                         <SearchableSelect value={clientId} onValueChange={selectClient} options={clientOptions} placeholder="Pesquisar cliente por nome, NIF ou telefone…" disabled={!!renewal} />
+                        {biCliente && (biCliente.estado === 'expirado' || biCliente.estado === 'a_expirar') && (
+                            <p className={cn('flex items-center gap-2 rounded-xl border px-3 py-2 text-sm', biCliente.estado === 'expirado' ? 'border-red-200 bg-red-50 text-red-700' : 'border-orange-200 bg-orange-50 text-orange-700')}>
+                                <AlertTriangle className="h-4 w-4 shrink-0" />
+                                {biCliente.texto}.{biCliente.estado === 'expirado' ? (parametrosBI.creditoExpirado === 'bloqueio' ? ' Não é possível pedir um novo crédito até o BI ser actualizado.' : ' Contacte o cliente para renovar o BI.') : ''}
+                            </p>
+                        )}
                         {client && (
                             <div className="grid gap-3 md:grid-cols-2">
                                 <div className="rounded-xl border p-3">
                                     <Row label="NIF" value={client.nif || '—'} />
                                     <Row label="Telefone" value={client.phone || '—'} />
+                                    {biCliente && <Row label="Validade do BI" value={biCliente.texto} tone={biCliente.estado === 'expirado' ? 'red' : undefined} />}
                                     <Row label="Rendimento mensal" value={client.monthlyIncome ? formatCurrency(Number(client.monthlyIncome)) : 'Não indicado'} />
                                     <Row label="Limite disponível" value={formatCurrency(Number(client.availableCredit) || 0)} />
                                     <Row label="Risco" value={RISK_LABELS[client.riskLevel as 'low'] || client.riskLevel} tone={client.riskLevel === 'high' ? 'red' : undefined} />

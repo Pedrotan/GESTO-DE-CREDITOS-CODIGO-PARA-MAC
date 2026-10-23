@@ -22,6 +22,10 @@ import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import { PaymentSlipModal } from './PaymentSlipModal';
 import { ClientCreditInstallments } from './ClientCreditInstallments';
 import { useState } from 'react';
+import { estadoBI } from '@/bibliotecas/rh/bi-validade';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
+import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
+import { SeloBI } from '@/componentes/rh/comum-rh';
 
 interface ClientDetailsModalProps {
     client: Client | null;
@@ -33,6 +37,7 @@ interface ClientDetailsModalProps {
 const limitConsumingCreditStatuses = new Set<Credit['status']>(['active', 'overdue', 'defaulted', 'renegotiated']);
 
 export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemaining }: ClientDetailsModalProps) {
+    const parametrosBI = useParametrosBI();
     const { credits, payments, companySettings } = useData();
     const { user } = useAuth();
     const { toast } = useToast();
@@ -224,6 +229,13 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
                                             <Calendar className="h-4 w-4 text-muted-foreground" />
                                             <span className="font-medium min-w-[80px]">Validade BI:</span>
                                             <span>{client.expiryDate}</span>
+                                        </div>
+                                    )}
+                                    {client.clientType !== 'EMPRESA' && client.documentType !== 'PASSAPORTE' && (
+                                        <div className="flex items-center gap-3">
+                                            <ShieldAlert className="h-4 w-4 text-muted-foreground" />
+                                            <span className="font-medium min-w-[80px]">Situação BI:</span>
+                                            <SeloBI situacao={estadoBI(client.expiryDate, luandaTodayKey(), parametrosBI.diasAviso)} detalhe />
                                         </div>
                                     )}
                                     <div className="flex items-center gap-3">

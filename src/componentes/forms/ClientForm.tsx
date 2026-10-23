@@ -1,5 +1,9 @@
 import { BankLogo } from '@/componentes/BankLogo';
 import { useEffect, useRef, useState } from 'react';
+import { estadoBI, validadeSugerida, validarDatasBI } from '@/bibliotecas/rh/bi-validade';
+import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
+import { SeloBI } from '@/componentes/rh/comum-rh';
 import { 
     CreditCard, 
     Landmark, 
@@ -224,6 +228,7 @@ function isPdfDocument(doc: ClientDocument): boolean {
 }
 
 export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Guardar', category = 'COMUM' }: ClientFormProps) {
+    const parametrosBI = useParametrosBI();
     const { user: authUser } = useAuth();
     const [applyInterest, setApplyInterest] = useState(
         initialData ? (initialData.defaultInterestRate > 0 || initialData.lateInterestRate > 0) : false
@@ -624,6 +629,20 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
     };
 
     const handleFormSubmit = (data: ClientFormValues) => {
+        // BI de particulares: emissão e validade obrigatórias; emissão não futura; validade posterior à emissão.
+        if (clientType === 'PARTICULAR' && documentType !== 'PASSAPORTE') {
+            const hoje = luandaTodayKey();
+            const problemas: Array<['issueDate' | 'expiryDate', string]> = [];
+            if (!data.issueDate) problemas.push(['issueDate', 'Indique a data de emissão do BI.']);
+            if (!data.expiryDate) problemas.push(['expiryDate', 'Indique a validade do BI (ou use a sugestão).']);
+            for (const erro of validarDatasBI(data.issueDate, data.expiryDate, hoje)) {
+                problemas.push([/emissão/.test(erro) && !/posterior/.test(erro) ? 'issueDate' : 'expiryDate', erro]);
+            }
+            if (problemas.length) {
+                for (const [campo, mensagem] of problemas) form.setError(campo, { type: 'manual', message: mensagem });
+                return;
+            }
+        }
         clearDraft();
         onSubmit({
             ...data,
@@ -1447,6 +1466,13 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                         className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" 
                                                     />
                                                 </FormControl>
+                                                {!field.value && validadeSugerida(form.watch('issueDate'), parametrosBI.anosValidade) && (
+                                                    <button type="button" className="text-[11px] font-bold text-blue-600 hover:underline"
+                                                        onClick={() => form.setValue('expiryDate', validadeSugerida(form.getValues('issueDate'), parametrosBI.anosValidade) || '', { shouldValidate: true, shouldDirty: true })}>
+                                                        Sugestão: {validadeSugerida(form.watch('issueDate'), parametrosBI.anosValidade)?.split('-').reverse().join('/')} (emissão + {parametrosBI.anosValidade} anos)
+                                                    </button>
+                                                )}
+                                                {field.value && <SeloBI situacao={estadoBI(field.value, luandaTodayKey(), parametrosBI.diasAviso)} detalhe />}
                                                 <FormMessage />
                                             </FormItem>
                                         )}

@@ -1040,7 +1040,21 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   message_templates: "manage_settings",
   sync_conflicts: "manage_credits",
   accounting_daily_closes: "manage_fiscal",
-  credit_writeoffs: "manage_fiscal"
+  credit_writeoffs: "manage_fiscal",
+  // Recursos Humanos: ficha, contratos e arquivo com hr_manage; tabelas legais com hr_settings.
+  rh_departamento: "hr_manage",
+  rh_cargo: "hr_manage",
+  rh_funcionario: "hr_manage",
+  rh_dependente: "hr_manage",
+  rh_contrato: "hr_manage",
+  rh_historico_salarial: "hr_manage",
+  rh_funcionario_rubrica: "hr_manage",
+  rh_documento: "hr_manage",
+  rh_documento_ficheiro: "hr_manage",
+  rh_rubrica: "hr_settings",
+  rh_parametro: "hr_settings",
+  rh_irt_tabela: "hr_settings",
+  rh_irt_escalao: "hr_settings"
 };
 // Tabelas que o assistente de configuração inicial grava antes de existir o primeiro utilizador (sem sessão).
 const FIRST_SETUP_TABLES = new Set(["company_settings", "audit_logs"]);

@@ -84,6 +84,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { ClientDetailsModal } from '@/componentes/modals/ClientDetailsModal';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
+import { estadoBI, ROTULO_ESTADO_BI, type EstadoBI } from '@/bibliotecas/rh/bi-validade';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
+import { exportToExcel } from '@/bibliotecas/ExcelHelper';
+import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
+import { SeloBI } from '@/componentes/rh/comum-rh';
 
 type BadgeVariant = 'default' | 'primary' | 'secondary' | 'destructive' | 'success' | 'warning' | 'info' | 'outline';
 
@@ -135,6 +140,8 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
     const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'blocked'>('all');
     // Filtro da tabela: Activo / Inactivo / Sem crédito activo / Bloqueado.
     const [tableStatus, setTableStatus] = useState<'all' | ClientDisplayStatus>('all');
+    const [biFilter, setBiFilter] = useState<'all' | EstadoBI | 'contactar'>('all');
+    const parametrosBI = useParametrosBI();
     const [currentPage, setCurrentPage] = useState(1);
     const itemsPerPage = 10;
 
@@ -269,15 +276,53 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
         }
     };
 
+    // Validade do BI (só particulares identificados por BI; passaportes e empresas ficam de fora).
+    const situacaoBI = useMemo(() => {
+        const hoje = luandaTodayKey();
+        return new Map(categoryClients
+            .filter(client => client.clientType !== 'EMPRESA' && client.documentType !== 'PASSAPORTE')
+            .map(client => [client.id, estadoBI(client.expiryDate, hoje, parametrosBI.diasAviso)]));
+    }, [categoryClients, parametrosBI.diasAviso]);
+    const contagemBI = useMemo(() => {
+        const contagem = { expirado: 0, a_expirar: 0 };
+        for (const situacao of situacaoBI.values()) {
+            if (situacao.estado === 'expirado') contagem.expirado += 1;
+            if (situacao.estado === 'a_expirar') contagem.a_expirar += 1;
+        }
+        return contagem;
+    }, [situacaoBI]);
+
     const filteredClients = useMemo(() => {
         return categoryClients.filter(
             (client) =>
                 ((client.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
                     (client.nif || '').includes(searchTerm)) &&
                 (statusFilter === 'all' ? true : client.status === statusFilter) &&
-                (tableStatus === 'all' ? true : clientDisplayStatus(client, credits) === tableStatus)
+                (tableStatus === 'all' ? true : clientDisplayStatus(client, credits) === tableStatus) &&
+                (biFilter === 'all' ? true : biFilter === 'contactar'
+                    ? ['expirado', 'a_expirar'].includes(situacaoBI.get(client.id)?.estado || '')
+                    : situacaoBI.get(client.id)?.estado === biFilter)
         );
-    }, [categoryClients, searchTerm, statusFilter, tableStatus, credits]);
+    }, [categoryClients, searchTerm, statusFilter, tableStatus, credits, biFilter, situacaoBI]);
+
+    /** Relatório «Clientes com BI expirado ou a expirar», com telefone, para a cobrança ou o atendimento. */
+    const exportarBIParaContactar = () => {
+        const linhas = categoryClients
+            .filter(client => ['expirado', 'a_expirar'].includes(situacaoBI.get(client.id)?.estado || ''))
+            .sort((a, b) => String(a.expiryDate || '').localeCompare(String(b.expiryDate || '')))
+            .map(client => {
+                const situacao = situacaoBI.get(client.id)!;
+                return {
+                    Cliente: client.name, 'BI/NIF': client.nif, Telefone: client.phone, Email: client.email || '',
+                    'Validade do BI': client.expiryDate || '', Estado: ROTULO_ESTADO_BI[situacao.estado], 'Situação': situacao.texto,
+                };
+            });
+        if (!linhas.length) {
+            toast({ title: 'Sem clientes para contactar', description: 'Nenhum BI expirado ou a expirar.' });
+            return;
+        }
+        exportToExcel(linhas, `clientes-bi-expirado-${luandaTodayKey()}`);
+    };
 
     const totalPages = Math.max(1, Math.ceil(filteredClients.length / itemsPerPage));
     const paginatedClients = useMemo(() => {
@@ -287,7 +332,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
 
     useEffect(() => {
         setCurrentPage(1);
-    }, [searchTerm, statusFilter, tableStatus]);
+    }, [searchTerm, statusFilter, tableStatus, biFilter]);
 
     // Calcular estatísticas estritas da categoria atual (Normal, Aposentado, Estrangeiro)
     const totalClients = categoryClients.length;
@@ -659,6 +704,16 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     <option value="all">Todos os estados</option>
                     {(Object.keys(CLIENT_STATUS_LABELS) as ClientDisplayStatus[]).map(key => <option key={key} value={key}>{CLIENT_STATUS_LABELS[key]}</option>)}
                 </select>
+                <select
+                    aria-label="Filtrar pela validade do BI"
+                    value={biFilter}
+                    onChange={(e) => setBiFilter(e.target.value as typeof biFilter)}
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm sm:w-48"
+                >
+                    <option value="all">Validade do BI: todos</option>
+                    <option value="contactar">Expirado ou a expirar</option>
+                    {(['valido', 'a_expirar', 'expirado', 'sem_data'] as EstadoBI[]).map(key => <option key={key} value={key}>{ROTULO_ESTADO_BI[key]}</option>)}
+                </select>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" className="gap-2" onClick={handleDownloadTemplate}>
                         <Download className="h-4 w-4" />
@@ -1005,12 +1060,27 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                 </DialogContent>
             </Dialog>
 
+            {(contagemBI.expirado > 0 || contagemBI.a_expirar > 0) && (
+                <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+                    <button type="button" onClick={() => setBiFilter('expirado')} className="rounded-full border border-red-200 bg-red-50 px-3 py-1 font-bold text-red-700 hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
+                        BI expirados: {contagemBI.expirado}
+                    </button>
+                    <button type="button" onClick={() => setBiFilter('a_expirar')} className="rounded-full border border-orange-200 bg-orange-50 px-3 py-1 font-bold text-orange-700 hover:bg-orange-100 dark:border-orange-900 dark:bg-orange-950/40 dark:text-orange-300">
+                        BI a expirar ({parametrosBI.diasAviso} dias): {contagemBI.a_expirar}
+                    </button>
+                    <Button variant="outline" size="sm" className="gap-2" onClick={exportarBIParaContactar}>
+                        <Download className="h-4 w-4" /> Clientes a contactar (Excel)
+                    </Button>
+                </div>
+            )}
+
             <div className="card-elevated overflow-hidden">
                 <Table>
                     <TableHeader>
                         <TableRow className="bg-primary/10 hover:bg-primary/10 border-b-2 border-primary/20">
                             <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">Cliente</TableHead>
                             <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">BI/NIF</TableHead>
+                            <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">Validade do BI</TableHead>
                             <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">Contacto</TableHead>
                             <TableHead className="text-right text-primary font-bold text-xs uppercase tracking-wider">Limite</TableHead>
                             <TableHead className="text-right text-primary font-bold text-xs uppercase tracking-wider">Utilizado</TableHead>
@@ -1024,7 +1094,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     <TableBody>
                         {filteredClients.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
+                                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                                     Nenhum cliente encontrado.
                                 </TableCell>
                             </TableRow>
@@ -1037,6 +1107,14 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                                     </div>
                                 </TableCell>
                                 <TableCell><span className="font-mono text-sm">{client.nif}</span></TableCell>
+                                <TableCell>
+                                    {situacaoBI.has(client.id) ? (
+                                        <div className="flex flex-col gap-0.5">
+                                            <SeloBI situacao={situacaoBI.get(client.id)!} />
+                                            {client.expiryDate && <span className="text-[11px] text-muted-foreground">{client.expiryDate.slice(0, 10).split('-').reverse().join('/')}</span>}
+                                        </div>
+                                    ) : <span className="text-xs text-muted-foreground">—</span>}
+                                </TableCell>
                                 <TableCell>
                                     <div className="flex gap-1">
                                         <Button variant="ghost" size="icon" className="h-8 w-8" asChild>

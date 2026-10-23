@@ -11,11 +11,14 @@ export const isPrimaryOwner = (user: { isOwner?: unknown; role?: unknown } | nul
 /** Permissões de páginas que antes não tinham nenhuma (todas as páginas do menu passam a ter uma). */
 export const PAGE_PERMISSIONS = ['view_market', 'use_simulator', 'view_chat', 'manage_suppliers'] as const;
 
+/** Permissões do módulo de Recursos Humanos. */
+export const HR_PERMISSIONS = ['hr_view', 'hr_manage', 'hr_view_salaries', 'hr_confidential', 'hr_payroll', 'hr_payroll_approve', 'hr_settings'] as const;
+
 /** Todas as permissões atribuíveis (as mesmas do editor de utilizadores). */
 export const ALL_ASSIGNABLE_PERMISSIONS = [
     'manage_users', 'manage_clients', 'view_credits', 'approve_loans', 'manage_payments', 'view_reports', 'view_user_reports',
     'manage_settings', 'view_audit_logs', 'manage_limits', 'manage_gateways', 'manage_fiscal', 'generate_fiscal_docs',
-    'manage_warranties', 'manage_legal', 'edit_credit_rate', ...PAGE_PERMISSIONS,
+    'manage_warranties', 'manage_legal', 'edit_credit_rate', ...PAGE_PERMISSIONS, ...HR_PERMISSIONS,
 ] as const;
 
 /** Colunas da tabela users que dão ou tiram poder: só a conta principal as altera nos outros utilizadores. */
