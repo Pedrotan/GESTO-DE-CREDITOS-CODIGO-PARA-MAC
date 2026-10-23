@@ -11,7 +11,10 @@ import {
     applyRemoteGroups,
     groupOperations,
     isAllowedDynamicUpdate,
-    isSafeToReprocess,
+    markIncomplete,
+    reprocessableGroups,
+    splitExpired,
+    stampReceived,
     isSyncableTable,
     mutationTable,
     normalizeSqlText,
@@ -594,7 +597,7 @@ const webUsersChange = async () => {
 
 const isUsersRoster = (operation: SyncOperation) => (operation as any).kind === 'users';
 
-const applyOperations = async (operations: SyncOperation[]): Promise<ApplyResult> => {
+const applyOperations = async (operations: SyncOperation[], caughtUp = true): Promise<ApplyResult> => {
     const accepted = operations.filter(operation => operation.commandVersion === 1 && activeConfig && sameTenant(operation.tenantId, activeConfig.tenantId));
     const waiting = await readAll(INCOMING_STORE);
     // Listas de utilizadores que ficaram por aplicar (ex.: chegaram ao computador sem sessão iniciada).
@@ -613,13 +616,12 @@ const applyOperations = async (operations: SyncOperation[]): Promise<ApplyResult
     }
     const { complete, pending } = groupOperations([...waiting.filter(operation => !isUsersRoster(operation)), ...valid]);
 
-    // Transacções que nunca chegam completas não podem ficar à espera para sempre.
-    const cutoff = Date.now() - INCOMPLETE_GROUP_MAX_AGE_MS;
-    const expired = pending.filter(operation => Date.parse(operation.createdAt) < cutoff);
-    const stillWaiting = pending.filter(operation => !expired.includes(operation));
+    // Transacções que nunca chegam completas não podem ficar à espera para sempre — mas o prazo conta desde que
+    // as partes chegaram aqui e só depois de recebidas todas as páginas (o resto pode vir na página seguinte).
+    const { expired, waiting: stillWaiting } = splitExpired(stampReceived(pending, new Date().toISOString()), Date.now(), caughtUp, INCOMPLETE_GROUP_MAX_AGE_MS);
     const groups: RemoteGroup[] = complete.map(group => ({ operations: group }));
-    // Partes de uma transacção incompleta não são aplicadas: vão para revisão.
-    for (const operation of expired) groups.push({ operations: [{ ...operation, kind: 'statement', statementId: '__incompleto__' }] });
+    // Partes de uma transacção incompleta não são aplicadas: vão para revisão, com o comando original guardado.
+    for (const operation of expired) groups.push({ operations: [markIncomplete(operation)] });
 
     const result = await applyGroups(groups);
     await deleteOperations(waiting.map(operation => operation.id), INCOMING_STORE);
@@ -674,46 +676,8 @@ export const reprocessRetainedOperations = async (): Promise<number> => {
         );
         if (!rows || rows.length === 0) return 0;
 
-        const TABLE_ORDER: Record<string, number> = {
-            users: 1,
-            company_settings: 2,
-            clients: 3,
-            credits: 4,
-            credit_installments: 5,
-            contracts: 6,
-            payments: 7,
-            warranties: 8,
-            legal_cases: 9,
-        };
-
-        const candidates: Array<{ group: RemoteGroup; priority: number; id: string }> = [];
-
-        for (const row of rows) {
-            try {
-                const operation = JSON.parse(row.operation) as SyncOperation & { reason?: string };
-                // Apenas operações comprovadamente seguras: inserções (snapshots e INSERT)
-                if (!isSafeToReprocess(operation, RENDERER_SQL_BY_ID)) continue;
-
-                const { reason: _reason, ...cleanOperation } = operation;
-                const entityType = row.entityType || operation.table || '';
-                const priority = TABLE_ORDER[entityType.toLowerCase()] ?? 50;
-
-                candidates.push({
-                    group: { operations: [cleanOperation], resolvesConflictIds: [row.id] },
-                    priority,
-                    id: row.id,
-                });
-            } catch {
-                // registo antigo ilegível: ignora e mantém para revisão manual
-            }
-        }
-
-        if (candidates.length === 0) return 0;
-
-        // Ordena por prioridade de tabela (ex: clientes antes de créditos, créditos antes de prestações)
-        candidates.sort((a, b) => a.priority - b.priority);
-        const groups = candidates.map(c => c.group);
-
+        const groups = reprocessableGroups(rows, RENDERER_SQL_BY_ID);
+        if (groups.length === 0) return 0;
         const result = await applyGroups(groups);
         if (result.applied > 0) {
             console.log(`[CloudSync] ${result.applied} registos seguros de sync_conflicts reprocessados e aplicados com sucesso.`);
@@ -860,7 +824,7 @@ export const syncCloudNow = async () => {
                 }
                 // Guardar a carga cifrada antes de avançar o cursor: uma chave corrigida pode recuperá-la.
                 await putOperations(unreadable, UNREADABLE_STORE);
-                const result = await applyOperations(incoming);
+                const result = await applyOperations(incoming, !body.hasMore);
                 await deleteOperations(decodedIds, UNREADABLE_STORE);
                 totalSkipped = unreadable.length;
                 totalPulled += result.applied;

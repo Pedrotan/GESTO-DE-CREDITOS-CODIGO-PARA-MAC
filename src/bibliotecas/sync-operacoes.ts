@@ -190,3 +190,67 @@ export const isSafeToReprocess = (operation: SyncOperation, sqlById: Map<string,
     const sql = sqlById.get(operation.statementId);
     return !!sql && /^\s*INSERT\b/iu.test(sql);
 };
+
+// ── Transacções que chegam em partes ─────────────────────────────────────────────
+// A nuvem entrega o histórico em páginas e uma transacção pode ficar entre duas. As partes ficam à espera
+// (com a hora a que chegaram a ESTE dispositivo) e só expiram depois de recebidas todas as páginas e de
+// passado o prazo desde a chegada. Contar o prazo desde a criação noutro computador partia as transacções
+// antigas de quem recebe o histórico (navegador novo, computador que esteve desligado).
+
+export type PendingOperation = SyncOperation & { receivedAt?: string };
+export const INCOMPLETE_STATEMENT_ID = '__incompleto__';
+
+/** Marca a hora de chegada das partes que ainda não a têm. */
+export const stampReceived = (operations: PendingOperation[], now: string): PendingOperation[] =>
+    operations.map(operation => (operation.receivedAt ? operation : { ...operation, receivedAt: now }));
+
+/** Partes de transacções incompletas que já podem ir para revisão: só com o histórico todo recebido. */
+export const splitExpired = (pending: PendingOperation[], nowMs: number, caughtUp: boolean, maxAgeMs: number) => {
+    if (!caughtUp) return { expired: [] as PendingOperation[], waiting: pending };
+    const expired = pending.filter(operation => Date.parse(operation.receivedAt || operation.createdAt) < nowMs - maxAgeMs);
+    return { expired, waiting: pending.filter(operation => !expired.includes(operation)) };
+};
+
+/** Parte de uma transacção incompleta: não é aplicada, mas guarda o comando original para ser recuperada. */
+export const markIncomplete = (operation: SyncOperation): SyncOperation & { original?: Partial<SyncOperation> } => ({
+    ...operation, kind: 'statement', statementId: INCOMPLETE_STATEMENT_ID,
+    original: { kind: operation.kind, statementId: operation.statementId, sql: operation.sql, table: operation.table, columns: operation.columns },
+});
+
+const restoreIncomplete = (operation: SyncOperation & { original?: Partial<SyncOperation> }): SyncOperation | null => {
+    if (operation.statementId !== INCOMPLETE_STATEMENT_ID) return operation;
+    if (!operation.original?.kind) return null; // marcado por uma versão antiga: o comando perdeu-se
+    const { original, ...rest } = operation;
+    return { ...rest, kind: original.kind!, statementId: original.statementId, sql: original.sql, table: original.table, columns: original.columns };
+};
+
+/**
+ * Conflitos pendentes que podem voltar a ser aplicados. Uma transacção de várias operações só volta inteira
+ * (todas as partes presentes, pela ordem original): aplicar só as inserções de uma transacção partida deixava,
+ * por exemplo, a decisão «aprovado» e o desembolso gravados com o crédito ainda pendente. Operações isoladas
+ * continuam a voltar só quando são inserções.
+ */
+export const reprocessableGroups = (rows: Array<{ id: string; operation: string }>, sqlById: Map<string, string>): RemoteGroup[] => {
+    const byTx = new Map<string, Array<{ id: string; operation: SyncOperation }>>();
+    const groups: RemoteGroup[] = [];
+    for (const row of rows) {
+        let parsed: SyncOperation & { reason?: string; original?: Partial<SyncOperation> };
+        try { parsed = JSON.parse(row.operation); } catch { continue; }
+        const { reason: _reason, ...clean } = parsed;
+        const operation = restoreIncomplete(clean);
+        if (!operation) continue;
+        if (operation.txId && Number(operation.txSize) > 1) {
+            byTx.set(operation.txId, [...(byTx.get(operation.txId) || []), { id: row.id, operation }]);
+        } else if (isSafeToReprocess(operation, sqlById)) {
+            groups.push({ operations: [operation], resolvesConflictIds: [row.id] });
+        }
+    }
+    for (const parts of byTx.values()) {
+        const unique = new Map(parts.map(part => [part.operation.id, part]));
+        if (unique.size < Number(parts[0].operation.txSize)) continue; // ainda falta alguma parte
+        const ordered = [...unique.values()].sort((a, b) => String(a.operation.createdAt).localeCompare(String(b.operation.createdAt)));
+        groups.push({ operations: ordered.map(part => part.operation), resolvesConflictIds: parts.map(part => part.id) });
+    }
+    // Pela ordem em que foram feitas (ex.: o cliente antes do crédito, o crédito antes das prestações).
+    return groups.sort((a, b) => String(a.operations[0].createdAt).localeCompare(String(b.operations[0].createdAt)));
+};
