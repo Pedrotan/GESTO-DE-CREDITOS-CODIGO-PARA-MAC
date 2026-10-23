@@ -167,144 +167,180 @@ const imageFormat = (value: string) => /^data:image\/jpe?g/i.test(value) ? 'JPEG
 /** Empresa que desenvolve o sistema (rodapé dos talões). */
 const SYSTEM_DEVELOPER = 'Tango Gestão de Créditos · DIGITAL NORTE - Comércio e Prestação de Serviços, (SU), Lda';
 
+/** Colunas do talão (letra monoespaçada de 7 pt numa largura útil de 72 mm, como nas impressoras de 80 mm). */
+const SLIP_COLS = 48;
+const amount = (value: number) => formatKz(value).replace(/\s*Kz$/, '');
+
+/** Quebra o texto em linhas de no máximo `cols` caracteres, por palavras. */
+const wrapCols = (text: string, cols: number) => {
+    const out: string[] = [];
+    let current = '';
+    for (const word of pdfSafe(text).split(/\s+/).filter(Boolean)) {
+        if (!current) current = word;
+        else if (current.length + 1 + word.length <= cols) current += ` ${word}`;
+        else { out.push(current); current = word; }
+        while (current.length > cols) { out.push(current.slice(0, cols)); current = current.slice(cols); }
+    }
+    if (current) out.push(current);
+    return out.length ? out : [''];
+};
+const centerCols = (text: string) => {
+    const value = text.slice(0, SLIP_COLS);
+    return ' '.repeat(Math.floor((SLIP_COLS - value.length) / 2)) + value;
+};
+/** Texto à esquerda e à direita na mesma linha (o da esquerda encurta se não couber). */
+const spread = (leftText: string, rightText: string) => {
+    const right = pdfSafe(rightText).slice(0, SLIP_COLS);
+    const room = Math.max(0, SLIP_COLS - right.length - 1);
+    const left = pdfSafe(leftText).slice(0, room);
+    return left + ' '.repeat(SLIP_COLS - left.length - right.length) + right;
+};
+
 /**
- * Talão de 80 mm (largura útil 72 mm) para impressoras térmicas. A altura acompanha o conteúdo.
- * Cabeçalho com o logótipo e os dados da empresa, marca de água por baixo do conteúdo, emissão e operador
- * no fim, e o agradecimento e quem desenvolveu o sistema em letra pequena no rodapé.
+ * Talão de 80 mm para impressoras térmicas, no formato de cupão: letra monoespaçada em 48 colunas, separadores
+ * "====" e "----", logótipo e dados da empresa no cabeçalho, prestações com capital/juros/total, totais, forma de
+ * pagamento, operador e cliente, QR de verificação e agradecimento. Marca de água ao fundo e altura exacta.
  */
 export async function generateReceiptThermal(row: PaymentRow, client: ReceiptClient, settings: any, userName?: string, output: 'save' | 'datauri' = 'save') {
     if (!row.receipt) throw new Error('Este pagamento ainda não tem recibo (está pendente de validação).');
     const config = getCompanySettings(settings);
     const width = 80;
-    const left = 4;
-    const usable = width - 8;
-    // Duas passagens: a primeira mede o conteúdo e a segunda gera o talão com a altura exacta (sem papel em branco).
-    const draw = async (height: number) => {
-    const doc = new jsPDF({ unit: 'mm', format: [width, height] });
-    // Talão: sem moldura nem rodapé de contactos (o verificador de PDFs reconhece-o por esta marca).
-    (doc as any).__receiptSlip = true;
-    // A marca de água deste talão é desenhada aqui, por baixo do conteúdo (e não por cima, à saída).
-    setPdfWatermark(doc, null);
+    const left = 4.4;
+    const fontSize = 7;
+    const lineH = 3.15;
     const code = receiptVerificationCode(row);
     const logo = [config.reportLogo, config.logo].find(isImageData);
     const watermark = [config.watermarkLogo, getMasterPdfWatermark(), logo].find(isImageData);
+    const slogan = String(settings?.slogan || settings?.segment || '').trim();
+    const issuedAt = formatLuandaDateTime(new Date());
+    const qr = await QRCode.toDataURL(qrContent(row, config, code), { margin: 0, width: 240, errorCorrectionLevel: 'M' }).catch(() => '');
 
-    // Marca de água: logótipo grande e muito claro ao centro do talão.
-    if (watermark) {
-        try {
-            const props = doc.getImageProperties(watermark);
-            const size = Math.min(56 / props.width, 56 / props.height);
-            const w = props.width * size;
-            const h = props.height * size;
-            doc.saveGraphicsState();
-            doc.setGState(new (doc.GState as unknown as { new (options: { opacity: number }): any })({ opacity: 0.07 }));
-            (doc as any).__drawingWatermark = true;
-            doc.addImage(watermark, imageFormat(watermark), (width - w) / 2, (height - h) / 2, w, h);
-            (doc as any).__drawingWatermark = false;
-            doc.restoreGraphicsState();
-        } catch { /* imagem inválida: talão sem marca de água */ }
-    }
+    // Duas passagens: a primeira mede o conteúdo e a segunda gera o talão com a altura exacta (sem papel em branco).
+    const draw = (height: number) => {
+        const doc = new jsPDF({ unit: 'mm', format: [width, height] });
+        // Talão: sem moldura nem rodapé de contactos (o verificador de PDFs reconhece-o por esta marca).
+        (doc as any).__receiptSlip = true;
+        // A marca de água deste talão é desenhada aqui, por baixo do conteúdo (e não por cima, à saída).
+        setPdfWatermark(doc, null);
+        if (watermark) {
+            try {
+                const props = doc.getImageProperties(watermark);
+                const size = Math.min(58 / props.width, 58 / props.height);
+                const w = props.width * size;
+                const h = props.height * size;
+                doc.saveGraphicsState();
+                doc.setGState(new (doc.GState as unknown as { new (options: { opacity: number }): any })({ opacity: 0.07 }));
+                (doc as any).__drawingWatermark = true;
+                doc.addImage(watermark, imageFormat(watermark), (width - w) / 2, (height - h) / 2, w, h);
+                (doc as any).__drawingWatermark = false;
+                doc.restoreGraphicsState();
+            } catch { /* imagem inválida: talão sem marca de água */ }
+        }
 
-    let y = 6;
-    const center = (text: string, size: number, bold = false) => {
-        doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size);
-        const wrapped = doc.splitTextToSize(pdfSafe(text), usable) as string[];
-        doc.text(wrapped, width / 2, y, { align: 'center' });
-        y += wrapped.length * size * 0.42 + 1;
-    };
-    const line = (label: string, value: string, bold = false) => {
-        doc.setFontSize(7.6);
-        doc.setFont('helvetica', 'normal');
-        const labelWidth = doc.getTextWidth(pdfSafe(label)) + 2;
-        doc.setFont('helvetica', bold ? 'bold' : 'normal');
-        const wrapped = doc.splitTextToSize(pdfSafe(value), usable - labelWidth) as string[];
-        doc.setFont('helvetica', 'normal');
-        doc.text(pdfSafe(label), left, y);
-        doc.setFont('helvetica', bold ? 'bold' : 'normal');
-        doc.text(wrapped, width - left, y, { align: 'right' });
-        y += Math.max(1, wrapped.length) * 3.3;
-    };
-    const rule = () => { doc.setDrawColor(120, 120, 120); doc.setLineWidth(0.15); doc.setLineDashPattern([0.8, 0.8], 0); doc.line(left, y - 1.6, width - left, y - 1.6); doc.setLineDashPattern([], 0); y += 1.6; };
-
-    // Cabeçalho: logótipo à esquerda e os dados da empresa ao lado (nome em letra moderada).
-    doc.setTextColor(0, 0, 0);
-    let textX = left;
-    let logoBottom = y;
-    if (logo) {
-        try {
-            const props = doc.getImageProperties(logo);
-            const scale = Math.min(18 / props.width, 18 / props.height);
-            const w = props.width * scale;
-            const h = props.height * scale;
-            doc.addImage(logo, imageFormat(logo), left, y - 2, w, h);
-            textX = left + w + 2.5;
-            logoBottom = y - 2 + h;
-        } catch { /* sem logótipo */ }
-    }
-    const infoWidth = width - left - textX;
-    const info = (text: string, size: number, bold = false) => {
-        if (!text) return;
-        doc.setFont('helvetica', bold ? 'bold' : 'normal'); doc.setFontSize(size);
-        const wrapped = (doc.splitTextToSize(pdfSafe(text), infoWidth) as string[]).slice(0, bold ? 3 : 2);
-        doc.text(wrapped, textX, y);
-        y += wrapped.length * size * 0.4 + 0.5;
-    };
-    info(config.name || 'Empresa', 7.2, true);
-    info(`NIF ${config.nif || '-'}`, 5.8);
-    info([config.address, config.location].filter(Boolean).join(', ') || 'Angola', 5.8);
-    info([config.phone && `Tel. ${config.phone}`, config.whatsapp && `WhatsApp ${config.whatsapp}`].filter(Boolean).join(' · '), 5.8);
-    info(config.email || '', 5.8);
-    info(config.website || '', 5.8);
-    y = Math.max(y, logoBottom + 1) + 2.5;
-    rule();
-    center('RECIBO DE PAGAMENTO', 9.5, true);
-    center(row.receipt, 9, true);
-    if (row.status === 'cancelled') {
-        y += 1;
-        doc.setFillColor(0, 0, 0);
-        doc.rect(left, y - 4, usable, 7, 'F');
-        doc.setTextColor(255, 255, 255); doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
-        doc.text('*** ANULADO ***', width / 2, y + 0.8, { align: 'center' });
+        let y = 5;
         doc.setTextColor(0, 0, 0);
-        y += 6;
-        center(`Motivo: ${row.payment.cancelReason || '-'}`, 6.6);
-    }
-    rule();
-    line('Cliente', row.clientName, true);
-    line('NIF/BI', client.nif || '-');
-    line('Contrato', row.contract);
-    line('Data-valor', formatLuandaDate(`${row.valueDateKey}T12:00:00Z`));
-    line('Registado', formatRegistration(row.registeredAt));
-    line('Método', row.methodLabel);
-    if (row.reference) line('Referência', row.reference);
-    rule();
-    for (const item of row.installments) line(`${item.n}.ª prestação`, formatKz((item.principalMinor + item.interestMinor + item.lateMinor) / 100));
-    if (row.installments.length) rule();
-    line('Capital', formatKz(row.principal));
-    line('Juros', formatKz(row.interest));
-    line('Juros de mora', formatKz(row.late));
-    if (row.other) line('Selo e comissões', formatKz(row.other));
-    line('TOTAL PAGO', formatKz(row.total), true);
-    line('Capital em dívida', row.balanceAfter === null ? '-' : formatKz(row.balanceAfter));
-    rule();
-    line('Emitido em', formatLuandaDateTime(new Date()));
-    line('Operador', userName || row.operator);
-    y += 1;
-    try {
-        const qr = await QRCode.toDataURL(qrContent(row, config, code), { margin: 0, width: 240, errorCorrectionLevel: 'M' });
-        doc.addImage(qr, 'PNG', (width - 30) / 2, y, 30, 30);
-        y += 33;
-    } catch { /* sem QR */ }
-    center(`Verificação: ${code}`, 7, true);
-    y += 0.5;
-    doc.setTextColor(70, 70, 70);
-    center(`Obrigado pela sua preferência, ${row.clientName}!`, 5.2);
-    center(`Processado por ${SYSTEM_DEVELOPER}`, 4.6);
-    doc.setTextColor(0, 0, 0);
-    return { doc, end: y };
+        const text = (value: string, bold = false, size = fontSize) => {
+            doc.setFont('courier', bold ? 'bold' : 'normal'); doc.setFontSize(size);
+            doc.text(value, left, y);
+            y += lineH * (size / fontSize);
+        };
+        const centered = (value: string, bold = false) => wrapCols(value, SLIP_COLS).forEach(part => text(centerCols(part), bold));
+        const field = (label: string, value: string) => {
+            const [first, ...rest] = wrapCols(`${label} ${value}`, SLIP_COLS);
+            text(first);
+            for (const part of rest.length ? wrapCols(rest.join(' '), SLIP_COLS - 2) : []) text(`  ${part}`);
+        };
+        const rule = (char: '=' | '-') => text(char.repeat(SLIP_COLS));
+
+        // Cabeçalho: logótipo centrado e identificação da empresa.
+        if (logo) {
+            try {
+                const props = doc.getImageProperties(logo);
+                const scale = Math.min(30 / props.width, 17 / props.height);
+                const w = props.width * scale;
+                const h = props.height * scale;
+                doc.addImage(logo, imageFormat(logo), (width - w) / 2, y - 1.5, w, h);
+                y += h + 1.5;
+            } catch { /* sem logótipo */ }
+        }
+        rule('=');
+        centered((config.name || 'Empresa').toUpperCase(), true);
+        if (slogan) centered(slogan);
+        rule('=');
+        field('NIF:', config.nif || '-');
+        if (config.address) field('Endereço:', config.address);
+        if (config.location) field('Cidade:', config.location);
+        // Telefone e WhatsApp na mesma linha quando cabem (como no cupão); senão, um por linha, sem partir os números.
+        const phones = `Telefone: ${config.phone || '-'} | WhatsApp: ${config.whatsapp}`;
+        if (config.phone && config.whatsapp && phones.length <= SLIP_COLS) text(pdfSafe(phones));
+        else {
+            if (config.phone) field('Telefone:', config.phone);
+            if (config.whatsapp) field('WhatsApp:', config.whatsapp);
+        }
+        if (config.email) field('Email:', config.email);
+        if (config.website) field('Site:', config.website);
+        rule('=');
+        text(spread(issuedAt, `RECIBO: ${row.receipt.replace(/^RC\s*/, '')}`));
+        text(spread(`CONTRATO: ${row.contract}`, row.reference ? `REF: ${row.reference}` : ''));
+        rule('-');
+        text(centerCols('RECIBO DE PAGAMENTO'), true);
+        if (row.status === 'cancelled') {
+            text(centerCols('*** ANULADO ***'), true);
+            wrapCols(`Motivo: ${row.payment.cancelReason || '-'}`, SLIP_COLS).forEach(part => text(part));
+        }
+        rule('-');
+
+        // Prestações pagas (descrição e capital / juros / total, como as linhas de um cupão).
+        text('Nº  DESCRIÇÃO');
+        text(`     ${'CAPITAL(Kz)'.padStart(13)}${'JUROS(Kz)'.padStart(13)}${'TOTAL(Kz)'.padStart(15)}`);
+        rule('-');
+        const items = row.installments.length ? row.installments : [{ n: 0, principalMinor: Math.round(row.principal * 100), interestMinor: Math.round(row.interest * 100), lateMinor: Math.round(row.late * 100), settled: false }];
+        items.forEach((item, index) => {
+            const label = item.n ? `${item.n}.ª PRESTAÇÃO${item.settled ? ' (LIQUIDADA)' : ''}` : 'IMPUTAÇÃO GLOBAL AO CONTRATO';
+            text(`${String(index + 1).padStart(3, '0')} ${label}`);
+            const total = (item.principalMinor + item.interestMinor + item.lateMinor) / 100;
+            text(`     ${amount(item.principalMinor / 100).padStart(13)}${amount(item.interestMinor / 100).padStart(13)}${amount(total).padStart(15)}`);
+            if (item.lateMinor) text(`     JUROS DE MORA: ${amount(item.lateMinor / 100)}`);
+        });
+        rule('-');
+        text(spread('CAPITAL (Kz):', amount(row.principal)));
+        text(spread('JUROS (Kz):', amount(row.interest)));
+        text(spread('JUROS DE MORA (Kz):', amount(row.late)));
+        if (row.other) text(spread('SELO E COMISSÕES (Kz):', amount(row.other)));
+        text(spread('TOTAL PAGO (Kz):', amount(row.total)), true);
+        rule('-');
+        text(spread('FORMA DE PAGAMENTO', 'VALOR PAGO'));
+        text(spread(row.methodLabel, amount(row.total)));
+        text(spread('CAPITAL EM DÍVIDA (Kz):', row.balanceAfter === null ? '-' : amount(row.balanceAfter)));
+        rule('-');
+        field('Operador:', userName || row.operator);
+        field('Cliente:', client.name || row.clientName);
+        field('NIF/BI:', client.nif || '-');
+        if (client.phone) field('Telefone:', client.phone);
+        field('Data-valor:', formatLuandaDate(`${row.valueDateKey}T12:00:00Z`));
+        field('Registado:', formatRegistration(row.registeredAt));
+        rule('=');
+
+        if (qr) {
+            y += 0.5;
+            doc.addImage(qr, 'PNG', (width - 26) / 2, y, 26, 26);
+            y += 28.5;
+        }
+        text(centerCols(`VERIFICAÇÃO: ${code}`), true);
+        rule('=');
+        text(centerCols('OBRIGADO PELA PREFERÊNCIA!'), true);
+        centered(`Volte sempre à ${(config.name || 'nossa empresa').split(/\s+[-–,]\s*|,/)[0]}.`);
+        rule('=');
+        // Quem desenvolveu o sistema, em letra pequena.
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(4.6); doc.setTextColor(70, 70, 70);
+        const dev = doc.splitTextToSize(pdfSafe(`Processado por ${SYSTEM_DEVELOPER}`), width - 2 * left) as string[];
+        doc.text(dev, width / 2, y + 0.4, { align: 'center' });
+        y += dev.length * 2;
+        doc.setTextColor(0, 0, 0);
+        return { doc, end: y };
     };
-    const probe = await draw(500);
-    const { doc } = await draw(Math.max(100, Math.ceil(probe.end + 5)));
+    const probe = draw(600);
+    const { doc } = draw(Math.max(100, Math.ceil(probe.end + 4)));
     const fileName = `Talao-${row.receipt.replace(/[^\w]+/g, '-')}.pdf`;
     if (output === 'datauri') return { fileName, dataUrl: doc.output('datauristring') as string };
     doc.save(fileName);
