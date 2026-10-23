@@ -20,6 +20,7 @@ import { applyRemoteGroups, type RemoteGroup } from '../src/bibliotecas/sync-ope
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
+import { isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
 import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
@@ -1070,6 +1071,9 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
 // Processamento salarial: calcular exige hr_payroll; aprovar, pagar e fechar exigem hr_payroll_approve e o
 // utilizador autenticado como responsável (1.º parâmetro); aprovar o que o próprio calculou e reabrir um
 // processamento aprovado ou pago são só para o Super Administrador.
+// Pedidos do portal do funcionário: só estas duas instruções (estado fixo «planeado»/«pendente»), com
+// hr_self e o próprio utilizador como autor. Que a ficha é mesmo do utilizador confirma-se em assertApprovalBatch.
+const isPortalPedido = (statement: { sql: string }) => isPortalPedidoSql(statement.sql);
 const assertPayrollSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statement: { sql: string; params?: unknown[] }) => {
   const sql = statement.sql.replace(/\s+/g, " ");
   const setClause = /^\s*UPDATE\b/i.test(sql) ? (sql.match(/\bSET\b(.*?)\bWHERE\b/i)?.[1] || "") : "";
@@ -1151,6 +1155,11 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if (operator !== actor.id) throw new Error('Só pode abrir ou fechar o seu próprio caixa.');
     }
     if (table === 'rh_processamento') assertPayrollSqlAuthorized(event, statement);
+    if (isPortalPedido(statement)) {
+      const actor = assertUserPermission(event, "hr_self");
+      if (statement.params?.[statement.params.length - 2] !== actor.id) throw new Error("O pedido tem de ser feito pelo utilizador autenticado.");
+      continue;
+    }
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
   }
 };
@@ -1164,6 +1173,12 @@ const loadLimitPolicy = async (query:(type:string,sql:string,params?:unknown[])=
 const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:Array<{sql:string;params?:unknown[]}>,query:(type:string,sql:string,params?:unknown[])=>Promise<any>)=>{
   if(financialSchemaBootstrapOpen)return;
   for(const statement of statements){
+    if(isPortalPedido(statement)){
+      // A ficha do pedido tem de estar ligada à conta de quem pede (ou quem pede gere o RH).
+      const actor:any=userAuth.assertAuthenticated(event.sender.id);
+      const ficha=await query('get','SELECT utilizador_id FROM rh_funcionario WHERE id = ?',[statement.params?.[1]]);
+      if(ficha?.utilizador_id!==actor.id && !hasPermission(actor,'hr_manage'))throw new Error('Só pode fazer pedidos na sua própria ficha.');
+    }
     const table=mutationTable(statement.sql);
     if(table==='limit_policy_versions' && /^\s*INSERT/i.test(statement.sql)){
       const actor=assertUserPermission(event,'manage_limits');

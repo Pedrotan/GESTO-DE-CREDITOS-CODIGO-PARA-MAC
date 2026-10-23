@@ -51,6 +51,17 @@ export class ServicoSalariosRH {
             JOIN rh_processamento p ON p.id = r.processamento_id WHERE r.funcionario_id = ? ORDER BY p.ano DESC, p.mes DESC`, [funcionarioId])
             .catch(() => [] as Array<Recibo & { ano: number; mes: number; tipo: TipoProcessamento; estado: EstadoProcessamento }>);
     }
+    /** Todos os recibos com o mês e o estado do processamento (relatórios). */
+    static todosRecibos() {
+        type Linha = Recibo & { ano: number; mes: number; tipo: TipoProcessamento; estado: EstadoProcessamento };
+        return db.all<Linha>(`SELECT r.*, p.ano, p.mes, p.tipo, p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id
+            ORDER BY p.ano, p.mes, r.nome`).catch(() => [] as Linha[]);
+    }
+    /** Linhas de horas extra, atrasos e faltas de todos os recibos (relatório de horas extra e atrasos). */
+    static linhasTempo() {
+        return db.all<{ recibo_id: string; codigo: string; quantidade: number; valor_minor: number }>(`SELECT recibo_id, codigo, quantidade, valor_minor FROM rh_recibo_linha
+            WHERE codigo IN ('HORAS_EXTRA', 'ATRASOS', 'FALTAS')`).catch(() => [] as Array<{ recibo_id: string; codigo: string; quantidade: number; valor_minor: number }>);
+    }
     static linhas(reciboId: string) {
         return db.all<LinhaReciboRH>('SELECT * FROM rh_recibo_linha WHERE recibo_id = ? ORDER BY ordem, descricao', [reciboId]).catch(() => [] as LinhaReciboRH[]);
     }

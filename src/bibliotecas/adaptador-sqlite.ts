@@ -1171,6 +1171,10 @@ const createTables = async () => {
         for (const seed of rhSeedFase4Statements(new Date().toISOString())) await runSql(seed.sql, seed.params);
         await safeAddColumn('clients', 'biAlertSentAt', 'TEXT');
     });
+    // Recursos Humanos, fase 5: pedidos de férias feitos pelo próprio funcionário no portal.
+    await applyMigration(2026102305, 'rh-fase5-portal-do-funcionario', async () => {
+        await safeAddColumn('rh_plano_ferias', 'pedido_funcionario', 'INTEGER NOT NULL DEFAULT 0');
+    });
 
     // safeAddColumns for migrations
     await safeAddColumn("users", "permissionExceptions", "TEXT");

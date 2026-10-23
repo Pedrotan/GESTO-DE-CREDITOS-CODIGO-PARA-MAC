@@ -157,6 +157,8 @@ const menuItems: MenuItem[] = [
       { icon: Banknote, label: 'Processamento Salarial', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh' },
       { icon: ReciboIcon, label: 'Recibos e Declarações', path: '/rh/recibos', permission: 'hr_view_salaries', licensedModule: 'rh' },
       { icon: FolderOpen, label: 'Documentos', path: '/rh/documentos', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: BarChart, label: 'Relatórios de RH', path: '/rh/relatorios', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: UserCog, label: 'Portal do Funcionário', path: '/rh/portal', permission: 'hr_self', licensedModule: 'rh' },
       { icon: SlidersHorizontal, label: 'Configurações de RH', path: '/rh/configuracoes', permission: 'hr_view', licensedModule: 'rh' },
     ],
   },

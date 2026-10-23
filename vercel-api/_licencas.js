@@ -107,7 +107,12 @@ export const ensureLicenseTables = async (sql) => {
     await sql(`INSERT INTO tango_planos (id, nome, duracao_meses, duracao_dias) VALUES ($1, $2, $3, $4)
       ON CONFLICT (id) DO NOTHING`, [plan.id, plan.nome, plan.meses, plan.dias]);
   }
+  // Módulos vendidos à empresa como extra (ex.: { rh: true }): somam-se aos do plano e mandam sobre eles.
+  await sql(`ALTER TABLE tango_licencas ADD COLUMN IF NOT EXISTS modulos JSONB NOT NULL DEFAULT '{}'::jsonb`);
 };
+
+/** Módulos que se podem activar por empresa no painel do Master. */
+export const LICENSE_MODULES = ['rh'];
 
 export const recordLicenseEvent = (sql, { licenseId = null, tenantId = null, type, detail = {}, ip = null }) =>
   sql(`INSERT INTO tango_licenca_eventos (licenca_id, empresa_id, tipo, detalhe, ip) VALUES ($1, $2, $3, $4::jsonb, $5)`,
@@ -368,7 +373,7 @@ const tokenClaims = (license, plan, activation, now) => {
     plano: license.plano_id,
     plano_nome: plan?.nome || license.plano_id,
     escalao: license.escalao,
-    funcionalidades: plan?.funcionalidades || {},
+    funcionalidades: { ...(plan?.funcionalidades || {}), ...parseJsonText(license.modulos, {}) },
     max_maquinas: Number(license.max_maquinas),
     machine_hash: activation.machine_hash,
     data_fim: license.data_fim ? new Date(license.data_fim).toISOString() : null,
@@ -609,6 +614,7 @@ export const licenseDetails = async (sql, tenantId) => {
     WHERE licenca_id = $1 OR (licenca_id IS NULL AND UPPER(empresa_id) = UPPER($2)) ORDER BY criado_em DESC, id DESC LIMIT 200`, [license.id, license.empresa_id]);
   return {
     ok: true,
+    modules: parseJsonText(license.modulos, {}),
     machines: machines.map(row => ({
       id: row.id,
       name: row.nome_maquina || null,
@@ -627,10 +633,10 @@ export const licenseDetails = async (sql, tenantId) => {
  * mantêm o que tinham.
  */
 export const tenantAllowsFeature = async (sql, tenantId, feature) => {
-  const [row] = await sql(`SELECT l.escalao, p.funcionalidades::text AS funcionalidades FROM tango_licencas l
+  const [row] = await sql(`SELECT l.escalao, p.funcionalidades::text AS funcionalidades, l.modulos::text AS modulos FROM tango_licencas l
     JOIN tango_planos p ON p.id = l.plano_id WHERE UPPER(l.empresa_id) = UPPER($1)`, [tenantId]);
   if (!row) return true;
-  const explicit = parseJsonText(row.funcionalidades, {})[feature];
+  const explicit = { ...parseJsonText(row.funcionalidades, {}), ...parseJsonText(row.modulos, {}) }[feature];
   return typeof explicit === 'boolean' ? explicit : row.escalao === 'empresarial';
 };
 
@@ -641,12 +647,29 @@ export const licenseSummary = async (sql, tenantId) => {
   if (!row) return null;
   const license = toPublicLicense(row);
   const [plan] = await sql(`SELECT funcionalidades::text AS funcionalidades FROM tango_planos WHERE id = $1`, [license.plan]);
+  const [own] = await sql(`SELECT modulos::text AS modulos FROM tango_licencas WHERE id = $1`, [license.id]);
   return {
     plan: license.plan, planName: license.planName, tier: license.tier, status: license.status, endsAt: license.endsAt,
     daysRemaining: license.daysRemaining, maxMachines: license.maxMachines, machines: license.machines,
     // Módulos do plano (ex.: multi_empresa): a versão web mostra-os só quando a licença os inclui.
-    features: parseJsonText(plan?.funcionalidades, {}),
+    features: { ...parseJsonText(plan?.funcionalidades, {}), ...parseJsonText(own?.modulos, {}) },
   };
+};
+
+/** Activa ou desactiva módulos extra na licença da empresa (chega aos computadores na próxima renovação do token). */
+export const setLicenseModules = async (sql, tenantId, modules, ip = null) => {
+  const license = await findLicense(sql, tenantId);
+  if (!license) return { ok: false, status: 404, message: 'A empresa não tem licença no servidor.' };
+  if (!modules || typeof modules !== 'object' || Array.isArray(modules)) return { ok: false, status: 400, message: 'Módulos inválidos.' };
+  const current = parseJsonText(license.modulos, {});
+  const next = { ...current };
+  for (const [name, value] of Object.entries(modules)) {
+    if (!LICENSE_MODULES.includes(name) || typeof value !== 'boolean') return { ok: false, status: 400, message: `Módulo desconhecido: ${name}.` };
+    next[name] = value;
+  }
+  await sql(`UPDATE tango_licencas SET modulos = $2::jsonb, atualizado_em = NOW() WHERE id = $1`, [license.id, JSON.stringify(next)]);
+  await recordLicenseEvent(sql, { licenseId: license.id, tenantId: license.empresa_id, type: 'modulos_alterados', ip, detail: { antes: current, depois: next } });
+  return { ok: true, modules: next };
 };
 
 /** Estado no servidor das chaves antigas (eyJ…) emitidas pelo Master: mantida na licença da empresa ou revogada. */

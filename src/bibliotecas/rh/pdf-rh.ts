@@ -275,3 +275,69 @@ export function gerarGuiaFeriasPdf(d: DadosGuiaFerias, settings: unknown, userNa
     writeClosingNote(doc, `Guia ${d.numero} emitida pelo sistema; os dias ficam marcados como férias no livro de ponto.`, fim + 40, config, userName, { line: false });
     return terminar(doc, `Guia-ferias-${d.numero.replace(/[^\w]+/gu, '-')}.pdf`, saida);
 }
+
+type ColunaRel = { titulo: string; tipo: 'texto' | 'kz' | 'numero' | 'data' | 'pct' };
+type TabelaRel = { titulo: string; subtitulo: string; colunas: ColunaRel[]; linhas: Array<Array<string | number | null>>; totais?: Array<string | number | null>; nota?: string };
+
+/** Formata uma célula de relatório para o ecrã e o PDF. */
+export function formatarCelula(valor: string | number | null, tipo: ColunaRel['tipo']) {
+    if (valor === null || valor === undefined || valor === '') return '';
+    if (tipo === 'kz' && typeof valor === 'number') return formatCurrency(valor);
+    if (tipo === 'pct' && typeof valor === 'number') return `${valor.toLocaleString('pt-PT', { maximumFractionDigits: 1 })}%`;
+    if (tipo === 'numero' && typeof valor === 'number') return valor.toLocaleString('pt-PT', { maximumFractionDigits: 2 });
+    if (tipo === 'data' && typeof valor === 'string' && /^\d{4}-\d{2}-\d{2}/u.test(valor)) return dataPt(valor);
+    return String(valor);
+}
+
+/** Relatório de RH em PDF (horizontal), com a marca da empresa, filtros no subtítulo e totais. */
+export function gerarRelatorioPdf(t: TabelaRel, filtros: string, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF({ orientation: 'landscape' });
+    const config = getCompanySettings(settings);
+    const cor = resolveBrandPrimary(config.primaryColor);
+    applyBranding(doc, config, userName);
+    const y = brandingHeaderBottom(doc) + 9;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(15, 23, 42);
+    doc.text(t.titulo.toUpperCase(), 148, y, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.5); doc.setTextColor(100, 116, 139);
+    doc.text(`${t.subtitulo}${filtros ? ` · ${filtros}` : ''}`, 148, y + 5, { align: 'center' });
+    const direita = (tipo: ColunaRel['tipo']) => ['kz', 'numero', 'pct'].includes(tipo);
+    autoTable(doc, {
+        startY: y + 9, theme: 'striped', styles: { fontSize: 7.5, cellPadding: 1.4 }, headStyles: { fillColor: cor },
+        head: [t.colunas.map(c => c.titulo)],
+        body: t.linhas.length ? t.linhas.map(l => l.map((v, i) => formatarCelula(v, t.colunas[i].tipo))) : [[{ content: 'Sem dados para os filtros escolhidos.', colSpan: t.colunas.length }]],
+        foot: t.totais ? [t.totais.map((v, i) => ({ content: formatarCelula(v, t.colunas[i].tipo), styles: { halign: direita(t.colunas[i].tipo) ? 'right' as const : 'left' as const } }))] : undefined,
+        footStyles: { fillColor: [15, 23, 42] },
+        columnStyles: Object.fromEntries(t.colunas.map((c, i) => [i, direita(c.tipo) ? { halign: 'right' as const } : {}])),
+        didDrawPage: () => applyBranding(doc, config, userName, true),
+    });
+    const fim = (doc as any).lastAutoTable?.finalY || y + 30;
+    if (t.nota) writeClosingNote(doc, t.nota, fim, config, userName, { line: false });
+    return terminar(doc, `${t.titulo.normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^\w]+/gu, '-')}.pdf`, saida);
+}
+
+export type SeccaoFicha = { titulo: string; pares?: Array<[string, string]>; tabela?: { colunas: string[]; linhas: string[][] } };
+
+/** Ficha individual do funcionário: dados, contrato, histórico salarial, ausências e documentos. */
+export function gerarFichaIndividualPdf(nome: string, seccoes: SeccaoFicha[], settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF();
+    const config = getCompanySettings(settings);
+    const cor = resolveBrandPrimary(config.primaryColor);
+    applyBranding(doc, config, userName);
+    let y = brandingHeaderBottom(doc) + 10;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(15, 23, 42);
+    doc.text('FICHA INDIVIDUAL DO FUNCIONÁRIO', 105, y, { align: 'center' });
+    doc.setFontSize(10); doc.setTextColor(cor[0], cor[1], cor[2]);
+    doc.text(nome, 105, y + 6, { align: 'center' });
+    y += 12;
+    for (const s of seccoes) {
+        autoTable(doc, {
+            startY: y, theme: s.pares ? 'grid' : 'striped', styles: { fontSize: 8, cellPadding: 1.6 }, headStyles: { fillColor: cor },
+            head: s.pares ? [[{ content: s.titulo, colSpan: 2 }]] : [[{ content: s.titulo, colSpan: s.tabela!.colunas.length }], s.tabela!.colunas],
+            body: s.pares ? s.pares : (s.tabela!.linhas.length ? s.tabela!.linhas : [[{ content: 'Sem registos.', colSpan: s.tabela!.colunas.length }]]),
+            columnStyles: s.pares ? { 0: { fontStyle: 'bold', cellWidth: 55, fillColor: [248, 250, 252] } } : {},
+            didDrawPage: () => applyBranding(doc, config, userName, true),
+        });
+        y = ((doc as any).lastAutoTable?.finalY || y + 20) + 5;
+    }
+    return terminar(doc, `Ficha-${nome.replace(/[^\w]+/gu, '_')}.pdf`, saida);
+}

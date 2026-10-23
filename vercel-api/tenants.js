@@ -5,7 +5,7 @@ import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOr
 import { ensureRegistrationRequestsTable, toPublicRequest } from './_pedidos-cadastro.js';
 import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas.js';
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
-import { changeLicensePlan, importLegacyKeys, legacyKeyStatuses, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
+import { changeLicensePlan, importLegacyKeys, legacyKeyStatuses, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, setLicenseModules, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
 import { createMasterSession, isValidMasterSession, revokeMasterSession } from './_sessao-master.js';
 import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
 
@@ -391,11 +391,13 @@ export default async function handler(req, res) {
     }
 
     // Gestão da licença: mudar plano, libertar um computador, ver computadores e histórico.
-    if (action === 'license-change-plan' || action === 'license-release-machine' || action === 'license-details') {
+    if (action === 'license-change-plan' || action === 'license-release-machine' || action === 'license-details' || action === 'license-modules') {
       if (!licensesReady) return send(res, 503, { success: false, message: 'As tabelas de licenças não estão disponíveis neste servidor.' });
       const result = action === 'license-change-plan'
         ? await changeLicensePlan(sql, tenantId, { plan: body.plan, tier: body.tier, maxMachines: body.maxMachines }, clientIp)
-        : action === 'license-release-machine'
+        : action === 'license-modules'
+          ? await setLicenseModules(sql, tenantId, body.modules, clientIp)
+          : action === 'license-release-machine'
           ? await releaseMachine(sql, tenantId, body.activationId, clientIp)
           : await licenseDetails(sql, tenantId);
       if (!result.ok) return send(res, result.status, { success: false, message: result.message });

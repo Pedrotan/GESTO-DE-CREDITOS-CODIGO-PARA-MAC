@@ -8,7 +8,7 @@ import { auditoriaRH, ServicoRH, type ActorRH } from './ServicoRH';
 import { ServicoTempoRH } from './ServicoTempoRH';
 import { ServicoSalariosRH } from './ServicoSalariosRH';
 
-export type PlanoFeriasRH = PlanoFerias & { observacoes: string | null; aprovado_por_nome: string | null; aprovado_em: string | null; criado_por_nome: string | null };
+export type PlanoFeriasRH = PlanoFerias & { pedido_funcionario?: number; observacoes: string | null; aprovado_por_nome: string | null; aprovado_em: string | null; criado_por_nome: string | null };
 const TIPO_FERIAS = 'ausencia-FE';
 const agora = () => new Date().toISOString();
 

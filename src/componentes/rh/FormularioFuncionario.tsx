@@ -11,6 +11,7 @@ import { ServicoRH, type ActorRH, type Cargo, type Departamento, type Funcionari
 import { estadoBI, validadeSugerida } from '@/bibliotecas/rh/bi-validade';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { executar, paraMinor, SeloBI } from './comum-rh';
+import { useAuth } from '@/contextos/ContextoAutenticacao';
 
 type Props = {
     open: boolean; onClose: () => void; onSaved: () => void; actor: ActorRH;
@@ -30,6 +31,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
     const [contrato, setContrato] = useState({ tipo: 'indeterminado' as 'indeterminado' | 'determinado', inicio: luandaTodayKey(), fim: '', periodo_experiencia_fim: '', salario: 0, horas_semanais: 40, dias_ferias: 22 });
     const [comContrato, setComContrato] = useState(true);
     const [aGuardar, setAGuardar] = useState(false);
+    const { users } = useAuth();
 
     useEffect(() => {
         if (!open) return;
@@ -145,6 +147,12 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                             </Select>
                         </Campo>
                     )}
+                    <Campo label="Utilizador do sistema (portal do funcionário)">
+                        <Select value={f.utilizador_id || NENHUM} onValueChange={v => set('utilizador_id', v === NENHUM ? null : v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent><SelectItem value={NENHUM}>Sem conta</SelectItem>{(users || []).map(u => <SelectItem key={u.id} value={u.id}>{u.name}{u.username ? ` (${u.username})` : ''}</SelectItem>)}</SelectContent>
+                        </Select>
+                    </Campo>
                     <Campo label="Observações" className="sm:col-span-3"><Textarea rows={2} value={f.observacoes || ''} onChange={e => set('observacoes', e.target.value)} /></Campo>
                 </section>
 

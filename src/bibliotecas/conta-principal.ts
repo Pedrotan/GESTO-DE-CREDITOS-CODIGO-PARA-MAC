@@ -12,7 +12,7 @@ export const isPrimaryOwner = (user: { isOwner?: unknown; role?: unknown } | nul
 export const PAGE_PERMISSIONS = ['view_market', 'use_simulator', 'view_chat', 'manage_suppliers'] as const;
 
 /** Permissões do módulo de Recursos Humanos. */
-export const HR_PERMISSIONS = ['hr_view', 'hr_manage', 'hr_view_salaries', 'hr_confidential', 'hr_payroll', 'hr_payroll_approve', 'hr_settings'] as const;
+export const HR_PERMISSIONS = ['hr_view', 'hr_manage', 'hr_view_salaries', 'hr_confidential', 'hr_payroll', 'hr_payroll_approve', 'hr_settings', 'hr_self'] as const;
 
 /** Todas as permissões atribuíveis (as mesmas do editor de utilizadores). */
 export const ALL_ASSIGNABLE_PERMISSIONS = [

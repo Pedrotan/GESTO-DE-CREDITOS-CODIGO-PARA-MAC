@@ -119,9 +119,25 @@ test('suspender e renovar pelo painel actualizam a licença; o histórico regist
     assert.ok(new Date(history.body.events[0].at) >= new Date(history.body.events.at(-1).at), 'mais recente primeiro');
 });
 
+test('módulo de RH por empresa: o Master activa-o e o token passa a incluí-lo', async () => {
+    const before = (await activate({ chave: key, machine_hash: machine('pc-2') })).body.token;
+    const claims = token => JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+    assert.equal(claims(before).funcionalidades.rh, undefined);
+    const on = await admin({ action: 'license-modules', tenantId: NIF, modules: { rh: true } });
+    assert.equal(on.statusCode, 200, JSON.stringify(on.body));
+    assert.deepEqual(on.body.modules, { rh: true });
+    assert.equal(claims((await activate({ chave: key, machine_hash: machine('pc-2') })).body.token).funcionalidades.rh, true);
+    assert.deepEqual((await admin({ action: 'license-details', tenantId: NIF })).body.modules, { rh: true });
+    assert.equal((await admin({ action: 'license-modules', tenantId: NIF, modules: { contabilidade: true } })).statusCode, 400, 'só módulos conhecidos');
+    await admin({ action: 'license-modules', tenantId: NIF, modules: { rh: false } });
+    assert.equal(claims((await activate({ chave: key, machine_hash: machine('pc-2') })).body.token).funcionalidades.rh, false);
+    const types = (await admin({ action: 'license-details', tenantId: NIF })).body.events.map(event => event.type);
+    assert.ok(types.includes('modulos_alterados'));
+});
+
 test('empresa inexistente: as acções respondem 404', async () => {
-    for (const action of ['license-details', 'license-release-machine', 'license-change-plan']) {
-        const response = await admin({ action, tenantId: '5999999999', plan: 'annual', tier: 'singular', maxMachines: 1, activationId: 'x' });
+    for (const action of ['license-details', 'license-release-machine', 'license-change-plan', 'license-modules']) {
+        const response = await admin({ action, tenantId: '5999999999', plan: 'annual', tier: 'singular', maxMachines: 1, activationId: 'x', modules: { rh: true } });
         assert.equal(response.statusCode, 404, action);
     }
 });

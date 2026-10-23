@@ -137,7 +137,7 @@ export default function FeriasRH() {
                             const estado = estadoEfectivo(p, hoje);
                             return (
                                 <tr key={p.id} className="border-t border-slate-100 dark:border-slate-800">
-                                    <td className="px-3 py-2 font-semibold">{base.dados.funcionarios.find(f => f.id === p.funcionario_id)?.nome || '—'}</td>
+                                    <td className="px-3 py-2 font-semibold">{base.dados.funcionarios.find(f => f.id === p.funcionario_id)?.nome || '—'}{p.pedido_funcionario ? <span className="ml-1 rounded bg-violet-100 px-1.5 text-[10px] font-bold text-violet-700">pedido do funcionário</span> : null}</td>
                                     <td className="px-3 py-2">{p.data_inicio ? `${dataPt(p.data_inicio)} a ${dataPt(p.data_fim)}` : `previsto em ${MESES[(p.mes_previsto || 1) - 1]}`}</td>
                                     <td className="px-3 py-2">{p.dias || '—'}</td>
                                     <td className="px-3 py-2"><span className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${CORES[estado]}`}>{ROTULO[estado]}</span></td>

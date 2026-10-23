@@ -15,6 +15,7 @@ export type Role =
     | 'legal'
     | 'internal_auditor'
     | 'hr_manager'
+    | 'employee'
     | string;
 
 export interface User {
@@ -102,6 +103,11 @@ export const ROLES: Record<string, { label: string; description: string; badgeCo
         description: 'Contencioso judicial e execução de garantias',
         badgeColor: 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-200'
     },
+    employee: {
+        label: 'Funcionário',
+        description: 'Portal do funcionário: recibos, férias e pedidos',
+        badgeColor: 'bg-lime-500/10 text-lime-700 dark:text-lime-400 border-lime-200'
+    },
     hr_manager: {
         label: 'Gestor de RH',
         description: 'Funcionários, ponto, férias e cálculo dos salários',
@@ -148,6 +154,7 @@ export const AVAILABLE_PERMISSIONS = [
     { id: 'hr_confidential', label: 'RH: Documentos confidenciais', description: 'Ver documentos das categorias Saúde e Disciplinar' },
     { id: 'hr_payroll', label: 'RH: Calcular salários', description: 'Abrir e calcular o processamento salarial e emitir recibos' },
     { id: 'hr_payroll_approve', label: 'RH: Aprovar e fechar salários', description: 'Aprovar, pagar e fechar o processamento salarial (gera os lançamentos)' },
+    { id: 'hr_self', label: 'RH: Portal do funcionário', description: 'Ver os próprios recibos, o saldo de férias e pedir férias ou dispensas (a ficha tem de estar ligada à conta)' },
     { id: 'hr_settings', label: 'RH: Configurações legais', description: 'Alterar parâmetros legais, tabela do IRT, rubricas, horários e tipos de ausência' },
 ];
 

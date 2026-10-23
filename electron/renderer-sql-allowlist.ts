@@ -371,6 +371,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO report_history (id, reportType, title, format, filters, fileName, fileData, generatedAt, generatedBy, generatedById) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO report_schedules (id, reportType, recipients, enabled, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET reportType = excluded.reportType, recipients = excluded.recipients, enabled = excluded.enabled",
   "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, estado, pedido_dispensa, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', 1, ?, ?, ?)",
   "INSERT INTO rh_cargo (id, nome, departamento_id, salario_referencia_minor, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_contrato (id, funcionario_id, tipo, inicio, fim, periodo_experiencia_fim, salario_base_minor, horas_semanais, dias_ferias, estado, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)",
   "INSERT INTO rh_departamento (id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, 1, ?, ?)",
@@ -387,6 +388,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, ?)",
   "INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
   "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, estado, observacoes, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, 'planeado', ?, ?, ?, ?)",
+  "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)",
   "INSERT INTO rh_ponto (id, funcionario_id, data, entrada, saida, horas_trabalhadas, horas_extra, minutos_atraso, origem, observacoes, registado_por, registado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET entrada = excluded.entrada, saida = excluded.saida, horas_trabalhadas = excluded.horas_trabalhadas, horas_extra = excluded.horas_extra, minutos_atraso = excluded.minutos_atraso, origem = excluded.origem, observacoes = excluded.observacoes, registado_por = excluded.registado_por, registado_por_nome = excluded.registado_por_nome, actualizado_em = excluded.criado_em",
   "INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)",
   "INSERT INTO rh_recibo (id, processamento_id, funcionario_id, numero_recibo, nome, numero_mecanografico, cargo, departamento, nif, numero_inss, iban, banco, salario_base_minor, dias_trabalhados, valor_dia_minor, valor_hora_minor, total_abonos_minor, total_descontos_minor, bruto_minor, base_inss_minor, inss_minor, inss_emp_minor, isento_irt_minor, base_irt_minor, irt_minor, escalao_irt, outros_descontos_minor, liquido_minor, custo_empresa_minor, avisos_json, resumo_json, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -526,6 +528,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM rh_feriado ORDER BY substr(data, 6, 5)",
   "SELECT * FROM rh_funcionario ORDER BY nome",
   "SELECT * FROM rh_funcionario WHERE id = ?",
+  "SELECT * FROM rh_funcionario WHERE utilizador_id = ?",
   "SELECT * FROM rh_funcionario_rubrica",
   "SELECT * FROM rh_funcionario_rubrica WHERE funcionario_id = ? ORDER BY inicio DESC",
   "SELECT * FROM rh_historico_salarial WHERE funcionario_id = ? ORDER BY data_efeito DESC, criado_em DESC",
@@ -680,9 +683,11 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT principalAmountMinor, principalAmount FROM credits WHERE id = ?",
+  "SELECT r.*, p.ano, p.mes, p.tipo, p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id ORDER BY p.ano, p.mes, r.nome",
   "SELECT r.*, p.ano, p.mes, p.tipo, p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id WHERE r.funcionario_id = ? ORDER BY p.ano DESC, p.mes DESC",
   "SELECT receiptYear, MAX(receiptSeq) AS last FROM payments WHERE receiptSeq IS NOT NULL GROUP BY receiptYear",
   "SELECT receiveMethod FROM clients WHERE id = ?",
+  "SELECT recibo_id, codigo, quantidade, valor_minor FROM rh_recibo_linha WHERE codigo IN ('HORAS_EXTRA', 'ATRASOS', 'FALTAS')",
   "SELECT requestedBy FROM accounting_requests WHERE id = ?",
   "SELECT requestedById FROM accounting_requests WHERE id = ?",
   "SELECT requestedById, reason FROM accounting_requests WHERE id = ? AND kind = ? AND targetId = ? AND status = ?",
@@ -2336,6 +2341,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "9f5aae0633142175315adb4637a3f5bb6c32b57f039553cf55a96a24f4e44ebd",
+    "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, estado, pedido_dispensa, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', 1, ?, ?, ?)"
+  ],
+  [
     "88376c21e6f5f7c6fddc5e988e2ff7e6e296fb1269f52e8a6ab62ec780d291de",
     "INSERT INTO rh_cargo (id, nome, departamento_id, salario_referencia_minor, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)"
   ],
@@ -2398,6 +2407,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "0ddf99aa8e465ce334d3990eb596a8811afb9e9f9b2a996074cfa049e67c763a",
     "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, estado, observacoes, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, 'planeado', ?, ?, ?, ?)"
+  ],
+  [
+    "29c81c76cf8fbff6544578a330802e1155e419d24dead5d0ad5f16d9d9fbbd15",
+    "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)"
   ],
   [
     "7c5edb6a7dbe2b1f02cee726ead60fceb8ea63d727027812a0be4d5f74a3edd5",
@@ -2954,6 +2967,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "595754bda8f07bfb6b6fb960d55914510883b62a6af4d2e51f6b49f3e9c5457a",
     "SELECT * FROM rh_funcionario WHERE id = ?"
+  ],
+  [
+    "a49df995fa4bf5aa38582046c2f9584df283dedc41e8518ef34542ef608782f4",
+    "SELECT * FROM rh_funcionario WHERE utilizador_id = ?"
   ],
   [
     "ff12e7100bc93ec1ac88e4cc4a67c5b33d01839df17a892379dbf2cf5207abc1",
@@ -3572,6 +3589,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT principalAmountMinor, principalAmount FROM credits WHERE id = ?"
   ],
   [
+    "0422ac0afaa013eb90350ca10fcd4649510c7fcc2540911f5a4b12174a278418",
+    "SELECT r.*, p.ano, p.mes, p.tipo, p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id ORDER BY p.ano, p.mes, r.nome"
+  ],
+  [
     "6182871c6857599612b3bfcdb721769c02bfa0827f1434873f34862c0bcefe10",
     "SELECT r.*, p.ano, p.mes, p.tipo, p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id WHERE r.funcionario_id = ? ORDER BY p.ano DESC, p.mes DESC"
   ],
@@ -3582,6 +3603,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "5f31058fd763edc86ec62ff3a08eba55f0ad2a50eb603cca235d4ff28a0df9e4",
     "SELECT receiveMethod FROM clients WHERE id = ?"
+  ],
+  [
+    "3eb26ad2874fa57166f7fe941ea4912c868e3b96d6d73e3a11a79ad7b92c2e56",
+    "SELECT recibo_id, codigo, quantidade, valor_minor FROM rh_recibo_linha WHERE codigo IN ('HORAS_EXTRA', 'ATRASOS', 'FALTAS')"
   ],
   [
     "4a26b62b13326bfb72bba39780bdbc7931da14e4596dd4fc986a0ba278cb7eb5",

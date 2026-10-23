@@ -226,7 +226,8 @@ export class ServicoControloAcesso {
       hr_confidential: ['rh_funcionarios.ver_sensiveis'],
       hr_payroll: ['rh_salarios.criar'],
       hr_payroll_approve: ['rh_salarios.aprovar', 'rh_salarios.fechar_periodo'],
-      hr_settings: ['rh_configuracoes.editar']
+      hr_settings: ['rh_configuracoes.editar'],
+      hr_self: ['rh_portal.ver', 'rh_portal.criar']
     };
     return mapa[legado] || [legado];
   }

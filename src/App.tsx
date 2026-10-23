@@ -60,6 +60,8 @@ const CalendarioRH = lazyWithReload(() => import("./paginas/rh/CalendarioRH"));
 const ProcessamentoRH = lazyWithReload(() => import("./paginas/rh/ProcessamentoRH"));
 const RecibosRH = lazyWithReload(() => import("./paginas/rh/RecibosRH"));
 const FeriasRH = lazyWithReload(() => import("./paginas/rh/FeriasRH"));
+const RelatoriosRH = lazyWithReload(() => import("./paginas/rh/RelatoriosRH"));
+const PortalFuncionario = lazyWithReload(() => import("./paginas/rh/PortalFuncionario"));
 const Scoring = lazyWithReload(() => import("./paginas/Scoring"));
 const SimuladorCredito = lazyWithReload(() => import("./paginas/SimuladorCredito"));
 const TermosPoliticas = lazyWithReload(() => import("./paginas/TermosPoliticas"));
@@ -364,6 +366,8 @@ const AppContent = () => {
             ].map(({ path, page }) => (
               <Route key={path} path={path} element={<ProtectedRoute permission="hr_view"><GuardaModuloRH>{page}</GuardaModuloRH></ProtectedRoute>} />
             ))}
+            <Route path="/rh/relatorios" element={<ProtectedRoute permission="hr_view"><GuardaModuloRH><RelatoriosRH /></GuardaModuloRH></ProtectedRoute>} />
+            <Route path="/rh/portal" element={<ProtectedRoute permission="hr_self"><GuardaModuloRH><PortalFuncionario /></GuardaModuloRH></ProtectedRoute>} />
             <Route
               path="/fornecedores"
               element={

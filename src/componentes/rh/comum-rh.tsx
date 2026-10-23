@@ -20,6 +20,7 @@ const LIGACOES = [
     { path: '/rh/processamento', label: 'Processamento salarial' },
     { path: '/rh/recibos', label: 'Recibos e declarações' },
     { path: '/rh/documentos', label: 'Documentos' },
+    { path: '/rh/relatorios', label: 'Relatórios' },
     { path: '/rh/configuracoes', label: 'Configurações' },
 ];
 

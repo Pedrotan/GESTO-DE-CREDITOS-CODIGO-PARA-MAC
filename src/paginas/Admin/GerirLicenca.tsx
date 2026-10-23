@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { CalendarClock, History, Loader2, Monitor, PauseCircle, PlayCircle, Save, Unplug } from 'lucide-react';
+import { Blocks, CalendarClock, History, Loader2, Monitor, PauseCircle, PlayCircle, Save, Unplug } from 'lucide-react';
 import Swal from 'sweetalert2';
 import { Button } from '@/componentes/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
@@ -82,6 +82,7 @@ export function GerirLicenca({ license, plans, open, onOpenChange, api, notify, 
     const [plan, setPlan] = useState('');
     const [tier, setTier] = useState('empresarial');
     const [maxMachines, setMaxMachines] = useState('1');
+    const [modules, setModules] = useState<Record<string, boolean>>({});
 
     const tenantId = license?.tenantId || '';
     const loadDetails = useCallback(async () => {
@@ -91,6 +92,7 @@ export function GerirLicenca({ license, plans, open, onOpenChange, api, notify, 
             const data = await api('license-details', { tenantId });
             setMachines(data.machines || []);
             setEvents(data.events || []);
+            setModules(data.modules || {});
         } catch (error: any) {
             notify('error', error?.message || 'Não foi possível obter os detalhes da licença.');
         } finally {
@@ -129,6 +131,17 @@ export function GerirLicenca({ license, plans, open, onOpenChange, api, notify, 
                 : 'Plano da licença alterado.');
         } catch (error: any) {
             notify('error', error?.message || 'Não foi possível alterar o plano.');
+        }
+    });
+
+    // Módulos extra da empresa (ex.: Recursos Humanos): chegam aos computadores na próxima renovação do token.
+    const toggleModule = (name: string, enabled: boolean) => run(`module-${name}`, async () => {
+        try {
+            const data = await api('license-modules', { tenantId, modules: { [name]: enabled } });
+            setModules(data.modules || {});
+            notify('success', enabled ? 'Módulo activado. Os computadores recebem-no na próxima ligação ao servidor.' : 'Módulo desactivado.');
+        } catch (error: any) {
+            notify('error', error?.message || 'Não foi possível alterar os módulos.');
         }
     });
 
@@ -219,6 +232,21 @@ export function GerirLicenca({ license, plans, open, onOpenChange, api, notify, 
                         })()}
                         A data de fim muda com «Renovar». Os computadores já activados mantêm-se ao mudar o plano.
                     </p>
+                </section>
+
+                {/* Módulos extra */}
+                <section className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                    <h3 className="mb-3 flex items-center gap-2 text-sm font-black text-slate-800 dark:text-slate-100">
+                        <Blocks className="h-4 w-4 text-[#F37021]" /> Módulos
+                    </h3>
+                    <label className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2.5 text-sm dark:bg-slate-900">
+                        <span>
+                            <b>Recursos Humanos</b>
+                            <span className="block text-[11px] text-slate-500">Funcionários, ponto, férias, salários (INSS e IRT), recibos e portal do funcionário.</span>
+                        </span>
+                        <input type="checkbox" className="h-5 w-5 accent-[#F37021]" checked={modules.rh === true} disabled={!!busy || revoked}
+                            onChange={event => toggleModule('rh', event.target.checked)} />
+                    </label>
                 </section>
 
                 {/* Computadores */}

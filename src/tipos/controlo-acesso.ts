@@ -409,6 +409,14 @@ export const MODULOS_SISTEMA: DefinicaoModulo[] = [
     legadoId: 'hr_payroll'
   },
   {
+    id: 'rh_portal',
+    nome: 'RH: Portal do funcionário',
+    area: 'recursos_humanos',
+    acoesDisponiveis: ['ver', 'criar'],
+    caminho: '/rh/portal',
+    legadoId: 'hr_self'
+  },
+  {
     id: 'rh_configuracoes',
     nome: 'RH: Configurações legais',
     area: 'recursos_humanos',
@@ -792,6 +800,26 @@ export const PERFIS_PREDEFINIDOS: PerfilAcesso[] = [
       perdaoJurosKz: 0,
       anulacaoPagamentoKz: 0,
       abateCreditoKz: 2_000_000
+    },
+    exigeDoisFatores: false,
+    editavel: true,
+    predefinido: true
+  },
+  {
+    id: 'employee',
+    codigo: 'FUNCIONARIO',
+    nome: 'Funcionário',
+    descricao: 'Só o portal do funcionário: os seus recibos, o saldo de férias e os pedidos de férias e de dispensa.',
+    areaPrincipal: 'recursos_humanos',
+    corBadge: 'bg-lime-500/10 text-lime-700 dark:text-lime-400 border-lime-200 dark:border-lime-900',
+    permissoesBase: ['rh_portal.ver', 'rh_portal.criar'],
+    alcadasPadrao: {
+      aprovacaoCreditoKz: 0,
+      desembolsoKz: 0,
+      perdaoJurosPct: 0,
+      perdaoJurosKz: 0,
+      anulacaoPagamentoKz: 0,
+      abateCreditoKz: 0
     },
     exigeDoisFatores: false,
     editavel: true,
