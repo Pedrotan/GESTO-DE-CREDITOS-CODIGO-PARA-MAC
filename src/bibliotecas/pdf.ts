@@ -202,13 +202,14 @@ export type BrandingOptions = {
  * Linha de contactos do rodapé com ícones (telefone, web, email e localização). Desenhada por applyBranding
  * em todas as páginas e reutilizada pelos documentos com design próprio (certificados, credenciais).
  */
-export const drawContactFooter = (doc: jsPDF, config: CompanySettings) => {
+export const drawContactFooter = (doc: jsPDF, config: CompanySettings, signer?: { name?: string; role?: string }) => {
     const pageWidth = doc.internal.pageSize.width;
     const pageHeight = doc.internal.pageSize.height;
     const isLandscape = pageWidth > pageHeight;
     const primary = resolveBrandPrimary(config.primaryColor);
     const dark = resolveBrandDark(config.secondaryColor);
-    const footInfoY = pageHeight - 17.5;
+    // Com o utilizador por baixo da localização, os contactos sobem 2 mm para as duas linhas novas caberem.
+    const footInfoY = pageHeight - (signer ? 19.6 : 17.5);
     const col1X = isLandscape ? 32 : 26;
     const col2X = isLandscape ? pageWidth * 0.38 : 82;
     const col3X = isLandscape ? pageWidth * 0.70 : 138;
@@ -280,6 +281,20 @@ export const drawContactFooter = (doc: jsPDF, config: CompanySettings) => {
     doc.setTextColor(dark[0], dark[1], dark[2]);
     footText(config.address || 'Cuanza Norte, N´dalatando', col3X + 3.6, footInfoY, footRight);
     footText(config.location || 'Angola', col3X + 3.6, footInfoY + 3.4, footRight);
+
+    // Utilizador que emitiu o documento, por baixo da localização (nome na cor da marca, cargo em cinzento).
+    // Sem nome não se escreve nada: há relatórios que redesenham a moldura na mesma página sem o utilizador.
+    if (signer?.name?.trim()) {
+        doc.setFont("helvetica", "bold");
+        doc.setFontSize(5.9);
+        doc.setTextColor(primary[0], primary[1], primary[2]);
+        footText(signer.name.trim().toUpperCase(), col3X + 3.6, footInfoY + 7.0, footRight);
+        doc.setFont("helvetica", "normal");
+        doc.setFontSize(5.1);
+        doc.setTextColor(100, 116, 139);
+        footText(signer.role || 'GESTOR DE CRÉDITO / OPERAÇÕES', col3X + 3.6, footInfoY + 9.4, footRight);
+        doc.setFont("helvetica", "normal");
+    }
     doc.setTextColor(dark[0], dark[1], dark[2]);
     doc.setDrawColor(226, 232, 240);
     doc.setLineWidth(0.2);
@@ -423,7 +438,7 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
     // =========================================================================
     // 4. INFORMAÇÕES DE CONTACTO EM 3 COLUNAS COM ÍCONES CIRCULARES
     // =========================================================================
-    drawContactFooter(doc, config);
+    drawContactFooter(doc, config, { name: userName, role: options.roleLabel });
     const cleanAddr1 = (config.address || 'Cuanza Norte, N´dalatando').substring(0, 32);
     const cleanAddr2 = (config.location || 'Angola').substring(0, 32);
 
@@ -514,29 +529,13 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
         const tagText = (config.nif ? `NIF: ${config.nif}   •   ` : '') + (options.tagline || 'SISTEMA DE GESTÃO DE CRÉDITO');
         doc.text(tagText, textStartX, taglineY, { maxWidth: maxTitleW });
 
-        // 3. Bloco de Responsável, contactos e Data (compacto: três linhas)
+        // 3. Contactos e Data. O utilizador que emite o documento aparece no rodapé, por baixo da localização.
         const metaY = taglineY + 3.9;
-        // 7 mm abaixo do nome: a data e os contactos ficam afastados da terceira linha decorativa.
+        // A data fica 7 mm abaixo do nome, afastada da terceira linha decorativa; os contactos sobem para
+        // logo abaixo do slogan.
         const contactsY = metaY + 7.0;
-
-        // Linha divisória vertical fina à esquerda do bloco de responsável (conforme imagem de referência)
-        doc.setDrawColor(210, 215, 225);
-        doc.setLineWidth(0.35);
-        doc.line(textStartX, metaY - 1, textStartX, contactsY + 1);
-
-        const infoStartX = textStartX + 2.5;
-
-        // Nome do Titular / Responsável (Laranja Primário em Negrito)
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(8.2);
-        doc.setTextColor(primary[0], primary[1], primary[2]);
-        doc.text((userName || 'ADMINISTRADOR').toUpperCase(), infoStartX, metaY);
-
-        // Cargo / Departamento (Carvão / Cinza Escuro)
-        doc.setFont("helvetica", "bold");
-        doc.setFontSize(6.5);
-        doc.setTextColor(dark[0], dark[1], dark[2]);
-        doc.text(options.roleLabel || "GESTOR DE CRÉDITO / OPERAÇÕES", infoStartX, metaY + 3.2);
+        const contactLineY = taglineY + 4.2;
+        const infoStartX = textStartX;
 
         // Data alinhada à direita, na linha dos contactos ("DATA :" em laranja)
         doc.setFont("helvetica", "bold");
@@ -557,8 +556,8 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
             ['WEB : ', config.website || 'www.tango.co.ao'],
             ['MORADA : ', `${cleanAddr1}, ${cleanAddr2}`],
         ];
-        // Os contactos terminam antes do nó decorativo da terceira linha (nunca por baixo dele).
-        const contactsMaxX = Math.min(dateStartX - 4, dot3X - 4);
+        // Os contactos terminam antes do nó decorativo da primeira linha (nunca por baixo das linhas).
+        const contactsMaxX = Math.min(dateStartX - 4, dot1X - 4);
         let contactX = infoStartX;
         doc.setFontSize(6.0);
         for (const [label, value] of contactParts) {
@@ -571,10 +570,10 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
             let text = value;
             while (text.length > 4 && doc.getTextWidth(text) > room) text = `${text.slice(0, -2)}…`;
             doc.setFont("helvetica", "bold");
-            doc.text(label, contactX, contactsY);
+            doc.text(label, contactX, contactLineY);
             doc.setFont("helvetica", "normal");
             doc.setTextColor(100, 116, 139);
-            doc.text(text, contactX + labelW, contactsY);
+            doc.text(text, contactX + labelW, contactLineY);
             contactX += labelW + doc.getTextWidth(text) + 4;
         }
 
