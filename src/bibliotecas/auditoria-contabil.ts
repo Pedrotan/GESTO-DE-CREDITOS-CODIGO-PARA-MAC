@@ -12,7 +12,7 @@ export type AuditGroup = 'integrity' | 'balances' | 'cash' | 'payments' | 'contr
 export type AuditKind = 'full' | AuditGroup;
 
 export type AuditRuleCode =
-    | 'integrity_chain' | 'integrity_hash' | 'integrity_seal' | 'unsealed_entry' | 'legacy_hash'
+    | 'integrity_chain' | 'integrity_hash' | 'integrity_seal' | 'unsealed_entry' | 'legacy_hash' | 'parallel_branch'
     | 'missing_double_entry' | 'unbalanced_entry' | 'orphan_line'
     | 'trial_balance' | 'asset_credit_balance' | 'portfolio_mismatch' | 'contract_balance'
     | 'cash_leak' | 'disbursement_without_funds' | 'cash_session'
@@ -56,6 +56,7 @@ export const AUDIT_RULE_TITLES: Record<AuditRuleCode, string> = {
     integrity_seal: 'Selo HMAC inválido',
     unsealed_entry: 'Lançamento sem selo HMAC',
     legacy_hash: 'Lançamento antigo sem hash da versão actual',
+    parallel_branch: 'Lançamentos feitos ao mesmo tempo noutro computador',
     missing_double_entry: 'Lançamento sem partidas dobradas',
     unbalanced_entry: 'Lançamento desequilibrado (débito ≠ crédito)',
     orphan_line: 'Linha do razão sem lançamento',
@@ -77,7 +78,7 @@ export const AUDIT_RULE_TITLES: Record<AuditRuleCode, string> = {
 };
 
 const RULE_GROUP: Record<AuditRuleCode, AuditGroup> = {
-    integrity_chain: 'integrity', integrity_hash: 'integrity', integrity_seal: 'integrity', unsealed_entry: 'integrity', legacy_hash: 'integrity',
+    integrity_chain: 'integrity', integrity_hash: 'integrity', integrity_seal: 'integrity', unsealed_entry: 'integrity', legacy_hash: 'integrity', parallel_branch: 'integrity',
     missing_double_entry: 'integrity', unbalanced_entry: 'integrity', orphan_line: 'integrity',
     trial_balance: 'balances', asset_credit_balance: 'balances', portfolio_mismatch: 'balances', contract_balance: 'balances',
     cash_leak: 'cash', disbursement_without_funds: 'cash', cash_session: 'cash',
@@ -165,10 +166,15 @@ export async function runAccountingAudit(data: AuditDataset, kind: AuditKind = '
     const signed = (line: AuditLineRow) => (line.side === 'debit' ? 1 : -1) * Number(line.amountMinor);
 
     // ---------------------------------------------------------------- Cadeia de integridade
+    // Cada lançamento aponta para um lançamento anterior que existe (ou para a origem). Ramos paralelos (dois
+    // computadores ao mesmo tempo) são legítimos; um hash desconhecido ou futuro denuncia apagamento ou reordenação.
     let previous = '0'.repeat(64);
+    const seen = new Set<string>([previous]);
     for (const entry of data.entries) {
-        if ((entry.previousHash || '') !== previous) {
-            add('integrity_chain', 'critical', entry.id, `O lançamento ${entry.id} não aponta para o hash do lançamento anterior: a sequência foi alterada (lançamento apagado, inserido ou reordenado).`, [{ kind: 'entry', id: entry.id }], { at: entry.timestamp });
+        if (!seen.has(entry.previousHash || '')) {
+            add('integrity_chain', 'critical', entry.id, `O lançamento ${entry.id} aponta para um lançamento que não existe antes dele: a sequência foi alterada (lançamento apagado, inserido ou reordenado).`, [{ kind: 'entry', id: entry.id }], { at: entry.timestamp });
+        } else if ((entry.previousHash || '') !== previous) {
+            add('parallel_branch', 'low', entry.id, `O lançamento ${entry.id} foi feito noutro computador ao mesmo tempo que o anterior (ramo paralelo da cadeia, sincronizado depois).`, [{ kind: 'entry', id: entry.id }], { at: entry.timestamp });
         }
         if (Number(entry.hashVersion) === 2) {
             const expected = await calculateLedgerHash({
@@ -189,6 +195,7 @@ export async function runAccountingAudit(data: AuditDataset, kind: AuditKind = '
             add('missing_double_entry', 'high', entry.id, `O lançamento ${entry.id} não tem linhas de partidas dobradas. Use "Gerar linhas históricas" depois de rever o histórico.`, [{ kind: 'entry', id: entry.id }], { at: entry.timestamp });
         }
         previous = entry.integrityHash || '';
+        seen.add(previous);
     }
     for (const tx of data.transactions) {
         const own = linesByTx.get(tx.id) || [];

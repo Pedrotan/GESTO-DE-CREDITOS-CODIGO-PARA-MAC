@@ -70,12 +70,17 @@ export const LEDGER_PROTECTION_SQL = [
         WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS (
             SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment'
         ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger'); END`,
-    `CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_chain
+    // Cadeia com vários computadores: cada lançamento aponta para um lançamento que já existe (ou para a origem).
+    // Dois computadores que lançam ao mesmo tempo criam ramos paralelos, que se juntam no lançamento seguinte;
+    // exigir o «último» recusava o lançamento do outro computador quando chegava pela sincronização. Continua
+    // recusado apontar para um hash que não existe (lançamento apagado, inventado ou fora de ordem).
+    `CREATE INDEX IF NOT EXISTS idx_accounting_entries_integrity_hash ON accounting_entries(integrityHash)`,
+    `DROP TRIGGER IF EXISTS trg_accounting_entries_chain`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_chain_v2
         BEFORE INSERT ON accounting_entries
-        WHEN NEW.previousHash <> COALESCE(
-            (SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1),
-            '${LEDGER_GENESIS_HASH}'
-        ) BEGIN SELECT RAISE(ABORT, 'Cadeia contabilística concorrente ou inválida'); END`,
+        WHEN NEW.previousHash <> '${LEDGER_GENESIS_HASH}'
+            AND NOT EXISTS (SELECT 1 FROM accounting_entries WHERE integrityHash = NEW.previousHash)
+        BEGIN SELECT RAISE(ABORT, 'Cadeia contabilística inválida: o lançamento anterior não existe'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_ledger_transactions_immutable_update
         BEFORE UPDATE ON ledger_transactions BEGIN
         SELECT RAISE(ABORT, 'As transações do ledger são imutáveis'); END`,

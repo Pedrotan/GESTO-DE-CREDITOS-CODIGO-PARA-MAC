@@ -50,13 +50,14 @@ export class ServicoIntegridadeContabilistica {
         const findings: Finding[] = [...ledgerFindings(transactions, lines), ...auditRiskFindings(auditLogs, entries), ...auditChainFindings(auditLogs,auditChain)];
         for (const session of cashSessions) findings.push({id:'cash:'+session.id,severity:'warning',entityId:session.id,
             message:'Diferença de caixa de '+session.operatorName+' em '+session.sessionDate+': '+((Number(session.countedMinor)-Number(session.expectedMinor))/100).toFixed(2)+' AOA. Motivo registado: '+session.reason});
-        let previous = '0'.repeat(64);
+        // Ramos paralelos (computadores ao mesmo tempo) são válidos; apontar para um hash inexistente não.
+        const seen = new Set<string>(['0'.repeat(64)]);
         for (const entry of entries) {
-            if (entry.previousHash !== previous) findings.push({ id: 'chain:' + entry.id, severity: 'error', message: 'Encadeamento contabilístico inválido.', entityId: entry.id });
+            if (!seen.has(entry.previousHash)) findings.push({ id: 'chain:' + entry.id, severity: 'error', message: 'Encadeamento contabilístico inválido.', entityId: entry.id });
             if (Number(entry.hashVersion) === 2 && await calculateLedgerHash(entry) !== entry.integrityHash)
                 findings.push({ id: 'hash:' + entry.id, severity: 'error', message: 'Conteúdo contabilístico adulterado ou hash inválido.', entityId: entry.id });
             if (!transactions.some(t => t.id === entry.id)) findings.push({ id: 'migration:' + entry.id, severity: 'warning', message: 'Lançamento histórico sem linhas de partidas dobradas; requer migração validada.', entityId: entry.id });
-            previous = entry.integrityHash;
+            seen.add(entry.integrityHash);
         }
         for (const payment of payments.filter(p => !p.deletedAt && p.status !== 'cancelled')) {
             if (!credits.some(c => c.id === payment.creditId)) findings.push({ id: 'orphan-payment:' + payment.id, severity: 'error', message: 'Pagamento sem crédito associado.', entityId: payment.id });

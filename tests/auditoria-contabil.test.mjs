@@ -102,6 +102,21 @@ test('desembolso sem saldo e Caixa com saldo credor são assinalados', async () 
     assert.equal(asset?.amountMinor, 10_000_000);
 });
 
+test('dois computadores ao mesmo tempo: ramo paralelo é informação, não adulteração', async () => {
+    const segundo = { ...capital, id: 'journal:capital-2' };
+    const data = dataset([capital, disbursement, segundo]);
+    // O 3.º lançamento foi feito noutro computador ao mesmo tempo que o 2.º: aponta para o 1.º.
+    data.entries[2].previousHash = data.entries[0].integrityHash;
+    const result = await runAccountingAudit(data, 'integrity');
+    assert.ok(!result.findings.some(finding => finding.rule === 'integrity_chain'), 'não é cadeia quebrada');
+    const ramo = result.findings.find(finding => finding.rule === 'parallel_branch');
+    assert.equal(ramo?.severity, 'low');
+    assert.equal(ramo?.references[0].id, 'journal:capital-2');
+    // Apontar para um lançamento que só aparece depois (reordenação) continua crítico.
+    data.entries[1].previousHash = data.entries[2].integrityHash;
+    assert.ok((await runAccountingAudit(data, 'integrity')).findings.some(finding => finding.rule === 'integrity_chain' && finding.references[0].id === 'origination:cr-1'));
+});
+
 test('lançamento desequilibrado, linha órfã e cadeia quebrada são críticos', async () => {
     const data = dataset([capital, disbursement]);
     data.lines[0].amountMinor -= 1;

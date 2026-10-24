@@ -11,6 +11,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_accounting_audit_runs_finished ON accounting_audit_runs(finishedAt)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_clientId ON accounting_entries(clientId)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_creditId ON accounting_entries(creditId)",
+  "CREATE INDEX IF NOT EXISTS idx_accounting_entries_integrity_hash ON accounting_entries(integrityHash)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_timestamp ON accounting_entries(timestamp)",
   "CREATE INDEX IF NOT EXISTS idx_accounting_usuario ON accounting_entries(usuario_id)",
   "CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action)",
@@ -292,6 +293,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DROP TABLE dictionary_old",
   "DROP TABLE payments_old",
   "DROP TABLE simulations",
+  "DROP TRIGGER IF EXISTS trg_accounting_entries_chain",
   "DROP TRIGGER IF EXISTS trg_accounting_requests_segregation",
   "DROP TRIGGER IF EXISTS trg_audit_alerts_self_close",
   "DROP TRIGGER IF EXISTS trg_credit_restructurings_four_eyes",
@@ -899,6 +901,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "b6de128c620c62abca54a69c0ba5cbfa834bd7249dec09df7e44789eb8082934",
     "CREATE INDEX IF NOT EXISTS idx_accounting_creditId ON accounting_entries(creditId)"
+  ],
+  [
+    "c75740f483f51ff78df8934b337d545709cc7315205616de823af6407374f68c",
+    "CREATE INDEX IF NOT EXISTS idx_accounting_entries_integrity_hash ON accounting_entries(integrityHash)"
   ],
   [
     "3d5f430d0af9ec38686e739c5875f5d645f16cce662461d7223c383ae78de301",
@@ -2023,6 +2029,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "3cb3fccca6f5a6bdc24891f486e3a0e08479eeff19dbe37be146ea5ee3b838ac",
     "DROP TABLE simulations"
+  ],
+  [
+    "ad80615c68c7fc370bec78de78820ceb836baeda98a21a3c89047fe4c9399d45",
+    "DROP TRIGGER IF EXISTS trg_accounting_entries_chain"
   ],
   [
     "90a6efc0e4431481fdcaf66c4270cdc654a9c19e066a7b9874b70e2dc5bb5b39",
