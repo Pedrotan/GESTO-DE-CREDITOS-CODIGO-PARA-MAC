@@ -27,6 +27,7 @@ await build({
             export * as reciboPag from '@/bibliotecas/recibo-pagamento';
             export * as relPag from '@/bibliotecas/relatorios-pagamentos';
             export * as relCred from '@/bibliotecas/relatorios-creditos';
+            export * as relPrev from '@/bibliotecas/relatorios-previsao';
             export * as anPag from '@/bibliotecas/pagamentos-analise';
             export * as matriz from '@/bibliotecas/matriz-permissoes-pdf';
             export * as relAud from '@/bibliotecas/relatorios-auditoria';
@@ -353,6 +354,13 @@ const creditPayments = creditRows.map((row, i) => ({ creditId: row.id, status: '
 for (const report of M.relCred.CREDIT_REPORTS.filter(item => item.key !== 'extrato')) jobs[`relatorioCreditos_${report.key}`] = () => M.relPag.renderReportPdf(M.relCred.buildCreditReport(report.key, {
     rows: creditRows, installments: [], payments: creditPayments, dateKey: '2026-10-24', monthKey: '2026-10', todayKey: '2026-10-24',
 }), settings, USER, 'none');
+const creditInstallments = creditRows.slice(0, 6).flatMap((row, i) => Array.from({ length: 4 }, (_, n) => ({
+    id: `${row.id}-${n}`, creditId: row.id, installmentNumber: n + 1, dueDate: `2026-${String(9 + n).padStart(2, '0')}-20T12:00:00Z`, principalMinor: row.grantedMinor / 4, interestMinor: row.contractedInterestMinor / 4,
+    lateInterestMinor: 0, paidPrincipalMinor: n === 0 ? row.grantedMinor / 4 : 0, paidInterestMinor: n === 0 ? row.contractedInterestMinor / 4 : 0, paidLateInterestMinor: 0, status: n === 0 ? 'paid' : 'pending',
+})));
+jobs.relatorioPrevisaoLucros = () => M.relPag.renderReportPdf(M.relPrev.profitForecastDetailReport({ rows: creditRows, installments: creditInstallments, payments: creditPayments, todayKey: '2026-10-24' }), settings, USER, 'none');
+jobs.relatorioDevedores = () => M.relPag.renderReportPdf(M.relPrev.debtorsReport({ rows: creditRows, phones: new Map(creditRows.map(r => [r.clientId, '+244 923 000 000'])),
+    filters: { ...M.relPrev.DEFAULT_DEBTOR_FILTERS, minDays: 0, search: '' }, todayKey: '2026-10-24' }), settings, USER, 'none');
 // PDF_OUT=<pasta> grava os PDFs gerados, para inspecção visual.
 const shotsDir = process.env.PDF_OUT ? path.resolve(process.env.PDF_OUT) : null;
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });

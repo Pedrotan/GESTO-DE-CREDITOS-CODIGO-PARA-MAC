@@ -5,7 +5,7 @@ import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { CREDIT_REPORTS, buildCreditReport, type CreditReportInput, type CreditReportKey } from '@/bibliotecas/relatorios-creditos';
-import { downloadDataUrl, renderReportExcel, renderReportPdf } from '@/bibliotecas/relatorios-pagamentos';
+import { downloadDataUrl, renderReportExcel, renderReportPdf, type ReportDef } from '@/bibliotecas/relatorios-pagamentos';
 import { ServicoPagamentos } from '@/servicos/ServicoPagamentos';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
 import type { CarteiraState } from './useCarteira';
@@ -14,7 +14,11 @@ type Actor = { id: string; name: string; role: string };
 
 /** Gera um relatório da carteira, guarda-o no histórico de relatórios (a exportação fica na auditoria) e descarrega-o. */
 export async function generateCreditReport(key: CreditReportKey, input: CreditReportInput, settings: any, actor: Actor, format: 'pdf' | 'xlsx', download = true) {
-    const def = buildCreditReport(key, input);
+    return generateReportFromDef(buildCreditReport(key, input), settings, actor, format, download);
+}
+
+/** Gera um relatório já montado (PDF ou Excel), guarda-o no histórico e descarrega-o. */
+export async function generateReportFromDef(def: ReportDef, settings: any, actor: Actor, format: 'pdf' | 'xlsx', download = true) {
     const file = format === 'pdf' ? renderReportPdf(def, settings, actor.name, 'datauri') : renderReportExcel(def, settings, actor.name, 'datauri');
     await ServicoPagamentos.saveReport({ reportType: def.key, title: def.title, format, fileName: file.fileName, dataUrl: file.dataUrl, filters: { subtitulo: def.subtitle } }, actor as any).catch(() => undefined);
     if (download) downloadDataUrl(file.dataUrl, file.fileName);

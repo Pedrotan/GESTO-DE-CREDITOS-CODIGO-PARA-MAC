@@ -22,6 +22,7 @@ async function loadModules() {
                 export * as A from '@/bibliotecas/pagamentos-analise';
                 export * as E from '@/bibliotecas/eliminacao-dados';
                 export * as C from '@/bibliotecas/carteira-credito';
+                export * as P from '@/bibliotecas/relatorios-previsao';
                 export { RepositorioCliente } from '@/repositorios/RepositorioCliente';
                 export { RepositorioCredito } from '@/repositorios/RepositorioCredito';
             `,
@@ -175,4 +176,27 @@ test('lucros previstos: capital investido face ao lucro dos juros, recebido e po
     assert.equal(summary.totalExpectedMinor, 180000_00);
     assert.equal(summary.rows[0].id, 'a');
     assert.equal(summary.rows[0].marginRate, 0.25);
+});
+
+test('devedores com filtros e detalhe da previsão de lucros prestação a prestação', () => {
+    const row = (id, clientId, name, days, outstanding) => ({ id, reference: id, clientId, clientName: name, stage: days ? 'em_atraso' : 'ativo', rate: 10, managerName: 'Ana',
+        grantedMinor: 100000_00, outstandingMinor: outstanding, interestOutstandingMinor: 1000_00, moraMinor: days ? 500_00 : 0, overdueMinor: days ? 20000_00 : 0, daysOverdue: days,
+        nextDueKey: '2026-11-20', contractedInterestMinor: 10000_00, totalCount: 2, paidCount: 0 });
+    const rows = [row('a', 'c1', 'Ana', 40, 80000_00), row('b', 'c2', 'Bruno', 0, 50000_00), row('c', 'c1', 'Ana', 5, 10000_00)];
+    const all = M.P.buildDebtors(rows, new Map(), M.P.DEFAULT_DEBTOR_FILTERS);
+    assert.equal(all.length, 2);
+    assert.equal(all[0].clientName, 'Ana');
+    assert.equal(all[0].owedMinor, 80000_00 + 10000_00 + 2 * 1000_00 + 2 * 500_00);
+    assert.deepEqual(M.P.buildDebtors(rows, new Map(), { ...M.P.DEFAULT_DEBTOR_FILTERS, situation: 'current' }).map(d => d.clientName), ['Bruno']);
+    assert.equal(M.P.buildDebtors(rows, new Map(), { ...M.P.DEFAULT_DEBTOR_FILTERS, minDays: 41 }).length, 0);
+
+    const plan = [1, 2].map(n => ({ id: `i${n}`, creditId: 'a', installmentNumber: n, dueDate: `2026-${n === 1 ? '09' : '11'}-20T12:00:00Z`, principalMinor: 50000_00, interestMinor: 5000_00,
+        lateInterestMinor: 0, paidPrincipalMinor: n === 1 ? 50000_00 : 0, paidInterestMinor: n === 1 ? 5000_00 : 0, paidLateInterestMinor: 0, status: n === 1 ? 'paid' : 'pending' }));
+    const detail = M.P.creditProfitBreakdown(rows[0], plan, '2026-10-24');
+    assert.equal(detail.expectedMinor, 10000_00, 'lucro = soma dos juros das prestações');
+    assert.deepEqual(detail.lines.map(l => l.situation), ['Paga', 'Por vencer']);
+    assert.equal(detail.lines[1].toReceiveInterestMinor, 5000_00);
+    const report = M.P.profitForecastDetailReport({ rows, installments: plan, payments: [], todayKey: '2026-10-24' });
+    assert.equal(report.sections[0].heading, 'Como se calcula a previsão');
+    assert.ok(report.sections.some(section => String(section.heading).includes('lucro 10.000,00 Kz')));
 });

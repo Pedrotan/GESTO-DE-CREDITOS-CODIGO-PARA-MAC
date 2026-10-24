@@ -65,7 +65,7 @@ test('criar utilizadores: só a conta principal cria Super Administradores; os o
     assert.ok(checkUserMutation({ kind: 'insert', sql: 'INSERT INTO users (id, isOwner) VALUES (?, ?)', params: ['x', 1], actor: owner }).error);
 });
 
-test('permissões efectivas: a conta principal tem tudo; outro Super Administrador só o que lhe foi atribuído', async () => {
+test('permissões efectivas: qualquer Super Administrador tem tudo; os outros perfis só o que lhes foi atribuído', async () => {
     const { ServicoControloAcesso } = await import('../src/servicos/ServicoControloAcesso.ts');
     const dono = { id: 'd', role: 'super_admin', isOwner: 1, permissions: [] };
     const outro = { id: 'o', role: 'super_admin', isOwner: 0, permissions: ['view_credits'] };
@@ -73,6 +73,11 @@ test('permissões efectivas: a conta principal tem tudo; outro Super Administrad
     assert.equal(ServicoControloAcesso.temPermissao(dono as any, 'view_market'), true);
     assert.equal(ServicoControloAcesso.temPermissao(outro as any, 'view_credits'), true);
     assert.equal(ServicoControloAcesso.temPermissao(outro as any, 'creditos.ver'), true, 'a permissão antiga dá as detalhadas');
-    assert.equal(ServicoControloAcesso.temPermissao(outro as any, 'approve_loans'), false);
-    assert.equal(ServicoControloAcesso.temPermissao(outro as any, 'manage_settings'), false);
+    // Decisão do utilizador: um Super Administrador tem autoridade total (pode, por exemplo, desbloquear outro).
+    assert.equal(ServicoControloAcesso.temPermissao(outro as any, 'approve_loans'), true);
+    // Funcionário: vale o perfil e o que lhe foi atribuído, sem aprovar créditos nem mudar definições.
+    const gestor = { id: 'g', role: 'employee', isOwner: 0, permissions: ['view_credits'] };
+    assert.equal(ServicoControloAcesso.temPermissao(gestor as any, 'view_credits'), true);
+    assert.equal(ServicoControloAcesso.temPermissao(gestor as any, 'approve_loans'), false);
+    assert.equal(ServicoControloAcesso.temPermissao(gestor as any, 'manage_settings'), false);
 });

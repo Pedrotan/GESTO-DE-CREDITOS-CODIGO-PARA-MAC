@@ -1012,7 +1012,7 @@ const assertFinancialSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statem
     assertFinancialPermission(user, table);
   }
 };
-// Acesso total só para o Super Administrador principal; todos os outros (incluindo outros Super Administradores)
+// Acesso total para a conta principal e para qualquer Super Administrador; os restantes perfis
 // têm só as permissões atribuídas. Os administradores existentes receberam a lista completa na migração 2026101301.
 const hasManageUsers = (user: any) => isPrimaryOwner(user) || user?.role === 'super_admin' ||
   (Array.isArray(user?.permissions) && user.permissions.includes('manage_users'));

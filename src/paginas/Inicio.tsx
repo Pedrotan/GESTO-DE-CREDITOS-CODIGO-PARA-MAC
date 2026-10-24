@@ -19,6 +19,7 @@ import { useCarteira } from '@/componentes/creditos/useCarteira';
 import { IN_PORTFOLIO } from '@/bibliotecas/carteira-credito';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { contractNumberOf } from '@/bibliotecas/pagamentos-analise';
+import { RelatorioDevedores } from '@/componentes/creditos/RelatorioDevedores';
 import { formatCurrency, getAdaptiveDonutValue } from '@/bibliotecas/formatters';
 import { useToast } from '@/componentes/ui/use-toast';
 import {
@@ -1827,6 +1828,7 @@ export default function Dashboard() {
   const maxDebt = Math.max(...sortedClients.map(d => d.debt), 1);
 
   const { insights: tangoAI, dismissInsight, resetDismissed, hasDismissed } = useTangoAI();
+  const [debtorsReportOpen, setDebtorsReportOpen] = useState(false);
 
   // 7. Volume de Crédito Concedido (Últimos 12 Meses)
   const getDisbursedVolumeData = () => {
@@ -2852,15 +2854,21 @@ export default function Dashboard() {
               <CardTitle className="text-base">Ranking de Clientes</CardTitle>
               <CardDescription>Clientes com saldo em aberto (Top 50)</CardDescription>
             </div>
-            <Select value={clientSort} onValueChange={(v: any) => setClientSort(v)}>
-              <SelectTrigger className="w-[130px] h-8 text-xs">
-                <SelectValue placeholder="Ordenar" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="desc">Maior Dívida</SelectItem>
-                <SelectItem value="asc">Menor Dívida</SelectItem>
-              </SelectContent>
-            </Select>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={() => setDebtorsReportOpen(true)} title="Relatório de devedores com filtros (PDF ou Excel)">
+                <FileText className="h-3.5 w-3.5" /> Relatório
+              </Button>
+              <Select value={clientSort} onValueChange={(v: any) => setClientSort(v)}>
+                <SelectTrigger className="w-[130px] h-8 text-xs">
+                  <SelectValue placeholder="Ordenar" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="desc">Maior Dívida</SelectItem>
+                  <SelectItem value="asc">Menor Dívida</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <RelatorioDevedores open={debtorsReportOpen} onClose={() => setDebtorsReportOpen(false)} />
           </CardHeader>
           <CardContent className="flex-1 overflow-hidden p-0">
             <div className="h-full overflow-y-auto p-4 pt-0 space-y-4">

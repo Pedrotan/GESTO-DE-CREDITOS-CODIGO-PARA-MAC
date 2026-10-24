@@ -1,5 +1,5 @@
 import * as crypto from 'node:crypto';
-import { ALL_ASSIGNABLE_PERMISSIONS } from '../src/bibliotecas/conta-principal';
+import { ALL_ASSIGNABLE_PERMISSIONS } from '../src/bibliotecas/conta-principal.ts';
 
 type UserRecord = {
   id: string; name: string; email?: string; username?: string; role: string;
