@@ -3173,7 +3173,7 @@ export default function Settings() {
                                             </div>
 
                                             <p className="text-xs text-blue-600/70 mt-1 font-medium bg-blue-100/30 p-2 rounded-lg border border-blue-100">
-                                                DICA: Use o <strong>NOME (Opção 2)</strong> nos outros computadores. Assim não precisa mudar o URL se o IP do servidor alterar.
+                                                DICA: Use o <strong>NOME (Opção 2)</strong> nos outros computadores. Assim não precisa mudar o endereço se o IP do servidor alterar.
                                             </p>
                                         </div>
 
@@ -3202,7 +3202,7 @@ export default function Settings() {
                                                                     </div>
                                                                     <div className="flex items-center gap-2">
                                                                         <span className={`text-[10px] font-bold uppercase ${client.status === 'offline' ? 'text-slate-400' : 'text-emerald-600'}`}>
-                                                                            {client.status === 'offline' ? 'Desconectado' : 'Online'}
+                                                                            {client.status === 'offline' ? 'Desconectado' : 'Ligado'}
                                                                         </span>
                                                                         <span className="text-slate-300">•</span>
                                                                         <span className="text-[10px] text-slate-500">
@@ -3251,7 +3251,7 @@ export default function Settings() {
                             : <p className="text-sm text-muted-foreground">{isDesktopApp ? 'A rede local requer o módulo intranet no plano. A sincronização com a versão web continua disponível pela nuvem.' : 'A versão web utiliza a VPS para sincronizar com os computadores. O Modo Servidor da rede local é ativado apenas no desktop com um plano que inclua intranet.'}</p>}
                             <div className="flex items-center justify-between rounded-lg border p-4">
                                 <div className="space-y-0.5">
-                                    <Label className="text-base">Sincronização Cloud</Label>
+                                    <Label className="text-base">Sincronização na nuvem</Label>
                                     <p className="text-sm text-muted-foreground">
                                         Ative para desbloquear e configurar a sincronização com o servidor remoto.
                                     </p>
@@ -3264,7 +3264,7 @@ export default function Settings() {
                             </div>
                             <div className="grid gap-2">
                                 <Label htmlFor="syncUrl" className="flex items-center justify-between">
-                                    <span>{localServerAllowed ? 'URL da API (Servidor Local ou Nuvem)' : 'URL da API (Nuvem)'}</span>
+                                    <span>{localServerAllowed ? 'Endereço do servidor (local ou nuvem)' : 'Endereço do servidor na nuvem'}</span>
                                     {formData.syncEnabled && !serverInfo?.isRunning && (
                                         <button
                                             type="button"
@@ -3291,7 +3291,7 @@ export default function Settings() {
                                 )}
                             </div>
                             <div className="grid gap-2">
-                                <Label htmlFor="syncApiKey">Chave de Sincronização Cloud</Label>
+                                <Label htmlFor="syncApiKey">Chave de sincronização da nuvem</Label>
                                 <div className="relative">
                                     <Input
                                         id="syncApiKey"

@@ -2,7 +2,7 @@
 // data, produção mensal, aging e PAR30, mapa de vencimentos, créditos por situação, rentabilidade por produto e
 // por gestor, e o extrato de um crédito para o cliente. Os valores vêm da biblioteca partilhada da carteira.
 import { luandaDateKey, formatLuandaDate } from '@/bibliotecas/fuso-angola';
-import { AGING_LABELS, IN_PORTFOLIO, STAGES, agingOf, type AgingBucket, type InstallmentRow, type PortfolioRow, type annualTable } from '@/bibliotecas/carteira-credito';
+import { AGING_LABELS, IN_PORTFOLIO, STAGES, agingOf, expectedProfitSummary, type AgingBucket, type InstallmentRow, type PortfolioRow, type annualTable } from '@/bibliotecas/carteira-credito';
 import type { Cell, ReportDef, Section } from '@/bibliotecas/relatorios-pagamentos';
 import type { Payment } from '@/tipos/credito';
 
@@ -28,6 +28,28 @@ export type CreditReportInput = {
 };
 
 const baseRow = (row: PortfolioRow): Cell[] => [row.reference, row.clientName, row.product, row.managerName];
+const pctText = (value: number) => `${(value * 100).toFixed(1).replace('.', ',')}%`;
+
+/**
+ * Previsão de lucros dos créditos concedidos (os juros são o ganho da empresa): capital investido face ao lucro
+ * previsto pela taxa de cada crédito, o lucro já recebido e o que falta receber. Sai por baixo dos relatórios.
+ */
+function profitForecast(rows: PortfolioRow[], payments: Payment[], heading = 'Previsão de lucros dos créditos concedidos'): { summary: Array<[string, string]>; section: Section } {
+    const forecast = expectedProfitSummary(rows, payments);
+    const money = (minor: number) => `${kz(minor).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} Kz`;
+    return {
+        summary: [['Capital investido', money(forecast.capitalMinor)], ['Lucro previsto (juros)', `${money(forecast.expectedProfitMinor)} · ${pctText(forecast.marginRate)}`],
+            ['Lucro já recebido', money(forecast.receivedProfitMinor)], ['Lucro por receber', money(forecast.toReceiveProfitMinor)], ['Total a receber (capital + lucro)', money(forecast.totalExpectedMinor)]],
+        section: {
+            heading, head: ['Referência', 'Cliente', 'Taxa', 'Capital investido', 'Lucro previsto', '% s/ capital', 'Lucro recebido', 'Lucro por receber', 'Total a receber'],
+            widths: { 0: 30, 1: 50 }, numeric: [2, 5], money: [3, 4, 6, 7, 8],
+            rows: forecast.rows.map(row => [row.reference, row.clientName, `${row.rate.toLocaleString('pt-BR')}%`, kz(row.capitalMinor), kz(row.expectedProfitMinor), pctText(row.marginRate),
+                kz(row.receivedProfitMinor), kz(row.toReceiveProfitMinor), kz(row.totalExpectedMinor)]),
+            foot: [['Total', '', '', kz(forecast.capitalMinor), kz(forecast.expectedProfitMinor), pctText(forecast.marginRate), kz(forecast.receivedProfitMinor), kz(forecast.toReceiveProfitMinor), kz(forecast.totalExpectedMinor)]],
+            emptyText: 'Sem créditos concedidos.',
+        },
+    };
+}
 const HEAD = ['Referência', 'Cliente', 'Produto', 'Gestor'];
 const WIDTHS = { 0: 26, 1: 44, 2: 30, 3: 34 };
 
@@ -54,6 +76,9 @@ export function buildCreditReport(key: CreditReportKey, input: CreditReportInput
             sections = [{ heading: 'Créditos em curso', head: [...HEAD, 'Concedido em', 'Capital concedido', 'Capital em dívida', 'Estado atual'], widths: WIDTHS, money: [5, 6],
                 rows: list.map(({ row, outstanding }) => [...baseRow(row), label(row.grantedKey), kz(row.grantedMinor), kz(outstanding), STAGES[row.stage].label]),
                 foot: [['Total', '', '', '', '', kz(list.reduce((sum, item) => sum + item.row.grantedMinor, 0)), kz(total), '']], emptyText: 'Sem créditos em curso nessa data.' }];
+            const forecast = profitForecast(input.rows.filter(row => row.grantedKey <= date), input.payments);
+            summary = [...summary, ...forecast.summary];
+            sections = [...sections, forecast.section];
             break;
         }
         case 'producao': {
@@ -69,6 +94,9 @@ export function buildCreditReport(key: CreditReportKey, input: CreditReportInput
                 { heading: 'Créditos concedidos', head: [...HEAD, 'Data', 'Capital', 'TAN', 'Prestações', 'Juros contratados', 'Estado'], widths: WIDTHS, money: [5, 9], numeric: [6, 7],
                     rows: list.map(row => [...baseRow(row), label(row.grantedKey), kz(row.grantedMinor), `${row.rate}%`, row.totalCount, kz(row.contractedInterestMinor), STAGES[row.stage].label]), emptyText: 'Sem créditos concedidos no mês.' },
             ];
+            const forecast = profitForecast(list, input.payments, 'Previsão de lucros dos créditos concedidos no mês');
+            summary = [...summary.filter(([name]) => name !== 'Juros contratados'), ...forecast.summary.slice(1)];
+            sections = [...sections, forecast.section];
             break;
         }
         case 'aging': {
@@ -133,7 +161,9 @@ export function buildCreditReport(key: CreditReportKey, input: CreditReportInput
                 { heading: 'Por produto', head: ['Produto', ...head.slice(1)], numeric: [1], money: [2, 3, 4, 6], rows: group(row => row.product) },
                 { heading: 'Por gestor', head: ['Gestor', ...head.slice(1)], numeric: [1], money: [2, 3, 4, 6], rows: group(row => row.managerName) },
             ];
-            summary = [['Juros recebidos (total)', money([...interestPaid.values()].reduce((sum, value) => sum + value, 0))]];
+            const forecast = profitForecast(input.rows, input.payments);
+            summary = [['Juros recebidos (total)', money([...interestPaid.values()].reduce((sum, value) => sum + value, 0))], ...forecast.summary];
+            sections = [...sections, forecast.section];
             break;
         }
         case 'extrato': {

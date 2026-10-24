@@ -455,9 +455,9 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
         if (isValidLogoData(pdfLogo)) {
             const imgFormat = detectImageFormat(pdfLogo);
             try {
-                const maxLogoW = 28 * logoScale;
-                const maxLogoH = 18 * logoScale;
-                let imgWidth = 26 * logoScale;
+                const maxLogoW = 36 * logoScale;
+                const maxLogoH = 22 * logoScale;
+                let imgWidth = 33 * logoScale;
                 let imgHeight = maxLogoH;
                 try {
                     const properties = doc.getImageProperties(pdfLogo);
@@ -476,7 +476,7 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
                 } catch (err) {
                     console.warn("Could not get logo properties:", err);
                 }
-                const yOffset = 12 + (maxLogoH - imgHeight) / 2;
+                const yOffset = 11 + (maxLogoH - imgHeight) / 2;
                 doc.addImage(pdfLogo, imgFormat, 18, yOffset, imgWidth, imgHeight, undefined, 'NONE');
                 textStartX = 18 + imgWidth + 5;
             } catch (e) {
@@ -581,7 +581,7 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
         }
 
         // Linha Divisória Sutil de Separação (nunca acima do fundo do logótipo)
-        const divLineY = Math.max(contactsY + 2.2, 12 + 18 * logoScale + 2);
+        const divLineY = Math.max(contactsY + 2.2, 11 + 22 * logoScale + 2);
         doc.setDrawColor(226, 232, 240);
         doc.setLineWidth(0.25);
         doc.line(18, divLineY, pageWidth - 14, divLineY);

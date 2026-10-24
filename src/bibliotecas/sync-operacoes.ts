@@ -156,6 +156,14 @@ export const conflictStatements = (operations: SyncOperation[], reason: string, 
 };
 
 /**
+ * Erros de um registo que já existe neste dispositivo: o mesmo identificador (chave primária `id`) ou o
+ * lançamento contabilístico do mesmo pagamento já gravado (cada pagamento tem um só lançamento). Outras chaves
+ * únicas repetidas (ex.: o mesmo NIF em dois clientes diferentes) continuam a ser conflitos para rever.
+ */
+export const isAlreadyAppliedError = (reason: string) =>
+    /UNIQUE constraint failed: \w+\.id(?:$|[^\w,])|Pagamento já registado no ledger/i.test(reason);
+
+/**
  * Aplica grupos um a um, cada um numa transacção. Um grupo que falha (ex.: o mesmo crédito foi alterado
  * nos dois lados) não bloqueia os restantes: fica registado em sync_conflicts para revisão.
  */
@@ -175,10 +183,20 @@ export const applyRemoteGroups = async (
             if (statements.length) await deps.transaction(statements);
             applied += group.operations.length;
         } catch (error) {
+            const reason = error instanceof Error ? error.message : String(error);
+            // Histórico recebido de novo (repetição da nuvem, «Receber tudo de novo», reprocessamento): só inserções
+            // de registos que já existem aqui. Já foi aplicado: não é conflito.
+            if (isAlreadyAppliedError(reason) && group.operations.every(operation => isSafeToReprocess(operation, deps.sqlById))) {
+                applied += group.operations.length;
+                if (group.resolvesConflictIds?.length) {
+                    const now = new Date().toISOString();
+                    await deps.transaction(group.resolvesConflictIds.map(id => ({ sql: CONFLICT_RESOLVE_SQL, params: ['Já estava aplicado neste dispositivo.', now, id] })));
+                }
+                continue;
+            }
             conflicts += group.operations.length;
             // Conflitos já existentes (reprocessamento) continuam pendentes; os novos são registados.
             if (!group.resolvesConflictIds?.length) {
-                const reason = error instanceof Error ? error.message : String(error);
                 await deps.transaction(conflictStatements(group.operations, reason, deps.sqlById));
             }
         }

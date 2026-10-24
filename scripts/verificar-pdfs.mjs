@@ -26,6 +26,7 @@ await build({
             export { normalizeSimulatorConfig } from '@/bibliotecas/config-simulador';
             export * as reciboPag from '@/bibliotecas/recibo-pagamento';
             export * as relPag from '@/bibliotecas/relatorios-pagamentos';
+            export * as relCred from '@/bibliotecas/relatorios-creditos';
             export * as anPag from '@/bibliotecas/pagamentos-analise';
             export * as matriz from '@/bibliotecas/matriz-permissoes-pdf';
             export * as relAud from '@/bibliotecas/relatorios-auditoria';
@@ -338,6 +339,20 @@ for (const report of M.relAlc.LIMITS_REPORTS) jobs[`limites_${report.key}`] = ()
 const results = [];
 jobs.marcaRetrato = () => { const x = new jsPDF(); M.pdf.applyBranding(x, M.pdf.getCompanySettings(settings), USER, false); x.__skipBrand = true; };
 jobs.marcaPaisagem = () => { const x = new jsPDF({ orientation: 'landscape' }); M.pdf.applyBranding(x, M.pdf.getCompanySettings(settings), USER, false); x.__skipBrand = true; };
+// Relatórios de Créditos (carteira, produção, rentabilidade… com a previsão de lucros por baixo).
+const creditRows = Array.from({ length: 14 }, (_, i) => ({
+    id: `CR-${i}`, reference: `BV-CRT/2026/${String(i + 1).padStart(3, '0')}`, clientId: `c${i % 9}`,
+    clientName: ['JOANA SEGUNDA DA COSTA PAULINO', 'Isaac Daniel Antonio', 'FIRMINO AMERICO PEDRO', 'DANIEL TCHIWAWA MIGUEL'][i % 4] + (i > 3 ? ` ${i}` : ''),
+    product: 'Crédito Pessoal', managerName: 'Stanislau Bastos', stage: ['ativo', 'em_atraso', 'liquidado', 'ativo'][i % 4], rate: 10 + (i % 4) * 5,
+    grantedMinor: (50_000 + i * 137_500) * 100, outstandingMinor: (40_000 + i * 120_000) * 100, interestOutstandingMinor: 9_000_00, contractedInterestMinor: (5_000 + i * 21_000) * 100,
+    installmentMinor: 25_000_00, paidCount: i % 3, totalCount: 6, nextDueKey: '2026-11-20', nextDueMinor: 25_000_00, daysOverdue: i % 4 === 1 ? 45 : 0, overdueMinor: i % 4 === 1 ? 25_000_00 : 0,
+    moraMinor: i % 4 === 1 ? 1_200_00 : 0, aging: i % 4 === 1 ? '31-60' : 'em_dia', grantedKey: `2026-10-${String(1 + i).padStart(2, '0')}`, competenceMonth: '2026-10', paidOffKey: i % 4 === 2 ? '2026-10-22' : null,
+    credit: {}, managerId: 'm', branchId: 'b', branchName: 'Sede', riskLevel: 'medium',
+}));
+const creditPayments = creditRows.map((row, i) => ({ creditId: row.id, status: 'confirmed', paymentDate: '2026-10-21T10:00:00Z', amount: 30_000, allocatedToPrincipal: 20_000, allocatedToInterest: 5_000 + i * 100, allocatedToLateInterest: 0 }));
+for (const report of M.relCred.CREDIT_REPORTS.filter(item => item.key !== 'extrato')) jobs[`relatorioCreditos_${report.key}`] = () => M.relPag.renderReportPdf(M.relCred.buildCreditReport(report.key, {
+    rows: creditRows, installments: [], payments: creditPayments, dateKey: '2026-10-24', monthKey: '2026-10', todayKey: '2026-10-24',
+}), settings, USER, 'none');
 // PDF_OUT=<pasta> grava os PDFs gerados, para inspecção visual.
 const shotsDir = process.env.PDF_OUT ? path.resolve(process.env.PDF_OUT) : null;
 if (shotsDir) mkdirSync(shotsDir, { recursive: true });

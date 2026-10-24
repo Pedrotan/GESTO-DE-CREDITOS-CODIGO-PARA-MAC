@@ -8,7 +8,7 @@ export async function downloadConflictReport(format: string, rows: SyncConflict[
         const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a3' });
         pdf.setFontSize(15); pdf.text('Relatório completo de sincronização', 12, 15);
         pdf.setFontSize(9);
-        const header = pdf.splitTextToSize(`${context.company || 'Empresa'} | NIF: ${context.nif || '—'}\nServidor: ${context.server || '—'}\nGerado: ${new Date(generatedAt).toLocaleString('pt-AO')} | Estado: ${context.syncState || '—'}\nTotal: ${rows.length} | Inclui todos os estados e páginas, incluindo o arquivo.`, 390);
+        const header = pdf.splitTextToSize(`${context.company || 'Empresa'} | NIF: ${context.nif || '—'}\nServidor: ${context.server || '—'}\nGerado: ${new Date(generatedAt).toLocaleString('pt-AO')} | Estado: ${({ idle: 'Parado', syncing: 'A sincronizar', synced: 'Sincronizado', pending: 'Com alterações por enviar', error: 'Com erro' } as Record<string, string>)[String(context.syncState)] || context.syncState || '—'}\nTotal: ${rows.length} | Inclui todos os estados e páginas, incluindo o arquivo.`, 390);
         pdf.text(header, 12, 22);
         autoTable(pdf, { startY: 25 + header.length * 4, head: [CONFLICT_REPORT_COLUMNS], body: conflictReportRows(rows),
             styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak', valign: 'top' },

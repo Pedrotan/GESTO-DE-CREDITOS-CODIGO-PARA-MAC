@@ -803,6 +803,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                         {documentType === 'PASSAPORTE'
                                                             ? 'Número do Passaporte'
                                                             : clientType === 'PARTICULAR' ? 'NIF / Bilhete de Identidade' : 'NIF da Empresa'}
+                                                        <span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
                                                     </FormLabel>
                                                     <div className={cn('flex items-center gap-1.5', documentType === 'PASSAPORTE' && 'hidden')}>
                                                         <button
@@ -1048,7 +1049,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                             <FormItem>
                                                 <div className="flex items-center justify-between mb-1.5">
                                                     <FormLabel className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                                                        Nome Completo / Razão Social
+                                                        Nome Completo / Razão Social<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
                                                     </FormLabel>
                                                     {isNameAutoFilled && (
                                                         <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-xs">
@@ -1117,7 +1118,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                         render={({ field }) => (
                                             <FormItem>
                                                 <FormLabel className="text-xs font-bold text-slate-700">
-                                                    Idade (Anos)
+                                                    Idade (Anos)<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
                                                 </FormLabel>
                                                 <FormControl>
                                                     <Input 
@@ -1169,7 +1170,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                         render={({ field }) => (
                                             <FormItem>
                                                 <FormLabel className="text-xs font-bold text-slate-700">
-                                                    Estado Civil
+                                                    Estado Civil<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
                                                 </FormLabel>
                                                 <Select
                                                     onValueChange={field.onChange}
@@ -1436,7 +1437,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                             <FormItem>
                                                 <FormLabel className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                                                     <Calendar className="h-3.5 w-3.5 text-blue-600 shrink-0" />
-                                                    Data de Emissão do Bilhete
+                                                    Data de Emissão do Bilhete<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
                                                 </FormLabel>
                                                 <FormControl>
                                                     <Input 
@@ -1457,7 +1458,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                             <FormItem>
                                                 <FormLabel className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                                                     <ShieldAlert className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                                                    Data de Validade / Expiração do Bilhete
+                                                    Data de Validade / Expiração do Bilhete<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
                                                 </FormLabel>
                                                 <FormControl>
                                                     <Input 
@@ -1637,7 +1638,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                     name="phone"
                                     render={({ field }) => (
                                         <FormItem>
-                                            <FormLabel className="text-xs font-bold text-slate-700">Telefone / WhatsApp</FormLabel>
+                                            <FormLabel className="text-xs font-bold text-slate-700">Telefone / WhatsApp<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span></FormLabel>
                                             <FormControl>
                                                 <div className="flex gap-2">
                                                     <Input 
@@ -1765,7 +1766,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                         <FormItem>
                                             <FormLabel className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
                                                 <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded shrink-0">Kz</span>
-                                                Rendimento Mensal Estimado
+                                                Rendimento Mensal Estimado<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
                                             </FormLabel>
                                             <FormControl>
                                                 <CurrencyInput
@@ -1935,7 +1936,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                 />
 
                                 <div className="space-y-1.5">
-                                    <Label className="text-xs font-bold text-slate-700">Coordenadas Bancárias (IBAN)</Label>
+                                    <Label className="text-xs font-bold text-slate-700">Coordenadas Bancárias (IBAN)<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span></Label>
                                     <Button
                                         type="button"
                                         variant="outline"

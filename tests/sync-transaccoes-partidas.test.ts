@@ -112,3 +112,21 @@ test('comando desconhecido numa versão antiga: depois de actualizar, a alteraç
         .map(s => ({ id: String(s.params![0]), operation: String(s.params![3]) }));
     assert.equal(reprocessableGroups(outra, SQL).length, 0);
 });
+
+test('histórico recebido de novo: inserções que já existem não viram conflitos e os antigos ficam resolvidos', async () => {
+    const { database, deps } = base();
+    const lancamento = op({ statementId: 'ins-entry', params: ['e9', 'c1', 1000] });
+    assert.equal((await applyRemoteGroups([{ operations: [lancamento] }], deps)).applied, 1);
+    // A nuvem volta a entregar o mesmo lançamento: já existe, não é conflito.
+    const repetido = await applyRemoteGroups([{ operations: [lancamento] }], deps);
+    assert.deepEqual(repetido, { applied: 1, conflicts: 0 });
+    assert.equal((database.prepare('SELECT COUNT(*) AS n FROM sync_conflicts').get() as { n: number }).n, 0);
+    // Conflito antigo «Pagamento já registado no ledger»: reprocessado, fica resolvido.
+    const antigo = conflictStatements([lancamento], 'Pagamento já registado no ledger', SQL);
+    await deps.transaction(antigo);
+    const rows = database.prepare("SELECT id, operation FROM sync_conflicts WHERE status = 'pending'").all() as Array<{ id: string; operation: string }>;
+    await applyRemoteGroups(reprocessableGroups(rows, SQL), deps);
+    assert.equal((database.prepare("SELECT COUNT(*) AS n FROM sync_conflicts WHERE status = 'pending'").get() as { n: number }).n, 0);
+    // Uma alteração (UPDATE) que falha continua a ser conflito.
+    assert.equal((await applyRemoteGroups([{ operations: [op({ statementId: 'upd-credit', params: ['c1', 7], expectChanges: 1 })] }], deps)).conflicts, 1);
+});

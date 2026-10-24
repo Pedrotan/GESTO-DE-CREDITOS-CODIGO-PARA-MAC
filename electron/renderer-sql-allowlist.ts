@@ -593,6 +593,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT creditId FROM credit_import_items WHERE batchId = ?",
   "SELECT creditId FROM credit_writeoffs",
   "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status FROM credit_installments WHERE status <> 'cancelled'",
+  "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, paidAt FROM credit_installments WHERE status <> 'cancelled'",
   "SELECT creditId, stage FROM legal_cases WHERE deletedAt IS NULL AND stage <> 'closed'",
   "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments",
   "SELECT data_url FROM rh_documento_ficheiro WHERE documento_id = ?",
@@ -3241,6 +3242,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d2d20e166d0c2a1a51b3af51f46196317daac73b5daebf1833afb7c83ee8b7b3",
     "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status FROM credit_installments WHERE status <> 'cancelled'"
+  ],
+  [
+    "8a52a23036792900d95af1b86f85270533898cc585943910ba3e82e881aeaed7",
+    "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, paidAt FROM credit_installments WHERE status <> 'cancelled'"
   ],
   [
     "cc45ae6a81a4b79953483f522a09f975265209d485f42d594fa120ae41a65c61",

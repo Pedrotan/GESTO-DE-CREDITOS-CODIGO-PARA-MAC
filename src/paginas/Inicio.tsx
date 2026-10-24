@@ -18,6 +18,7 @@ import { useData } from '@/contextos/ContextoDados';
 import { useCarteira } from '@/componentes/creditos/useCarteira';
 import { IN_PORTFOLIO } from '@/bibliotecas/carteira-credito';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { contractNumberOf } from '@/bibliotecas/pagamentos-analise';
 import { formatCurrency, getAdaptiveDonutValue } from '@/bibliotecas/formatters';
 import { useToast } from '@/componentes/ui/use-toast';
 import {
@@ -1078,11 +1079,14 @@ export default function Dashboard() {
       headStyles: { fillColor: dark, textColor: [255, 255, 255], fontStyle: 'bold' },
       alternateRowStyles: { fillColor: [250, 250, 252] },
       columnStyles: {
+        1: { halign: 'right' },
         2: { halign: 'right' },
         3: { halign: 'right' },
         4: { halign: 'right' }
       },
       margin: { left: 16, right: 14, bottom: 25 },
+      // Cabeçalho por cima dos números (alinhado à direita como os valores).
+      didParseCell: (data: any) => { if (data.section === 'head' && data.column.index > 0) data.cell.styles.halign = 'right'; },
       didDrawPage: () => applyBranding(doc, config, generatedBy, true)
     });
 
@@ -1110,7 +1114,7 @@ export default function Dashboard() {
           row.clientName,
           row.categoryLabel || 'Normal',
           row.registerNumber,
-          row.credit.id,
+          contractNumberOf(row.credit.id),
           row.contractModality,
           formatMoney(row.investedAmount),
           formatMoney(row.paidPrincipal),
@@ -1126,18 +1130,23 @@ export default function Dashboard() {
       styles: { fontSize: 6.5, cellPadding: 1.25, overflow: 'linebreak', textColor: [71, 85, 105] },
       headStyles: { fillColor: dark, textColor: [255, 255, 255] },
       alternateRowStyles: { fillColor: [248, 250, 252] },
+      // Valores em Kz numa só linha e cabeçalhos alinhados com os valores.
       columnStyles: {
-        1: { cellWidth: 26 },
-        2: { cellWidth: 18 },
-        6: { halign: 'right' },
-        7: { halign: 'right' },
-        8: { halign: 'right' },
-        9: { halign: 'right' },
-        10: { halign: 'right' },
+        1: { cellWidth: 30 },
+        2: { cellWidth: 15 },
+        4: { cellWidth: 25 },
+        6: { halign: 'right', minCellWidth: 22 },
+        7: { halign: 'right', minCellWidth: 22 },
+        8: { halign: 'right', minCellWidth: 22 },
+        9: { halign: 'right', minCellWidth: 22 },
+        10: { halign: 'right', minCellWidth: 22 },
+        11: { halign: 'center' },
         13: { halign: 'center' }
       },
       margin: { left: 16, right: 14, bottom: 25 },
       didParseCell: (data: any) => {
+        if (data.section === 'head' && data.column.index >= 6 && data.column.index <= 10) data.cell.styles.halign = 'right';
+        if (data.section === 'head' && (data.column.index === 11 || data.column.index === 13)) data.cell.styles.halign = 'center';
         if (data.section !== 'body' || data.column.index !== 13) return;
         const statusInfo = Object.values(creditStatusLabels).find(item => item.label === data.cell.raw);
         if (statusInfo) {

@@ -319,6 +319,8 @@ export function renderReportPdf(def: ReportDef, settings: any, userName: string,
         section.head.forEach((_, index) => {
             const style: any = {};
             if (money.has(index) || numeric.has(index)) style.halign = 'right';
+            // Valores em Kz numa só linha (sem «Kz» a cair para a linha de baixo).
+            if (money.has(index) && !section.widths?.[index]) style.minCellWidth = def.orientation === 'landscape' ? 25 : 23;
             if (section.widths?.[index]) style.cellWidth = section.widths[index];
             if (Object.keys(style).length) columnStyles[index] = style;
         });
@@ -335,6 +337,10 @@ export function renderReportPdf(def: ReportDef, settings: any, userName: string,
             headStyles: { fillColor: [dark[0], dark[1], dark[2]], textColor: [255, 255, 255], fontStyle: 'bold' },
             footStyles: { fillColor: [241, 245, 249], textColor: [15, 23, 42], fontStyle: 'bold' },
             columnStyles,
+            // O cabeçalho e o total seguem o alinhamento da coluna (os valores à direita), para ficarem por cima dos números.
+            didParseCell: hook => {
+                if ((hook.section === 'head' || hook.section === 'foot') && (money.has(hook.column.index) || numeric.has(hook.column.index))) hook.cell.styles.halign = 'right';
+            },
             didDrawPage: hook => { if (hook.pageNumber > 1) applyBranding(doc, config, userName, true); },
         });
         y = (doc as any).lastAutoTable.finalY + 7;
