@@ -33,6 +33,7 @@ import { CalendarTasksModal } from '@/componentes/modals/CalendarTasksModal';
 import { useCarteira } from '@/componentes/creditos/useCarteira';
 import { CabecalhoCarteira } from '@/componentes/creditos/CabecalhoCarteira';
 import { CartoesCarteira, type CardDetail } from '@/componentes/creditos/CartoesCarteira';
+import { LucrosPrevistos } from '@/componentes/creditos/LucrosPrevistos';
 import { TabelaCarteira } from '@/componentes/creditos/TabelaCarteira';
 import { VisaoAnualCreditos } from '@/componentes/creditos/VisaoAnualCreditos';
 import { AlertasCarteira } from '@/componentes/creditos/AlertasCarteira';
@@ -261,6 +262,7 @@ export default function Credits() {
       ) : (
         <>
           <CartoesCarteira state={carteira} onDetails={setDetail} cashFlowCard={cashFlowCard} />
+          <LucrosPrevistos state={carteira} />
           <TabelaCarteira state={carteira} onOpen={openCreditFile} clientsById={new Map(clients.map(c => [c.id, { phone: c.phone }]))} currentUser={actor} renderActions={renderRowActions} />
         </>
       )}

@@ -65,17 +65,30 @@ export class RepositorioCredito extends RepositorioBase {
         }]);
     }
 
+    /** Envia o crédito e o contrato dele (mesmo identificador) para a lixeira. */
     static async softDelete(id: string, userId: string, originalState?: string): Promise<void> {
-        await this.execute('UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?', [new Date().toISOString(), userId, originalState, id]);
+        const now = new Date().toISOString();
+        await db.transaction([
+            { sql: 'UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?', params: [now, userId, originalState, id] },
+            { sql: 'UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL', params: [now, userId, id] },
+        ]);
     }
 
     static async restore(id: string): Promise<void> {
-        await this.execute('UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?', [new Date().toISOString(), id]);
+        const now = new Date().toISOString();
+        await db.transaction([
+            { sql: 'UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?', params: [now, id] },
+            { sql: 'UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE id = ? AND deletedAt IS NOT NULL', params: [now, id] },
+        ]);
     }
 
-    /** «Apagar definitivamente»: sai da lixeira sem restauro; o histórico contabilístico fica (é imutável). */
+    /** «Apagar definitivamente»: o crédito e o contrato saem da lixeira sem restauro (o razão fica guardado, imutável). */
     static async purge(id: string, userId: string): Promise<void> {
-        await db.transaction([{ sql: 'UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL', params: [`purged:${userId}`, id], expectChanges: 1 }]);
+        const marker = `purged:${userId}`;
+        await db.transaction([
+            { sql: 'UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL', params: [marker, id], expectChanges: 1 },
+            { sql: 'UPDATE contracts SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE id = ?', params: [new Date().toISOString(), marker, id] },
+        ]);
     }
 }
 

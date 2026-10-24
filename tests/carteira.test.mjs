@@ -351,7 +351,7 @@ test('A1 · Causa corrigida: a carteira lê da base e os pagamentos seguem o cr�
     } finally { database.close(); }
 });
 
-test('A2 · A referência curta CR-AAAA-NNNN é a mesma em Créditos e em Pagamentos (conta os créditos apagados)', async () => {
+test('A2 · O número do contrato (CT-CRT/AAAA/NNN) é o mesmo em Créditos e em Pagamentos (conta os créditos apagados)', async () => {
     const M = await loadModules();
     const database = await createDatabase(M);
     try {
@@ -363,7 +363,7 @@ test('A2 · A referência curta CR-AAAA-NNNN é a mesma em Créditos e em Pagame
         const numbersPagamentos = M.P.contractNumbers([...context.credits, ...context.deletedCredits]);
         const row = rows.find(item => item.id === 'CR-SEGUINTE');
         assert.equal(row.reference, numbersPagamentos.get('CR-SEGUINTE'));
-        assert.match(row.reference, /^CR-\d{4}-0002$/);
+        assert.match(row.reference, /^[A-Z0-9]+-CRT\/\d{4}\/002$/);
         console.log(`    A2: CR-SEGUINTE → ${row.reference} em Créditos e ${numbersPagamentos.get('CR-SEGUINTE')} em Pagamentos`);
     } finally { database.close(); }
 });

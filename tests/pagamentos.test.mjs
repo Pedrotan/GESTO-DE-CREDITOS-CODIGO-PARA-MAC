@@ -142,7 +142,7 @@ test('K1 · Outubro de 2026: 2 linhas com referências diferentes e 135 000 Kz i
         assert.equal(inOctober.length, 2, 'uma linha por pagamento');
         assert.notEqual(inOctober[0].receipt, inOctober[1].receipt, 'cada pagamento tem o seu recibo');
         assert.deepEqual(inOctober.map(row => row.receipt).sort(), ['RC 2026/000001', 'RC 2026/000002']);
-        assert.ok(inOctober.every(row => row.contract === 'CR-2026-0001'), 'número curto do contrato em vez do UUID');
+        assert.ok(inOctober.every(row => row.contract === 'CT-CRT/2026/001'), 'número curto do contrato em vez do UUID');
 
         const schedule = await M.ServicoPagamentos.loadSchedule();
         const kpis = M.A.computeKpis(rows, schedule, range, { today: '2026-10-06' });
@@ -258,11 +258,11 @@ test('K5 · importação: linha duplicada e contrato inexistente são assinalado
         const rows = await rowsOf(M);
         const credits = await M.ServicoFinanceiro.getAllCredits();
         const preview = M.A.validateImportRows([
-            { 'Contrato': 'CR-2026-0001', 'Data-valor (AAAA-MM-DD)': '2026-10-03', 'Valor (Kz)': 15000, 'Método': 'Numerário', 'Referência': '' },
-            { 'Contrato': 'CR-2026-0001', 'Data-valor (AAAA-MM-DD)': '2026-10-03', 'Valor (Kz)': 15000, 'Método': 'Numerário', 'Referência': '' },
-            { 'Contrato': 'CR-2099-9999', 'Data-valor (AAAA-MM-DD)': '2026-10-03', 'Valor (Kz)': 5000, 'Método': 'Numerário', 'Referência': '' },
-            { 'Contrato': 'CR-2026-0001', 'Data-valor (AAAA-MM-DD)': '02/10/2026', 'Valor (Kz)': '10.000,00', 'Método': 'numerario', 'Referência': '' },
-            { 'Contrato': 'CR-2026-0001', 'Data-valor (AAAA-MM-DD)': '2026-10-04', 'Valor (Kz)': 7000, 'Método': 'Transferência', 'Referência': 'TRF-1' },
+            { 'Contrato': 'CT-CRT/2026/001', 'Data-valor (AAAA-MM-DD)': '2026-10-03', 'Valor (Kz)': 15000, 'Método': 'Numerário', 'Referência': '' },
+            { 'Contrato': 'CT-CRT/2026/001', 'Data-valor (AAAA-MM-DD)': '2026-10-03', 'Valor (Kz)': 15000, 'Método': 'Numerário', 'Referência': '' },
+            { 'Contrato': 'CT-CRT/2099/999', 'Data-valor (AAAA-MM-DD)': '2026-10-03', 'Valor (Kz)': 5000, 'Método': 'Numerário', 'Referência': '' },
+            { 'Contrato': 'CT-CRT/2026/001', 'Data-valor (AAAA-MM-DD)': '02/10/2026', 'Valor (Kz)': '10.000,00', 'Método': 'numerario', 'Referência': '' },
+            { 'Contrato': 'CT-CRT/2026/001', 'Data-valor (AAAA-MM-DD)': '2026-10-04', 'Valor (Kz)': 7000, 'Método': 'Transferência', 'Referência': 'TRF-1' },
         ], { credits, numbers: M.A.contractNumbers(credits), existing: rows, closedMonths: new Set(), today: '2026-10-06' });
         assert.deepEqual(preview.map(row => row.status), ['ok', 'warning', 'error', 'warning', 'ok']);
         assert.match(preview[1].messages.join(' '), /duplicada no ficheiro/);

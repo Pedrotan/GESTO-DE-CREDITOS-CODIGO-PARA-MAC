@@ -209,7 +209,7 @@ export function stageOf(credit: Credit, input: { outstanding: number; interestOu
 }
 
 /**
- * Constrói a carteira. A numeração CR-AAAA-NNNN conta também os créditos apagados (`deletedCredits`), como na
+ * Constrói a carteira. A numeração (BV-CRT/AAAA/NNN) conta também os créditos apagados (`deletedCredits`), como na
  * página de Pagamentos: o mesmo crédito tem a mesma referência curta em todas as páginas.
  */
 export function buildPortfolio(credits: Credit[], context: PortfolioContext & { deletedCredits?: Credit[] }): PortfolioRow[] {
@@ -410,3 +410,49 @@ export function creditAlerts(rows: PortfolioRow[], installments: InstallmentRow[
 }
 
 export const todayKey = luandaTodayKey;
+
+// ── Lucros previstos ──────────────────────────────────────────────────────────────────
+export type ExpectedProfitRow = {
+    id: string; reference: string; clientName: string; stage: CreditStage; rate: number;
+    capitalMinor: number; expectedProfitMinor: number; receivedProfitMinor: number; toReceiveProfitMinor: number;
+    /** Capital + lucro previsto: o que a empresa recebe ao todo neste crédito. */
+    totalExpectedMinor: number;
+    /** Lucro previsto face ao capital investido (ex.: 0,25 = 25%). */
+    marginRate: number;
+};
+export type ExpectedProfitSummary = {
+    rows: ExpectedProfitRow[]; count: number;
+    capitalMinor: number; expectedProfitMinor: number; receivedProfitMinor: number; toReceiveProfitMinor: number; totalExpectedMinor: number; marginRate: number;
+};
+
+const GRANTED_STAGES: CreditStage[] = ['contrato', 'ativo', 'em_atraso', 'liquidado', 'reestruturado', 'contencioso'];
+
+/**
+ * Lucros previstos dos créditos concedidos: em cada crédito, o capital investido face ao lucro (juros
+ * contratados pela taxa do crédito), o lucro já recebido (parte dos pagamentos imputada a juros) e o que
+ * falta receber. Os créditos pedidos, rejeitados, cancelados ou abatidos não entram.
+ */
+export function expectedProfitSummary(rows: PortfolioRow[], payments: Array<Pick<Payment, 'creditId' | 'status' | 'allocatedToInterest'> & { deletedAt?: unknown }>): ExpectedProfitSummary {
+    const interestPaid = new Map<string, number>();
+    for (const payment of payments) {
+        if (payment.status !== 'confirmed' || payment.deletedAt) continue;
+        interestPaid.set(payment.creditId, (interestPaid.get(payment.creditId) || 0) + toMinor(payment.allocatedToInterest));
+    }
+    const list = rows.filter(row => GRANTED_STAGES.includes(row.stage)).map(row => {
+        const expected = Math.max(0, row.contractedInterestMinor);
+        const received = Math.min(expected, interestPaid.get(row.id) || 0);
+        return {
+            id: row.id, reference: row.reference, clientName: row.clientName, stage: row.stage, rate: row.rate,
+            capitalMinor: row.grantedMinor, expectedProfitMinor: expected, receivedProfitMinor: received,
+            toReceiveProfitMinor: Math.max(0, expected - received), totalExpectedMinor: row.grantedMinor + expected,
+            marginRate: row.grantedMinor > 0 ? expected / row.grantedMinor : 0,
+        };
+    }).sort((a, b) => b.toReceiveProfitMinor - a.toReceiveProfitMinor || b.expectedProfitMinor - a.expectedProfitMinor);
+    const sum = (key: 'capitalMinor' | 'expectedProfitMinor' | 'receivedProfitMinor' | 'toReceiveProfitMinor' | 'totalExpectedMinor') => list.reduce((total, row) => total + row[key], 0);
+    const capital = sum('capitalMinor');
+    const expected = sum('expectedProfitMinor');
+    return {
+        rows: list, count: list.length, capitalMinor: capital, expectedProfitMinor: expected, receivedProfitMinor: sum('receivedProfitMinor'),
+        toReceiveProfitMinor: sum('toReceiveProfitMinor'), totalExpectedMinor: sum('totalExpectedMinor'), marginRate: capital > 0 ? expected / capital : 0,
+    };
+}

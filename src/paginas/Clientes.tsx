@@ -7,6 +7,8 @@ import { clientCreditStanding, newCreditBlockReason, requiresCreditApproval } fr
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { ModalEliminarDados } from '@/componentes/modals/ModalEliminarDados';
+import type { DataRemovalOptions } from '@/contextos/ContextoDados';
 import { useData } from '@/contextos/ContextoDados';
 import { formatCurrency, formatDate } from '@/bibliotecas/formatters';
 import { Badge } from '@/componentes/ui/badge';
@@ -366,28 +368,21 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
         }
     };
 
-    const confirmDelete = async () => {
-        if (selectedClient) {
-            const hasActiveCredits = credits.some(c => c.clientId === selectedClient.id && c.status === 'active');
-
-            if (hasActiveCredits) {
-                setAlertConfig({
-                    isOpen: true,
-                    title: "Atenção!",
-                    description: "Este cliente possui créditos ativos. Finalize os créditos antes de excluir.",
-                    type: "warning"
-                });
-            } else {
-                await deleteClient(selectedClient.id, user ? { id: user.id, name: user.name } : undefined);
-                setAlertConfig({
-                    isOpen: true,
-                    title: "Excluído!",
-                    description: "O cliente foi removido com sucesso do sistema.",
-                    type: "success"
-                });
-            }
-            setIsDeleteAlertOpen(false);
+    // Eliminação escolhida na modal (páginas marcadas). Créditos por pagar não bloqueiam: a modal avisa.
+    const confirmDelete = async (options: DataRemovalOptions) => {
+        if (!selectedClient) return;
+        try {
+            await deleteClient(selectedClient.id, user ? { id: user.id, name: user.name } : undefined, options);
+            setAlertConfig({
+                isOpen: true,
+                title: "Eliminado!",
+                description: options.purge ? "O cliente e os dados marcados foram apagados definitivamente." : "O cliente e os dados marcados foram para a lixeira.",
+                type: "success"
+            });
             setSelectedClient(undefined);
+        } catch (error) {
+            setAlertConfig({ isOpen: true, title: "Não foi possível eliminar", description: error instanceof Error ? error.message : String(error), type: "error" });
+            throw error;
         }
     };
 
@@ -1270,18 +1265,14 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
 
             />
 
-            <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
-                <AlertDialogContent>
-                    <AlertDialogHeader>
-                        <AlertDialogTitle>Tem certeza absoluta?</AlertDialogTitle>
-                        <AlertDialogDescription>Esta ação não pode ser desfeita. Isso excluirá permanentemente o cliente <strong> {selectedClient?.name} </strong> e removerá seus dados do servidor local.</AlertDialogDescription>
-                    </AlertDialogHeader>
-                    <AlertDialogFooter>
-                        <AlertDialogCancel onClick={() => setSelectedClient(undefined)}>Cancelar</AlertDialogCancel>
-                        <AlertDialogAction onClick={confirmDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Confirmar Exclusão</AlertDialogAction>
-                    </AlertDialogFooter>
-                </AlertDialogContent>
-            </AlertDialog>
+            <ModalEliminarDados
+                open={isDeleteAlertOpen}
+                onOpenChange={open => { setIsDeleteAlertOpen(open); if (!open) setSelectedClient(undefined); }}
+                kind="client"
+                name={selectedClient?.name || ''}
+                activeCredits={selectedClient ? credits.filter(c => c.clientId === selectedClient.id && ['active', 'overdue', 'renegotiated'].includes(c.status)).length : 0}
+                onConfirm={confirmDelete}
+            />
 
             <AlertModal isOpen={alertConfig.isOpen} onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })} title={alertConfig.title} description={alertConfig.description} type={alertConfig.type} />
 

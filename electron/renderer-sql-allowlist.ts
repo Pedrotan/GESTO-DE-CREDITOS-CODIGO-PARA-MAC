@@ -630,12 +630,15 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod, productId FROM credits WHERE deletedAt IS NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'",
   "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, clientId, deletedBy FROM credits WHERE deletedAt IS NOT NULL",
   "SELECT id, clientId, status FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, createdAt, startDate FROM credits",
   "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC",
   "SELECT id, creditId, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt FROM credit_installments",
   "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC",
+  "SELECT id, deletedBy FROM clients WHERE deletedAt IS NOT NULL",
   "SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC",
   "SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome",
@@ -723,8 +726,14 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE company_settings SET name = ?, nif = ?, logo = COALESCE(?, logo), enableMultiTenant = COALESCE(?, enableMultiTenant) WHERE id = 1",
   "UPDATE company_settings SET rescueKey = NULL WHERE rescueKey = ?",
   "UPDATE contracts SET clientId = COALESCE(?, clientId), clientName = COALESCE(?, clientName), title = COALESCE(?, title), value = COALESCE(?, value), startDate = COALESCE(?, startDate), endDate = COALESCE(?, endDate), status = COALESCE(?, status), terms = COALESCE(?, terms), usuario_id = COALESCE(?, usuario_id) WHERE id = ?",
+  "UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL",
+  "UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL",
   "UPDATE contracts SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
+  "UPDATE contracts SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE clientId = ?",
+  "UPDATE contracts SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE id = ?",
+  "UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)",
   "UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
+  "UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE contracts SET status = 'active' WHERE id = ? AND status = 'paid'",
   "UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'",
   "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?",
@@ -3382,6 +3391,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "40e256e2a8dfeb3b6334c509ea5dd63fbe8965a4035998ec12ca5ccb9dfb6169",
+    "SELECT id, clientId, deletedBy FROM credits WHERE deletedAt IS NOT NULL"
+  ],
+  [
     "c8a0034c34111a433a0bc800383d5ea23dce65b4eebd8fb2e2b9561cf9b9f4f2",
     "SELECT id, clientId, status FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
@@ -3394,6 +3407,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "463f0161a81c45d9b44e81bb00da9c1d600a8475d6e0916fba7a26d628571e1c",
+    "SELECT id, createdAt, startDate FROM credits"
+  ],
+  [
     "2700cbcf81526b02bff254c2148f19906658bb7180c0b753ff42aad7e9012c78",
     "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC"
   ],
@@ -3404,6 +3421,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "18f872abec7e51e7606df6b21240f8ff974534d61d3b776750842d243e6af040",
     "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC"
+  ],
+  [
+    "ec2b0b5aaa091084c3e3e3ba54d0755dabe0c4124fc5d37bd157e8e758500425",
+    "SELECT id, deletedBy FROM clients WHERE deletedAt IS NOT NULL"
   ],
   [
     "cd9c8e924c552da45d883f5e02f6f267e3f7130b5d55661f8d77a75ce5bc1218",
@@ -3754,12 +3775,36 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE contracts SET clientId = COALESCE(?, clientId), clientName = COALESCE(?, clientName), title = COALESCE(?, title), value = COALESCE(?, value), startDate = COALESCE(?, startDate), endDate = COALESCE(?, endDate), status = COALESCE(?, status), terms = COALESCE(?, terms), usuario_id = COALESCE(?, usuario_id) WHERE id = ?"
   ],
   [
+    "37b12357620d8f8e8253f8f1c479c730f3e6f7b7310dd49e1053027f01ef6efd",
+    "UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL"
+  ],
+  [
+    "bc42bc0ecf4fa44c6822999fc91aa8bb5bdb5f538aaf7db46a8ced63f4aca7d3",
+    "UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
     "15bbc90639dc5fadc5ac6c791c5a974c2f6aba0fe52b689125e5001d358f84a4",
     "UPDATE contracts SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?"
   ],
   [
+    "60ecc4e4b0c138bb86f21da77f7b416b841935487689c951d1e451652f2bb3c4",
+    "UPDATE contracts SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE clientId = ?"
+  ],
+  [
+    "bbd23f3b0dfb31ba7189ce9585d40d7e6525adcb9c4df552d546cad5d012c481",
+    "UPDATE contracts SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE id = ?"
+  ],
+  [
+    "b7f7645de7eb89d2f5cf0c79e74bcf201eca45c7119705da3f8265790bfc57bc",
+    "UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)"
+  ],
+  [
     "22c20ac802eecb6998842a694a588b10fee5415463c3634bf89eda1052823b36",
     "UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
+  ],
+  [
+    "cde85385f853155c99cf8958def287284ea6d5500a17b4e4ee17e562aa8802ce",
+    "UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE id = ? AND deletedAt IS NOT NULL"
   ],
   [
     "44b3619caa664a3f544412f215d0fa509614f2bd81c1924d0ff322c520d961be",

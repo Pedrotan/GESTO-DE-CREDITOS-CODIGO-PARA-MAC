@@ -63,6 +63,10 @@ import { ServicoFornecedor } from '@/servicos/ServicoFornecedor';
 import { ServicoTarefaCalendario } from '@/servicos/ServicoTarefaCalendario';
 import { ServicoTaxasJuro } from '@/servicos/ServicoTaxasJuro';
 import { SHARED_SETTING_KEYS, ServicoDefinicoesPartilhadas } from '@/servicos/ServicoDefinicoesPartilhadas';
+import { hideFromAccounting, isRemovedFromAccounting, loadDataRemovalState } from '@/bibliotecas/eliminacao-dados';
+
+/** Onde eliminar os dados (modal de eliminação): créditos e contratos, contabilidade e apagar já sem lixeira. */
+export type DataRemovalOptions = { withCredits?: boolean; accounting?: boolean; purge?: boolean };
 import { DEFAULT_ACCESS_SCHEDULE, normalizeAccessSchedule, validateAccessSchedule, type AccessSchedule } from '@/bibliotecas/horario-acesso';
 import { isCloudSyncUrl, startCloudSync, syncCloudNow, webCloudSyncConfig } from '@/servicos/ServicoSincronizacaoCloud';
 import { ServicoCarteira } from '@/servicos/ServicoCarteira';
@@ -97,7 +101,7 @@ interface ContextoDadosType {
     addAccountingEntry: (entry: Omit<AccountingEntry, 'id' | 'timestamp' | 'integrityHash' | 'previousHash'>) => Promise<void>;
     addClient: (client: Client, user?: { id: string; name: string }) => Promise<void>;
     updateClient: (id: string, updates: Partial<Client>, user?: { id: string; name: string }) => Promise<void>;
-    deleteClient: (id: string, user?: { id: string; name: string }) => Promise<void>;
+    deleteClient: (id: string, user?: { id: string; name: string }, options?: DataRemovalOptions) => Promise<void>;
     addDocumentToClient: (clientId: string, doc: any, user?: { id: string; name: string }) => Promise<void>;
     deleteDocumentFromClient: (clientId: string, docId: string, user?: { id: string; name: string }) => Promise<void>;
     addCredit: (credit: Credit, user?: { id: string; name: string }, context?: { productId?: string | null; effortRate?: number | null; reinforcementOf?: string }) => Promise<Credit & { escalationReason?: string }>;
@@ -110,7 +114,7 @@ interface ContextoDadosType {
         options?: { installmentId: string; notes?: string; idempotencyKey?: string },
         user?: { id: string; name: string }
     ) => Promise<void>;
-    deleteCredit: (id: string, user?: { id: string; name: string }, justification?: string) => Promise<void>;
+    deleteCredit: (id: string, user?: { id: string; name: string }, justification?: string, options?: DataRemovalOptions) => Promise<void>;
     approveCredit: (id: string, adminId: string, adminName: string, notes?: string) => Promise<{ final: boolean; message?: string }>;
     rejectCredit: (id: string, adminId: string, adminName: string, notes?: string) => Promise<void>;
     addPayment: (payment: Payment, user?: { id: string; name: string }) => Promise<void>;
@@ -359,6 +363,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const [notifications, setNotifications] = useState<Notification[]>([]);
     const [simulations, setSimulations] = useState<Simulation[]>([]);
     const [accountingEntries, setAccountingEntries] = useState<AccountingEntry[]>([]);
+    const [removalVersion, setRemovalVersion] = useState(0);
     const [logs, setLogs] = useState<AuditLog[]>([]);
     const [messageTemplates, setMessageTemplates] = useState<MessageTemplate[]>([]);
     const [userLimits, setUserLimits] = useState<UserLimit[]>([]);
@@ -570,7 +575,10 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const filteredSuppliers = React.useMemo(() => filterByUser(suppliers), [suppliers, filterByUser]);
     const filteredSimulations = React.useMemo(() => filterByUser(simulations), [simulations, filterByUser]);
     const filteredLogs = React.useMemo(() => filterByUser(logs), [logs, filterByUser]);
-    const filteredAccountingEntries = React.useMemo(() => filterByUser(accountingEntries), [accountingEntries, filterByUser]);
+    // Lançamentos de clientes ou contratos eliminados com «Contabilidade» marcada (ou apagados definitivamente) não aparecem.
+    const filteredAccountingEntries = React.useMemo(() => filterByUser(accountingEntries).filter(entry => !isRemovedFromAccounting(entry)),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [accountingEntries, filterByUser, removalVersion]);
     const filteredNotifications = React.useMemo(() => {
         if (!notifications) return [];
         return notifications.filter(n => {
@@ -712,6 +720,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 console.error(`[ContextoDados] Falha ao carregar ${label}:`, error);
                 return [] as unknown as T;
             });
+            // Numeração dos contratos e clientes/créditos retirados da contabilidade (antes dos dados que dependem disto).
+            await loadDataRemovalState().catch(error => console.error('[ContextoDados] Falha ao carregar a numeração dos contratos:', error));
+            setRemovalVersion(version => version + 1);
             Promise.all([
                 settle('gateways de pagamento', db.all<PaymentGateway>('SELECT * FROM payment_gateways ORDER BY createdAt DESC')),
                 settle('referências de pagamento', db.all<PaymentReference>('SELECT * FROM payment_references ORDER BY createdAt DESC')),
@@ -1385,28 +1396,34 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         await addLog('delete', 'client', `Removeu documento do cliente: ${client.name}`, user?.id, user?.name, client, { ...client, documents: updatedDocuments }, { documentId: docId });
     };
 
-    const deleteClient = async (id: string, user?: { id: string; name: string }) => {
+    const deleteClient = async (id: string, user?: { id: string; name: string }, options: DataRemovalOptions = {}) => {
         const client = clients.find(c => c.id === id);
         if (!user) {
             toast({ title: 'Erro de Permissão', description: 'Utilizador não identificado', variant: 'destructive' });
             return;
         }
+        const withCredits = options.withCredits !== false || options.purge === true;
 
-        await ServicoCliente.delete(id, user.id);
+        await ServicoCliente.delete(id, user.id, withCredits);
         const deletedClient = { ...client!, deletedAt: new Date(), deletedBy: user.id } as Client;
         setClients(prev => prev.filter(c => c.id !== id));
         setDeletedClients(prev => [deletedClient, ...prev]);
         // Os créditos do cliente foram com ele para a lixeira; os pagamentos desses créditos deixam de contar.
-        const clientCredits = credits.filter(c => c.clientId === id);
+        const clientCredits = withCredits ? credits.filter(c => c.clientId === id) : [];
+        if (options.accounting) await hideFromAccounting({ clients: [id], credits: clientCredits.map(c => c.id) }, user.id);
+        if (options.purge) await ServicoCliente.hardDelete(id, user.id);
         if (clientCredits.length) {
             const creditIds = new Set(clientCredits.map(c => c.id));
             setCredits(prev => prev.filter(c => c.clientId !== id));
+            setContracts(prev => prev.filter(contract => !creditIds.has(contract.id) && contract.clientId !== id));
             setDeletedCredits(prev => [...clientCredits.map(c => ({ ...c, deletedAt: new Date(), deletedBy: user.id }) as Credit), ...prev]);
             setPayments(prev => prev.filter(p => !creditIds.has(p.creditId)));
         }
 
+        if (options.accounting || options.purge) void refreshData();
         if (client) {
-            await addLog('delete', 'client', `Enviou cliente para a lixeira: ${client.name}`, user.id, user.name);
+            const where = [withCredits ? 'créditos, contratos e pagamentos' : '', options.accounting ? 'contabilidade' : ''].filter(Boolean).join(', ');
+            await addLog('delete', 'client', `${options.purge ? 'Apagou definitivamente' : 'Enviou para a lixeira'} o cliente ${client.name}${where ? ` (com ${where})` : ''}`, user.id, user.name);
             await addNotification({
                 id: crypto.randomUUID(),
                 title: 'Cliente na Lixeira',
@@ -1438,6 +1455,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         await ServicoCliente.hardDelete(id, user?.id || authUser?.id || 'sistema');
         setDeletedClients(prev => prev.filter(c => c.id !== id));
         setDeletedCredits(prev => prev.filter(c => c.clientId !== id));
+        // Apagado definitivamente: os lançamentos dele saem da contabilidade (recarrega para os relatórios).
+        void refreshData();
         if (client) {
             await addLog('delete', 'client', `Apagou permanentemente o cliente: ${client.name}`, user?.id, user?.name);
         }
@@ -1651,13 +1670,17 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         performAutoSync();
     };
 
-    const deleteCredit = async (id: string, user?: { id: string; name: string }, justification?: string) => {
+    const deleteCredit = async (id: string, user?: { id: string; name: string }, justification?: string, options: DataRemovalOptions = {}) => {
         const credit = credits.find(c => c.id === id);
 
         const previousState = credit ? JSON.parse(JSON.stringify(credit)) : null;
 
         if (user) {
             await ServicoFinanceiro.deleteCredit(id, user.id);
+            if (options.accounting) await hideFromAccounting({ credits: [id] }, user.id);
+            if (options.purge) await ServicoFinanceiro.hardDeleteCredit(id, user.id);
+            setContracts(prev => prev.filter(contract => contract.id !== id));
+            if (options.accounting || options.purge) void refreshData();
             const deletedCredit = { ...credit!, deletedAt: new Date(), deletedBy: user.id } as Credit;
             const nextCredits = credits.filter(c => c.id !== id);
             setCredits(prev => prev.filter(c => c.id !== id));
@@ -1670,7 +1693,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             await addLog(
                 'delete',
                 'credit',
-                `Enviou crédito para a lixeira: ${id} ${justification ? `(${justification})` : ''}`,
+                `${options.purge ? 'Apagou definitivamente' : 'Enviou para a lixeira'} o crédito/contrato ${id}${options.accounting ? ' (com contabilidade)' : ''} ${justification ? `(${justification})` : ''}`,
                 user.id,
                 user.name,
                 previousState,
@@ -1711,6 +1734,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const credit = deletedCredits.find(c => c.id === id);
         await ServicoFinanceiro.hardDeleteCredit(id, user?.id || authUser?.id || 'sistema');
         setDeletedCredits(prev => prev.filter(c => c.id !== id));
+        void refreshData();
         if (credit) {
             await addLog('delete', 'credit', `Apagou permanentemente o crédito: ${id}`, user?.id, user?.name);
         }

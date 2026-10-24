@@ -4,6 +4,7 @@ import autoTable from '@/bibliotecas/pdf-tabela';
 import { CompanySettings } from '@/tipos/base-dados';
 import { Client, Credit } from '@/tipos/credito';
 import { formatCurrency, formatDate, formatDateTime } from './formatters';
+import { contractNumberOf } from './pagamentos-analise';
 import { AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
 import { ANGOLAN_BANKS, getBankLogoUrl, identifyBankFromIBAN } from '@/bibliotecas/ibanHelper';
 import { PROMESSA_CLAUSES_TEMPLATE, PROMESSA_CONTRACT_TITLE, companyShortName, promessaPlaceholderValues } from '@/bibliotecas/contrato-promessa';
@@ -910,7 +911,7 @@ export const fillContractPlaceholders = (text: string, contract: any, settings?:
         '{{DATA_FIM}}': contract?.endDate || contract?.dueDate ? formatDate(contract.endDate || contract.dueDate) : '—',
         '{{EMPRESA}}': config.name || '',
         '{{NIF_EMPRESA}}': config.nif || '',
-        '{{REF}}': contract?.id || '',
+        '{{REF}}': contract?.id ? contractNumberOf(contract.id) : '',
         ...promessaPlaceholderValues(contract, config),
     };
     return String(text || '').replace(/\{\{[A-Z_]+\}\}/g, token => values[token] ?? token);
@@ -962,7 +963,7 @@ export const generateContractPDF = (
         doc.setFontSize(9);
         doc.setFont("helvetica", "normal");
         doc.setTextColor(150, 150, 150);
-        doc.text(`REF: ${contract.id}`, 105, refY, { align: 'center' });
+        doc.text(`REF: ${contractNumberOf(contract.id)}`, 105, refY, { align: 'center' });
         doc.text(copyType || '', 105, refY + 5, { align: 'center' });
         return refY + 16;
     };
@@ -1078,7 +1079,7 @@ export const generateContractPDF = (
         const blob = doc.output('blob');
         return URL.createObjectURL(blob);
     }
-    doc.save(`Contrato-${contract.id}.pdf`);
+    doc.save(`Contrato-${contractNumberOf(contract.id).replace(/\//g, '-')}.pdf`);
 };
 
 /** Termos editados do contrato-promessa, guardados no campo `terms` do contrato na chave `promessa`. */
@@ -1151,7 +1152,7 @@ export const generatePromessaContractPDF = (
     doc.setFontSize(7); doc.setTextColor(muted[0], muted[1], muted[2]);
     doc.text('Nº DO CONTRATO', right - 3, y + 8.4, { align: 'right' });
     doc.setFont('courier', 'bold'); doc.setFontSize(8.5); doc.setTextColor(orange[0], orange[1], orange[2]);
-    doc.text(fitPdfText(doc, String(contract?.id || '—'), boxW - 6, 8.5), right - 3, y + 12.2, { align: 'right' });
+    doc.text(fitPdfText(doc, contract?.id ? contractNumberOf(contract.id) : '—', boxW - 6, 8.5), right - 3, y + 12.2, { align: 'right' });
     doc.setFont('courier', 'normal'); doc.setFontSize(7.5); doc.setTextColor(dark[0], dark[1], dark[2]);
     doc.text(`Data: ${values['{{DATA_CONTRATO}}']}`, right - 3, y + 15.6, { align: 'right' });
     y += 24;
@@ -1241,7 +1242,7 @@ export const generatePromessaContractPDF = (
         const blob = doc.output('blob');
         return URL.createObjectURL(blob);
     }
-    doc.save(`Contrato-Promessa-${contract?.id || 'doc'}.pdf`);
+    doc.save(`Contrato-Promessa-${contract?.id ? contractNumberOf(contract.id).replace(/\//g, '-') : 'doc'}.pdf`);
 };
 
 export const generateAuditLogPDF = (logs: any[], settings?: any, userInfo?: { name?: string, role?: string }) => {

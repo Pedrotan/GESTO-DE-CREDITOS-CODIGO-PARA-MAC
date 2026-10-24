@@ -252,7 +252,7 @@ const Lixeira = () => {
                                                         })}
                                                         onDelete={() => openAlert({
                                                             title: 'Eliminar Definitivamente',
-                                                            description: `Tem certeza que deseja apagar permanentemente o cliente ${client.name}? O cliente, os créditos e os pagamentos dele deixam de aparecer em todo o sistema, sem restauro. Os lançamentos contabilísticos ficam como histórico (são imutáveis por lei).`,
+                                                            description: `Tem certeza que deseja apagar permanentemente o cliente ${client.name}? O cliente, os créditos, os contratos, os pagamentos e os lançamentos contabilísticos dele deixam de aparecer em todo o sistema (incluindo a contabilidade e os relatórios), sem restauro.`,
                                                             type: 'error',
                                                             onConfirm: () => {
                                                                 void tentar(() => hardDeleteClient(client.id, user!));
@@ -292,7 +292,7 @@ const Lixeira = () => {
                                                         })}
                                                         onDelete={() => openAlert({
                                                             title: 'Eliminar Definitivamente',
-                                                            description: `Tem certeza que deseja apagar permanentemente este crédito? Ele e os pagamentos dele deixam de aparecer em todo o sistema, sem restauro. Os lançamentos contabilísticos ficam como histórico.`,
+                                                            description: `Tem certeza que deseja apagar permanentemente este crédito? Ele, o contrato, os pagamentos e os lançamentos contabilísticos dele deixam de aparecer em todo o sistema (incluindo a contabilidade e os relatórios), sem restauro.`,
                                                             type: 'error',
                                                             onConfirm: () => {
                                                                 void tentar(() => hardDeleteCredit(credit.id, user!));

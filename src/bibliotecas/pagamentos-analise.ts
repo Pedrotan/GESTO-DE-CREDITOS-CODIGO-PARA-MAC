@@ -45,12 +45,49 @@ export const receiptLabel = (payment: Pick<Payment, 'receiptYear' | 'receiptSeq'
 
 // ── Contratos ─────────────────────────────────────────────────────────────────────────
 /**
- * Número curto de cada contrato (CR-2026-0001): sequência por ano de criação, pela ordem de criação. Os
- * créditos apagados entram na contagem para os números nunca mudarem.
+ * Prefixo do número de contrato (ex.: «BV» em BV-CRT/2026/001). Sem prefixo escolhido nas definições, sai do
+ * nome da empresa: iniciais das duas primeiras palavras, ou, com uma só palavra, a primeira letra e a primeira
+ * consoante depois da primeira vogal (BRAVALDO → BV).
+ */
+export function deriveContractPrefix(companyName?: string | null): string {
+    const ignored = new Set(['DE', 'DA', 'DO', 'DAS', 'DOS', 'E', 'LDA', 'SA', 'SU', 'COMERCIO', 'SERVICOS', 'PRESTACAO', 'GRUPO']);
+    const words = String(companyName || '').normalize('NFD').replace(/\p{M}/gu, '').toUpperCase()
+        .split(/[^A-Z0-9]+/).filter(word => word && !ignored.has(word));
+    if (!words.length) return 'CT';
+    if (words.length >= 2 && words[1].length > 1) return words[0][0] + words[1][0];
+    const word = words[0];
+    const vowel = word.search(/[AEIOU]/);
+    const consonant = vowel >= 0 ? word.slice(vowel + 1).match(/[B-DF-HJ-NP-TV-Z]/) : null;
+    return word[0] + (consonant ? consonant[0] : (word[1] || 'T'));
+}
+
+export const normalizeContractPrefix = (value?: string | null) =>
+    String(value || '').normalize('NFD').replace(/\p{M}/gu, '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6);
+
+let numberingPrefix = '';
+let numberingCredits: Array<Pick<Credit, 'id' | 'createdAt' | 'startDate'>> = [];
+/**
+ * Prefixo e lista completa dos créditos (incluindo os apagados definitivamente) para a numeração. Carregados
+ * da base de dados pela aplicação; sem eles, a numeração usa só os créditos recebidos e o prefixo «CT».
+ */
+export function setContractNumbering(input: { prefix?: string; credits?: Array<Pick<Credit, 'id' | 'createdAt' | 'startDate'>> }) {
+    if (input.prefix !== undefined) numberingPrefix = normalizeContractPrefix(input.prefix);
+    if (input.credits) numberingCredits = input.credits;
+}
+
+export const formatContractNumber = (prefix: string, year: number, sequence: number) =>
+    `${prefix || 'CT'}-CRT/${year}/${String(sequence).padStart(3, '0')}`;
+
+/**
+ * Número de cada contrato (BV-CRT/2026/001): sequência por ano de criação, pela ordem de criação. Contam todos
+ * os créditos que já existiram (apagados e apagados definitivamente), para um número nunca se repetir nem mudar;
+ * só recomeça se a base de dados for zerada.
  */
 export function contractNumbers(credits: Array<Pick<Credit, 'id' | 'createdAt' | 'startDate'>>): Map<string, string> {
+    const all = new Map<string, Pick<Credit, 'id' | 'createdAt' | 'startDate'>>();
+    for (const credit of [...numberingCredits, ...credits]) if (credit?.id && !all.has(credit.id)) all.set(credit.id, credit);
     const byYear = new Map<number, Array<{ id: string; time: number }>>();
-    for (const credit of credits) {
+    for (const credit of all.values()) {
         const time = new Date(credit.createdAt || credit.startDate || 0).getTime() || 0;
         const year = Number(luandaDateKey(time || Date.now()).slice(0, 4));
         if (!byYear.has(year)) byYear.set(year, []);
@@ -59,10 +96,14 @@ export function contractNumbers(credits: Array<Pick<Credit, 'id' | 'createdAt' |
     const numbers = new Map<string, string>();
     for (const [year, list] of byYear) {
         list.sort((a, b) => a.time - b.time || a.id.localeCompare(b.id));
-        list.forEach((item, index) => numbers.set(item.id, `CR-${year}-${String(index + 1).padStart(4, '0')}`));
+        list.forEach((item, index) => numbers.set(item.id, formatContractNumber(numberingPrefix, year, index + 1)));
     }
     return numbers;
 }
+
+/** Número de um contrato (ou o identificador, se ainda não houver numeração para ele). */
+export const contractNumberOf = (id: string, credits: Array<Pick<Credit, 'id' | 'createdAt' | 'startDate'>> = []) =>
+    contractNumbers(credits).get(id) || id;
 
 // ── Linhas da tabela ─────────────────────────────────────────────────────────────────
 export type InstallmentImputation = { n: number; principalMinor: number; interestMinor: number; lateMinor: number; settled?: boolean };

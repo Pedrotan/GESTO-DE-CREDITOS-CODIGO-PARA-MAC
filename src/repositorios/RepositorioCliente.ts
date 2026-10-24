@@ -143,12 +143,18 @@ export class RepositorioCliente extends RepositorioBase {
         await this.execute(sql, params);
     }
 
-    /** Envia o cliente e todos os créditos dele para a lixeira (os pagamentos desses créditos deixam de aparecer). */
-    static async softDelete(id: string, userId: string, originalState?: string): Promise<void> {
+    /**
+     * Envia o cliente para a lixeira; com `withCredits` (padrão), também os créditos e contratos dele (os
+     * pagamentos desses créditos deixam de aparecer).
+     */
+    static async softDelete(id: string, userId: string, originalState?: string, withCredits = true): Promise<void> {
         const now = new Date().toISOString();
         await db.transaction([
             { sql: 'UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?', params: [now, userId, originalState, id] },
-            { sql: 'UPDATE credits SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL', params: [now, userId, id] },
+            ...(withCredits ? [
+                { sql: 'UPDATE credits SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL', params: [now, userId, id] },
+                { sql: 'UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL', params: [now, userId, id] },
+            ] : []),
         ]);
     }
 
@@ -157,19 +163,21 @@ export class RepositorioCliente extends RepositorioBase {
         const now = new Date().toISOString();
         await db.transaction([
             { sql: 'UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)', params: [now, id, id] },
+            { sql: 'UPDATE contracts SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)', params: [now, id, id] },
             { sql: 'UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?', params: [now, id] },
         ]);
     }
 
     /**
-     * «Apagar definitivamente»: o cliente e os créditos dele saem da lixeira e de todo o sistema, sem restauro. Os
-     * lançamentos contabilísticos e a auditoria são imutáveis (lei e cadeia de hashes) e ficam como histórico;
-     * apagar as linhas deixava a contabilidade com lançamentos órfãos e criava divergências em todos os computadores.
+     * «Apagar definitivamente»: o cliente, os créditos e os contratos dele saem da lixeira e de todo o sistema, sem
+     * restauro. Os lançamentos contabilísticos deixam de aparecer na contabilidade (ver eliminacao-dados), mas as
+     * linhas ficam guardadas: são imutáveis (lei e cadeia de hashes) e apagá-las criava divergências nos computadores.
      */
     static async purge(id: string, userId: string): Promise<void> {
         const marker = `purged:${userId}`;
         await db.transaction([
             { sql: 'UPDATE credits SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE clientId = ?', params: [new Date().toISOString(), marker, id] },
+            { sql: 'UPDATE contracts SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE clientId = ?', params: [new Date().toISOString(), marker, id] },
             { sql: 'UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL', params: [marker, id], expectChanges: 1 },
         ]);
     }

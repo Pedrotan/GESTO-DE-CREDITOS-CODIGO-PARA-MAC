@@ -459,7 +459,7 @@ function injectValidations(bytes: Uint8Array, sheetPath: string, validations: st
 export function buildImportTemplate(examples: Array<{ contract: string }>) {
     const head = ['Contrato', 'Data-valor (AAAA-MM-DD)', 'Valor (Kz)', 'Método', 'Referência'];
     const sample = examples.slice(0, 3).map((item, index) => [item.contract, '', index === 0 ? 25000 : '', index === 0 ? 'Numerário' : '', '']);
-    const data = XLSX.utils.aoa_to_sheet([head, ...(sample.length ? sample : [['CR-2026-0001', '', 25000, 'Numerário', '']])]);
+    const data = XLSX.utils.aoa_to_sheet([head, ...(sample.length ? sample : [['BV-CRT/2026/001', '', 25000, 'Numerário', '']])]);
     data['!cols'] = [{ wch: 18 }, { wch: 24 }, { wch: 16 }, { wch: 26 }, { wch: 28 }];
     for (let r = 1; r <= 500; r++) {
         const ref = XLSX.utils.encode_cell({ r, c: 2 });
@@ -469,7 +469,7 @@ export function buildImportTemplate(examples: Array<{ contract: string }>) {
         ['Instruções de importação de pagamentos'],
         [],
         ['1. Preencha uma linha por pagamento na folha «Pagamentos». Não altere os títulos das colunas.'],
-        ['2. Contrato: número curto (ex.: CR-2026-0001) tal como aparece na página de Pagamentos.'],
+        ['2. Contrato: número curto (ex.: BV-CRT/2026/001) tal como aparece na página de Pagamentos.'],
         ['3. Data-valor: dia em que o cliente pagou, no formato AAAA-MM-DD. Não pode ser futura nem cair num mês fechado.'],
         ['4. Valor (Kz): número maior que zero, sem exceder a dívida do contrato.'],
         ['5. Método: Numerário, Transferência, Depósito, Multicaixa, TPA ou Referência.'],
@@ -486,7 +486,7 @@ export function buildImportTemplate(examples: Array<{ contract: string }>) {
         '<dataValidation type="list" allowBlank="1" showErrorMessage="1" errorTitle="Método inválido" error="Escolha um método da lista." sqref="D2:D500"><formula1>"Numerário,Transferência,Depósito,Multicaixa,TPA,Referência"</formula1></dataValidation>',
         '<dataValidation type="decimal" operator="greaterThan" allowBlank="1" showErrorMessage="1" errorTitle="Valor inválido" error="O valor tem de ser maior que zero." sqref="C2:C500"><formula1>0</formula1></dataValidation>',
         '<dataValidation type="textLength" operator="between" allowBlank="1" showInputMessage="1" promptTitle="Data-valor" prompt="Formato AAAA-MM-DD, por exemplo 2026-10-04." sqref="B2:B500"><formula1>10</formula1><formula2>10</formula2></dataValidation>',
-        '<dataValidation type="textLength" operator="between" allowBlank="1" showErrorMessage="1" errorTitle="Contrato" error="Indique o número do contrato (ex.: CR-2026-0001)." sqref="A2:A500"><formula1>4</formula1><formula2>40</formula2></dataValidation>',
+        '<dataValidation type="textLength" operator="between" allowBlank="1" showErrorMessage="1" errorTitle="Contrato" error="Indique o número do contrato (ex.: BV-CRT/2026/001)." sqref="A2:A500"><formula1>4</formula1><formula2>40</formula2></dataValidation>',
     ].join('');
     try { return injectValidations(bytes, 'xl/worksheets/sheet1.xml', validations); } catch { return bytes; }
 }

@@ -68,7 +68,7 @@ export function FiltrosAuditoria({ open, filters, onChange, users, saved, onSave
                     </div>
                     <div className="space-y-1.5">
                         <Label className="text-xs font-semibold text-muted-foreground">Entidade (n.º do crédito, cliente, recibo)</Label>
-                        <Input className="h-9 bg-background" value={filters.entity} onChange={event => onChange({ entity: event.target.value })} placeholder="Ex.: CR-2026-0001 ou RC 2026/000001" />
+                        <Input className="h-9 bg-background" value={filters.entity} onChange={event => onChange({ entity: event.target.value })} placeholder="Ex.: BV-CRT/2026/001 ou RC 2026/000001" />
                     </div>
                     <div className="space-y-1.5 md:col-span-2">
                         <Label className="text-xs font-semibold text-muted-foreground">Guardar estes filtros com um nome</Label>

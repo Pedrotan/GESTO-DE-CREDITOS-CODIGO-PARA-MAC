@@ -2,6 +2,11 @@ import { useState, useRef, useMemo, useEffect, useCallback } from 'react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { hasFullAuthority } from '@/bibliotecas/conta-principal';
+import { contractNumbers } from '@/bibliotecas/pagamentos-analise';
+import { saveContractPrefix } from '@/bibliotecas/eliminacao-dados';
+import { ModalEliminarDados } from '@/componentes/modals/ModalEliminarDados';
+import type { DataRemovalOptions } from '@/contextos/ContextoDados';
 import { formatCurrency, formatDate } from '@/bibliotecas/formatters';
 import { Badge } from '@/componentes/ui/badge';
 import { Button } from '@/componentes/ui/button';
@@ -96,8 +101,40 @@ type EditorState = { open: boolean; title: string; clauses: string; dirty: boole
 const contractDate = (contract: any) => contract.startDate || contract.createdAt;
 
 export default function Contracts() {
-    const { contracts, companySettings, clients, credits, updateCompanySettings, addDocumentToClient, deleteDocumentFromClient, updateContract } = useData();
+    const { contracts, companySettings, clients, credits, deletedCredits, updateCompanySettings, addDocumentToClient, deleteDocumentFromClient, updateContract, deleteCredit, refreshData } = useData();
     const { user } = useAuth();
+    // Número do contrato (BV-CRT/2026/001): conta todos os créditos que já existiram, para nunca se repetir.
+    const [numberingVersion, setNumberingVersion] = useState(0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const numbers = useMemo(() => contractNumbers([...credits, ...(deletedCredits || [])]), [credits, deletedCredits, numberingVersion]);
+    const numberOf = (contract: any) => numbers.get(contract.id) || contract.id;
+    const prefixSample = (numbers.values().next().value as string | undefined)?.split('-CRT/')[0] || '';
+    const [prefixDraft, setPrefixDraft] = useState('');
+    const [contractToDelete, setContractToDelete] = useState<any>(null);
+    const canForceDelete = hasFullAuthority(user);
+    const savePrefix = async () => {
+        try {
+            const value = await saveContractPrefix(prefixDraft, user?.id);
+            if (!value) throw new Error('Indique um prefixo com letras ou números (ex.: BV).');
+            await refreshData();
+            setNumberingVersion(version => version + 1);
+            setPrefixDraft('');
+            setAlertConfig({ isOpen: true, title: 'Prefixo guardado', description: `Os contratos passam a ser numerados como ${value}-CRT/${new Date().getFullYear()}/001.`, type: 'success' });
+        } catch (error) {
+            setAlertConfig({ isOpen: true, title: 'Não foi possível guardar', description: error instanceof Error ? error.message : String(error), type: 'destructive' });
+        }
+    };
+    const confirmContractDelete = async (options: DataRemovalOptions) => {
+        if (!contractToDelete || !user) return;
+        try {
+            await deleteCredit(contractToDelete.id, { id: user.id, name: user.name }, 'Eliminação manual na página de Contratos', options);
+            setAlertConfig({ isOpen: true, title: 'Contrato eliminado', description: options.purge ? 'O contrato e os dados marcados foram apagados definitivamente.' : 'O contrato e os dados marcados foram para a lixeira.', type: 'success' });
+            setContractToDelete(null);
+        } catch (error) {
+            setAlertConfig({ isOpen: true, title: 'Não foi possível eliminar', description: error instanceof Error ? error.message : String(error), type: 'destructive' });
+            throw error;
+        }
+    };
     const [searchTerm, setSearchTerm] = useState('');
     const [period, setPeriod] = useState<PeriodSelection>(() => defaultPeriod(new Date(), 'month'));
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -186,10 +223,10 @@ export default function Contracts() {
             if (!matchesStatus(contract, statusFilter)) return false;
             if (!query) return true;
             const client = clientById.get(contract.clientId);
-            return [contract.clientName, contract.id, contract.title, client?.nif, client?.phone]
+            return [contract.clientName, contract.id, numbers.get(contract.id), contract.title, client?.nif, client?.phone]
                 .filter(Boolean).join(' ').toLowerCase().includes(query);
         });
-    }, [periodContracts, statusFilter, searchTerm, clientById, matchesStatus]);
+    }, [periodContracts, statusFilter, searchTerm, clientById, matchesStatus, numbers]);
 
     // Agrupar contratos (já filtrados) por cliente
     const groupedContracts = useMemo(() => {
@@ -490,6 +527,12 @@ export default function Contracts() {
                         <Plus className="h-4 w-4" />
                         Renovar
                     </DropdownMenuItem>
+                    {canForceDelete && (
+                        <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={() => setContractToDelete(contract)}>
+                            <Trash2 className="h-4 w-4" />
+                            Eliminar contrato
+                        </DropdownMenuItem>
+                    )}
                 </DropdownMenuContent>
             </DropdownMenu>
         </div>
@@ -631,7 +674,7 @@ export default function Contracts() {
                                         <TableRow key={contract.id}>
                                             <TableCell className="font-medium">
                                                 <div>{contract.title}</div>
-                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground">N.º {contract.id}</div>
+                                                <div className="text-[10px] uppercase tracking-wider text-muted-foreground" title={contract.id}>N.º {numberOf(contract)}</div>
                                             </TableCell>
                                             <TableCell className="text-xs">
                                                 {formatDate(contract.startDate)} - {formatDate(contract.endDate)}
@@ -883,7 +926,7 @@ export default function Contracts() {
                                                     <p className="font-semibold">{contract.clientName}</p>
                                                     <p className="text-[10px] text-muted-foreground">{clientById.get(contract.clientId)?.nif || '—'}</p>
                                                 </TableCell>
-                                                <TableCell className="font-mono text-xs" title={contract.id}>{contract.id}</TableCell>
+                                                <TableCell className="whitespace-nowrap font-mono text-xs font-bold" title={contract.id}>{numberOf(contract)}</TableCell>
                                                 <TableCell className="text-right font-semibold whitespace-nowrap">{formatCurrency(contract.value)}</TableCell>
                                                 <TableCell className="whitespace-nowrap text-xs">{formatDate(contract.startDate)} - {formatDate(contract.endDate)}</TableCell>
                                                 <TableCell>{statusBadge(contract)}</TableCell>
@@ -898,6 +941,23 @@ export default function Contracts() {
 
                 <TabsContent value="models">
                     <div className="space-y-4">
+                        <div className="bg-card p-6 rounded-xl border shadow-sm">
+                            <h3 className="font-bold">Numeração dos contratos</h3>
+                            <p className="mt-1 text-xs text-muted-foreground">
+                                Cada contrato recebe automaticamente o número seguinte do ano: <span className="font-mono font-bold">{prefixSample || 'BV'}-CRT/{new Date().getFullYear()}/001</span>, 002, 003…
+                                Os números nunca se repetem (contam também os contratos eliminados) e só recomeçam se a base de dados for zerada.
+                            </p>
+                            {canForceDelete && (
+                                <div className="mt-3 flex flex-wrap items-end gap-2">
+                                    <div>
+                                        <label className="text-xs font-bold" htmlFor="contract-prefix">Prefixo da empresa</label>
+                                        <Input id="contract-prefix" className="mt-1 h-9 w-36 font-mono uppercase" maxLength={6} placeholder={prefixSample || 'BV'}
+                                            value={prefixDraft} onChange={event => setPrefixDraft(event.target.value.toUpperCase())} />
+                                    </div>
+                                    <Button size="sm" disabled={!prefixDraft.trim()} onClick={() => void savePrefix()}>Guardar prefixo</Button>
+                                </div>
+                            )}
+                        </div>
                         <div className="bg-card p-6 rounded-xl border shadow-sm">
                             <div className="mb-4">
                                 <h3 className="text-lg font-semibold">Cláusulas personalizadas do contrato</h3>
@@ -1125,6 +1185,14 @@ export default function Contracts() {
                 </DialogContent>
             </Dialog>
 
+            <ModalEliminarDados
+                open={Boolean(contractToDelete)}
+                onOpenChange={open => { if (!open) setContractToDelete(null); }}
+                kind="contract"
+                name={contractToDelete ? `${numberOf(contractToDelete)} · ${contractToDelete.clientName || ''}` : ''}
+                activeCredits={contractToDelete && credits.some(c => c.id === contractToDelete.id && ['active', 'overdue', 'renegotiated'].includes(c.status)) ? 1 : 0}
+                onConfirm={confirmContractDelete}
+            />
             <AlertModal
                 isOpen={alertConfig.isOpen}
                 onClose={() => setAlertConfig({ ...alertConfig, isOpen: false })}

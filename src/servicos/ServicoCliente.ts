@@ -37,11 +37,11 @@ export class ServicoCliente {
         await RepositorioCliente.update(id, updates);
     }
 
-    static async delete(id: string, userId: string): Promise<void> {
+    static async delete(id: string, userId: string, withCredits = true): Promise<void> {
         const clients = await this.getAll();
         const client = clients.find(c => c.id === id);
         const originalState = client ? JSON.stringify(client) : undefined;
-        await RepositorioCliente.softDelete(id, userId, originalState);
+        await RepositorioCliente.softDelete(id, userId, originalState, withCredits);
     }
 
     static async restore(id: string): Promise<void> {
