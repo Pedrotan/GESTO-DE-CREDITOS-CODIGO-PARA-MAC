@@ -7,6 +7,33 @@ const pageDecorators = new WeakMap<jsPDF, (doc: jsPDF) => void>();
 const decoratedPages = new WeakMap<jsPDF, Set<number>>();
 const currentPage = (doc: jsPDF) => doc.getCurrentPageInfo().pageNumber;
 
+const brandTextLocked = new WeakSet<jsPDF>();
+const rgbKey = (args: any[]): string | null => {
+    if (args.length >= 3) return args.slice(0, 3).map(Number).join(',');
+    const value = args[0];
+    if (Array.isArray(value)) return value.slice(0, 3).map(Number).join(',');
+    if (typeof value !== 'string') return null;
+    const hex = value.trim().replace(/^#/, '');
+    const full = hex.length === 3 ? hex.split('').map(c => c + c).join('') : hex;
+    return /^[0-9a-f]{6}$/i.test(full) ? [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16)).join(',') : null;
+};
+
+/**
+ * Letras dos documentos sempre a preto: as cores da marca escolhidas nas definições ficam só para as molduras,
+ * barras, ícones e fundos. Qualquer texto pedido numa dessas cores (cabeçalho, títulos, indicadores, tabelas)
+ * passa a preto; o texto branco sobre fundos de cor e as cores de estado (verde, vermelho) mantêm-se.
+ */
+export function lockBrandTextToBlack(doc: jsPDF, brandColors: Array<[number, number, number]>) {
+    if (brandTextLocked.has(doc)) return;
+    brandTextLocked.add(doc);
+    const brand = new Set(brandColors.map(color => color.join(',')));
+    const setTextColor = doc.setTextColor.bind(doc) as (...args: any[]) => jsPDF;
+    (doc as any).setTextColor = (...args: any[]) => {
+        const key = rgbKey(args);
+        return key && brand.has(key) ? setTextColor(0, 0, 0) : setTextColor(...args);
+    };
+}
+
 /** Regista como decorar (moldura, rodapé com contactos) as páginas novas deste documento. */
 export function setPdfPageDecorator(doc: jsPDF, decorate: (doc: jsPDF) => void) {
     pageDecorators.set(doc, decorate);

@@ -1,4 +1,4 @@
-import { markPdfPageDecorated, setPdfPageDecorator, setPdfWatermark, getMasterPdfWatermark } from './pdf-documento';
+import { lockBrandTextToBlack, markPdfPageDecorated, setPdfPageDecorator, setPdfWatermark, getMasterPdfWatermark } from './pdf-documento';
 import jsPDF from '@/bibliotecas/pdf-documento';
 import autoTable from '@/bibliotecas/pdf-tabela';
 import { CompanySettings } from '@/tipos/base-dados';
@@ -208,6 +208,7 @@ export const drawContactFooter = (doc: jsPDF, config: CompanySettings, signer?: 
     const isLandscape = pageWidth > pageHeight;
     const primary = resolveBrandPrimary(config.primaryColor);
     const dark = resolveBrandDark(config.secondaryColor);
+    lockBrandTextToBlack(doc, [resolveBrandPrimary(config.primaryColor), resolveBrandDark(config.secondaryColor), BRAND_ORANGE, BRAND_CHARCOAL]);
     // Com o utilizador por baixo da localização, os contactos sobem 2 mm para as duas linhas novas caberem.
     const footInfoY = pageHeight - (signer ? 19.6 : 17.5);
     const col1X = isLandscape ? 32 : 26;
@@ -312,6 +313,7 @@ export const applyBranding = (doc: jsPDF, config: CompanySettings, userName?: st
     const primary = resolveBrandPrimary(config.primaryColor); // #F37021
     const dark = resolveBrandDark(config.secondaryColor);   // #2B2D2F
     const lightSilver = BRAND_SILVER;   // #E5E7EB
+    lockBrandTextToBlack(doc, [resolveBrandPrimary(config.primaryColor), resolveBrandDark(config.secondaryColor), BRAND_ORANGE, BRAND_CHARCOAL]);
 
     setPdfWatermark(doc, config.watermarkLogo || getMasterPdfWatermark());
 

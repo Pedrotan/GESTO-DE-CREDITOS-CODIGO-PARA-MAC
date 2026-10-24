@@ -73,12 +73,13 @@ export function ModalTermosSistema() {
     return (
         <Dialog open={open} onOpenChange={() => undefined}>
             <DialogContent
-                className="flex max-h-[92vh] flex-col gap-0 overflow-hidden border-none bg-white p-0 shadow-2xl sm:max-w-[640px] [&>button]:hidden"
+                className="flex max-h-[92vh] w-[calc(100vw-2rem)] max-w-5xl flex-col gap-0 overflow-hidden border-none bg-white p-0 shadow-2xl [&>button]:hidden"
                 onPointerDownOutside={event => event.preventDefault()}
                 onInteractOutside={event => event.preventDefault()}
                 onEscapeKeyDown={event => event.preventDefault()}
             >
-                <DialogHeader className="space-y-1 bg-gradient-to-br from-blue-700 to-indigo-700 px-6 py-5 text-left text-white">
+                {/* m-0: o cabeçalho base compensa o p-6 do modal com margens negativas; aqui o modal não tem padding. */}
+                <DialogHeader className="m-0 space-y-1 bg-gradient-to-br from-blue-700 to-indigo-700 px-8 py-6 text-left text-white">
                     <DialogTitle className="flex items-center gap-2 text-xl font-black text-white">
                         <ShieldCheck className="h-5 w-5" /> Termos de Utilização e Política de Privacidade
                     </DialogTitle>
@@ -87,7 +88,7 @@ export function ModalTermosSistema() {
                     </DialogDescription>
                 </DialogHeader>
 
-                <div className="flex gap-1 border-b border-slate-200 px-6 pt-3" role="tablist">
+                <div className="flex gap-1 border-b border-slate-200 px-8 pt-3" role="tablist">
                     {([['termos', 'Termos de Utilização'], ['privacidade', 'Política de Privacidade']] as const).map(([id, label]) => (
                         <button
                             key={id}
@@ -103,11 +104,11 @@ export function ModalTermosSistema() {
                     ))}
                 </div>
 
-                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5" role="tabpanel">
+                <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6" role="tabpanel">
                     <Sections sections={tab === 'termos' ? SYSTEM_TERMS_OF_USE : SYSTEM_PRIVACY_POLICY} />
                 </div>
 
-                <div className="space-y-4 border-t border-slate-200 bg-slate-50 px-6 py-4">
+                <div className="space-y-4 border-t border-slate-200 bg-slate-50 px-8 py-4">
                     <label className="flex cursor-pointer items-start gap-3 text-[13px] font-semibold text-slate-700">
                         <Checkbox checked={agreed} onCheckedChange={value => setAgreed(value === true)} className="mt-0.5" />
                         Li e aceito os Termos de Utilização e a Política de Privacidade do sistema.
