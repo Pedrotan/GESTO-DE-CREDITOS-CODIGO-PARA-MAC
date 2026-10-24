@@ -1,3 +1,4 @@
+import { REBUILD_REPLICA_FLAG } from '@/bibliotecas/sync-operacoes';
 import { SIMULATIONS_FLAT_MIGRATION } from '@/bibliotecas/migracao-simulacoes';
 import { auditSqlHash } from '@/bibliotecas/cadeia-auditoria';
 import initSqlJs, { Database } from 'sql.js';
@@ -13,6 +14,13 @@ const IS_DEV = typeof window !== 'undefined' && (window.location.hostname === 'l
 const IDB_NAME = IS_DEV ? 'TangoGestaoCreditosERP_DevDB' : 'TangoGestaoCreditosERPDB';
 const IDB_STORE = 'sqlite_store';
 const IDB_KEY = 'main_db';
+
+const deleteIdb = (name: string) => new Promise<void>(resolve => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = () => resolve();
+    request.onerror = () => resolve();
+    request.onblocked = () => resolve();
+});
 
 export type SqlTransactionStatement = {
     sql: string;
@@ -98,6 +106,11 @@ const initDB = async (): Promise<Database> => {
         }
         // 2. Verificar IndexedDB
         else {
+            if (localStorage.getItem(REBUILD_REPLICA_FLAG)) {
+                localStorage.removeItem(REBUILD_REPLICA_FLAG);
+                await deleteIdb(IDB_NAME);
+                await deleteIdb('TangoCloudSyncQueue');
+            }
             const stored = await loadFromIDB();
             if (stored) {
                 persisted = stored;

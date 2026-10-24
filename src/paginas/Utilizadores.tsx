@@ -27,7 +27,7 @@ import { Badge } from '@/componentes/ui/badge';
 import { Checkbox } from '@/componentes/ui/checkbox';
 import { Switch } from '@/componentes/ui/switch';
 import {
-    Trash2, UserPlus, ShieldAlert, KeyRound, Lock, Download, Upload,
+    Trash2, UserPlus, ShieldAlert, KeyRound, Lock, LockOpen, Download, Upload,
     FileText, Bell, Eye, EyeOff, ShieldCheck, ShieldX, Users as UsersIcon,
     Search, Sliders, ChevronDown, ChevronRight, AlertTriangle, Clock,
     Building2, Shield, CheckCircle2, XCircle, ArrowRight, RefreshCw, Calendar
@@ -45,7 +45,7 @@ import { validateJustification } from '@/bibliotecas/justificacao';
 import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { formatAuditTimestamp, toAuditEvent, type AuditEvent } from '@/bibliotecas/auditoria-analise';
 import { generateUsersPermissionsMatrixPDF } from '@/bibliotecas/matriz-permissoes-pdf';
-import { isPrimaryOwner } from '@/bibliotecas/conta-principal';
+import { hasFullAuthority, isPrimaryOwner } from '@/bibliotecas/conta-principal';
 
 interface PasswordResetRequest {
     id: string;
@@ -59,7 +59,7 @@ type TabEditor = 'matriz' | 'efetivas' | 'alcadas' | 'dados' | 'seguranca' | 'te
 type FiltroCard = 'todos' | 'ativos' | 'pendentes' | 'bloqueados' | 'sem_2fa' | 'temporarias';
 
 export default function Utilizadores() {
-    const { users, addUser, deleteUser, user: currentUser, getResetRequests, handleResetRequest, updateUser, reloadUsers } = useAuth();
+    const { users, addUser, deleteUser, user: currentUser, getResetRequests, handleResetRequest, updateUser, unblockUser, reloadUsers } = useAuth();
     const { addLog, notifications, companySettings } = useData();
     const navigate = useNavigate();
 
@@ -951,6 +951,26 @@ export default function Utilizadores() {
                                                     >
                                                         <KeyRound className="h-4 w-4" />
                                                     </Button>}
+
+                                                    {/* Desbloquear depois de palavras-passe erradas: qualquer Super Administrador, também a outro. */}
+                                                    {u.status === 'blocked' && u.id !== currentUser?.id && isSuperAdmin && hasFullAuthority(currentUser) && (
+                                                        <Button
+                                                            variant="outline"
+                                                            size="sm"
+                                                            className="h-8 gap-1.5 border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-950/30"
+                                                            title="Desbloquear o acesso (bloqueado por palavra-passe errada)"
+                                                            onClick={async () => {
+                                                                try {
+                                                                    await unblockUser(u.id);
+                                                                    toast({ title: 'Utilizador desbloqueado', description: `${u.name} já pode voltar a entrar.` });
+                                                                } catch (error) {
+                                                                    toast({ variant: 'destructive', title: 'Não foi possível desbloquear', description: error instanceof Error ? error.message : String(error) });
+                                                                }
+                                                            }}
+                                                        >
+                                                            <LockOpen className="h-4 w-4" /> Desbloquear
+                                                        </Button>
+                                                    )}
 
                                                     {/* Bloquear / Desbloquear (a conta principal nunca) */}
                                                     {u.id !== currentUser?.id && !isSuperAdmin && (

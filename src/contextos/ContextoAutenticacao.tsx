@@ -6,6 +6,7 @@ import { usersListSqlFromColumns } from '@/bibliotecas/sql-utilizadores';
 import bcrypt from 'bcryptjs';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
+import { hasFullAuthority } from '@/bibliotecas/conta-principal';
 
 const DEFAULT_PERMISSIONS: Record<Role, string[]> = {
     super_admin: AVAILABLE_PERMISSIONS.map(p => p.id),
@@ -44,6 +45,7 @@ interface ContextoAutenticacaoType {
     logout: () => Promise<void>;
     addUser: (user: Omit<User, 'id' | 'lastLogin'> & { password: string }) => Promise<void>;
     updateUser: (id: string, updates: Partial<User> & { password?: string }, isInitialCreation?: boolean) => Promise<void>;
+    unblockUser: (id: string) => Promise<void>;
     /** Termina à força a sessão de outro utilizador. */
     forceLogoutUser: (id: string) => Promise<void>;
     deleteUser: (id: string) => Promise<void>;
@@ -960,6 +962,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }));
     };
 
+    /** Desbloqueia uma conta bloqueada por palavras-passe erradas (qualquer Super Administrador, também a outro). */
+    const unblockUser = async (id: string) => {
+        if (!user || !hasFullAuthority(user)) throw new Error('Só um Super Administrador pode desbloquear utilizadores.');
+        if (user.id === id) throw new Error('Não pode desbloquear a sua própria conta.');
+        const target = users.find(u => u.id === id);
+        await db.run("UPDATE users SET status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?", [id]);
+        setUsers(prev => prev.map(u => u.id === id ? { ...u, status: 'active', failedAttempts: 0 } as User : u));
+        await ServicoAuditoria.addLog('update', 'user', `Desbloqueou a conta de ${target?.name || id} (palavra-passe errada várias vezes)`,
+            user.id, user.name, { status: target?.status }, { status: 'active' }, { reason: 'Desbloqueio de conta' });
+    };
+
     const deleteUser = async (id: string) => {
         if (!user || user.role !== 'super_admin') {
             throw new Error("Apenas o Super Administrador pode eliminar utilizadores.");
@@ -1345,6 +1358,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 logout,
                 addUser,
                 updateUser,
+                unblockUser,
                 forceLogoutUser,
                 deleteUser,
                 rescueSuperAdmin,

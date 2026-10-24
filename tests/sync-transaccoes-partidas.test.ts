@@ -93,3 +93,22 @@ test('a activação falha (versão diferente): nada da transacção fica gravado
     const rows = database.prepare('SELECT id, operation FROM sync_conflicts').all() as Array<{ id: string; operation: string }>;
     assert.equal(reprocessableGroups(rows, SQL).length, 1, 'a transacção inteira fica disponível para reprocessar');
 });
+
+test('comando desconhecido numa versão antiga: depois de actualizar, a alteração é reaplicada', async () => {
+    const { database, deps } = base();
+    const update = op({ statementId: 'upd-credit', params: ['c1', 0], expectChanges: 1 });
+    // Versão antiga: não conhecia o comando, a alteração ficou retida.
+    const antiga = await applyRemoteGroups([{ operations: [update] }], { ...deps, sqlById: new Map() });
+    assert.equal(antiga.conflicts, 1);
+    const rows = database.prepare('SELECT id, operation FROM sync_conflicts').all() as Array<{ id: string; operation: string }>;
+    assert.equal(reprocessableGroups(rows, new Map()).length, 0, 'ainda sem o comando: continua retida');
+    // Versão nova: já conhece o comando e aplica-o (antes só as inserções eram reaplicadas).
+    const grupos = reprocessableGroups(rows, SQL);
+    assert.equal(grupos.length, 1);
+    assert.equal((await applyRemoteGroups(grupos, deps)).applied, 1);
+    assert.equal(estado(database).credito, 'active');
+    // Uma alteração que falhou por outro motivo (ex.: versão diferente) não é reaplicada às cegas.
+    const outra = conflictStatements([op({ statementId: 'upd-credit', params: ['c1', 5] })], 'Conflito de concorrência', SQL)
+        .map(s => ({ id: String(s.params![0]), operation: String(s.params![3]) }));
+    assert.equal(reprocessableGroups(outra, SQL).length, 0);
+});

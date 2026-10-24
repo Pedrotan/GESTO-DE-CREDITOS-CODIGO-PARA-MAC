@@ -26,6 +26,18 @@ test('a conta principal não pode ser eliminada, alterada nem perder permissões
     assert.ok(block.error);
 });
 
+test('um Super Administrador desbloqueia outro (só reactivar, nada mais)', () => {
+    const sql = "UPDATE users SET status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?";
+    const superActor = { id: 'super2', isOwner: 0, role: 'super_admin', permissions: '[]' };
+    const ok = checkUserMutation({ kind: 'update', sql, params: ['dono'], actor: superActor, target: ownerRow });
+    assert.equal(ok.error, null);
+    assert.equal(ok.changesPrivileges, true);
+    // Um gestor não desbloqueia a conta principal; e o mesmo canal não serve para bloquear nem mudar outra coisa.
+    assert.ok(checkUserMutation({ kind: 'update', sql, params: ['dono'], actor: { id: 'g', isOwner: 0, role: 'manager', permissions: '[]' }, target: ownerRow }).error);
+    assert.ok(checkUserMutation({ kind: 'update', sql: 'UPDATE users SET status = ? WHERE id = ?', params: ['blocked', 'dono'], actor: superActor, target: ownerRow }).error);
+    assert.ok(checkUserMutation({ kind: 'update', sql: "UPDATE users SET status = 'active', name = ? WHERE id = ?", params: ['x', 'dono'], actor: superActor, target: ownerRow }).error);
+});
+
 test('a conta principal altera-se a si própria, mas não se despromove nem se bloqueia', () => {
     const presence = "UPDATE users SET lastSeen = ?, status = 'active', ip = COALESCE(NULLIF(ip, ''), ?) WHERE id = ?";
     assert.equal(checkUserMutation({ kind: 'update', sql: presence, params: ['agora', 'ip', 'dono'], actor: owner, target: ownerRow }).error, null);

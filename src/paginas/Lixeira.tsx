@@ -1,3 +1,4 @@
+import { toast } from '@/ganchos/usar-toast';
 import React, { useState } from 'react';
 import { useData } from '@/contextos/ContextoDados';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
@@ -52,6 +53,11 @@ const Lixeira = () => {
         companySettings
     } = useData();
     const { user } = useAuth();
+    // Mostra o erro em vez de falhar em silêncio (antes o item ficava «pendente de purga» sem explicação).
+    const tentar = async (accao: () => Promise<unknown>) => {
+        try { await accao(); }
+        catch (error) { toast({ variant: 'destructive', title: 'Não foi possível concluir', description: error instanceof Error ? error.message : String(error) }); }
+    };
     const [searchTerm, setSearchTerm] = useState('');
     const [activeTab, setActiveTab] = useState('clients');
     const [sortBy, setSortBy] = useState<'date' | 'name'>('date');
@@ -240,16 +246,16 @@ const Lixeira = () => {
                                                             description: `Deseja restaurar o cadastro do cliente ${client.name}? Ele voltará a estar ativo no sistema.`,
                                                             type: 'info',
                                                             onConfirm: () => {
-                                                                restoreClient(client.id, user!);
+                                                                void tentar(() => restoreClient(client.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
                                                         onDelete={() => openAlert({
                                                             title: 'Eliminar Definitivamente',
-                                                            description: `Tem certeza que deseja apagar permanentemente o cliente ${client.name}? Esta ação é irreversível e todos os dados associados serão perdidos.`,
+                                                            description: `Tem certeza que deseja apagar permanentemente o cliente ${client.name}? O cliente, os créditos e os pagamentos dele deixam de aparecer em todo o sistema, sem restauro. Os lançamentos contabilísticos ficam como histórico (são imutáveis por lei).`,
                                                             type: 'error',
                                                             onConfirm: () => {
-                                                                hardDeleteClient(client.id, user!);
+                                                                void tentar(() => hardDeleteClient(client.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
@@ -280,16 +286,16 @@ const Lixeira = () => {
                                                             description: `Deseja restaurar este crédito para o status ativo?`,
                                                             type: 'info',
                                                             onConfirm: () => {
-                                                                restoreCredit(credit.id, user!);
+                                                                void tentar(() => restoreCredit(credit.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
                                                         onDelete={() => openAlert({
                                                             title: 'Eliminar Definitivamente',
-                                                            description: `Tem certeza que deseja apagar permanentemente este crédito? Esta ação é irreversível.`,
+                                                            description: `Tem certeza que deseja apagar permanentemente este crédito? Ele e os pagamentos dele deixam de aparecer em todo o sistema, sem restauro. Os lançamentos contabilísticos ficam como histórico.`,
                                                             type: 'error',
                                                             onConfirm: () => {
-                                                                hardDeleteCredit(credit.id, user!);
+                                                                void tentar(() => hardDeleteCredit(credit.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
@@ -320,7 +326,7 @@ const Lixeira = () => {
                                                             description: `Deseja restaurar este registo de pagamento?`,
                                                             type: 'info',
                                                             onConfirm: () => {
-                                                                restorePayment(payment.id, user!);
+                                                                void tentar(() => restorePayment(payment.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
@@ -329,7 +335,7 @@ const Lixeira = () => {
                                                             description: `Tem certeza que deseja apagar permanentemente este pagamento? Esta ação é irreversível.`,
                                                             type: 'error',
                                                             onConfirm: () => {
-                                                                hardDeletePayment(payment.id, user!);
+                                                                void tentar(() => hardDeletePayment(payment.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
@@ -360,7 +366,7 @@ const Lixeira = () => {
                                                             description: `Deseja restaurar este processo legal?`,
                                                             type: 'info',
                                                             onConfirm: () => {
-                                                                restoreLegalCase(legalCase.id, user!);
+                                                                void tentar(() => restoreLegalCase(legalCase.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
@@ -369,7 +375,7 @@ const Lixeira = () => {
                                                             description: `Tem certeza que deseja apagar permanentemente este processo?`,
                                                             type: 'error',
                                                             onConfirm: () => {
-                                                                hardDeleteLegalCase(legalCase.id, user!);
+                                                                void tentar(() => hardDeleteLegalCase(legalCase.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
@@ -400,7 +406,7 @@ const Lixeira = () => {
                                                             description: `Deseja restaurar esta garantia?`,
                                                             type: 'info',
                                                             onConfirm: () => {
-                                                                restoreWarranty(warranty.id, user!);
+                                                                void tentar(() => restoreWarranty(warranty.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}
@@ -409,7 +415,7 @@ const Lixeira = () => {
                                                             description: `Tem certeza que deseja apagar permanentemente esta garantia?`,
                                                             type: 'error',
                                                             onConfirm: () => {
-                                                                hardDeleteWarranty(warranty.id, user!);
+                                                                void tentar(() => hardDeleteWarranty(warranty.id, user!));
                                                                 closeAlert();
                                                             }
                                                         })}

@@ -3066,7 +3066,7 @@ app.whenReady().then(async () => {
         if (kind !== 'insert' && !byId) throw new Error("Alterações a utilizadores têm de indicar o utilizador (WHERE id = ?).");
         const target: any = kind === 'insert' ? null : await runQuery("get", "SELECT id, role, isOwner FROM users WHERE id = ? LIMIT 1", [params[params.length - 1]]);
         // A conta da sessão é relida da base: a marca de conta principal nunca vem do renderer.
-        const actorRow: any = await runQuery("get", "SELECT id, isOwner, permissions FROM users WHERE id = ? LIMIT 1", [currentUser.id]);
+        const actorRow: any = await runQuery("get", "SELECT id, role, isOwner, permissions FROM users WHERE id = ? LIMIT 1", [currentUser.id]);
         const verdict = checkUserMutation({ kind, sql: statement.sql, params, actor: actorRow || currentUser, target });
         if (verdict.error) {
           await writeAuthAudit(currentUser, "permission_denied", verdict.error, { targetUserId: target?.id || null, sql: statement.sql.slice(0, 120) });

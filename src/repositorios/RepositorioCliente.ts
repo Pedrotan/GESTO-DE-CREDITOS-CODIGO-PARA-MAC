@@ -1,4 +1,5 @@
 import { RepositorioBase } from './RepositorioBase';
+import { db } from '@/bibliotecas/bd';
 import { Client } from '@/tipos/credito';
 
 export class RepositorioCliente extends RepositorioBase {
@@ -11,7 +12,8 @@ export class RepositorioCliente extends RepositorioBase {
     }
 
     static async findDeleted(): Promise<any[]> {
-        return await this.query('SELECT * FROM clients WHERE deletedAt IS NOT NULL');
+        // Os purgados («apagar definitivamente») já não aparecem na lixeira nem podem ser restaurados.
+        return await this.query("SELECT * FROM clients WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'");
     }
 
     static async insert(client: Client): Promise<void> {
@@ -141,15 +143,34 @@ export class RepositorioCliente extends RepositorioBase {
         await this.execute(sql, params);
     }
 
+    /** Envia o cliente e todos os créditos dele para a lixeira (os pagamentos desses créditos deixam de aparecer). */
     static async softDelete(id: string, userId: string, originalState?: string): Promise<void> {
-        await this.execute('UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?', [new Date().toISOString(), userId, originalState, id]);
+        const now = new Date().toISOString();
+        await db.transaction([
+            { sql: 'UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?', params: [now, userId, originalState, id] },
+            { sql: 'UPDATE credits SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL', params: [now, userId, id] },
+        ]);
     }
 
+    /** Restaura o cliente e os créditos que foram para a lixeira com ele (mesma data de eliminação). */
     static async restore(id: string): Promise<void> {
-        await this.execute('UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?', [new Date().toISOString(), id]);
+        const now = new Date().toISOString();
+        await db.transaction([
+            { sql: 'UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)', params: [now, id, id] },
+            { sql: 'UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?', params: [now, id] },
+        ]);
     }
 
-    static async hardDelete(id: string): Promise<void> {
-        await this.execute('DELETE FROM clients WHERE id = ?', [id]);
+    /**
+     * «Apagar definitivamente»: o cliente e os créditos dele saem da lixeira e de todo o sistema, sem restauro. Os
+     * lançamentos contabilísticos e a auditoria são imutáveis (lei e cadeia de hashes) e ficam como histórico;
+     * apagar as linhas deixava a contabilidade com lançamentos órfãos e criava divergências em todos os computadores.
+     */
+    static async purge(id: string, userId: string): Promise<void> {
+        const marker = `purged:${userId}`;
+        await db.transaction([
+            { sql: 'UPDATE credits SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE clientId = ?', params: [new Date().toISOString(), marker, id] },
+            { sql: 'UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL', params: [marker, id], expectChanges: 1 },
+        ]);
     }
 }

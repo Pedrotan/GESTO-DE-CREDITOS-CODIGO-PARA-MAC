@@ -71,6 +71,9 @@ export const isSyncableTable = (table: string | null | undefined) => !!table && 
 const IDENTIFIER = /^[a-z_][a-z0-9_]*$/iu;
 const quoteIdentifier = (value: string) => `"${value.replace(/"/g, '""')}"`;
 
+/** Pedido de «receber tudo de novo da nuvem» (versão web): a cópia local é apagada no arranque, antes de abrir. */
+export const REBUILD_REPLICA_FLAG = 'tango_rebuild_replica_v1';
+export const UNKNOWN_COMMAND_REASON = 'Comando remoto desconhecido nesta versão do sistema.';
 export const CONFLICT_INSERT_SQL = `INSERT OR IGNORE INTO sync_conflicts (id, entityType, entityId, operation, status, createdAt)
                           VALUES (?, ?, ?, ?, 'pending', ?)`;
 export const CONFLICT_RESOLVE_SQL = `UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'`;
@@ -115,7 +118,7 @@ export const buildRemoteStatements = async (
     for (const operation of group.operations) {
         if (operation.kind === 'statement') {
             const sql = operation.statementId ? deps.sqlById.get(operation.statementId) : undefined;
-            if (!sql) throw new Error('Comando remoto desconhecido nesta versão do sistema.');
+            if (!sql) throw new Error(UNKNOWN_COMMAND_REASON);
             if (!isSyncableTable(mutationTable(sql))) throw new Error('Tabela remota não sincronizável.');
             statements.push({ sql, params: operation.params || [], expectChanges: operation.expectChanges });
         } else if (operation.kind === 'dynamic') {
@@ -236,12 +239,16 @@ export const reprocessableGroups = (rows: Array<{ id: string; operation: string 
     for (const row of rows) {
         let parsed: SyncOperation & { reason?: string; original?: Partial<SyncOperation> };
         try { parsed = JSON.parse(row.operation); } catch { continue; }
-        const { reason: _reason, ...clean } = parsed;
+        const { reason, ...clean } = parsed;
         const operation = restoreIncomplete(clean);
         if (!operation) continue;
+        // Retida só porque esta versão ainda não conhecia o comando: nunca foi aplicada, por isso aplicá-la depois
+        // de actualizar é seguro (antes ficavam presas para sempre as alterações que não eram inserções).
+        const unknownBefore = reason === UNKNOWN_COMMAND_REASON && operation.kind === 'statement'
+            && !!operation.statementId && sqlById.has(operation.statementId);
         if (operation.txId && Number(operation.txSize) > 1) {
             byTx.set(operation.txId, [...(byTx.get(operation.txId) || []), { id: row.id, operation }]);
-        } else if (isSafeToReprocess(operation, sqlById)) {
+        } else if (unknownBefore || isSafeToReprocess(operation, sqlById)) {
             groups.push({ operations: [operation], resolvesConflictIds: [row.id] });
         }
     }

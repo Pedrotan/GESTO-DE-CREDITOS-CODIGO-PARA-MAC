@@ -809,8 +809,9 @@ export class ServicoFinanceiro {
         await RepositorioCredito.restore(id);
     }
 
-    static async hardDeleteCredit(id: string): Promise<void> {
-        throw new Error(`A eliminação permanente de créditos financeiros foi desativada por política de retenção (${id}).`);
+    /** Sai da lixeira sem restauro. Os lançamentos contabilísticos ficam: são imutáveis por lei e pela cadeia de hashes. */
+    static async hardDeleteCredit(id: string, userId: string): Promise<void> {
+        await RepositorioCredito.purge(id, userId);
     }
 
     // Pagamentos
@@ -1107,8 +1108,8 @@ export class ServicoFinanceiro {
         await RepositorioPagamento.restore(id);
     }
 
-    static async hardDeletePayment(id: string): Promise<void> {
-        throw new Error(`A eliminação permanente de pagamentos financeiros foi desativada por política de retenção (${id}).`);
+    static async hardDeletePayment(id: string, userId: string): Promise<void> {
+        await RepositorioPagamento.purge(id, userId);
     }
 
     // ---------------------------------------------------------------------------------------------

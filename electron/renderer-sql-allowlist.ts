@@ -256,12 +256,10 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM calendar_tasks WHERE id = ?",
   "DELETE FROM chat_messages",
   "DELETE FROM clients",
-  "DELETE FROM clients WHERE id = ?",
   "DELETE FROM closed_months WHERE id = ?",
   "DELETE FROM contracts",
   "DELETE FROM contracts WHERE id = ?",
   "DELETE FROM credits",
-  "DELETE FROM credits WHERE id = ?",
   "DELETE FROM internal_messages WHERE (senderId = ? AND receiverId = ?) OR (senderId = ? AND receiverId = ?)",
   "DELETE FROM internal_messages WHERE id = ?",
   "DELETE FROM legal_cases WHERE id = ?",
@@ -274,7 +272,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM payment_references",
   "DELETE FROM payment_references WHERE id = ?",
   "DELETE FROM payments",
-  "DELETE FROM payments WHERE id = ?",
   "DELETE FROM report_schedules WHERE id = ?",
   "DELETE FROM rh_dependente WHERE id = ? AND funcionario_id = ?",
   "DELETE FROM rh_ponto WHERE id = ?",
@@ -462,7 +459,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM audit_logs WHERE timestamp < ? OR (timestamp = ? AND id < ?) ORDER BY timestamp DESC, id DESC LIMIT ?",
   "SELECT * FROM audit_logs WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT ?",
   "SELECT * FROM calendar_tasks ORDER BY date ASC",
-  "SELECT * FROM clients WHERE deletedAt IS NOT NULL",
+  "SELECT * FROM clients WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'",
   "SELECT * FROM clients WHERE deletedAt IS NULL",
   "SELECT * FROM clients WHERE id = ?",
   "SELECT * FROM closed_months",
@@ -513,9 +510,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM payment_import_batches WHERE id = ?",
   "SELECT * FROM payment_references ORDER BY createdAt DESC",
   "SELECT * FROM payments",
-  "SELECT * FROM payments WHERE deletedAt IS NOT NULL",
-  "SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed'",
-  "SELECT * FROM payments WHERE deletedAt IS NULL ORDER BY paymentDate DESC",
+  "SELECT * FROM payments WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'",
+  "SELECT * FROM payments WHERE deletedAt IS NULL AND NOT EXISTS (SELECT 1 FROM credits WHERE credits.id = payments.creditId AND credits.deletedAt IS NOT NULL) ORDER BY paymentDate DESC",
+  "SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed' AND NOT EXISTS (SELECT 1 FROM credits WHERE credits.id = payments.creditId AND credits.deletedAt IS NOT NULL)",
   "SELECT * FROM report_schedules ORDER BY createdAt",
   "SELECT * FROM rh_alerta",
   "SELECT * FROM rh_alerta WHERE estado <> 'resolvido' ORDER BY prioridade, data_alerta",
@@ -631,7 +628,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, ano, lei_referencia, vigencia_inicio, vigencia_fim FROM rh_irt_tabela ORDER BY vigencia_inicio DESC",
   "SELECT id, chave, valor, descricao, vigencia_inicio, vigencia_fim FROM rh_parametro ORDER BY chave, vigencia_inicio DESC",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod, productId FROM credits WHERE deletedAt IS NULL",
-  "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL",
+  "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'",
   "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
@@ -718,6 +715,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE clients SET biAlertSentAt = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
+  "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy) WHERE id = ?",
   "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'",
   "UPDATE company_settings SET installDate = ? WHERE installDate IS NULL",
@@ -743,8 +741,12 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, dueDate = ?, status = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
+  "UPDATE credits SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL",
   "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
+  "UPDATE credits SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE clientId = ?",
+  "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)",
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
+  "UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL",
@@ -780,6 +782,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE payments SET deletedAt = NULL, deletedBy = NULL, restoredAt = ? WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE payments SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
+  "UPDATE payments SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE payments SET hasProof = 1 WHERE id = ?",
   "UPDATE payments SET receiptYear = ?, receiptSeq = ? WHERE id = ? AND receiptSeq IS NULL",
   "UPDATE payments SET registeredAt = paymentDate WHERE registeredAt IS NULL",
@@ -1883,10 +1886,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DELETE FROM clients"
   ],
   [
-    "caad8ec1acc8229a7bb4002fc3859893e6f6f7192b25eed4aa80ff75620d399d",
-    "DELETE FROM clients WHERE id = ?"
-  ],
-  [
     "d565fa38635b4abb2dbeb235cb054d7184fa7c11bc5b7abaa33bdc4a42145678",
     "DELETE FROM closed_months WHERE id = ?"
   ],
@@ -1901,10 +1900,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "1d6c56dbd318960e5a82a74e5c20d6eae381abbdd632b2b2e232a01924ea3a1f",
     "DELETE FROM credits"
-  ],
-  [
-    "814f197e638c58273138d58cb3a839ce2e1b7870b028ebd0ab194424d5002aac",
-    "DELETE FROM credits WHERE id = ?"
   ],
   [
     "74b78e06c2590636c2fd2613a2ac66a6d2d6d56699a7d0b5b9e590014985cb7c",
@@ -1953,10 +1948,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "ab75fc3bd0d87926db742fb6c941b41b27d3cb8630b6d5afe22b779fbc7026ab",
     "DELETE FROM payments"
-  ],
-  [
-    "5823cab7fdd63eae7eef460f3c01a18d590bab9077a28e3ec64b9ce3adeae2be",
-    "DELETE FROM payments WHERE id = ?"
   ],
   [
     "470788ce3fc62225bdab6d7295469c5d1ad9b0052e6a4f5511a95b6c790dc892",
@@ -2707,8 +2698,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM calendar_tasks ORDER BY date ASC"
   ],
   [
-    "dedd5574a8468d610bafdac5965a79039062ec0250eaed0435324ea39bb58f88",
-    "SELECT * FROM clients WHERE deletedAt IS NOT NULL"
+    "60cc695bdd1461ea5e1366c5d7f37edd4995880243bd7df6a0267c21a4cf5b30",
+    "SELECT * FROM clients WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'"
   ],
   [
     "f542e4a27ba11b4c3f4e5c68c1b2ce92a257a8f332f180d8dc5656cb764b117f",
@@ -2911,16 +2902,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM payments"
   ],
   [
-    "09a525d768a966420c5aeecc1ed98262be07a58a4c1f10025cd8a786f0b55fc4",
-    "SELECT * FROM payments WHERE deletedAt IS NOT NULL"
+    "854eb90b0227cf46543c859fd9e747de0ba827627926174439ae7a41cc4b0885",
+    "SELECT * FROM payments WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'"
   ],
   [
-    "21883d4b0bc8e8fa557758881f0b65f1d8e28589ef8ec59eef6d36e5da234903",
-    "SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed'"
+    "539b9e1f5ec696448a43741bc705d02839e63066a6fbd8d73ae6beeaa0d4bb7b",
+    "SELECT * FROM payments WHERE deletedAt IS NULL AND NOT EXISTS (SELECT 1 FROM credits WHERE credits.id = payments.creditId AND credits.deletedAt IS NOT NULL) ORDER BY paymentDate DESC"
   ],
   [
-    "d7fc402bdcfebcd36ada870fe7a3ca7f102699864b24475dfc60a3b8657bb3c1",
-    "SELECT * FROM payments WHERE deletedAt IS NULL ORDER BY paymentDate DESC"
+    "44dabe59b07fe1e0da0c174315545174b369941705f304725b50437b15c78bc1",
+    "SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed' AND NOT EXISTS (SELECT 1 FROM credits WHERE credits.id = payments.creditId AND credits.deletedAt IS NOT NULL)"
   ],
   [
     "c5bdc0851c9ca0f7b0a51545055d09e854ce4e15b49353d4dee4c8ab81f55ba2",
@@ -3383,8 +3374,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod, productId FROM credits WHERE deletedAt IS NULL"
   ],
   [
-    "ccafb7c269b7a7d7c159d6b9702b60ad64802276a7ab5057cd0668cec8c00822",
-    "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL"
+    "319f25b5a676715f3aabc5d6dd8f8b03c296764cc9ec71cd11665dda981a640a",
+    "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'"
   ],
   [
     "68a37b8e9bab8c64d19dc673d86ee67997224e261d646b12e0a13b94806dacc1",
@@ -3731,6 +3722,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
   ],
   [
+    "10a08f13ce9e90b31b90dfc1de77a8b96e3fd512db2cd3a51d4e8f9d3249f999",
+    "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL"
+  ],
+  [
     "b8b3e41aa4ffdfa17ea7ea60603a7cd739caed63f45683a85dbe58eaffad9e1b",
     "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy) WHERE id = ?"
   ],
@@ -3831,12 +3826,28 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
+    "0f892a412b0a3836bf0e8c3388350b463d5fb4aaebb38f58e97ee8a8bd55a407",
+    "UPDATE credits SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL"
+  ],
+  [
     "c827331c87cdac1ee00f953df2bc31ecde4281549bdb77b32cddf11c3b5effff",
     "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?"
   ],
   [
+    "5733ce5b208ed85b84791b935a0ea348bca58da1c985786e86efd2f1dfcdb02b",
+    "UPDATE credits SET deletedAt = COALESCE(deletedAt, ?), deletedBy = ?, originalState = NULL WHERE clientId = ?"
+  ],
+  [
+    "bf446177d3ad12a941e84414abfe6265f6c764fa06b8e2c4cdc2fdf644b5705e",
+    "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)"
+  ],
+  [
     "4275561b7ef88f96a442b1e33817e87c6c26bf90097ff6eae2403d81ec1a8c48",
     "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
+  ],
+  [
+    "c844921d1680cc66ae248eb364224f933767329f16738f743a16ce50beffdfee",
+    "UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL"
   ],
   [
     "fe1a161f6325e819fde15144917bf75aa8e7538614876bcd4e6b2ab5aa46b31e",
@@ -3977,6 +3988,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "91c846e2bdd43ba84ec52d7bfecb78a3207856cd97559bebf672199240ceabde",
     "UPDATE payments SET deletedAt = NULL, restoredAt = ? WHERE id = ?"
+  ],
+  [
+    "8ac0f6d0bf67e8665468a965bbaa035bdb52ddfcd08aad201d4b6f16f81f8cc9",
+    "UPDATE payments SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL"
   ],
   [
     "f4017e2cd1f7faa5b040eeaa86ce7a356702851f68b32cc2e1c98160c03f0f42",

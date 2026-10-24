@@ -724,7 +724,7 @@ export default function Login() {
 
             {/* Modal de Outros Erros e Suspensão de Conta */}
             <Dialog open={isErrorModalOpen && !/horário|pode voltar a entrar|sem acesso ao sistema|acesso ao sistema/i.test(errorMessage)} onOpenChange={setIsErrorModalOpen}>
-                <DialogContent className="sm:max-w-[420px] border-none bg-white/95 backdrop-blur-xl p-0 overflow-hidden text-center shadow-2xl">
+                <DialogContent className="sm:max-w-[420px] border-none bg-white p-0 overflow-hidden text-center shadow-2xl">
                     {(() => {
                         const isBlocked = errorMessage.toLowerCase().includes('bloqueada');
 
@@ -855,7 +855,7 @@ export default function Login() {
 
             {/* Support / Developer Info Modal */}
             <Dialog open={isSupportModalOpen} onOpenChange={setIsSupportModalOpen}>
-                <DialogContent className="sm:max-w-[520px] border-none bg-white/95 backdrop-blur-xl p-0 overflow-hidden shadow-2xl">
+                <DialogContent className="sm:max-w-[520px] border-none bg-white p-0 overflow-hidden shadow-2xl">
                     <div className="bg-gradient-to-br from-[#2563eb] to-[#0c1b40] p-8 text-white">
                         <div className="flex items-center gap-3 mb-4">
                             <div className="grid h-10 w-10 place-items-center rounded-xl bg-white/20 backdrop-blur-sm">

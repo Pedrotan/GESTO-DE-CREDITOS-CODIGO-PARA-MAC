@@ -133,6 +133,10 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
     if (columns.includes('isowner')) return { error: 'A conta principal não pode ser alterada.', changesPrivileges: true };
     const privileged = columns.filter(column => (PRIVILEGE_COLUMNS as readonly string[]).includes(column));
     const selfUpdate = input.target ? String(input.target.id) === String(input.actor.id) : false;
+    // Desbloqueio depois de palavras-passe erradas: um Super Administrador pode reactivar outro (e só isso).
+    const unblockOnly = columns.length > 0 && columns.every(column => ['status', 'failedattempts', 'blockedat'].includes(column))
+        && String(updatedUserValue(input.sql, input.params, 'status')) === 'active';
+    if (targetIsOwner && !selfUpdate && unblockOnly && hasFullAuthority(input.actor)) return { error: null, changesPrivileges: true };
     if (targetIsOwner && !selfUpdate) {
         return { error: 'O Super Administrador principal só pode ser alterado por ele próprio.', changesPrivileges: privileged.length > 0 };
     }

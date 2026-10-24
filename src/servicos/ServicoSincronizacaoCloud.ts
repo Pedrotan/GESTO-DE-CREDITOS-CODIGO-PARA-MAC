@@ -7,6 +7,7 @@ import { setFinancialConnectionProbe } from '@/bibliotecas/ligacao-financeira';
 import { sqlite, type SqlTransactionStatement } from '@/bibliotecas/adaptador-sqlite';
 import { RENDERER_SQL_BY_ID, RENDERER_SQL_ID_BY_STATEMENT } from '../../electron/renderer-sql-allowlist.ts';
 import {
+    REBUILD_REPLICA_FLAG,
     SYNC_EXCLUDED_TABLES,
     applyRemoteGroups,
     groupOperations,
@@ -692,6 +693,24 @@ export const reprocessRetainedOperations = async (): Promise<number> => {
 const emitStatus = (detail: CloudSyncStatus) => {
     lastStatus = detail;
     window.dispatchEvent(new CustomEvent('tango-cloud-sync-status', { detail }));
+};
+
+/**
+ * Versão web: apaga a cópia local deste navegador e recebe tudo de novo da nuvem (resolve conflitos antigos que
+ * já não se conseguem reaplicar). Recusado com alterações por enviar, para não perder nada deste navegador.
+ */
+export const rebuildBrowserReplica = async () => {
+    if (window.electronAPI) throw new Error('No computador os conflitos resolvem-se sozinhos depois de instalar a versão nova.');
+    const pending = await getPendingSyncCount();
+    if (pending > 0) throw new Error(`Ainda há ${pending} alteração(ões) deste navegador por enviar. Sincronize primeiro e tente de novo.`);
+    localStorage.setItem(scopedStorageKey(CURSOR_KEY), '0');
+    // Este navegador não volta a enviar a fotografia completa: os dados vêm todos da nuvem.
+    localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
+    localStorage.setItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY), 'true');
+    localStorage.removeItem(scopedStorageKey(USERS_STATE_KEY));
+    localStorage.removeItem(scopedStorageKey(USERS_ROSTER_AT_KEY));
+    localStorage.setItem(REBUILD_REPLICA_FLAG, new Date().toISOString());
+    window.location.reload();
 };
 
 /** Alterações locais ainda por enviar para a nuvem. */

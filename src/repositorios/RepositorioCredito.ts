@@ -23,7 +23,7 @@ export class RepositorioCredito extends RepositorioBase {
             SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, 
                    lateInterestRate, installments, status, deletedAt, deletedBy, createdAt
             FROM credits 
-            WHERE deletedAt IS NOT NULL
+            WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'
         `);
     }
 
@@ -73,8 +73,9 @@ export class RepositorioCredito extends RepositorioBase {
         await this.execute('UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?', [new Date().toISOString(), id]);
     }
 
-    static async hardDelete(id: string): Promise<void> {
-        await this.execute('DELETE FROM credits WHERE id = ?', [id]);
+    /** «Apagar definitivamente»: sai da lixeira sem restauro; o histórico contabilístico fica (é imutável). */
+    static async purge(id: string, userId: string): Promise<void> {
+        await db.transaction([{ sql: 'UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL', params: [`purged:${userId}`, id], expectChanges: 1 }]);
     }
 }
 

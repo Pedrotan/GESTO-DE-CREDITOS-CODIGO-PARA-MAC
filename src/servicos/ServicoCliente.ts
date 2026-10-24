@@ -48,8 +48,8 @@ export class ServicoCliente {
         await RepositorioCliente.restore(id);
     }
 
-    static async hardDelete(id: string): Promise<void> {
-        await RepositorioCliente.hardDelete(id);
+    static async hardDelete(id: string, userId: string): Promise<void> {
+        await RepositorioCliente.purge(id, userId);
     }
 }
 

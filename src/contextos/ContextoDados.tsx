@@ -1396,6 +1396,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const deletedClient = { ...client!, deletedAt: new Date(), deletedBy: user.id } as Client;
         setClients(prev => prev.filter(c => c.id !== id));
         setDeletedClients(prev => [deletedClient, ...prev]);
+        // Os créditos do cliente foram com ele para a lixeira; os pagamentos desses créditos deixam de contar.
+        const clientCredits = credits.filter(c => c.clientId === id);
+        if (clientCredits.length) {
+            const creditIds = new Set(clientCredits.map(c => c.id));
+            setCredits(prev => prev.filter(c => c.clientId !== id));
+            setDeletedCredits(prev => [...clientCredits.map(c => ({ ...c, deletedAt: new Date(), deletedBy: user.id }) as Credit), ...prev]);
+            setPayments(prev => prev.filter(p => !creditIds.has(p.creditId)));
+        }
 
         if (client) {
             await addLog('delete', 'client', `Enviou cliente para a lixeira: ${client.name}`, user.id, user.name);
@@ -1415,6 +1423,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const restoreClient = async (id: string, user?: { id: string; name: string }) => {
         const client = deletedClients.find(c => c.id === id);
         await ServicoCliente.restore(id);
+        void refreshData();
         if (client) {
             const restored = { ...client, deletedAt: undefined, restoredAt: new Date() };
             setDeletedClients(prev => prev.filter(c => c.id !== id));
@@ -1426,8 +1435,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const hardDeleteClient = async (id: string, user?: { id: string; name: string }) => {
         const client = deletedClients.find(c => c.id === id);
-        await ServicoCliente.hardDelete(id);
+        await ServicoCliente.hardDelete(id, user?.id || authUser?.id || 'sistema');
         setDeletedClients(prev => prev.filter(c => c.id !== id));
+        setDeletedCredits(prev => prev.filter(c => c.clientId !== id));
         if (client) {
             await addLog('delete', 'client', `Apagou permanentemente o cliente: ${client.name}`, user?.id, user?.name);
         }
@@ -1651,6 +1661,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             const deletedCredit = { ...credit!, deletedAt: new Date(), deletedBy: user.id } as Credit;
             const nextCredits = credits.filter(c => c.id !== id);
             setCredits(prev => prev.filter(c => c.id !== id));
+            setPayments(prev => prev.filter(p => p.creditId !== id));
             setDeletedCredits(prev => [deletedCredit, ...prev]);
             if (credit) {
                 await refreshClientCreditLimit(credit.clientId, nextCredits, payments, user);
@@ -1685,6 +1696,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const restoreCredit = async (id: string, user?: { id: string; name: string }) => {
         const credit = deletedCredits.find(c => c.id === id);
         await ServicoFinanceiro.restoreCredit(id);
+        void refreshData();
         if (credit) {
             const restored = { ...credit, deletedAt: undefined, restoredAt: new Date() };
             setDeletedCredits(prev => prev.filter(c => c.id !== id));
@@ -1697,7 +1709,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const hardDeleteCredit = async (id: string, user?: { id: string; name: string }) => {
         const credit = deletedCredits.find(c => c.id === id);
-        await ServicoFinanceiro.hardDeleteCredit(id);
+        await ServicoFinanceiro.hardDeleteCredit(id, user?.id || authUser?.id || 'sistema');
         setDeletedCredits(prev => prev.filter(c => c.id !== id));
         if (credit) {
             await addLog('delete', 'credit', `Apagou permanentemente o crédito: ${id}`, user?.id, user?.name);
@@ -1822,7 +1834,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const hardDeletePayment = async (id: string, user?: { id: string; name: string }) => {
         const payment = deletedPayments.find(p => p.id === id);
-        await ServicoFinanceiro.hardDeletePayment(id);
+        await ServicoFinanceiro.hardDeletePayment(id, user?.id || authUser?.id || 'sistema');
         setDeletedPayments(prev => prev.filter(p => p.id !== id));
         if (payment) {
             await addLog('delete', 'payment', `Apagou permanentemente o pagamento: ${id}`, user?.id, user?.name);

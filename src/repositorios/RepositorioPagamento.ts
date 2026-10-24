@@ -5,16 +5,17 @@ import { toMinorUnits } from '@/bibliotecas/ledger-financeiro';
 export class RepositorioPagamento extends RepositorioBase {
     static async findAll(): Promise<any[]> {
         // Só dinheiro efectivamente recebido: pendentes de validação e anulados ficam fora dos saldos e indicadores.
-        return await this.query("SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed'");
+        // Os pagamentos de créditos na lixeira (ou de clientes eliminados) deixam de contar em listas, lucros e painéis.
+        return await this.query("SELECT * FROM payments WHERE deletedAt IS NULL AND status = 'confirmed' AND NOT EXISTS (SELECT 1 FROM credits WHERE credits.id = payments.creditId AND credits.deletedAt IS NOT NULL)");
     }
 
     /** Todos os pagamentos para a gestão (confirmados, pendentes de validação e anulados). */
     static async findForManagement(): Promise<any[]> {
-        return await this.query('SELECT * FROM payments WHERE deletedAt IS NULL ORDER BY paymentDate DESC');
+        return await this.query('SELECT * FROM payments WHERE deletedAt IS NULL AND NOT EXISTS (SELECT 1 FROM credits WHERE credits.id = payments.creditId AND credits.deletedAt IS NOT NULL) ORDER BY paymentDate DESC');
     }
 
     static async findDeleted(): Promise<any[]> {
-        return await this.query('SELECT * FROM payments WHERE deletedAt IS NOT NULL');
+        return await this.query("SELECT * FROM payments WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'");
     }
 
     static async insert(payment: Payment): Promise<void> {
@@ -44,8 +45,9 @@ export class RepositorioPagamento extends RepositorioBase {
         await this.execute('UPDATE payments SET deletedAt = NULL, restoredAt = ? WHERE id = ?', [new Date().toISOString(), id]);
     }
 
-    static async hardDelete(id: string): Promise<void> {
-        await this.execute('DELETE FROM payments WHERE id = ?', [id]);
+    /** «Apagar definitivamente»: sai da lixeira sem restauro; o histórico contabilístico fica (é imutável). */
+    static async purge(id: string, userId: string): Promise<void> {
+        await this.execute('UPDATE payments SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL', [`purged:${userId}`, id]);
     }
 }
 
