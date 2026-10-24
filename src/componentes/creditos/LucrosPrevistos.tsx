@@ -13,6 +13,7 @@ import type { CarteiraState } from '@/componentes/creditos/useCarteira';
 const kz = (minor: number) => formatCurrency(minor / 100);
 const pct = (value: number) => `${(value * 100).toLocaleString('pt-AO', { maximumFractionDigits: 1 })}%`;
 const dateText = (key: string | null) => key ? key.split('-').reverse().join('/') : '—';
+const MONTHS_LONG = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 const SITUATION_TONE: Record<string, string> = { Paga: 'text-emerald-600', 'Em atraso': 'text-red-600', Parcial: 'text-amber-600', 'Por vencer': 'text-muted-foreground' };
 
 /**
@@ -48,21 +49,69 @@ export function LucrosPrevistos({ state }: { state: CarteiraState }) {
         return { next30, late };
     }, [summary.rows, byId, installments, state.today]);
 
+    // Mês escolhido nos filtros (vista Produção): a previsão passa a ser a das prestações que vencem nesse mês.
+    const period = state.view === 'producao' ? state.range : null;
+    const periodLabel = period ? `${MONTHS_LONG[state.month]} de ${state.year}` : '';
+    const monthly = useMemo(() => {
+        if (!period) return null;
+        const items = summary.rows.map(item => {
+            const row = byId.get(item.id);
+            if (!row) return null;
+            const lines = creditProfitBreakdown(row, installments, state.today).lines.filter(line => line.due >= period.start && line.due <= period.end);
+            if (!lines.length) return null;
+            const sum = (pick: (line: typeof lines[number]) => number) => lines.reduce((total, line) => total + pick(line), 0);
+            return {
+                item, lines, principal: sum(line => line.principalMinor), interest: sum(line => line.interestMinor), received: sum(line => line.paidInterestMinor),
+                toReceive: sum(line => line.toReceiveInterestMinor), total: sum(line => line.totalMinor),
+                late: sum(line => (line.due < state.today ? line.toReceiveInterestMinor : 0)),
+            };
+        }).filter(Boolean) as Array<{ item: typeof summary.rows[number]; lines: ReturnType<typeof creditProfitBreakdown>['lines']; principal: number; interest: number; received: number; toReceive: number; total: number; late: number }>;
+        const total = (key: 'principal' | 'interest' | 'received' | 'toReceive' | 'total' | 'late') => items.reduce((sum, entry) => sum + entry[key], 0);
+        const granted = state.rows.filter(row => row.competenceMonth === state.monthKey && summary.rows.some(item => item.id === row.id));
+        return {
+            items: items.sort((a, b) => b.toReceive - a.toReceive || b.interest - a.interest),
+            principal: total('principal'), interest: total('interest'), received: total('received'), toReceive: total('toReceive'), total: total('total'), late: total('late'),
+            grantedCount: granted.length, grantedMinor: granted.reduce((sum, row) => sum + row.grantedMinor, 0),
+            installments: items.reduce((sum, entry) => sum + entry.lines.length, 0),
+        };
+    }, [period, summary.rows, byId, installments, state.today, state.rows, state.monthKey]);
+
     if (!summary.count) return null;
-    const receivedShare = summary.expectedProfitMinor > 0 ? summary.receivedProfitMinor / summary.expectedProfitMinor : 0;
-    const rows = showAll ? summary.rows : summary.rows.slice(0, 10);
+    const receivedShare = monthly
+        ? (monthly.interest > 0 ? monthly.received / monthly.interest : 0)
+        : (summary.expectedProfitMinor > 0 ? summary.receivedProfitMinor / summary.expectedProfitMinor : 0);
     const averageRate = summary.capitalMinor > 0 ? summary.rows.reduce((sum, row) => sum + row.rate * row.capitalMinor, 0) / summary.capitalMinor : 0;
+    // Linhas da tabela: a carteira inteira, ou só os créditos com prestações no mês (valores desse mês).
+    const tableRows = monthly
+        ? monthly.items.map(entry => ({ ...entry.item, expectedProfitMinor: entry.interest, receivedProfitMinor: entry.received, toReceiveProfitMinor: entry.toReceive,
+            totalExpectedMinor: entry.total, monthLines: entry.lines, monthPrincipal: entry.principal }))
+        : summary.rows.map(item => ({ ...item, monthLines: null as null | ReturnType<typeof creditProfitBreakdown>['lines'], monthPrincipal: 0 }));
+    const rows = showAll ? tableRows : tableRows.slice(0, 10);
 
     const download = async (format: 'pdf' | 'xlsx') => {
         if (!user) return;
         setBusy(format); setError('');
         try {
-            const def = profitForecastDetailReport({ rows: state.rows, installments, payments: state.payments || [], todayKey: state.today });
+            const def = profitForecastDetailReport({ rows: state.rows, installments, payments: state.payments || [], todayKey: state.today,
+                creditIds: monthly ? monthly.items.map(entry => entry.item.id) : undefined });
+            if (monthly) {
+                if (!monthly.items.length) throw new Error(`Não há prestações a vencer em ${periodLabel}.`);
+                def.subtitle = `Créditos com prestações em ${periodLabel} · ${def.subtitle}`;
+                def.fileBase = `${def.fileBase}-${state.monthKey}`;
+            }
             await generateReportFromDef(def, companySettings, { id: user.id, name: user.name, role: user.role }, format);
         } catch (cause: any) { setError(cause?.message || 'Não foi possível gerar o relatório.'); } finally { setBusy(null); }
     };
 
-    const figures = [
+    const figures = monthly ? [
+        { label: `Prestações de ${MONTHS_LONG[state.month]}`, value: String(monthly.installments), note: `${monthly.items.length} crédito(s) · ${monthly.grantedCount} concedido(s) no mês (${kz(monthly.grantedMinor)})` },
+        { label: 'Capital a receber no mês', value: kz(monthly.principal), note: 'Capital das prestações do mês' },
+        { label: 'Lucro previsto no mês', value: kz(monthly.interest), note: monthly.total > 0 ? `${pct(monthly.interest / monthly.total)} do valor a receber` : 'Juros das prestações do mês', tone: 'text-emerald-600' },
+        { label: 'Lucro já recebido', value: kz(monthly.received), note: `${pct(receivedShare)} do lucro do mês`, tone: 'text-sky-600' },
+        { label: 'Lucro por receber', value: kz(monthly.toReceive), note: 'Juros do mês ainda por cobrar', tone: 'text-orange-600' },
+        { label: 'Lucro em atraso', value: kz(monthly.late), note: 'Juros do mês já vencidos', tone: monthly.late > 0 ? 'text-red-600' : '' },
+        { label: 'Total a receber no mês', value: kz(monthly.total), note: 'Capital + lucro das prestações' },
+    ] : [
         { label: 'Capital investido', value: kz(summary.capitalMinor), note: `${summary.count} crédito(s) · taxa média ${averageRate.toLocaleString('pt-AO', { maximumFractionDigits: 1 })}%` },
         { label: 'Lucro previsto', value: kz(summary.expectedProfitMinor), note: `${pct(summary.marginRate)} sobre o capital`, tone: 'text-emerald-600' },
         { label: 'Lucro já recebido', value: kz(summary.receivedProfitMinor), note: `${pct(receivedShare)} do lucro previsto`, tone: 'text-sky-600' },
@@ -76,8 +125,10 @@ export function LucrosPrevistos({ state }: { state: CarteiraState }) {
         <section className="mb-6 rounded-2xl border bg-card p-5 shadow-sm">
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <h2 className="flex items-center gap-2 text-base font-black"><TrendingUp className="h-5 w-5 text-emerald-600" /> Lucros previstos dos créditos concedidos</h2>
-                    <p className="text-xs text-muted-foreground">Os ganhos da empresa são os juros: a soma dos juros de todas as prestações de cada crédito, calculados pela taxa do crédito sobre o capital entregue ao cliente.</p>
+                    <h2 className="flex items-center gap-2 text-base font-black"><TrendingUp className="h-5 w-5 text-emerald-600" /> {monthly ? `Lucros previstos em ${periodLabel}` : 'Lucros previstos dos créditos concedidos'}</h2>
+                    <p className="text-xs text-muted-foreground">{monthly
+                        ? `Os juros (lucro) e o capital das prestações que vencem em ${periodLabel}, de todos os créditos concedidos. Escolha outro mês nos filtros para ver a previsão desse mês.`
+                        : 'Os ganhos da empresa são os juros: a soma dos juros de todas as prestações de cada crédito, calculados pela taxa do crédito sobre o capital entregue ao cliente.'}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" disabled={!!busy} onClick={() => void download('pdf')} title="Relatório detalhado: como se chega à previsão de cada crédito, prestação a prestação">
@@ -106,18 +157,20 @@ export function LucrosPrevistos({ state }: { state: CarteiraState }) {
             </div>
             {open && (
                 <div className="mt-4 overflow-x-auto">
-                    <p className="mb-2 text-xs text-muted-foreground">Clique num crédito para ver as prestações e o juro (lucro) de cada uma.</p>
+                    <p className="mb-2 text-xs text-muted-foreground">{monthly ? `Créditos com prestações em ${periodLabel}. Clique num crédito para ver as prestações do mês.` : 'Clique num crédito para ver as prestações e o juro (lucro) de cada uma.'}</p>
+                    {monthly && !monthly.items.length && <p className="rounded-xl border border-dashed p-4 text-center text-sm text-muted-foreground">Não há prestações a vencer em {periodLabel}.</p>}
                     <table className="w-full text-sm">
                         <thead className="text-left text-[11px] uppercase text-muted-foreground">
                             <tr>
                                 <th className="py-2" /><th>Contrato</th><th>Cliente</th><th className="text-right">Taxa</th><th className="text-center">Prestações</th><th>Próximo vencimento</th>
-                                <th className="text-right">Capital investido</th><th className="text-right">Lucro previsto</th><th className="text-right">Recebido</th><th className="text-right">Por receber</th><th className="text-right">Total a receber</th>
+                                <th className="text-right">{monthly ? 'Capital do mês' : 'Capital investido'}</th><th className="text-right">Lucro previsto</th><th className="text-right">Recebido</th><th className="text-right">Por receber</th><th className="text-right">Total a receber</th>
                             </tr>
                         </thead>
                         <tbody>
                             {rows.map(item => {
                                 const row = byId.get(item.id)!;
-                                const detail = creditProfitBreakdown(row, installments, state.today);
+                                const full = creditProfitBreakdown(row, installments, state.today);
+                                const detail = item.monthLines ? { ...full, lines: item.monthLines } : full;
                                 const isOpen = expanded === item.id;
                                 return (
                                     <Fragment key={item.id}>
@@ -126,9 +179,9 @@ export function LucrosPrevistos({ state }: { state: CarteiraState }) {
                                             <td className="whitespace-nowrap font-mono text-xs font-bold">{item.reference}</td>
                                             <td>{item.clientName}</td>
                                             <td className="text-right">{item.rate.toLocaleString('pt-AO')}%</td>
-                                            <td className="text-center">{detail.paidCount}/{detail.lines.length || row.totalCount}</td>
-                                            <td className="whitespace-nowrap">{dateText(detail.nextDue)}</td>
-                                            <td className="whitespace-nowrap text-right">{kz(item.capitalMinor)}</td>
+                                            <td className="text-center">{item.monthLines ? `${item.monthLines.filter(line => line.situation === 'Paga').length}/${item.monthLines.length}` : `${detail.paidCount}/${detail.lines.length || row.totalCount}`}</td>
+                                            <td className="whitespace-nowrap">{dateText(item.monthLines ? item.monthLines[0]?.due || null : detail.nextDue)}</td>
+                                            <td className="whitespace-nowrap text-right">{kz(item.monthLines ? item.monthPrincipal : item.capitalMinor)}</td>
                                             <td className="whitespace-nowrap text-right font-bold text-emerald-600">{kz(item.expectedProfitMinor)} <span className="text-[10px] font-normal text-muted-foreground">({pct(item.marginRate)})</span></td>
                                             <td className="whitespace-nowrap text-right text-sky-600">{kz(item.receivedProfitMinor)}</td>
                                             <td className="whitespace-nowrap text-right font-bold text-orange-600">{kz(item.toReceiveProfitMinor)}</td>
@@ -138,9 +191,10 @@ export function LucrosPrevistos({ state }: { state: CarteiraState }) {
                                             <tr className="bg-muted/30">
                                                 <td colSpan={11} className="px-4 py-3">
                                                     <p className="mb-2 text-xs">
-                                                        <strong>Como se chega à previsão:</strong> capital de {kz(item.capitalMinor)} à taxa de {item.rate.toLocaleString('pt-AO')}% em {detail.lines.length || row.totalCount} prestação(ões).
-                                                        A soma dos juros das prestações dá o lucro previsto de <strong className="text-emerald-600">{kz(detail.expectedMinor)}</strong>;
-                                                        já foram recebidos {kz(item.receivedProfitMinor)} e faltam <strong className="text-orange-600">{kz(item.toReceiveProfitMinor)}</strong>.
+                                                        {item.monthLines && <><strong>Em {periodLabel}:</strong> {item.monthLines.length} prestação(ões) com {kz(item.expectedProfitMinor)} de juros. </>}
+                                                        <strong>Como se chega à previsão:</strong> capital de {kz(item.capitalMinor)} à taxa de {item.rate.toLocaleString('pt-AO')}% em {full.lines.length || row.totalCount} prestação(ões).
+                                                        A soma dos juros das prestações dá o lucro previsto de <strong className="text-emerald-600">{kz(full.expectedMinor)}</strong>{item.monthLines ? ' no crédito inteiro' : ''};
+                                                        {item.monthLines ? "no mês, " : ""}já foram recebidos {kz(item.receivedProfitMinor)} e faltam <strong className="text-orange-600">{kz(item.toReceiveProfitMinor)}</strong>.
                                                     </p>
                                                     {detail.lines.length ? (
                                                         <table className="w-full text-xs">
@@ -167,9 +221,9 @@ export function LucrosPrevistos({ state }: { state: CarteiraState }) {
                             })}
                         </tbody>
                     </table>
-                    {summary.rows.length > 10 && (
+                    {tableRows.length > 10 && (
                         <Button variant="ghost" size="sm" className="mt-2" onClick={() => setShowAll(value => !value)}>
-                            {showAll ? 'Mostrar só os 10 maiores' : `Mostrar todos (${summary.rows.length})`}
+                            {showAll ? 'Mostrar só os 10 maiores' : `Mostrar todos (${tableRows.length})`}
                         </Button>
                     )}
                 </div>

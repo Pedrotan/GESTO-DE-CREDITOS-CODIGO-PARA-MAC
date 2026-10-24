@@ -1,5 +1,5 @@
 import { BankLogo } from '@/componentes/BankLogo';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { estadoBI, validadeSugerida, validarDatasBI } from '@/bibliotecas/rh/bi-validade';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
@@ -31,6 +31,8 @@ import {
 } from 'lucide-react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useData } from '@/contextos/ContextoDados';
+import { findDuplicateClients, missingClientFields } from '@/bibliotecas/cliente-validacao';
 import * as z from 'zod';
 import { useFormDraft } from '@/ganchos/usar-rascunho-formulario';
 import { ServicoAngolaAPI, abrirPortalOficial } from '@/servicos/ServicoAngolaAPI';
@@ -259,9 +261,11 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
     const [clientType, setClientType] = useState<'PARTICULAR' | 'EMPRESA'>(
         initialData?.nif ? detectClientType(initialData.nif) : 'PARTICULAR'
     );
-    const [noNif, setNoNif] = useState(
-        initialData?.nif ? isSemNif(initialData.nif) : false
-    );
+    // A opção «Sem BI / Sem NIF» foi retirada: o bilhete (ou NIF) passou a ser obrigatório. Clientes antigos marcados
+    // «SEM-…» têm de receber o número verdadeiro ao serem editados.
+    const [noNif, setNoNif] = useState(false);
+    const { clients: registeredClients, deletedClients: binClients } = useData();
+    const [confirmedSameName, setConfirmedSameName] = useState('');
     /** Só a carteira de estrangeiros mostra passaporte, país e nacionalidade. */
     const ehEstrangeiro = category === 'ESTRANGEIRO';
     /** Só a carteira de aposentados mostra a instituição e o nº de segurança social. */
@@ -533,7 +537,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
             if (extra.documents) setDocuments(extra.documents);
             if (extra.applyInterest !== undefined) setApplyInterest(extra.applyInterest);
             if (extra.clientType) setClientType(extra.clientType);
-            if (extra.noNif !== undefined) setNoNif(extra.noNif);
+            if (extra.noNif !== undefined) setNoNif(false);
         }
     });
 
@@ -628,7 +632,44 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
         setBankCoordinates(prev => prev.filter(i => i.id !== id));
     };
 
+    // Clientes já registados com o mesmo bilhete/NIF ou o mesmo nome (aviso enquanto se escreve e ao gravar).
+    const watchedNif = form.watch('nif');
+    const watchedName = form.watch('name');
+    const duplicates = useMemo(() => findDuplicateClients({
+        nif: watchedNif, name: watchedName, currentId: initialData?.id, clients: registeredClients || [], deletedClients: binClients || [],
+    }), [watchedNif, watchedName, initialData?.id, registeredClients, binClients]);
+    const duplicateText = (list: typeof duplicates.byName) => list.slice(0, 3).map(({ client, deleted }) => `${client.name}${deleted ? ' (na lixeira)' : ''}`).join(', ');
+
     const handleFormSubmit = (data: ClientFormValues) => {
+        // Campos obrigatórios: sem eles não se grava.
+        const missing = missingClientFields(data, { particular: clientType === 'PARTICULAR', passport: documentType === 'PASSAPORTE', bankCoordinates: bankCoordinates.length });
+        if (missing.length) {
+            for (const item of missing) if (item.field !== 'bankCoordinates') form.setError(item.field as any, { type: 'manual', message: `${item.label}: campo obrigatório.` });
+            setGenericAlert({
+                isOpen: true, type: 'warning', title: 'Preencha os campos obrigatórios',
+                description: `Faltam: ${missing.map(item => item.label).join(', ')}. Os campos obrigatórios estão marcados com * a vermelho.`,
+            });
+            return;
+        }
+        // O mesmo bilhete/NIF não pode ser registado duas vezes.
+        if (duplicates.byDocument.length) {
+            form.setError('nif', { type: 'manual', message: 'Este número já está registado noutro cliente.' });
+            setGenericAlert({
+                isOpen: true, type: 'error', title: 'Bilhete já registado',
+                description: `O número ${data.nif} já pertence a: ${duplicateText(duplicates.byDocument)}. Verifique o número ou edite o cliente existente.`,
+            });
+            return;
+        }
+        // Nome igual a outro cliente: pode ser um homónimo; pede confirmação (carregar de novo em gravar).
+        const sameName = duplicates.byName.length ? String(data.name).trim().toLowerCase() : '';
+        if (sameName && confirmedSameName !== sameName) {
+            setConfirmedSameName(sameName);
+            setGenericAlert({
+                isOpen: true, type: 'warning', title: 'Já existe um cliente com este nome',
+                description: `Cliente(s) com o mesmo nome: ${duplicateText(duplicates.byName)}. Se for outra pessoa (bilhete diferente), carregue de novo em gravar para confirmar.`,
+            });
+            return;
+        }
         // BI de particulares: emissão e validade obrigatórias; emissão não futura; validade posterior à emissão.
         if (clientType === 'PARTICULAR' && documentType !== 'PASSAPORTE') {
             const hoje = luandaTodayKey();
@@ -870,38 +911,6 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                 </div>
                                                 <FormControl>
                                                     <div className="flex items-center gap-3 w-full">
-                                                        <label className={cn(
-                                                            "flex items-center gap-2 shrink-0 cursor-pointer select-none",
-                                                            isNameAutoFilled && "opacity-60 cursor-not-allowed",
-                                                            documentType === 'PASSAPORTE' && "hidden"
-                                                        )}>
-                                                            <input
-                                                                type="checkbox"
-                                                                id="noNif"
-                                                                checked={noNif}
-                                                                disabled={isNameAutoFilled}
-                                                                onChange={(e) => {
-                                                                    const checked = e.target.checked;
-                                                                    setNoNif(checked);
-                                                                    if (checked) {
-                                                                        const randomHex = Math.random().toString(36).substring(2, 10).toUpperCase();
-                                                                        form.setValue('nif', `SEM-${randomHex}`);
-                                                                    } else {
-                                                                        form.setValue('nif', '');
-                                                                    }
-                                                                }}
-                                                                className="sr-only"
-                                                            />
-                                                            <div className={cn(
-                                                                "h-5 w-5 rounded-full border border-slate-400 transition-all flex items-center justify-center bg-white",
-                                                                noNif ? "border-amber-500 bg-amber-500" : "hover:border-slate-700"
-                                                            )}>
-                                                                {noNif && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
-                                                            </div>
-                                                            <span className="text-xs font-semibold text-slate-600">
-                                                                {clientType === 'PARTICULAR' ? 'Sem BI' : 'Sem NIF'}
-                                                            </span>
-                                                        </label>
                                                         <div className="relative flex-1 flex items-center gap-2">
                                                             <Input
                                                                 placeholder={
@@ -1035,6 +1044,9 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                     </p>
                                                 )}
                                                 <FormMessage />
+                                                {duplicates.byDocument.length > 0 && (
+                                                    <p className="mt-1 text-xs font-semibold text-red-600">Este número já está registado: {duplicateText(duplicates.byDocument)}.</p>
+                                                )}
                                             </FormItem>
                                         )}
                                     />
@@ -1071,6 +1083,9 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                     />
                                                 </FormControl>
                                                 <FormMessage />
+                                                {duplicates.byName.length > 0 && (
+                                                    <p className="mt-1 text-xs font-semibold text-amber-600">Já existe um cliente com este nome: {duplicateText(duplicates.byName)}.</p>
+                                                )}
                                             </FormItem>
                                         )}
                                     />
