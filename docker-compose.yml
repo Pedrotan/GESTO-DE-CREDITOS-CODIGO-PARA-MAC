@@ -55,9 +55,13 @@ services:
       - MAIL_PASSWORD=${MAIL_PASSWORD:-}
       - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-}
       - MAIL_ENCRYPTION=${MAIL_ENCRYPTION:-starttls}
+      # Facturação electrónica AGT: chaves privadas por empresa (ficam fora da imagem, no disco da VPS).
+      - AGT_KEYS_DIR=/app/dados-agt
     volumes:
       - ./server.mjs:/app/server.mjs:ro
       - ./vercel-api:/app/vercel-api:ro
+      # Chaves da AGT importadas pela página Relatórios Fiscais: persistem entre reconstruções da imagem.
+      - ./dados-agt:/app/dados-agt
       # O site (vercel-web) NÃO é montado da VPS: vem sempre do build da imagem. Montar a pasta do servidor
       # escondia o site acabado de gerar e servia uma versão antiga (ex.: preload antigo, erro de versão da BD local).
     depends_on:
