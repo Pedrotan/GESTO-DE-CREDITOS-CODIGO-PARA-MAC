@@ -117,6 +117,11 @@ const vercelConfig = {
       headers: [{ key: 'Cache-Control', value: 'no-cache, must-revalidate' }]
     },
     {
+      // Versão da build: os separadores abertos lêem-na para avisar que há versão nova.
+      source: '/version.json',
+      headers: [{ key: 'Cache-Control', value: 'no-store, max-age=0' }]
+    },
+    {
       source: '/sql-wasm.wasm',
       headers: [{ key: 'Content-Type', value: 'application/wasm' }]
     },

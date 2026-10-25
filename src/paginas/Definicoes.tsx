@@ -121,6 +121,7 @@ import { ConfiguracaoSimulador } from '@/componentes/simulador/ConfiguracaoSimul
 import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
 import { canManageInterestTiers } from '@/bibliotecas/taxas-juro';
 import { assertLocalServerAccess, canHostLocalServer } from '@/bibliotecas/intranet-policy';
+import { PainelActualizacoes } from '@/componentes/layout/AvisoActualizacao';
 
 const SUPPORT_PHONE = "+244 941537486";
 const SYSTEM_NAME = "Tango Gestão de Créditos";
@@ -3476,7 +3477,7 @@ export default function Settings() {
                                 <Building2 className="h-12 w-12 text-primary" />
                             </div>
                             <CardTitle className="text-3xl font-black tracking-tighter">Tango Gestão de Créditos</CardTitle>
-                            <CardDescription className="text-primary font-bold">Versão 3.0.0 "Professional Edition"</CardDescription>
+                            <CardDescription className="text-primary font-bold">Versão {__TANGO_APP_VERSION__} "Professional Edition"</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-8 p-8">
                             <div className="grid md:grid-cols-2 gap-8">
@@ -3509,6 +3510,7 @@ export default function Settings() {
                                     </div>
                                 </div>
                             </div>
+                            <PainelActualizacoes />
                         </CardContent>
                     </Card>
                 </TabsContent>

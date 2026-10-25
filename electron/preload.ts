@@ -306,6 +306,19 @@ const api = Object.freeze({
     }),
     onCloudLicenseChanged: (callback: (status: any) => void) => subscribe('cloud-license-changed', callback),
 
+    // Actualizações do Tango ERP: só estes cinco pedidos e o aviso de estado (o processo principal decide tudo).
+    updates: Object.freeze({
+        getStatus: () => ipcRenderer.invoke('updates:status'),
+        check: () => ipcRenderer.invoke('updates:check'),
+        download: () => ipcRenderer.invoke('updates:download'),
+        install: () => ipcRenderer.invoke('updates:install'),
+        defer: (hours: number) => {
+            if (!Number.isFinite(hours) || hours < 1 || hours > 72) throw new TypeError('Adiamento inválido.');
+            return ipcRenderer.invoke('updates:defer', Math.round(hours));
+        },
+        onStatus: (callback: (status: any) => void) => subscribe('updates:status-changed', callback),
+    }),
+
     readLicenseKeys: () => ipcRenderer.invoke('read-license-keys'),
     generateLicenseKeypair: () => ipcRenderer.invoke('generate-license-keypair'),
     signLicensePayload: (payload: string) => ipcRenderer.invoke('sign-license-payload', ensureText(payload, 'Payload da licenca', 64_000)),

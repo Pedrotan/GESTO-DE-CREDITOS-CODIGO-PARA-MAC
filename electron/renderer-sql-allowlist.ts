@@ -918,7 +918,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "insert",
   "select",
   "select-all-debtors",
-  "update"
+  "update",
+  "update.available"
 ]);
 export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
@@ -4596,6 +4597,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "2937013f2181810606b2a799b05bda2849f3e369a20982a4138f0e0a55984ce4",
     "update"
+  ],
+  [
+    "aed9ced03873ba97080ee2a0e0561123e5a447728e0957a01705218e776fc9c1",
+    "update.available"
   ]
 ]);
 export const RENDERER_SQL_ID_BY_STATEMENT = new Map<string, string>([...RENDERER_SQL_BY_ID].map(([id, sql]) => [sql, id]));

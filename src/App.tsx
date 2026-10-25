@@ -11,6 +11,7 @@ import { GuardaSubscricaoWeb } from "@/componentes/layout/GuardaSubscricaoWeb";
 import { BackupReminder } from "@/componentes/layout/BackupReminder";
 import { AutoBackupManager } from "@/componentes/layout/AutoBackupManager";
 import { FilaFiscalGlobal } from "@/componentes/fiscal/FilaFiscalGlobal";
+import { AvisoActualizacao } from "@/componentes/layout/AvisoActualizacao";
 import { SplashScreen } from "@/componentes/layout/SplashScreen";
 import { isPublicWebBuild } from "@/bibliotecas/ambiente";
 
@@ -232,6 +233,7 @@ const AppContent = () => {
         <BackupReminder />
         <AutoBackupManager />
         <FilaFiscalGlobal />
+        <AvisoActualizacao />
         <Suspense fallback={suspenseFallback}>
           <Routes>
             <Route path="/login" element={<Navigate to="/entrar" replace />} />

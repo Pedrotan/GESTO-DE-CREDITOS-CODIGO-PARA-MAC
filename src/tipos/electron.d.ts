@@ -115,6 +115,15 @@ export interface ElectronAPI {
     cloudLicenseActivate: (payload: { key: string; serverUrl?: string; legacyMachineId?: string }) => Promise<
         { success: true; status: import('../bibliotecas/licenca-nuvem-cliente').CloudLicenseStatus } | { success: false; code: string; message: string }>;
     onCloudLicenseChanged: (callback: (status: import('../bibliotecas/licenca-nuvem-cliente').CloudLicenseStatus) => void) => () => void;
+    /** Actualizações do Tango ERP (ausente no Tango Master e em versões antigas do preload). */
+    updates?: {
+        getStatus: () => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        check: () => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        download: () => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        install: () => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        defer: (hours: number) => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        onStatus: (callback: (status: import('../bibliotecas/actualizacoes').UpdateStatus) => void) => () => void;
+    };
     readLicenseKeys: () => Promise<{ success: boolean; publicKey?: string; hasPrivateKey?: boolean; error?: string }>;
     generateLicenseKeypair: () => Promise<{ success: boolean; publicKey: string; hasPrivateKey: boolean }>;
     signLicensePayload: (payload: string) => Promise<{ success: boolean; payload: string; signature: string }>;

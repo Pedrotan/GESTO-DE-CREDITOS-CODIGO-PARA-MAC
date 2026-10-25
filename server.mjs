@@ -201,6 +201,8 @@ await loadHandler('usage-report', path.join(apiBaseDir, 'usage-report.js'));
 await loadHandler('lookup-document', path.join(apiBaseDir, 'lookup-document.js'));
 await loadHandler('licencas', path.join(apiBaseDir, 'licencas.js'));
 await loadHandler('agt', path.join(apiBaseDir, 'agt.js'));
+// Centro de actualizações (desktop e web): separado da sincronização de dados.
+await loadHandler('updates', path.join(apiBaseDir, 'updates.js'));
 
 console.log(`[VPS API] ${Object.keys(handlers).length} rotas centrais carregadas com sucesso.`);
 
@@ -388,6 +390,9 @@ const server = http.createServer(async (req, res) => {
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
       } else if (safePath === '/index.html' || safePath === '/') {
         res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+      } else if (safePath === '/version.json') {
+        // Versão da build web: lida pelos separadores abertos para avisar que há versão nova.
+        res.setHeader('Cache-Control', 'no-store, max-age=0');
       }
 
       // Tamanho conhecido (o navegador sabe quando o ficheiro chegou completo) e erros de leitura tratados.

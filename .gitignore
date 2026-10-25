@@ -58,3 +58,6 @@ public_key.json
 
 # Chaves da facturação electrónica AGT (nunca versionar)
 dados-agt/
+
+# Instaladores das actualizações (só na VPS, nunca no repositório)
+dados-actualizacoes/

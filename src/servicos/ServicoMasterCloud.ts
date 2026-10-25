@@ -57,6 +57,38 @@ export const masterTenantsRequest = async (baseUrl: string, secret: string, body
     return withSecret();
 };
 
+/**
+ * Pedido ao centro de actualizações (/api/updates/admin) com a mesma sessão do painel. Esta rota só aceita
+ * sessões: a chave mestra é usada apenas para abrir a sessão em /api/tenants.
+ */
+export const masterUpdatesApi = async (action: string, payload: Record<string, unknown> = {}, timeoutMs = 60_000) => {
+    const base = secureCloudUrl(((localStorage.getItem(URL_KEY) || DEFAULT_URL).trim() || DEFAULT_URL).replace(/\/+$/, ''));
+    const secret = (localStorage.getItem(SECRET_KEY) || '').trim();
+    if (!secret) throw new Error('Configure a Chave Mestra em Empresas para ligar o Master ao servidor.');
+    const key = `${base}0000${secret}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        if (!sessions.get(key) || sessions.get(key)!.expiresAt <= Date.now()) {
+            // Abre (ou renova) a sessão pelo caminho normal do painel.
+            const { response, data } = await masterTenantsRequest(base, secret, { action: 'session' });
+            if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
+        }
+        const session = sessions.get(key);
+        if (!session) throw new Error('Este servidor ainda não tem o centro de actualizações (sessões do painel indisponíveis).');
+        const response = await fetch(`${base}/api/updates/admin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-master-session': session.token },
+            body: JSON.stringify({ action, ...payload }),
+            signal: AbortSignal.timeout(timeoutMs),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401 && data.code === 'SESSION_INVALID' && attempt === 0) { sessions.delete(key); continue; }
+        if (response.status === 404 && !data.message) throw new Error('Este servidor ainda não tem o centro de actualizações: publique a versão nova do servidor.');
+        if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
+        return data;
+    }
+    throw new Error('A sessão do painel expirou. Autentique-se novamente.');
+};
+
 export const masterCloudApi = async (action: string, payload: Record<string, unknown> = {}) => {
     const base = ((localStorage.getItem(URL_KEY) || DEFAULT_URL).trim() || DEFAULT_URL).replace(/\/+$/, '');
     const secret = (localStorage.getItem(SECRET_KEY) || '').trim();

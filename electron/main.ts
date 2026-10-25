@@ -30,6 +30,7 @@ import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-toke
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import { assertIntranetLicense } from './intranet-license';
+import { isInstallingUpdate, startUpdater } from './actualizador';
 // @ts-ignore — módulo JS partilhado com a API da VPS (vercel-api/agt.js)
 import { assinarDocumento as agtAssinarDocumento, chamarAgt, descreverChave as agtDescreverChave, hashSaft as agtHashSaft, lerChavePrivada as agtLerChave, AGT_CAMPOS_ASSINATURA } from '../vercel-api/_agt-nucleo.js';
 import bcrypt from 'bcryptjs';
@@ -4691,6 +4692,17 @@ app.whenReady().then(async () => {
     }, msUntil2AM);
   }
   scheduleBackup();
+  // Actualizações do Tango ERP (o Tango Master é distribuído à parte). Antes de reiniciar para instalar,
+  // a base de dados é copiada; se a cópia falhar, a instalação não avança.
+  if (!isTangoMaster) startUpdater({
+    serverUrl: () => readCloudLicense()?.serverUrl || DEFAULT_LICENSE_SERVER,
+    licenseToken: () => readCloudLicense()?.token || null,
+    assertTrustedSender: assertTrustedIpcSender,
+    prepareForInstall: async () => {
+      const result: any = await backupDatabase();
+      if (result && result.success === false) throw new Error(result.error || "a cópia de segurança falhou");
+    },
+  });
   ipcMain.handle("backup-database", async (event) => {
     assertTrustedIpcSender(event);
     const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
@@ -4757,6 +4769,8 @@ app.whenReady().then(async () => {
     }
   });
   app.on("before-quit", async (event) => {
+    // A instalar uma actualização: a cópia de segurança já foi feita e o instalador espera que a aplicação feche.
+    if (isInstallingUpdate()) return;
     event.preventDefault();
     await backupDatabase();
     app.exit(0);
