@@ -1,456 +1,244 @@
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Activity, Eye, FileDown, FileSpreadsheet, Filter, Loader2, Search, ShieldCheck, User } from 'lucide-react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
-import { formatCurrency, formatDate, formatDateTimeFull } from '@/bibliotecas/formatters';
-import { Card, CardContent, CardHeader, CardTitle } from '@/componentes/ui/card';
+import { db } from '@/bibliotecas/bd';
+import { formatLuandaDateTime, luandaTodayKey, addDaysToKey } from '@/bibliotecas/fuso-angola';
 import {
-    Table,
-    TableBody,
-    TableCell,
-    TableHead,
-    TableHeader,
-    TableRow,
-} from '@/componentes/ui/table';
-import { User, Activity, CheckCircle, XCircle, FileText, Filter, FileDown, Eye, Trash2 } from 'lucide-react';
+    ACTIVITY_TYPES, ACTIVITY_TYPE_LABELS, activityLabel, activityOrigin, activityReportDef, activityType, countByType, entityLabel, filterActivity,
+    type ActivityLog, type ActivityType,
+} from '@/bibliotecas/atividade-utilizador';
+import { generateReportFromDef } from '@/componentes/creditos/RelatoriosCreditos';
+import { Card, CardContent, CardHeader, CardTitle } from '@/componentes/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/componentes/ui/table';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { Button } from '@/componentes/ui/button';
+import { Input } from '@/componentes/ui/input';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { useToast } from '@/componentes/ui/use-toast';
-import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
-import { generateUserActivityPDF } from '@/bibliotecas/pdf';
-import {
-    Dialog,
-    DialogContent,
-    DialogHeader,
-    DialogTitle,
-    DialogDescription,
-} from "@/componentes/ui/dialog";
-import { AuditLog } from '@/tipos/credito';
 
+// Início do dia em Angola (UTC+1) no formato guardado no registo de auditoria.
+const dayStartIso = (key: string) => new Date(`${key}T00:00:00+01:00`).toISOString();
+const TYPE_TONE: Partial<Record<ActivityType, string>> = {
+    cadastro: 'bg-emerald-100 text-emerald-800', edicao: 'bg-sky-100 text-sky-800', exclusao: 'bg-red-100 text-red-800', reposicao: 'bg-amber-100 text-amber-800',
+    aprovacao: 'bg-emerald-100 text-emerald-800', rejeicao: 'bg-red-100 text-red-800', exportacao: 'bg-violet-100 text-violet-800', seguranca: 'bg-red-100 text-red-800',
+    sessao_falhada: 'bg-orange-100 text-orange-800',
+};
+const CARD_TYPES: ActivityType[] = ['cadastro', 'edicao', 'exclusao', 'aprovacao', 'exportacao', 'inicio_sessao'];
+
+/**
+ * Relatórios de actividade dos utilizadores: lê o registo de auditoria completo do período, filtra por utilizador,
+ * tipo de acção (cadastro, edição, exclusão…), área e texto, e gera o PDF ou o Excel com esses filtros. O registo de
+ * auditoria é imutável (lei e cadeia de hashes): não se apagam acções.
+ */
 export default function UserActivityReports() {
     const { user } = useAuth();
-    const { users, logs, credits, clients, companySettings, getUserActivityReport, deleteLog, clearUserLogs } = useData();
-    const [roleFilter, setRoleFilter] = useState('all');
-    const [selectedUserId, setSelectedUserId] = useState('all');
-    const [startDate, setStartDate] = useState('');
-    const [endDate, setEndDate] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [reportLogs, setReportLogs] = useState<AuditLog[]>([]);
+    const { users, companySettings } = useData();
     const { toast } = useToast();
+    const today = luandaTodayKey();
+    const [startKey, setStartKey] = useState(addDaysToKey(today, -29));
+    const [endKey, setEndKey] = useState(today);
+    const [userId, setUserId] = useState('all');
+    const [roleFilter, setRoleFilter] = useState('all');
+    const [types, setTypes] = useState<ActivityType[]>([]);
+    const [entity, setEntity] = useState('all');
+    const [search, setSearch] = useState('');
+    const [rows, setRows] = useState<ActivityLog[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [busy, setBusy] = useState<string | null>(null);
+    const [detailUser, setDetailUser] = useState<{ id: string; name: string } | null>(null);
 
-    // Estado da Modal de Alerta
-    const [alertConfig, setAlertConfig] = useState<{
-        isOpen: boolean;
-        title: string;
-        description: string;
-        type: AlertModalType;
-        onConfirm?: () => void;
-        showCancel?: boolean;
-        actionLabel?: string;
-        variant?: 'default' | 'destructive';
-    }>({
-        isOpen: false,
-        title: '',
-        description: '',
-        type: 'success'
-    });
-
-    const [viewUserLogs, setViewUserLogs] = useState<{ isOpen: boolean; userId: string; userName: string }>({
-        isOpen: false,
-        userId: '',
-        userName: ''
-    });
-
-    const fetchReportData = useCallback(async () => {
-        setIsLoading(true);
-        const start = startDate ? new Date(startDate) : undefined;
-        const end = endDate ? new Date(endDate + 'T23:59:59') : undefined;
-
-        const logs = await getUserActivityReport(selectedUserId, start, end);
-        setReportLogs(logs);
-        setIsLoading(false);
-    }, [endDate, getUserActivityReport, selectedUserId, startDate]);
-
+    // Registo completo do período (não só os mais recentes em memória).
     useEffect(() => {
-        fetchReportData();
-    }, [fetchReportData, logs]);
+        let alive = true;
+        setLoading(true);
+        const from = startKey ? dayStartIso(startKey) : '0000';
+        const to = endKey ? dayStartIso(addDaysToKey(endKey, 1)) : '9999';
+        db.all<ActivityLog>(`SELECT id, timestamp, userId, userName, action, entity, details, metadata FROM audit_logs
+            WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp DESC LIMIT 50000`, [from, to])
+            .then(result => { if (alive) setRows(result || []); })
+            .catch(() => { if (alive) setRows([]); })
+            .finally(() => { if (alive) setLoading(false); });
+        return () => { alive = false; };
+    }, [startKey, endKey]);
 
-    const filteredLogs = useMemo(() => {
-        let result = reportLogs;
-        if (roleFilter !== 'all') {
-            // Se filtrarmos por cargo, precisamos cruzar com a lista de users
-            const usersInRole = users.filter(u => u.role === roleFilter).map(u => u.id);
-            result = result.filter(log => usersInRole.includes(log.userId));
+    const roleUserIds = useMemo(() => roleFilter === 'all' ? undefined : users.filter(u => u.role === roleFilter).map(u => u.id), [roleFilter, users]);
+    const filters = useMemo(() => ({
+        userIds: userId !== 'all' ? [userId] : roleUserIds, types, entities: entity !== 'all' ? [entity] : undefined, search, startKey, endKey,
+    }), [userId, roleUserIds, types, entity, search, startKey, endKey]);
+    const filtered = useMemo(() => filterActivity(rows, filters), [rows, filters]);
+    const counts = useMemo(() => countByType(filtered), [filtered]);
+    const entities = useMemo(() => [...new Set(rows.map(row => String(row.entity || '')).filter(Boolean))].sort((a, b) => entityLabel(a).localeCompare(entityLabel(b), 'pt')), [rows]);
+
+    const perUser = useMemo(() => {
+        const map = new Map<string, { id: string; name: string; total: number; counts: Record<ActivityType, number>; last: string }>();
+        for (const log of filtered) {
+            const id = String(log.userId || 'sistema');
+            const entry = map.get(id) || { id, name: log.userName || 'Sistema', total: 0, counts: countByType([]), last: String(log.timestamp) };
+            entry.total += 1; entry.counts[activityType(log)] += 1;
+            if (String(log.timestamp) > entry.last) entry.last = String(log.timestamp);
+            map.set(id, entry);
         }
-        return result;
-    }, [reportLogs, roleFilter, users]);
+        return [...map.values()].sort((a, b) => b.total - a.total);
+    }, [filtered]);
 
-    const handleViewLogs = (userId: string, userName: string) => {
-        setViewUserLogs({ isOpen: true, userId, userName });
-    };
+    const toggleType = (type: ActivityType) => setTypes(previous => previous.includes(type) ? previous.filter(item => item !== type) : [...previous, type]);
 
-    const handleDeleteLog = async (logId: string) => {
+    const download = async (format: 'pdf' | 'xlsx', onlyUser?: { id: string; name: string }) => {
+        if (!user) return;
+        const logs = onlyUser ? filtered.filter(log => String(log.userId || 'sistema') === onlyUser.id) : filtered;
+        if (!logs.length) { toast({ title: 'Sem dados', description: 'Não há acções com estes filtros.', variant: 'destructive' }); return; }
+        setBusy(`${format}-${onlyUser?.id || 'todos'}`);
         try {
-            await deleteLog(logId);
-            toast({ title: "Registro Apagado", description: "O registro de atividade foi removido." });
-            // Atualizar relatório? O hook fetchReportData depende de 'logs' (context), 
-            // se getUserActivityReport buscar do banco, e deleteLog apagar do banco e atualizar state logs -> deve atualizar.
-        } catch (error) {
-            toast({ title: "Erro", description: "Não foi possível apagar o registro.", variant: "destructive" });
-        }
+            const usersText = onlyUser ? onlyUser.name : userId !== 'all' ? (users.find(u => u.id === userId)?.name || 'Utilizador') : roleFilter !== 'all' ? `Todos (${roleFilter === 'admin' ? 'administradores' : roleFilter === 'manager' ? 'gestores' : roleFilter})` : 'Todos os utilizadores';
+            const def = activityReportDef(logs, filters, { users: usersText, scope: onlyUser || userId !== 'all' ? 'one' : 'all' });
+            await generateReportFromDef(def, companySettings, { id: user.id, name: user.name, role: user.role } as any, format);
+            toast({ title: 'Relatório gerado', description: `${logs.length} acção(ões) no relatório.` });
+        } catch (error: any) {
+            toast({ title: 'Não foi possível gerar o relatório', description: error?.message || String(error), variant: 'destructive' });
+        } finally { setBusy(null); }
     };
-
-    const handleClearHistory = (userId: string, userName: string) => {
-        setAlertConfig({
-            isOpen: true,
-            title: `Apagar Histórico de ${userName}`,
-            description: "Tem certeza que deseja apagar TODO o histórico de atividades deste utilizador? Esta ação não pode ser desfeita.",
-            type: "warning",
-            variant: "destructive",
-            showCancel: true,
-            actionLabel: "Sim, Apagar Tudo",
-            onConfirm: async () => {
-                try {
-                    await clearUserLogs(userId);
-                    toast({ title: "Histórico Apagado", description: `Todos os registros de ${userName} foram removidos.` });
-                } catch (error) {
-                    toast({ title: "Erro", description: "Falha ao limpar histórico.", variant: "destructive" });
-                }
-            }
-        });
-    };
-
-    const handleDownloadUserReport = (userId: string, userName: string) => {
-        const userLogs = filteredLogs.filter(l => l.userId === userId);
-        if (userLogs.length === 0) {
-            setAlertConfig({
-                isOpen: true,
-                title: "Sem dados",
-                description: "Este utilizador não possui atividades no período selecionado.",
-                type: "warning"
-            });
-            return;
-        }
-        generateUserActivityPDF(userId, userName, userLogs, companySettings, user?.name);
-        setAlertConfig({
-            isOpen: true,
-            title: "Sucesso",
-            description: `Relatório de ${userName} gerado com sucesso.`,
-            type: "success"
-        });
-    };
-
-    const userStats = useMemo(() => {
-        const stats: Record<string, any> = {};
-
-        // Processar logs filtrados para atividade
-        filteredLogs.forEach(log => {
-            // Apenas pular se não houver userId válido
-            if (!log.userId) return;
-
-            if (!stats[log.userId]) {
-                stats[log.userId] = {
-                    id: log.userId,
-                    name: log.userName || 'Utilizador Desconhecido',
-                    actions: 0,
-                    clientsCreated: 0,
-                    creditsCreated: 0,
-                    creditsApproved: 0,
-                    creditsRejected: 0,
-                    lastActive: log.timestamp
-                };
-            }
-
-            stats[log.userId].actions++;
-            if (log.action === 'create' && log.entity === 'client') stats[log.userId].clientsCreated++;
-            if (log.action === 'create' && log.entity === 'credit') stats[log.userId].creditsCreated++;
-            if (log.details.includes('Aprovou crédito')) stats[log.userId].creditsApproved++;
-            if (log.details.includes('Rejeitou crédito')) stats[log.userId].creditsRejected++;
-
-            if (new Date(log.timestamp) > new Date(stats[log.userId].lastActive)) {
-                stats[log.userId].lastActive = log.timestamp;
-            }
-        });
-
-        return Object.values(stats);
-    }, [filteredLogs]);
 
     if (user?.role !== 'super_admin') {
         return (
-            <MainLayout title="Relatórios de Atividade" subtitle="Acesso restrito">
-                <div className="flex items-center justify-center h-[60vh]">
-                    <p className="text-muted-foreground">Acesso restrito ao Super Administrador.</p>
-                </div>
+            <MainLayout title="Relatórios de Actividade" subtitle="Acesso restrito">
+                <div className="flex h-[60vh] items-center justify-center"><p className="text-muted-foreground">Acesso restrito ao Super Administrador.</p></div>
             </MainLayout>
         );
     }
 
+    const detailLogs = detailUser ? filtered.filter(log => String(log.userId || 'sistema') === detailUser.id) : [];
+
     return (
-        <MainLayout title="Relatórios de Atividade" subtitle="Performance e auditoria de pessoal">
-            <div className="space-y-6">
-                <div className="flex flex-wrap items-end justify-between gap-4">
-                    <div>
-                        <h1 className="text-3xl font-bold tracking-tight text-foreground">Relatórios de Atividade</h1>
-                        <p className="text-muted-foreground">Monitorize a performance e as ações de toda a equipa administrativa.</p>
-                    </div>
+        <MainLayout title="Relatórios de Actividade" subtitle="O que cada utilizador fez no sistema, com filtros e relatórios">
+            <div className="space-y-5">
+                <Card>
+                    <CardContent className="space-y-4 pt-5">
+                        <div className="flex flex-wrap items-end gap-3">
+                            <label className="text-xs font-bold">De<Input type="date" className="mt-1 h-9 w-40" value={startKey} max={endKey || undefined} onChange={event => setStartKey(event.target.value)} /></label>
+                            <label className="text-xs font-bold">Até<Input type="date" className="mt-1 h-9 w-40" value={endKey} min={startKey || undefined} onChange={event => setEndKey(event.target.value)} /></label>
+                            <div className="text-xs font-bold">Utilizador
+                                <Select value={userId} onValueChange={setUserId}>
+                                    <SelectTrigger className="mt-1 h-9 w-52"><SelectValue /></SelectTrigger>
+                                    <SelectContent><SelectItem value="all">Todos os utilizadores</SelectItem>{users.map(u => <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>)}</SelectContent>
+                                </Select>
+                            </div>
+                            <div className="text-xs font-bold">Perfil
+                                <Select value={roleFilter} onValueChange={setRoleFilter}>
+                                    <SelectTrigger className="mt-1 h-9 w-44"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="all">Todos os perfis</SelectItem><SelectItem value="super_admin">Super Administradores</SelectItem>
+                                        <SelectItem value="admin">Administradores</SelectItem><SelectItem value="manager">Gestores</SelectItem><SelectItem value="operator">Operadores</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="text-xs font-bold">Área
+                                <Select value={entity} onValueChange={setEntity}>
+                                    <SelectTrigger className="mt-1 h-9 w-48"><SelectValue /></SelectTrigger>
+                                    <SelectContent><SelectItem value="all">Todas as áreas</SelectItem>{entities.map(item => <SelectItem key={item} value={item}>{entityLabel(item)}</SelectItem>)}</SelectContent>
+                                </Select>
+                            </div>
+                            <label className="min-w-56 flex-1 text-xs font-bold">Pesquisar
+                                <div className="relative mt-1"><Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
+                                    <Input className="h-9 pl-9" value={search} onChange={event => setSearch(event.target.value)} placeholder="Cliente, crédito, descrição…" /></div>
+                            </label>
+                        </div>
+                        <div>
+                            <p className="mb-2 flex items-center gap-1.5 text-xs font-bold"><Filter className="h-3.5 w-3.5" /> Tipo de acção {types.length ? `(${types.length} escolhido(s))` : '(todas)'}</p>
+                            <div className="flex flex-wrap gap-1.5">
+                                {ACTIVITY_TYPES.map(type => (
+                                    <button key={type} type="button" onClick={() => toggleType(type)}
+                                        className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${types.includes(type) ? 'border-primary bg-primary text-primary-foreground' : 'hover:bg-muted'}`}>
+                                        {ACTIVITY_TYPE_LABELS[type]}
+                                    </button>
+                                ))}
+                                {types.length > 0 && <Button variant="ghost" size="sm" className="h-7" onClick={() => setTypes([])}>Limpar</Button>}
+                            </div>
+                        </div>
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t pt-3">
+                            <p className="text-sm text-muted-foreground">{loading ? 'A carregar…' : `${filtered.length} acção(ões) com estes filtros, de ${perUser.length} utilizador(es).`}</p>
+                            <div className="flex gap-2">
+                                <Button size="sm" disabled={!!busy || loading} onClick={() => void download('pdf')}>
+                                    {busy === 'pdf-todos' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <FileDown className="mr-1.5 h-4 w-4" />} Baixar relatório (PDF)
+                                </Button>
+                                <Button size="sm" variant="outline" disabled={!!busy || loading} onClick={() => void download('xlsx')}>
+                                    {busy === 'xlsx-todos' ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-1.5 h-4 w-4 text-emerald-600" />} Excel
+                                </Button>
+                            </div>
+                        </div>
+                    </CardContent>
+                </Card>
 
-                    <div className="flex flex-wrap items-center gap-4">
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">De:</span>
-                            <input
-                                type="date"
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                value={startDate}
-                                onChange={(e) => setStartDate(e.target.value)}
-                            />
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <span className="text-sm font-medium">Até:</span>
-                            <input
-                                type="date"
-                                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                                value={endDate}
-                                onChange={(e) => setEndDate(e.target.value)}
-                            />
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Filter className="h-4 w-4 text-muted-foreground" />
-                            <Select value={selectedUserId} onValueChange={setSelectedUserId}>
-                                <SelectTrigger className="w-52">
-                                    <SelectValue placeholder="Utilizador" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">Todos os Utilizadores</SelectItem>
-                                    {users.map(u => (
-                                        <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div className="flex items-center gap-2">
-                            <Select value={roleFilter} onValueChange={setRoleFilter}>
-                                <SelectTrigger className="w-40">
-                                    <SelectValue placeholder="Cargo" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="all">Todos os Cargos</SelectItem>
-                                    <SelectItem value="admin">Administradores</SelectItem>
-                                    <SelectItem value="manager">Gestores</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                    </div>
+                <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-7">
+                    <Card>
+                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1"><CardTitle className="text-xs font-semibold">Total de acções</CardTitle><Activity className="h-4 w-4 text-muted-foreground" /></CardHeader>
+                        <CardContent><div className="text-2xl font-bold">{filtered.length}</div><p className="text-[11px] text-muted-foreground">No período e filtros</p></CardContent>
+                    </Card>
+                    {CARD_TYPES.map(type => (
+                        <button key={type} type="button" onClick={() => setTypes([type])} className="text-left">
+                            <Card className={types.length === 1 && types[0] === type ? 'border-primary' : ''}>
+                                <CardHeader className="pb-1"><CardTitle className="text-xs font-semibold">{ACTIVITY_TYPE_LABELS[type]}</CardTitle></CardHeader>
+                                <CardContent><div className="text-2xl font-bold">{counts[type]}</div><p className="text-[11px] text-muted-foreground">Clique para filtrar</p></CardContent>
+                            </Card>
+                        </button>
+                    ))}
                 </div>
 
-                <div className="grid gap-4 md:grid-cols-4">
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">Total de Ações</CardTitle>
-                            <Activity className="h-4 w-4 text-muted-foreground" />
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-2xl font-bold">{logs.length}</div>
-                            <p className="text-xs text-muted-foreground">Registadas no sistema</p>
-                        </CardContent>
-                    </Card>
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">Créditos Processados</CardTitle>
-                            <FileText className="h-4 w-4 text-muted-foreground" />
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-2xl font-bold">{credits.length}</div>
-                            <p className="text-xs text-muted-foreground">Vitalício do sistema</p>
-                        </CardContent>
-                    </Card>
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">Aprovações</CardTitle>
-                            <CheckCircle className="h-4 w-4 text-success" />
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-2xl font-bold">{credits.filter(c => c.approvedBy).length}</div>
-                            <p className="text-xs text-muted-foreground">Pelas mãos de Admins</p>
-                        </CardContent>
-                    </Card>
-                    <Card>
-                        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                            <CardTitle className="text-sm font-medium">Rejeições</CardTitle>
-                            <XCircle className="h-4 w-4 text-danger" />
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-2xl font-bold">{credits.filter(c => c.status === 'rejected').length}</div>
-                            <p className="text-xs text-muted-foreground">Solicitações negadas</p>
-                        </CardContent>
-                    </Card>
-                </div>
-
-                <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                <div className="overflow-hidden rounded-xl border bg-card shadow-sm">
                     <Table>
                         <TableHeader>
                             <TableRow className="bg-muted/50">
-                                <TableHead>Colaborador</TableHead>
-                                <TableHead className="text-center">Ações</TableHead>
-                                <TableHead className="text-center">Créditos Criados</TableHead>
-                                <TableHead className="text-center">Aprov./Rejeit.</TableHead>
-                                <TableHead className="text-center">Clientes</TableHead>
-                                <TableHead className="text-right">Última Atividade</TableHead>
-                                <TableHead className="text-right">Ações</TableHead>
+                                <TableHead>Utilizador</TableHead><TableHead className="text-center">Total</TableHead>
+                                {CARD_TYPES.map(type => <TableHead key={type} className="text-center">{ACTIVITY_TYPE_LABELS[type]}</TableHead>)}
+                                <TableHead className="text-right">Última acção</TableHead><TableHead className="text-right">Relatórios</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
-                            {isLoading ? (
-                                <TableRow>
-                                    <TableCell colSpan={7} className="text-center py-10">
-                                        <div className="flex flex-col items-center gap-2">
-                                            <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-                                            <p className="text-sm text-muted-foreground">A carregar atividades...</p>
+                            {loading ? (
+                                <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground"><Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin" />A carregar acções…</TableCell></TableRow>
+                            ) : perUser.length === 0 ? (
+                                <TableRow><TableCell colSpan={10} className="py-10 text-center text-muted-foreground">Nenhuma acção com estes filtros.</TableCell></TableRow>
+                            ) : perUser.map(entry => (
+                                <TableRow key={entry.id}>
+                                    <TableCell><div className="flex items-center gap-2"><span className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary"><User className="h-4 w-4" /></span><span className="font-medium">{entry.name}</span></div></TableCell>
+                                    <TableCell className="text-center font-bold">{entry.total}</TableCell>
+                                    {CARD_TYPES.map(type => <TableCell key={type} className="text-center">{entry.counts[type] || '—'}</TableCell>)}
+                                    <TableCell className="text-right text-xs text-muted-foreground">{formatLuandaDateTime(entry.last)}</TableCell>
+                                    <TableCell className="text-right">
+                                        <div className="flex justify-end gap-1">
+                                            <Button variant="ghost" size="icon" title="Ver as acções" onClick={() => setDetailUser({ id: entry.id, name: entry.name })}><Eye className="h-4 w-4 text-primary" /></Button>
+                                            <Button variant="ghost" size="icon" title="Relatório deste utilizador (PDF)" disabled={!!busy} onClick={() => void download('pdf', entry)}><FileDown className="h-4 w-4" /></Button>
+                                            <Button variant="ghost" size="icon" title="Relatório deste utilizador (Excel)" disabled={!!busy} onClick={() => void download('xlsx', entry)}><FileSpreadsheet className="h-4 w-4 text-emerald-600" /></Button>
                                         </div>
                                     </TableCell>
                                 </TableRow>
-                            ) : userStats.length === 0 ? (
-                                <TableRow>
-                                    <TableCell colSpan={7} className="text-center py-10 text-muted-foreground">
-                                        Nenhuma atividade encontrada no período selecionado.
-                                    </TableCell>
-                                </TableRow>
-                            ) : (
-                                userStats.map((stat) => (
-                                    <TableRow key={stat.id}>
-                                        <TableCell>
-                                            <div className="flex items-center gap-3">
-                                                <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10 text-primary">
-                                                    <User className="h-4 w-4" />
-                                                </div>
-                                                <span className="font-medium">{stat.name}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-center font-bold text-muted-foreground">{stat.actions}</TableCell>
-                                        <TableCell className="text-center font-medium">{stat.creditsCreated}</TableCell>
-                                        <TableCell className="text-center">
-                                            <div className="flex items-center justify-center gap-2">
-                                                <span className="text-success">{stat.creditsApproved}</span>
-                                                <span className="text-muted-foreground">/</span>
-                                                <span className="text-danger">{stat.creditsRejected}</span>
-                                            </div>
-                                        </TableCell>
-                                        <TableCell className="text-center font-medium">{stat.clientsCreated}</TableCell>
-                                        <TableCell className="text-right text-xs text-muted-foreground">
-                                            {formatDate(stat.lastActive)}
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <div className="flex justify-end items-center gap-2">
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={() => handleViewLogs(stat.id, stat.name)}
-                                                    title="Ver todas as atividades"
-                                                >
-                                                    <Eye className="h-4 w-4 text-primary" />
-                                                </Button>
-                                                <Button
-                                                    variant="ghost"
-                                                    size="icon"
-                                                    onClick={() => handleDownloadUserReport(stat.id, stat.name)}
-                                                    title="Baixar Relatório PDF"
-                                                >
-                                                    <FileDown className="h-4 w-4 text-muted-foreground" />
-                                                </Button>
-                                                {user?.role === 'super_admin' && (
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon"
-                                                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                                                        onClick={() => handleClearHistory(stat.id, stat.name)}
-                                                        title="Apagar Histórico Completo"
-                                                    >
-                                                        <Trash2 className="h-4 w-4" />
-                                                    </Button>
-                                                )}
-                                            </div>
-                                        </TableCell>
-                                    </TableRow>
-                                ))
-                            )}
+                            ))}
                         </TableBody>
                     </Table>
                 </div>
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><ShieldCheck className="h-3.5 w-3.5" /> O registo de actividade é protegido e não pode ser apagado nem alterado: é a prova do que cada utilizador fez.</p>
             </div>
-            <AlertModal
-                onClose={() => setAlertConfig(prev => ({ ...prev, isOpen: false }))}
-                {...alertConfig}
-            />
 
-            <Dialog open={viewUserLogs.isOpen} onOpenChange={(open) => !open && setViewUserLogs({ ...viewUserLogs, isOpen: false })}>
-                <DialogContent className="max-w-4xl max-h-[80vh] flex flex-col">
+            <Dialog open={!!detailUser} onOpenChange={open => { if (!open) setDetailUser(null); }}>
+                <DialogContent className="flex max-h-[85vh] max-w-5xl flex-col">
                     <DialogHeader>
-                        <DialogTitle>Histórico de Atividades - {viewUserLogs.userName}</DialogTitle>
-                        <DialogDescription>
-                            Lista completa de ações realizadas por este utilizador no sistema.
-                        </DialogDescription>
+                        <DialogTitle>Acções de {detailUser?.name}</DialogTitle>
+                        <DialogDescription>{detailLogs.length} acção(ões) com os filtros escolhidos.</DialogDescription>
                     </DialogHeader>
-
-                    <div className="flex-1 overflow-auto mt-4 border rounded-md">
+                    <div className="mt-2 flex-1 overflow-auto rounded-md border">
                         <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead className="w-[180px]">Data/Hora</TableHead>
-                                    <TableHead>Ação</TableHead>
-                                    <TableHead>Entidade</TableHead>
-                                    <TableHead>Detalhes</TableHead>
-                                    <TableHead className="text-right w-[80px]">Ações</TableHead>
-                                </TableRow>
-                            </TableHeader>
+                            <TableHeader><TableRow><TableHead className="w-44">Data e hora</TableHead><TableHead>Tipo de acção</TableHead><TableHead>Área</TableHead><TableHead>Descrição</TableHead><TableHead>Origem</TableHead></TableRow></TableHeader>
                             <TableBody>
-                                {reportLogs.filter(l => l.userId === viewUserLogs.userId).length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                                            Nenhum registro encontrado.
-                                        </TableCell>
+                                {detailLogs.map(log => (
+                                    <TableRow key={log.id}>
+                                        <TableCell className="text-xs">{formatLuandaDateTime(log.timestamp)}</TableCell>
+                                        <TableCell><span className={`whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ${TYPE_TONE[activityType(log)] || 'bg-slate-100 text-slate-700'}`}>{activityLabel(log)}</span></TableCell>
+                                        <TableCell className="text-xs text-muted-foreground">{entityLabel(log.entity)}</TableCell>
+                                        <TableCell className="text-xs">{log.details}</TableCell>
+                                        <TableCell className="text-xs text-muted-foreground">{activityOrigin(log)}</TableCell>
                                     </TableRow>
-                                ) : (
-                                    reportLogs
-                                        .filter(l => l.userId === viewUserLogs.userId)
-                                        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
-                                        .map(log => (
-                                            <TableRow key={log.id}>
-                                                <TableCell className="text-xs">
-                                                    {formatDateTimeFull(new Date(log.timestamp))}
-                                                </TableCell>
-                                                <TableCell className="capitalize text-xs font-medium">
-                                                    {log.action === 'create' ? 'Criação' :
-                                                        log.action === 'update' ? 'Atualização' :
-                                                            log.action === 'delete' ? 'Exclusão' :
-                                                                log.action === 'login' ? 'Login' :
-                                                                    log.action === 'logout' ? 'Logout' :
-                                                                        log.action}
-                                                </TableCell>
-                                                <TableCell className="capitalize text-xs text-muted-foreground">
-                                                    {log.entity === 'client' ? 'Cliente' :
-                                                        log.entity === 'credit' ? 'Crédito' :
-                                                            log.entity === 'payment' ? 'Pagamento' :
-                                                                log.entity === 'user' ? 'Utilizador' :
-                                                                    log.entity === 'system' ? 'Sistema' :
-                                                                        log.entity === 'garantia' ? 'Garantia' :
-                                                                            log.entity === 'contencioso' ? 'Contencioso' :
-                                                                                log.entity}
-                                                </TableCell>
-                                                <TableCell className="text-xs">{log.details}</TableCell>
-                                                <TableCell className="text-right">
-                                                    {user?.role === 'super_admin' && (
-                                                        <Button
-                                                            variant="ghost"
-                                                            size="icon"
-                                                            className="h-6 w-6 text-destructive/50 hover:text-destructive"
-                                                            onClick={() => handleDeleteLog(log.id)}
-                                                        >
-                                                            <Trash2 className="h-3 w-3" />
-                                                        </Button>
-                                                    )}
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                )}
+                                ))}
                             </TableBody>
                         </Table>
                     </div>
@@ -459,7 +247,3 @@ export default function UserActivityReports() {
         </MainLayout>
     );
 }
-
-
-
-

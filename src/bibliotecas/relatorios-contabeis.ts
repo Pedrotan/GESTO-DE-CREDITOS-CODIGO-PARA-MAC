@@ -235,7 +235,8 @@ const outstandingOf = (item: InstallmentForecastRow) => Math.max(0,
 export function receivablesForecast(installments: InstallmentForecastRow[], activeCreditIds: Set<string>, now = new Date()) {
     const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const day = 24 * 60 * 60 * 1000;
-    const open = installments.filter(item => activeCreditIds.has(item.creditId) && item.status !== 'paid' && outstandingOf(item) > 0);
+    // Prestações anuladas (reestruturação, liquidação antecipada) não são dinheiro a receber.
+    const open = installments.filter(item => activeCreditIds.has(item.creditId) && item.status !== 'paid' && item.status !== 'cancelled' && outstandingOf(item) > 0);
     const overdueMinor = open.filter(item => new Date(item.dueDate).getTime() < today).reduce((sum, item) => sum + outstandingOf(item), 0);
     const horizons = [7, 30, 60, 90].map(days => ({
         days,
@@ -259,6 +260,83 @@ export function balanceAt(journal: JournalEntry[], account: string, end: Date | 
         for (const line of entry.lines) if (line.account === account) total += signed(line);
     }
     return total;
+}
+
+// ── Verificações que impedem resultados falsos ────────────────────────────────────────────────────────
+export type BalanceAnomaly = { account: string; name: string; balanceMinor: number; message: string; severity: 'high' | 'medium' };
+
+/**
+ * Saldos impossíveis ou suspeitos no fim do período (como num sistema bancário): Caixa ou Bancos credores
+ * (saiu mais dinheiro do que entrou), carteira de crédito credora, juros a receber credores, proveitos devedores
+ * ou custos credores. Indicam um lançamento em falta, duplicado ou na conta errada.
+ */
+export function balanceAnomalies(journal: JournalEntry[], end: Date | null): BalanceAnomaly[] {
+    const totals = new Map<string, number>();
+    for (const entry of journal) {
+        if (end && new Date(entry.timestamp).getTime() > end.getTime()) continue;
+        for (const line of entry.lines) totals.set(line.account, (totals.get(line.account) || 0) + signed(line));
+    }
+    const anomalies: BalanceAnomaly[] = [];
+    for (const [account, balance] of totals) {
+        if (balance === 0) continue;
+        const def = accountDefinition(account);
+        const natural = naturalBalance(account, balance);
+        if (natural >= 0) continue;
+        if (LIQUID_ACCOUNTS.has(account)) anomalies.push({ account, name: def.name, balanceMinor: balance, severity: 'high',
+            message: `${def.name} com saldo credor: saiu mais dinheiro do que entrou. Falta registar uma entrada (capital, transferência ou recebimento) ou há uma saída a mais.` });
+        else if (account === 'portfolio') anomalies.push({ account, name: def.name, balanceMinor: balance, severity: 'high',
+            message: 'Carteira de crédito credora: foi recebido mais capital do que o concedido. Verifique pagamentos duplicados ou desembolsos não lançados.' });
+        else if (def.accountClass === 'activo' && account !== 'provision') anomalies.push({ account, name: def.name, balanceMinor: balance, severity: 'medium',
+            message: `${def.name} com saldo credor, contrário à natureza da conta. Verifique os lançamentos.` });
+        else if (def.accountClass === 'proveitos') anomalies.push({ account, name: def.name, balanceMinor: balance, severity: 'medium',
+            message: `${def.name} com saldo devedor: há mais estornos do que receitas. Confirme os estornos.` });
+        else if (def.accountClass === 'custos') anomalies.push({ account, name: def.name, balanceMinor: balance, severity: 'medium',
+            message: `${def.name} com saldo credor: há mais anulações de custos do que custos.` });
+    }
+    return anomalies.sort((a, b) => (a.severity === b.severity ? Math.abs(b.balanceMinor) - Math.abs(a.balanceMinor) : a.severity === 'high' ? -1 : 1));
+}
+
+/** Lançamentos do período sem partidas dobradas (históricos): não entram nos livros e têm de ser revistos. */
+export function entriesWithoutLines(journal: JournalEntry[], range: DateRange) {
+    const list = journal.filter(entry => !entry.hasLines && (inRange(entry.timestamp, range) || before(entry.timestamp, range)));
+    return { count: list.length, totalMinor: list.reduce((sum, entry) => sum + entry.totalMinor, 0) };
+}
+
+export type BalanceSheetLine = { account: string; code: string; name: string; amountMinor: number };
+/**
+ * Balanço numa data: Activo (líquido de provisões), Passivo e Capital Próprio, com o resultado acumulado dos
+ * proveitos e custos (ainda sem apuramento). Equilibrado quando Activo = Passivo + Capital Próprio.
+ */
+export function balanceSheet(journal: JournalEntry[], end: Date | null) {
+    const totals = new Map<string, number>();
+    for (const entry of journal) {
+        if (end && new Date(entry.timestamp).getTime() > end.getTime()) continue;
+        for (const line of entry.lines) totals.set(line.account, (totals.get(line.account) || 0) + signed(line));
+    }
+    const section = (accountClass: string) => [...totals.entries()]
+        .filter(([account, balance]) => balance !== 0 && accountDefinition(account).accountClass === accountClass)
+        .map(([account, balance]) => {
+            const def = accountDefinition(account);
+            // Activo em débito − crédito (as provisões entram a subtrair); passivo e capital em crédito − débito.
+            return { account, code: def.code, name: def.name, amountMinor: accountClass === 'activo' ? balance : -balance };
+        })
+        .sort((a, b) => a.code.localeCompare(b.code, 'pt', { numeric: true }));
+    const assets = section('activo');
+    const liabilities = section('passivo');
+    const equity = section('capital_proprio');
+    let result = 0;
+    for (const [account, balance] of totals) {
+        const accountClass = accountDefinition(account).accountClass;
+        if (accountClass === 'proveitos' || accountClass === 'custos') result -= balance;
+    }
+    const sum = (lines: BalanceSheetLine[]) => lines.reduce((total, line) => total + line.amountMinor, 0);
+    const assetsMinor = sum(assets);
+    const liabilitiesMinor = sum(liabilities);
+    const equityMinor = sum(equity) + result;
+    return {
+        assets, liabilities, equity, resultMinor: result, assetsMinor, liabilitiesMinor, equityMinor,
+        differenceMinor: assetsMinor - liabilitiesMinor - equityMinor, balanced: assetsMinor === liabilitiesMinor + equityMinor,
+    };
 }
 
 const SHORT_MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];

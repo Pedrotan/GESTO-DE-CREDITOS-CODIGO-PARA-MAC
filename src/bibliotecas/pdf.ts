@@ -5,6 +5,7 @@ import { CompanySettings } from '@/tipos/base-dados';
 import { Client, Credit } from '@/tipos/credito';
 import { formatCurrency, formatDate, formatDateTime } from './formatters';
 import { contractNumberOf } from './pagamentos-analise';
+import { activityLabel, activityOrigin, entityLabel } from './atividade-utilizador';
 import { AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
 import { ANGOLAN_BANKS, getBankLogoUrl, identifyBankFromIBAN } from '@/bibliotecas/ibanHelper';
 import { PROMESSA_CLAUSES_TEMPLATE, PROMESSA_CONTRACT_TITLE, companyShortName, promessaPlaceholderValues } from '@/bibliotecas/contrato-promessa';
@@ -2495,25 +2496,25 @@ export const generateUserActivityPDF = (
     doc.setTextColor(0, 0, 0);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
-    const title = 'RELATÓRIO DE ATIVIDADE DO UTILIZADOR';
+    const title = 'RELATÓRIO DE ACTIVIDADE DO UTILIZADOR';
     doc.text(title, 105, 45, { align: 'center' });
 
     doc.setFontSize(10);
     doc.setFont("helvetica", "normal");
     doc.text(`Utilizador: ${userName}`, 20, 58);
-    doc.text(`ID do Utilizador: ${userId}`, 20, 63);
-    doc.text(`Total de Ações Registadas: ${logs.length}`, 20, 68);
+    doc.text(`Identificador do utilizador: ${userId}`, 20, 63);
+    doc.text(`Total de acções registadas: ${logs.length}`, 20, 68);
     doc.text(`Data de Emissão: ${formatDateTime(new Date())}`, 20, 73);
 
     autoTable(doc, {
         startY: 80,
-        head: [['Data/Hora', 'Ação', 'Entidade', 'Descrição', 'IP']],
+        head: [['Data e hora', 'Tipo de acção', 'Área', 'Descrição', 'Origem']],
         body: logs.map(log => [
             formatDateTime(log.createdAt || log.timestamp),
-            (log.action || '').toUpperCase(),
-            (log.entity || log.targetType || '-').toUpperCase(),
+            activityLabel(log),
+            entityLabel(log.entity || log.targetType),
             log.details || log.description || '-',
-            log.ip || 'Local'
+            log.ip || activityOrigin(log)
         ]),
         headStyles: {
             fillColor: orange,

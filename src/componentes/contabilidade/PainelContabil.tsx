@@ -14,7 +14,7 @@ import { money } from './formato';
 import type { ContabilidadeData } from './useContabilidade';
 
 export type SeccaoContabil =
-    | 'painel' | 'diario' | 'balancete' | 'razao' | 'resultados' | 'fluxo'
+    | 'painel' | 'diario' | 'balancete' | 'balanco' | 'razao' | 'resultados' | 'fluxo'
     | 'lancamentos' | 'reconciliacao' | 'caixa' | 'carteira' | 'abates' | 'cobranca' | 'rentabilidade'
     | 'auditoria' | 'historico' | 'pedidos' | 'trilha' | 'fecho' | 'plano' | 'regras' | 'guia';
 
