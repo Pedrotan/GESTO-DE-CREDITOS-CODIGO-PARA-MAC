@@ -49,6 +49,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_payment ON fiscal_documents(paymentId)",
   "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_request ON fiscal_documents(agtRequestId)",
   "CREATE INDEX IF NOT EXISTS idx_fiscal_series_lookup ON fiscal_series(deviceId, documentType, seriesYear, contingency, status)",
+  "CREATE INDEX IF NOT EXISTS idx_hub_events_client ON hub_collection_events(clientId, createdAt)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_lines_transaction ON ledger_lines(transactionId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_source ON ledger_transactions(sourceType, sourceId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_timestamp ON ledger_transactions(timestamp)",
@@ -125,6 +126,10 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS fiscal_saft_exports ( id TEXT PRIMARY KEY, fiscalYear INTEGER NOT NULL, startDate TEXT NOT NULL, endDate TEXT NOT NULL, basis TEXT NOT NULL, fileName TEXT NOT NULL, fileSize INTEGER NOT NULL, sha256 TEXT NOT NULL, invoicesCount INTEGER NOT NULL DEFAULT 0, paymentsCount INTEGER NOT NULL DEFAULT 0, totalDebitMinor INTEGER NOT NULL DEFAULT 0, totalCreditMinor INTEGER NOT NULL DEFAULT 0, warnings INTEGER NOT NULL DEFAULT 0, xml TEXT NOT NULL, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS fiscal_series ( id TEXT PRIMARY KEY, seriesCode TEXT NOT NULL UNIQUE, seriesYear INTEGER NOT NULL, documentType TEXT NOT NULL, establishment TEXT NOT NULL DEFAULT 'SEDE', contingency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'A' CHECK(status IN ('A','U','F')), firstNumber INTEGER NOT NULL DEFAULT 1, lastNumber INTEGER NOT NULL, nextNumber INTEGER NOT NULL DEFAULT 1, deviceId TEXT NOT NULL, simulated INTEGER NOT NULL DEFAULT 0, agtSyncedAt TEXT, createdAt TEXT NOT NULL, CHECK(nextNumber >= firstNumber) )",
   "CREATE TABLE IF NOT EXISTS fiscal_settings ( id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )",
+  "CREATE TABLE IF NOT EXISTS hub_collection_campaigns (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS hub_collection_clients (clientId TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS hub_collection_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, creditId TEXT, kind TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, metadata TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS hub_collection_settings (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS ledger_lines ( id TEXT PRIMARY KEY, transactionId TEXT NOT NULL, account TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('debit', 'credit')), component TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), FOREIGN KEY(transactionId) REFERENCES ledger_transactions(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS ledger_transactions ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, sourceType TEXT NOT NULL, sourceId TEXT NOT NULL, description TEXT, totalDebitMinor INTEGER NOT NULL CHECK(totalDebitMinor > 0), totalCreditMinor INTEGER NOT NULL CHECK(totalCreditMinor > 0), integrityHash TEXT NOT NULL, previousHash TEXT NOT NULL, hashVersion INTEGER NOT NULL DEFAULT 2, usuario_id TEXT, CHECK(totalDebitMinor = totalCreditMinor) )",
@@ -211,6 +216,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_cash_session_closed_update BEFORE UPDATE ON accounting_cash_sessions WHEN OLD.status = 'closed' BEGIN SELECT RAISE(ABORT, 'Fecho de caixa imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_cash_session_delete BEFORE DELETE ON accounting_cash_sessions BEGIN SELECT RAISE(ABORT, 'O histórico de caixa é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_collection_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_collection_one_pending_promise BEFORE INSERT ON collection_events WHEN NEW.kind = 'promise' AND EXISTS (SELECT 1 FROM collection_events p WHERE p.creditId = NEW.creditId AND p.kind = 'promise' AND NOT EXISTS (SELECT 1 FROM collection_events d WHERE d.relatedId = p.id AND d.kind IN ('promise_kept','promise_broken'))) BEGIN SELECT RAISE(ABORT, 'Este crédito já tem uma promessa em aberto')",
   "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_credit_documents_delete BEFORE DELETE ON credit_documents BEGIN SELECT RAISE(ABORT, 'Os documentos do crédito não podem ser apagados (só arquivados)')",
   "CREATE TRIGGER IF NOT EXISTS trg_credit_manager_transfers_delete BEFORE DELETE ON credit_manager_transfers BEGIN SELECT RAISE(ABORT, 'O histórico de transferências é imutável')",
@@ -226,6 +232,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_immutable BEFORE UPDATE OF documentNo, documentType, seriesId, sequenceNumber, documentDate, systemEntryDate, customerTaxId, customerName, netTotalMinor, taxPayableMinor, grossTotalMinor, payload, jwsSignature, saftHash ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documento fiscal imutável: use uma nota de crédito ou uma correcção')",
   "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_no_delete BEFORE DELETE ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documentos fiscais não podem ser apagados')",
   "CREATE TRIGGER IF NOT EXISTS trg_fiscal_saft_exports_immutable BEFORE UPDATE ON fiscal_saft_exports BEGIN SELECT RAISE(ABORT, 'Exportações SAF-T são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_hub_events_delete BEFORE DELETE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_hub_events_update BEFORE UPDATE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_delete BEFORE DELETE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_update BEFORE UPDATE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_transactions_immutable_delete BEFORE DELETE ON ledger_transactions BEGIN SELECT RAISE(ABORT, 'As transações do ledger são imutáveis')",
@@ -343,7 +351,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO calendar_tasks (id, title, description, date, done, createdAt, usuario_id) VALUES (?,?,?,?,?,?,?)",
   "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-  "INSERT INTO collection_messages (id, clientId, clientName, creditIds, channel, message, attemptNumber, totalDue, sentAt, sentBy, legalTriggered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, terms, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_approvals (id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_documents (id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedBy, uploadedByName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -361,6 +368,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO fiscal_saft_exports (id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, totalDebitMinor, totalCreditMinor, warnings, xml, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO fiscal_series (id, seriesCode, seriesYear, documentType, establishment, contingency, status, firstNumber, lastNumber, nextNumber, deviceId, simulated, agtSyncedAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO fiscal_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
+  "INSERT INTO hub_collection_campaigns (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
+  "INSERT INTO hub_collection_clients (clientId, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(clientId) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
+  "INSERT INTO hub_collection_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
   "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO ledger_lines (id, transactionId, account, side, component, amountMinor) VALUES (?,?,?,?,?,?)",
   "INSERT INTO ledger_transactions (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor, totalCreditMinor, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -425,12 +435,15 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT OR IGNORE INTO audit_alerts (id, alertKey, ruleId, severity, title, description, eventIds, originUserId, originUserName, occurredAt, status, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
   "INSERT OR IGNORE INTO audit_daily_closes (day, lastAuditId, headHash, eventCount, status, brokenSeq, verifiedAt, verifiedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)",
+  "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'legal', ?, ?)",
   "INSERT OR IGNORE INTO company_settings (id, name, nif) VALUES (1, 'Tango Gestão de Créditos', '000000000')",
   "INSERT OR IGNORE INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
   "INSERT OR IGNORE INTO credit_import_items (batchId, creditId) VALUES (?, ?)",
   "INSERT OR IGNORE INTO credit_installments (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor) VALUES (?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO dictionary (word, language) SELECT word, CASE WHEN language = 'ao' THEN 'pt-AO' WHEN language = 'pt' THEN 'pt-PT' WHEN language IN ('pt-AO', 'pt-PT', 'both') THEN language ELSE 'both' END FROM dictionary_old",
   "INSERT OR IGNORE INTO dictionary (word, language) VALUES (?, ?)",
+  "INSERT OR IGNORE INTO hub_collection_events (id, clientId, creditId, kind, channel, status, message, metadata, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT OR IGNORE INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, updatedAt, usuario_id) VALUES (?, ?, ?, 'interpellated', 'high', ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, 1)",
   "INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, ?, 0, ?)",
   "INSERT OR IGNORE INTO rh_alerta (id, tipo, referencia_id, funcionario_id, mensagem, data_alerta, destinatario_perfil, prioridade, accao, estado, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?)",
@@ -509,6 +522,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM fiscal_documents WHERE idempotencyKey = ?",
   "SELECT * FROM fiscal_series ORDER BY seriesYear DESC, documentType, createdAt",
   "SELECT * FROM fiscal_series WHERE deviceId = ? AND documentType = ? AND seriesYear = ? AND contingency = ? AND establishment = ? AND status IN ('A','U') AND nextNumber <= lastNumber ORDER BY simulated, createdAt LIMIT 1",
+  "SELECT * FROM hub_collection_events ORDER BY createdAt DESC",
+  "SELECT * FROM hub_collection_events WHERE id = ?",
   "SELECT * FROM internal_messages ORDER BY timestamp ASC",
   "SELECT * FROM ledger_lines ORDER BY rowid",
   "SELECT * FROM ledger_lines WHERE transactionId = ? ORDER BY id",
@@ -628,6 +643,10 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments",
   "SELECT d.*, s.simulated FROM fiscal_documents d JOIN fiscal_series s ON s.id = d.seriesId WHERE d.documentDate >= ? AND d.documentDate <= ? AND s.simulated = 0 ORDER BY d.documentType, d.seriesId, d.sequenceNumber",
   "SELECT data FROM fiscal_settings WHERE id = ?",
+  "SELECT data FROM hub_collection_campaigns ORDER BY updatedAt DESC",
+  "SELECT data FROM hub_collection_clients",
+  "SELECT data FROM hub_collection_clients WHERE clientId = ?",
+  "SELECT data FROM hub_collection_settings WHERE id = ?",
   "SELECT data_url FROM rh_documento_ficheiro WHERE documento_id = ?",
   "SELECT day FROM accounting_daily_closes WHERE day = ?",
   "SELECT day, status, brokenSeq, verifiedAt FROM audit_daily_closes ORDER BY day DESC LIMIT 1",
@@ -649,6 +668,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id FROM credits WHERE id = ?",
   "SELECT id FROM ledger_transactions WHERE id = ?",
   "SELECT id FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL AND stage <> 'closed'",
+  "SELECT id FROM legal_cases WHERE creditId = ? AND stage <> 'closed' AND deletedAt IS NULL",
   "SELECT id FROM notifications WHERE id = ?",
   "SELECT id FROM payments WHERE idempotencyKey = ?",
   "SELECT id FROM rh_funcionario WHERE numero_mecanografico = ?",
@@ -917,7 +937,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "drop-shadow(0 0 6px rgba(245, 158, 11, 0.55))",
   "insert",
   "select",
-  "select-all-debtors",
   "update",
   "update.available"
 ]);
@@ -1117,6 +1136,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d7b3e9e2ef6a0849595bb5ab79c44fdf198a8e0c8a9b2b01fabef3c7511ed4e9",
     "CREATE INDEX IF NOT EXISTS idx_fiscal_series_lookup ON fiscal_series(deviceId, documentType, seriesYear, contingency, status)"
+  ],
+  [
+    "0a48fe730b64d5afd26c575b43a696901b0cb9bc1867f9a821c818b9ab2d0f5e",
+    "CREATE INDEX IF NOT EXISTS idx_hub_events_client ON hub_collection_events(clientId, createdAt)"
   ],
   [
     "e59f5a8d8de9b9b8df0159cfd945c9285585c9e3519cfdd35a701df7c254e60c",
@@ -1421,6 +1444,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "dc3057db3dfe5bcc05a4763060b5885a6e079ae326405bdf2a377933e4feff49",
     "CREATE TABLE IF NOT EXISTS fiscal_settings ( id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )"
+  ],
+  [
+    "24b32335a158a3ddaf708520a6924d5db86eca5b0d204feb26a4c13d3774c175",
+    "CREATE TABLE IF NOT EXISTS hub_collection_campaigns (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)"
+  ],
+  [
+    "46ea6c4fbf6546d31821f17779701abd8ccb470cebe8d0538e47ec41105ee3cd",
+    "CREATE TABLE IF NOT EXISTS hub_collection_clients (clientId TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)"
+  ],
+  [
+    "2e09bff41230b29525eb7d97bb2ea9a59db8e801bd3e153838efeb8c5df59988",
+    "CREATE TABLE IF NOT EXISTS hub_collection_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, creditId TEXT, kind TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, metadata TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL)"
+  ],
+  [
+    "bf082cc01d892f41cd9d1e4bdc6977cf547f39ae978ac2b42cc519583cfcf180",
+    "CREATE TABLE IF NOT EXISTS hub_collection_settings (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)"
   ],
   [
     "fb7e45c39f9b488c3e81075c0d0373560da4bb5ca01ca39229616fab92888fb7",
@@ -1767,6 +1806,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_collection_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')"
   ],
   [
+    "0cbc413f14e0807c031d1ca4296de0948b8b0a3c6f883ecc7a129e0c4b185e43",
+    "CREATE TRIGGER IF NOT EXISTS trg_collection_one_pending_promise BEFORE INSERT ON collection_events WHEN NEW.kind = 'promise' AND EXISTS (SELECT 1 FROM collection_events p WHERE p.creditId = NEW.creditId AND p.kind = 'promise' AND NOT EXISTS (SELECT 1 FROM collection_events d WHERE d.relatedId = p.id AND d.kind IN ('promise_kept','promise_broken'))) BEGIN SELECT RAISE(ABORT, 'Este crédito já tem uma promessa em aberto')"
+  ],
+  [
     "676134166855a8983159bd9ca52f58bd40bf144cff6fad8d3d035eb54dd2f863",
     "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')"
   ],
@@ -1825,6 +1868,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "0cb46d210ca86b6da1666bc3c80b241aa05dc6d0941bacbeaa3103723afc38b4",
     "CREATE TRIGGER IF NOT EXISTS trg_fiscal_saft_exports_immutable BEFORE UPDATE ON fiscal_saft_exports BEGIN SELECT RAISE(ABORT, 'Exportações SAF-T são imutáveis')"
+  ],
+  [
+    "86c9d0006bc6b614f8756a79dfa21e3d2d14a13503197237501730fc033c2af9",
+    "CREATE TRIGGER IF NOT EXISTS trg_hub_events_delete BEFORE DELETE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')"
+  ],
+  [
+    "7f1fef115e4630c51013bdd114664c52faa782c92d216ee06fe6095bb3ce7458",
+    "CREATE TRIGGER IF NOT EXISTS trg_hub_events_update BEFORE UPDATE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')"
   ],
   [
     "c2c721f2f30495f9ec562c1fe57797d7287d68e3f93f08729552bfdeecd1a1f2",
@@ -2295,10 +2346,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
-    "3638b91193dd13588d45729d26ac146b099ae663265ef201038b28e8247ea227",
-    "INSERT INTO collection_messages (id, clientId, clientName, creditIds, channel, message, attemptNumber, totalDue, sentAt, sentBy, legalTriggered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-  ],
-  [
     "1fef7aba424e6c56360fff4678f06b33ce251c3ad8a123884d6878a94c06edff",
     "INSERT INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, terms, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -2365,6 +2412,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "2f7e71e6819bb45eed44ca6cb36697c7fa8b2162b1ca13c80b7618e301825f64",
     "INSERT INTO fiscal_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
+  ],
+  [
+    "d9fe6cb2c234cd1286604ff6020ba9874d43f5243aea4a4386923f7d42d89c4b",
+    "INSERT INTO hub_collection_campaigns (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
+  ],
+  [
+    "255c2e102df5aad99fa30ff57094ccba9bd81797342b54e112558d67968371e6",
+    "INSERT INTO hub_collection_clients (clientId, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(clientId) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
+  ],
+  [
+    "aa5fe092c88e634b556fe52811688abe70a2ad900c544e6f10b358863ee8775f",
+    "INSERT INTO hub_collection_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
   ],
   [
     "354403cb3fbc65e11a3acb6f2ed18990fe20472096e214c9192ca4884b2e5c20",
@@ -2623,6 +2682,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)"
   ],
   [
+    "092cd4d0987953639d22aad8559c9fa94642a9429f565f9a48540ee05b4897f2",
+    "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'legal', ?, ?)"
+  ],
+  [
     "ccbfe4cd2cec3330b9649b5f5a78bf4da5abcbcee69a46dae6aa481061af3ff0",
     "INSERT OR IGNORE INTO company_settings (id, name, nif) VALUES (1, 'Tango Gestão de Créditos', '000000000')"
   ],
@@ -2645,6 +2708,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "c7efc365a2cacf70dfb2577b5f6d1eb7fdf391b3304070bcddb3f5cc9ebf98e9",
     "INSERT OR IGNORE INTO dictionary (word, language) VALUES (?, ?)"
+  ],
+  [
+    "ce577cfcb33a2bffc6ab45a51697f314767a8e4942e4b32a4664349c11b964e1",
+    "INSERT OR IGNORE INTO hub_collection_events (id, clientId, creditId, kind, channel, status, message, metadata, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "ce31cc5a445ebd1db2be40cacb0a5d81814418f0947e259f22773104ca3800da",
+    "INSERT OR IGNORE INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, updatedAt, usuario_id) VALUES (?, ?, ?, 'interpellated', 'high', ?, ?, ?, ?, ?)"
   ],
   [
     "8061051673c9849357e501ae700a579e45998cca95222b8407e034a3cc7b65b4",
@@ -2957,6 +3028,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "2b29bdadbd17875d0041194ecf8951d1909166c5fa3f2b3072b98ca8c655d9f8",
     "SELECT * FROM fiscal_series WHERE deviceId = ? AND documentType = ? AND seriesYear = ? AND contingency = ? AND establishment = ? AND status IN ('A','U') AND nextNumber <= lastNumber ORDER BY simulated, createdAt LIMIT 1"
+  ],
+  [
+    "0365bf166d09435dd01eab0ac9d947aaa0e2b03f1ead5dfc7778507d3f6cd930",
+    "SELECT * FROM hub_collection_events ORDER BY createdAt DESC"
+  ],
+  [
+    "26f323382d1c1472d3a9d8e9dbebe400bc307e9a702573e69d923e9e18ae35dd",
+    "SELECT * FROM hub_collection_events WHERE id = ?"
   ],
   [
     "42597f4fe4167298886486ecbbafd7d8c62f12964e527109a63d7723d92a8d19",
@@ -3435,6 +3514,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT data FROM fiscal_settings WHERE id = ?"
   ],
   [
+    "a6a0882741cecdfe969b33474d56ac5d4aa4739aeec0a5d4b22a3ccdcbf10f83",
+    "SELECT data FROM hub_collection_campaigns ORDER BY updatedAt DESC"
+  ],
+  [
+    "bd1b133e572fc14dbe9948ce9d4234cce036df6e47d8012c04db03c32f329fb8",
+    "SELECT data FROM hub_collection_clients"
+  ],
+  [
+    "ea89d6570cd3fc6b9ce628216ae0a00eed1451311c54b70e8c6a9128014634bf",
+    "SELECT data FROM hub_collection_clients WHERE clientId = ?"
+  ],
+  [
+    "0583d818510eadf218722d67178c227af6dc9dc581518b5773f2436163c4c952",
+    "SELECT data FROM hub_collection_settings WHERE id = ?"
+  ],
+  [
     "cb2f4cab7cb0f2c54b908b6763633f1490649749afbea38b0913d9a9ae1f794a",
     "SELECT data_url FROM rh_documento_ficheiro WHERE documento_id = ?"
   ],
@@ -3517,6 +3612,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "58a62a73f807521538b754c006e02077867d67b3199a5ceded3d7a4dc8a371f7",
     "SELECT id FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL AND stage <> 'closed'"
+  ],
+  [
+    "d61c4989462471273a31c5333a530a5078129ca92bebc382c1dc35931302445b",
+    "SELECT id FROM legal_cases WHERE creditId = ? AND stage <> 'closed' AND deletedAt IS NULL"
   ],
   [
     "5202cc4abdce53a37ab39a6b28071d6d20df0455b0b050c5fdf30cd5e9c0ff48",
@@ -4589,10 +4688,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "b1a36d25d9633ed2ac04939fcb614ccb2b513243c148f18694592ae037f9d35f",
     "select"
-  ],
-  [
-    "c25dd8c9ed4ff8a034f248fdab3e1ba525f6579a4b8deb0b1c806aec4b6d80bf",
-    "select-all-debtors"
   ],
   [
     "2937013f2181810606b2a799b05bda2849f3e369a20982a4138f0e0a55984ce4",

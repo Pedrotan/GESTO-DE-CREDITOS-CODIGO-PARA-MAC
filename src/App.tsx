@@ -11,6 +11,7 @@ import { GuardaSubscricaoWeb } from "@/componentes/layout/GuardaSubscricaoWeb";
 import { BackupReminder } from "@/componentes/layout/BackupReminder";
 import { AutoBackupManager } from "@/componentes/layout/AutoBackupManager";
 import { FilaFiscalGlobal } from "@/componentes/fiscal/FilaFiscalGlobal";
+import { HubCobrancaGlobal } from "@/componentes/cobranca/HubCobrancaGlobal";
 import { AvisoActualizacao } from "@/componentes/layout/AvisoActualizacao";
 import { SplashScreen } from "@/componentes/layout/SplashScreen";
 import { isPublicWebBuild } from "@/bibliotecas/ambiente";
@@ -135,7 +136,6 @@ const AcessoNegado = ({ permission }: { permission: string }) => {
 
 const AppContent = () => {
   const { companySettings, isDataLoading } = useData();
-  const [forceReady, setForceReady] = useState(false);
   const [tenantAuthorized, setTenantAuthorized] = useState(() => {
     return localStorage.getItem('tango_company_status') === 'ACTIVE' ||
            localStorage.getItem('tango_active_tenant_authorized') === 'true' ||
@@ -158,13 +158,6 @@ const AppContent = () => {
       window.removeEventListener('tango_company_status_changed', handleAuth);
       window.removeEventListener('storage', handleAuth);
     };
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setForceReady(true);
-    }, 2000);
-    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -219,14 +212,15 @@ const AppContent = () => {
     updateFavicon();
   }, [companySettings?.logo]);
 
-  // Splash Screen para evitar a tela branca durante o carregamento inicial intenso
-  if (isDataLoading && !forceReady) {
+  // O fornecedor de dados já tem recuperação e timeout; não abrir páginas com dados ainda incompletos.
+  if (isDataLoading) {
     return <SplashScreen />;
   }
 
   return (
     <TooltipProvider>
       <LigacaoEmpresaWeb />
+      <HubCobrancaGlobal />
       {isPublicWebBuild && tenantAuthorized && <GuardaSubscricaoWeb />}
       {!isCompanyActiveLocally() && tenantAuthorized && <OnboardingWizard />}
       <HashRouter>

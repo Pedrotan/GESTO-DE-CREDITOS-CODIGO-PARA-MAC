@@ -1,9 +1,16 @@
 node_modules
 .git
 .agents
+.claude
 dist
 dist-electron
 release
 .env
 .env.production
+dados-agt
+tmp
+scratch
+release-admin
+dist-admin
+dist-electron-admin
 dados-actualizacoes

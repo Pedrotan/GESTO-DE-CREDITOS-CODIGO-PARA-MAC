@@ -7,9 +7,11 @@ import { BANK_IMPORT_SCHEMA_SQL } from './esquema-extratos.ts';
 import { COLLECTION_SCHEMA_SQL } from './cobranca-operacional.ts';
 import { RH_SALARIOS_SCHEMA_SQL } from './rh/esquema-rh-salarios.ts';
 import { FISCAL_SCHEMA_SQL } from './fiscal/esquema-fiscal.ts';
+import { HUB_COLLECTION_SCHEMA_SQL } from './esquema-hub-cobranca.ts';
 export const LEDGER_GENESIS_HASH = '0'.repeat(64);
 
 export const LEDGER_PROTECTION_SQL = [
+    ...HUB_COLLECTION_SCHEMA_SQL,
     ...COLLECTION_SCHEMA_SQL,
     ...BANK_IMPORT_SCHEMA_SQL,
     ...RECEIPT_SCHEMA_SQL,

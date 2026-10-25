@@ -234,7 +234,7 @@ export function gerarDeclaracaoPdf(d: DadosDeclaracao, settings: unknown, userNa
 export function ficheiroTransferencias(recibos: ReciboPdf[], descricao: string) {
     const linhas = [['IBAN', 'Beneficiario', 'Valor', 'Descricao', 'NumeroRecibo'].join(';'),
         ...recibos.filter(r => r.liquido_minor > 0).map(r => [r.iban || 'SEM IBAN', `"${r.nome.replace(/"/gu, "'")}"`, (r.liquido_minor / 100).toFixed(2), `"${descricao}"`, r.numero_recibo].join(';'))];
-    return `﻿${linhas.join('\r\n')}\r\n`;
+    return `\uFEFF${linhas.join('\r\n')}\r\n`;
 }
 
 export type DadosGuiaFerias = {

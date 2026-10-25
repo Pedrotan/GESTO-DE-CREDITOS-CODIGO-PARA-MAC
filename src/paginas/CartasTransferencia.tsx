@@ -12,6 +12,7 @@ import { generatePermanentTransferLetterPDF, companyBankAccount } from '@/biblio
 import { ServicoCartasTransferencia, CartaTransferencia, ModeloCarta } from '@/servicos/ServicoCartasTransferencia';
 import { printPdfFromUrl } from '@/bibliotecas/pdfPrint';
 import { HistoricoCartas } from '@/componentes/cartas/HistoricoCartas';
+import { EditorCarta } from '@/componentes/cartas/EditorCarta';
 import { useToast } from '@/ganchos/usar-toast';
 import { cn } from '@/bibliotecas/utils';
 import { sanitizeRichHtml } from '@/bibliotecas/sanitizar-html';
@@ -118,13 +119,6 @@ export function CartasTransferencia() {
     const [activeTab, setActiveTab] = useState<'editor' | 'history'>('editor');
     const initNewLetterRef = useRef<(client?: Client | null, credit?: Credit | null, templateId?: string) => void>(() => undefined);
 
-    // O conteúdo editável pertence ao estado e deve ser reposto quando o separador remonta.
-    useEffect(() => {
-        if (activeTab === 'editor' && editorRef.current) {
-            const html = sanitizeRichHtml(bodyHtml);
-            if (editorRef.current.innerHTML !== html) editorRef.current.innerHTML = html;
-        }
-    }, [activeTab, bodyHtml]);
     // Fechar dropdown Select2 ao clicar fora
     useEffect(() => {
         const handleClickOutside = (e: MouseEvent) => {
@@ -168,9 +162,6 @@ export function CartasTransferencia() {
         const safeBodyHtml = sanitizeRichHtml(templ.bodyHtml);
         setBodyHtml(safeBodyHtml);
 
-        if (editorRef.current) {
-            editorRef.current.innerHTML = safeBodyHtml;
-        }
     };
     initNewLetterRef.current = initNewLetter;
 
@@ -283,9 +274,6 @@ export function CartasTransferencia() {
         if (previewEditableRef.current) {
             const html = sanitizeRichHtml(previewEditableRef.current.innerHTML);
             setBodyHtml(html);
-            if (editorRef.current && editorRef.current.innerHTML !== html) {
-                editorRef.current.innerHTML = html;
-            }
         }
     };
 
@@ -395,10 +383,8 @@ export function CartasTransferencia() {
         const safeBodyHtml = sanitizeRichHtml(letter.bodyHtml);
         setBodyHtml(safeBodyHtml);
 
-        if (editorRef.current) {
-            editorRef.current.innerHTML = safeBodyHtml;
-        }
-
+        setCreditRef(letter.creditReference || 'Ref. Contrato');
+        setSelectedTemplateId(letter.templateId || 'modelo_ordem_permanente');
         setActiveTab('editor');
 
         toast({
@@ -862,9 +848,10 @@ export function CartasTransferencia() {
                                     </div>
 
                                     {/* Editor ContentEditable Word com Altura Aumentada e Confortável */}
-                                    <div
+                                    <EditorCarta
                                         ref={editorRef}
-                                        contentEditable
+                                        html={bodyHtml}
+                                        aria-label="Texto da carta"
                                         onInput={handleEditorInput}
                                         className="p-8 sm:p-10 pb-28 bg-background text-foreground font-serif text-[12.5px] leading-relaxed focus:outline-hidden overflow-y-auto transition-all duration-200 shadow-inner"
                                         style={{
@@ -1038,13 +1025,12 @@ export function CartasTransferencia() {
                                             </div>
 
                                             {/* Conteúdo HTML editável em tempo real na própria folha A4 */}
-                                            <div
+                                            <EditorCarta
                                                 ref={previewEditableRef}
-                                                contentEditable
-                                                suppressContentEditableWarning
+                                                html={bodyHtml}
+                                                aria-label="Pré-visualização editável da carta"
                                                 onInput={handlePreviewEditableInput}
                                                 className="carta-preview-html text-slate-900 leading-normal focus:outline-hidden focus:ring-1 focus:ring-blue-300 rounded p-1"
-                                                dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(bodyHtml) }}
                                             />
                                         </div>
 

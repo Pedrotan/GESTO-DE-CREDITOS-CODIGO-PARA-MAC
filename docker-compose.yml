@@ -37,6 +37,9 @@ services:
       - NODE_ENV=production
       - PORT=3000
       - HOST=0.0.0.0
+      - WHATSAPP_ENCRYPTION_KEY=${WHATSAPP_ENCRYPTION_KEY:-}
+      - WHATSAPP_WORKER_ENABLED=${WHATSAPP_WORKER_ENABLED:-false}
+      - AGT_KEYS_DIR=/app/dados-agt
       # Instaladores das versões (uma pasta por versão, com latest.yml), copiados para a VPS antes de registar.
       - TANGO_UPDATES_DIR=/app/dados-actualizacoes
       - DATABASE_URL=postgresql://${DB_USER:-tango_user}:${DB_PASSWORD:?Defina DB_PASSWORD no ficheiro .env}@db:5432/${DB_NAME:-tangodb}
@@ -57,15 +60,13 @@ services:
       - MAIL_PASSWORD=${MAIL_PASSWORD:-}
       - MAIL_FROM_ADDRESS=${MAIL_FROM_ADDRESS:-}
       - MAIL_ENCRYPTION=${MAIL_ENCRYPTION:-starttls}
-      # Facturação electrónica AGT: chaves privadas por empresa (ficam fora da imagem, no disco da VPS).
-      - AGT_KEYS_DIR=/app/dados-agt
     volumes:
       - ./server.mjs:/app/server.mjs:ro
       - ./vercel-api:/app/vercel-api:ro
+      # As chaves fiscais sobrevivem à reconstrução e substituição do contentor.
+      - tango_agt_keys:/app/dados-agt
       # Só leitura: o servidor nunca altera os instaladores; são copiados por SSH para /var/www/tango-erp/dados-actualizacoes.
       - ./dados-actualizacoes:/app/dados-actualizacoes:ro
-      # Chaves da AGT importadas pela página Relatórios Fiscais: persistem entre reconstruções da imagem.
-      - ./dados-agt:/app/dados-agt
       # O site (vercel-web) NÃO é montado da VPS: vem sempre do build da imagem. Montar a pasta do servidor
       # escondia o site acabado de gerar e servia uma versão antiga (ex.: preload antigo, erro de versão da BD local).
     depends_on:
@@ -75,6 +76,8 @@ services:
       - tango_network
 
 volumes:
+  tango_agt_keys:
+    name: tango_agt_keys
   tango_pgdata:
     name: tango_pgdata
 

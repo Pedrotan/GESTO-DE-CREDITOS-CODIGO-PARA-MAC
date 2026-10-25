@@ -1,4 +1,5 @@
 import { BankLogo } from '@/componentes/BankLogo';
+import { PreferenciasCliente } from '@/componentes/cobranca/PreferenciasCliente';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { estadoBI, validadeSugerida, validarDatasBI } from '@/bibliotecas/rh/bi-validade';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
@@ -716,6 +717,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
         <Form {...form}>
             <form onSubmit={form.handleSubmit(handleFormSubmit)} className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50/50">
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 min-h-0">
+                    {initialData?.id && <PreferenciasCliente clientId={initialData.id} />}
                     
                     {/* ========================================================================= */}
                     {/* SEÇÃO 1: DADOS PESSOAIS E IDENTIFICAÇÃO */}

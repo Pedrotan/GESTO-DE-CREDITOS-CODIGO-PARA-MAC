@@ -1,4 +1,3 @@
-/// <reference path="./electron-env.d.ts" />
 /// <reference types="node" />
 
 import { auditSqlHash } from '../src/bibliotecas/cadeia-auditoria';

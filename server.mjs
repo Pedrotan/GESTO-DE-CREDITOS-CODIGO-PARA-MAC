@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { toNeonResult } from './vercel-api/_ponte-pg.js';
 import { applyCors } from './vercel-api/_security.js';
+import { startCollectionWorker } from './vercel-api/_cobranca-cloud.js';
 
 // Tango Gestão e Créditos ERP - Servidor de Produção VPS (Hostinger / Linux)
 // Suporta execução contínua com Node.js nativo, Docker e PM2.
@@ -173,6 +174,11 @@ const initDatabaseBridge = async () => {
 };
 
 await initDatabaseBridge();
+if (process.env.DATABASE_URL) {
+  const { neon } = await import('@neondatabase/serverless');
+  const hubClient = neon(process.env.DATABASE_URL);
+  startCollectionWorker((q, p = []) => hubClient.query(q, p));
+}
 
 // Importar os handlers de API
 const handlers = {};
@@ -201,6 +207,8 @@ await loadHandler('usage-report', path.join(apiBaseDir, 'usage-report.js'));
 await loadHandler('lookup-document', path.join(apiBaseDir, 'lookup-document.js'));
 await loadHandler('licencas', path.join(apiBaseDir, 'licencas.js'));
 await loadHandler('agt', path.join(apiBaseDir, 'agt.js'));
+await loadHandler('cobranca', path.join(apiBaseDir, 'cobranca.js'));
+await loadHandler('whatsapp-webhook', path.join(apiBaseDir, 'whatsapp-webhook.js'));
 // Centro de actualizações (desktop e web): separado da sincronização de dados.
 await loadHandler('updates', path.join(apiBaseDir, 'updates.js'));
 
@@ -347,8 +355,14 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH') {
       try {
         const chunks = [];
-        for await (const chunk of req) chunks.push(chunk);
-        const raw = Buffer.concat(chunks).toString('utf8');
+        let bodySize = 0;
+        for await (const chunk of req) {
+          bodySize += chunk.length;
+          if (bodySize > 8 * 1024 * 1024) return res.status(413).json({ success: false, message: 'Pedido demasiado grande.' });
+          chunks.push(chunk);
+        }
+        req.rawBody = Buffer.concat(chunks);
+        const raw = req.rawBody.toString('utf8');
         if (raw) body = JSON.parse(raw);
       } catch (err) {
         return res.status(400).json({ success: false, message: 'Corpo da requisição JSON inválido.' });

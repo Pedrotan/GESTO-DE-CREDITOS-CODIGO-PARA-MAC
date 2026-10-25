@@ -1,4 +1,3 @@
-/// <reference path="./electron-env.d.ts" />
 /// <reference types="node" />
 
 import { EMPTY_USAGE, canApproveAtLevel, diffPolicies, evaluateOperation, needsSecondApproval, parsePolicy, policyFromRows, requiredLevelFor } from '../src/bibliotecas/alcadas';
@@ -1037,6 +1036,11 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   closed_months: "manage_fiscal",
   accounting_cash_sessions: "manage_payments",
   collection_events: "manage_credits",
+  legal_cases: "manage_legal",
+  hub_collection_settings: "manage_payments",
+  hub_collection_clients: "manage_clients",
+  hub_collection_campaigns: "manage_payments",
+  hub_collection_events: "manage_payments",
   accounting_bank_imports: "manage_fiscal",
   accounting_receipts: "manage_fiscal",
   audit_log_chain: "manage_fiscal",
@@ -1150,7 +1154,8 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if(statement.params?.[3]!==actor.id) throw new Error('O extrato deve ser importado pelo utilizador autenticado.');
     }
     if (table === 'collection_events') {
-      const actor = assertUserPermission(event, 'manage_credits');
+      const actor = assertUserPermission(event);
+      if (!hasPermission(actor, 'manage_credits') && !hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para registar cobranças.');
       if (statement.params?.[10] !== actor.id) throw new Error('O responsável pelo registo de cobrança deve ser o utilizador autenticado.');
       if (['assignment','target'].includes(String(statement.params?.[2])) && !['admin','super_admin'].includes(String(actor.role)))
         throw new Error('Atribuições e metas exigem um administrador.');
@@ -1169,6 +1174,17 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if (statement.params?.[statement.params.length - 2] !== actor.id) throw new Error("O pedido tem de ser feito pelo utilizador autenticado.");
       continue;
     }
+    if (table.startsWith('hub_collection_')) {
+      const actor = assertUserPermission(event);
+      if (table === 'hub_collection_clients' || (table === 'hub_collection_events' && statement.params?.[3] === 'consent')) {
+        if (!hasPermission(actor, 'manage_clients') && !hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para preferências de contacto.');
+      } else if (!hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para o Hub de Cobrança.');
+      if (['hub_collection_settings', 'hub_collection_campaigns'].includes(table) && !['admin', 'super_admin'].includes(String(actor.role))) throw new Error('Régua e campanhas exigem um administrador.');
+      const actorId = table === 'hub_collection_events' ? statement.params?.[9] : statement.params?.[3];
+      if (actorId !== actor.id) throw new Error('O registo deve identificar o utilizador autenticado.');
+      continue;
+    }
+    if (table === 'collection_events') continue;
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
   }
 };

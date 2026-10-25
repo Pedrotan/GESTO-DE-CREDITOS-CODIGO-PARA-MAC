@@ -12,6 +12,7 @@
   <link rel="icon" type="image/png" href="/favicon.png" />
   <link rel="apple-touch-icon" href="/pwa-192.png" />
   <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="/src/componentes/layout/carregamento.css" />
   <!-- TODO: Defina o título do documento com o nome do seu aplicativo -->
   <title>Tango Gestão de Creditos ERP</title>
   <meta name="description" content="Sistema de Gestão de Crédito Profissional" />
@@ -24,7 +25,28 @@
 </head>
 
 <body>
-  <div id="root"></div>
+  <div id="root">
+    <div class="tango-skeleton" role="status" aria-live="polite" aria-busy="true" aria-label="A carregar o sistema">
+      <aside class="tango-skeleton-sidebar" aria-hidden="true">
+        <span class="tango-skeleton-block tango-skeleton-brand"></span>
+        <span class="tango-skeleton-block tango-skeleton-nav"></span><span class="tango-skeleton-block tango-skeleton-nav"></span><span class="tango-skeleton-block tango-skeleton-nav"></span><span class="tango-skeleton-block tango-skeleton-nav"></span>
+      </aside>
+      <div class="tango-skeleton-main">
+        <div aria-hidden="true">
+          <div class="tango-skeleton-header"><span class="tango-skeleton-block tango-skeleton-heading"></span><span class="tango-skeleton-block tango-skeleton-avatar"></span></div>
+          <span class="tango-skeleton-block tango-skeleton-caption"></span>
+          <div class="tango-skeleton-cards">
+            <div class="tango-skeleton-card"><span class="tango-skeleton-block"></span><span class="tango-skeleton-block"></span></div>
+            <div class="tango-skeleton-card"><span class="tango-skeleton-block"></span><span class="tango-skeleton-block"></span></div>
+            <div class="tango-skeleton-card"><span class="tango-skeleton-block"></span><span class="tango-skeleton-block"></span></div>
+            <div class="tango-skeleton-card"><span class="tango-skeleton-block"></span><span class="tango-skeleton-block"></span></div>
+          </div>
+          <div class="tango-skeleton-table"><span class="tango-skeleton-block tango-skeleton-row"></span><span class="tango-skeleton-block tango-skeleton-row"></span><span class="tango-skeleton-block tango-skeleton-row"></span><span class="tango-skeleton-block tango-skeleton-row"></span></div>
+        </div>
+        <p class="tango-skeleton-message">A preparar o sistema. Aguarde um momento…</p>
+      </div>
+    </div>
+  </div>
   <script type="module" src="/src/main.tsx"></script>
 </body>
 
