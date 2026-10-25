@@ -22,7 +22,8 @@ type Device = {
     team: boolean; tenant_team: boolean; label: string | null; state: string | null; state_reason: string | null; acked_version: string | null; last_seen: string;
 };
 type AuditRow = { id: string; at: string; action: string; version: string | null; details: string; ip: string | null };
-type Overview = { releases: Release[]; devices: Device[]; teamTenants: Array<{ tenant_id: string }>; audit: AuditRow[]; eventClients: number };
+type Company = { tenant_id: string; name: string; status: string; team: boolean; devices: number };
+type Overview = { releases: Release[]; devices: Device[]; teamTenants: Array<{ tenant_id: string }>; companies?: Company[]; audit: AuditRow[]; eventClients: number };
 
 const STATE_LABEL: Record<string, string> = {
     up_to_date: 'Actualizado', available: 'Disponível', downloading: 'A descarregar', downloaded: 'Pronta a instalar', installing: 'A instalar',
@@ -59,6 +60,14 @@ export default function CentroActualizacoes() {
     };
 
     const latest = data?.releases?.[0] ?? null;
+    const companies = useMemo(() => {
+        const term = teamTenant.trim().toLowerCase();
+        return (data?.companies || []).filter(company => !term || company.name.toLowerCase().includes(term) || company.tenant_id.toLowerCase().includes(term));
+    }, [data, teamTenant]);
+    const orphanTeam = useMemo(() => {
+        const known = new Set((data?.companies || []).map(company => company.tenant_id));
+        return (data?.teamTenants || []).filter(row => !known.has(row.tenant_id));
+    }, [data]);
     const counts = useMemo(() => {
         const map = new Map<string, number>();
         for (const device of data?.devices || []) if (device.app_version) map.set(device.app_version, (map.get(device.app_version) || 0) + 1);
@@ -192,20 +201,53 @@ export default function CentroActualizacoes() {
                     <CardTitle className="flex items-center gap-2"><Users className="h-5 w-5" /> Equipa de desenvolvimento e computadores</CardTitle>
                     <CardDescription>
                         Os computadores marcados como equipa (ou de uma empresa marcada como equipa) recebem as versões antes de todos. O identificador de cada
-                        computador aparece no Tango ERP em Definições › Actualizações.
+                        computador aparece no Tango ERP em Definições › Sobre › Actualizações.
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className="flex flex-wrap items-center gap-2">
-                        <Input className="w-56" placeholder="NIF / ID da empresa" value={teamTenant} onChange={event => setTeamTenant(event.target.value)} />
-                        <Button variant="outline" disabled={!teamTenant.trim() || !!busy} onClick={() => void run('tenant', 'tenant-set-team', { tenantId: teamTenant, team: true }).then(ok => ok && setTeamTenant(''))}>Marcar empresa como equipa</Button>
-                        {(data?.teamTenants || []).map(row => (
-                            <Badge key={row.tenant_id} variant="outline" className="gap-1">
-                                {row.tenant_id}
-                                <button type="button" aria-label={`Retirar ${row.tenant_id} da equipa`} onClick={() => void run('tenant', 'tenant-set-team', { tenantId: row.tenant_id, team: false })}>×</button>
-                            </Badge>
-                        ))}
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <h3 className="font-bold">Empresas cadastradas ({data?.companies?.length ?? 0})</h3>
+                        <Input className="w-64" placeholder="Pesquisar por nome ou NIF" value={teamTenant} onChange={event => setTeamTenant(event.target.value)} />
                     </div>
+                    <div className="max-h-96 overflow-auto rounded-xl border">
+                        <Table>
+                            <TableHeader><TableRow>
+                                <TableHead>Equipa</TableHead><TableHead>Empresa</TableHead><TableHead>NIF / ID</TableHead><TableHead>Estado</TableHead><TableHead className="text-center">Computadores</TableHead>
+                            </TableRow></TableHeader>
+                            <TableBody>
+                                {companies.length === 0 ? (
+                                    <TableRow><TableCell colSpan={5} className="py-8 text-center text-sm text-slate-500">{teamTenant ? 'Nenhuma empresa corresponde à pesquisa.' : 'Nenhuma empresa cadastrada no servidor.'}</TableCell></TableRow>
+                                ) : companies.map(company => (
+                                    <TableRow key={company.tenant_id}>
+                                        <TableCell>
+                                            <Switch checked={company.team} disabled={!!busy} aria-label={`${company.name}: equipa de desenvolvimento`}
+                                                onCheckedChange={checked => void run(`tenant-${company.tenant_id}`, 'tenant-set-team', { tenantId: company.tenant_id, team: checked })} />
+                                        </TableCell>
+                                        <TableCell className="font-semibold">{company.name}</TableCell>
+                                        <TableCell className="font-mono text-xs">{company.tenant_id}</TableCell>
+                                        <TableCell className="text-xs">{company.status === 'active' ? 'Activa' : company.status === 'blocked' ? 'Bloqueada' : company.status}</TableCell>
+                                        <TableCell className="text-center font-mono text-xs">{company.devices}</TableCell>
+                                    </TableRow>
+                                ))}
+                            </TableBody>
+                        </Table>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                        Os computadores de uma empresa marcada como equipa recebem as versões novas antes de todos, logo que abram o Tango ERP 3.0.4 ou mais recente
+                        com a licença da empresa. Para marcar só um computador, use a tabela abaixo.
+                    </p>
+                    {orphanTeam.length > 0 && (
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                            <span className="text-slate-500">Marcadas como equipa mas sem cadastro:</span>
+                            {orphanTeam.map(row => (
+                                <Badge key={row.tenant_id} variant="outline" className="gap-1">
+                                    {row.tenant_id}
+                                    <button type="button" aria-label={`Retirar ${row.tenant_id} da equipa`} onClick={() => void run('tenant', 'tenant-set-team', { tenantId: row.tenant_id, team: false })}>×</button>
+                                </Badge>
+                            ))}
+                        </div>
+                    )}
+                    <h3 className="pt-2 font-bold">Computadores com o Tango ERP 3.0.4 ou mais recente</h3>
                     <div className="overflow-x-auto rounded-xl border">
                         <Table>
                             <TableHeader><TableRow>

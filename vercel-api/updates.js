@@ -97,7 +97,7 @@ const handleAdmin = async (req, res, sql, ip) => {
   };
 
   if (action === 'overview') {
-    const [releases, devices, teamTenants, auditRows] = await Promise.all([
+    const [releases, devices, teamTenants, auditRows, companies] = await Promise.all([
       listReleases(sql),
       sql(`SELECT d.device_id, d.kind, d.platform, d.arch, d.app_version, d.tenant_id, d.team, d.label, d.state, d.state_reason,
           d.target_version, d.acked_version, d.acked_at, d.last_seen, t.name AS tenant_name,
@@ -106,8 +106,13 @@ const handleAdmin = async (req, res, sql, ip) => {
         ORDER BY d.last_seen DESC LIMIT 500`).catch(() => sql('SELECT *, NULL AS tenant_name, FALSE AS tenant_team FROM tango_update_devices ORDER BY last_seen DESC LIMIT 500')),
       sql('SELECT tenant_id, added_at FROM tango_update_team_tenants ORDER BY added_at DESC'),
       sql('SELECT id, at, action, version, details, ip FROM tango_update_audit ORDER BY id DESC LIMIT 200'),
+      // Empresas já cadastradas no Tango Master: aparecem todas, prontas a marcar como equipa.
+      sql(`SELECT t.tenant_id, t.name, t.status,
+          EXISTS (SELECT 1 FROM tango_update_team_tenants tt WHERE tt.tenant_id = t.tenant_id) AS team,
+          (SELECT COUNT(*)::int FROM tango_update_devices d WHERE d.tenant_id = t.tenant_id) AS devices
+        FROM tango_tenants t ORDER BY t.name ASC`).catch(() => []),
     ]);
-    return send(res, 200, { success: true, releases, devices, teamTenants, audit: auditRows, eventClients: eventClients.size });
+    return send(res, 200, { success: true, releases, devices, teamTenants, companies, audit: auditRows, eventClients: eventClients.size });
   }
 
   if (action === 'release-register') {

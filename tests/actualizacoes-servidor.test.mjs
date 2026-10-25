@@ -287,3 +287,16 @@ test('aviso em tempo real: ligar o interruptor chega aos clientes ligados, sem e
         server.close();
     }
 });
+
+test('o painel lista as empresas já cadastradas, com a marca de equipa e os computadores', async () => {
+    await sql(`INSERT INTO tango_tenants (tenant_id, tenant_hash, name, key_hash) VALUES ('5000000099', 'h99', 'Aaa Microcrédito', 'k') ON CONFLICT DO NOTHING`);
+    const { body } = await admin({ action: 'overview' });
+    const byId = Object.fromEntries(body.companies.map(company => [company.tenant_id, company]));
+    assert.equal(byId['5000000099'].name, 'Aaa Microcrédito');
+    assert.equal(byId['5000000099'].team, false);
+    assert.equal(byId['5003207439'].team, true, 'marcada como equipa num teste anterior');
+    assert.equal(byId['5003207439'].devices, 1, 'o computador registado com o token da empresa');
+    assert.equal(body.companies[0].name, 'Aaa Microcrédito', 'ordenadas por nome');
+    await admin({ action: 'tenant-set-team', tenantId: '5000000099', team: true });
+    assert.equal((await admin({ action: 'overview' })).body.companies.find(company => company.tenant_id === '5000000099').team, true);
+});

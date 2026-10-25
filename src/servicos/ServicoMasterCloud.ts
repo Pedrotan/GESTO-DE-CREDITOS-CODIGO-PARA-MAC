@@ -62,18 +62,23 @@ export const masterTenantsRequest = async (baseUrl: string, secret: string, body
  * sessões: a chave mestra é usada apenas para abrir a sessão em /api/tenants.
  */
 export const masterUpdatesApi = async (action: string, payload: Record<string, unknown> = {}, timeoutMs = 60_000) => {
-    const base = secureCloudUrl(((localStorage.getItem(URL_KEY) || DEFAULT_URL).trim() || DEFAULT_URL).replace(/\/+$/, ''));
+    // O centro de actualizações só existe na VPS: um endereço antigo da Vercel passa para o servidor oficial.
+    const saved = (localStorage.getItem(URL_KEY) || '').trim();
+    const base = secureCloudUrl((!saved || saved.includes('vercel.app') ? DEFAULT_URL : saved).replace(/\/+$/, ''));
     const secret = (localStorage.getItem(SECRET_KEY) || '').trim();
     if (!secret) throw new Error('Configure a Chave Mestra em Empresas para ligar o Master ao servidor.');
-    const key = `${base}0000${secret}`;
+    const key = `${base}\u0000${secret}`;
     for (let attempt = 0; attempt < 2; attempt++) {
-        if (!sessions.get(key) || sessions.get(key)!.expiresAt <= Date.now()) {
-            // Abre (ou renova) a sessão pelo caminho normal do painel.
-            const { response, data } = await masterTenantsRequest(base, secret, { action: 'session' });
-            if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
+        let session = sessions.get(key);
+        if (!session || session.expiresAt <= Date.now()) {
+            // A chave mestra só viaja aqui, para abrir a sessão (mesma sessão dos outros ecrãs do painel).
+            const secretHeaders: Record<string, string> = /^[\x20-\x7e]*$/.test(secret) ? { Authorization: `Bearer ${secret}` } : {};
+            const opened = await postTenants(base, secretHeaders, { action: 'session', masterSecret: secret }, timeoutMs);
+            if (!opened.response.ok || !opened.data.success) throw new Error(opened.data.message || `O servidor recusou a sessão (${opened.response.status}).`);
+            if (!opened.data.sessionToken) throw new Error(`O servidor ${base} não abre sessões do painel: confirme o endereço do servidor em Empresas Cloud.`);
+            session = { token: String(opened.data.sessionToken), expiresAt: (Date.parse(opened.data.sessionExpiresAt) || Date.now() + 3_600_000) - 60_000 };
+            sessions.set(key, session);
         }
-        const session = sessions.get(key);
-        if (!session) throw new Error('Este servidor ainda não tem o centro de actualizações (sessões do painel indisponíveis).');
         const response = await fetch(`${base}/api/updates/admin`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'x-master-session': session.token },
