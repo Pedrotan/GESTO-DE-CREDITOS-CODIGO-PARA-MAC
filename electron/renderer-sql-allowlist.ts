@@ -698,6 +698,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, status, daysOverdue, clientName FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue')",
   "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp",
+  "SELECT id, timestamp, userId, userName, action, entity, details, metadata FROM audit_logs WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp DESC LIMIT 50000",
   "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs",
   "SELECT id, timestamp, userName, action, details FROM audit_logs WHERE details LIKE 'Fiscal:%' ORDER BY timestamp DESC LIMIT 300",
   "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp",
@@ -3711,6 +3712,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "1c6cd7487d8c304c871361e6c8caf23a6cf43f6eca836c431a34caafd22bdb0a",
     "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp"
+  ],
+  [
+    "8c3dd6691eac6de4b77e9d0afdc50459a41cf021bbf142438a1338f2f932d92d",
+    "SELECT id, timestamp, userId, userName, action, entity, details, metadata FROM audit_logs WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp DESC LIMIT 50000"
   ],
   [
     "32395461387ddf8df5d5819422a58f230ae70df0193344be202147b2c2c5c8de",

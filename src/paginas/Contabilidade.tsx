@@ -14,7 +14,7 @@ import { cn } from '@/bibliotecas/utils';
 import { useContabilidade } from '@/componentes/contabilidade/useContabilidade';
 import { CartoesContabeis, PainelContabil, type SeccaoContabil } from '@/componentes/contabilidade/PainelContabil';
 import { DiarioGeral } from '@/componentes/contabilidade/DiarioGeral';
-import { Balancete, FluxoCaixa, RazaoConta, Resultados } from '@/componentes/contabilidade/Livros';
+import { Balanco, Balancete, FluxoCaixa, RazaoConta, Resultados } from '@/componentes/contabilidade/Livros';
 import { CaixaPorOperador, DialogoLancamento, LancamentosManuais, ReconciliacaoBancaria } from '@/componentes/contabilidade/Tesouraria';
 import type { JournalKind } from '@/componentes/contabilidade/formato';
 import { CarteiraProvisoes, Cobranca, Rentabilidade } from '@/componentes/contabilidade/Carteira';
@@ -33,6 +33,7 @@ const NAVIGATION: Array<{ group: string; items: NavItem[] }> = [
         group: 'Livros contabilísticos', items: [
             { id: 'diario', label: 'Diário Geral', icon: BookText },
             { id: 'balancete', label: 'Balancete', icon: Scale },
+            { id: 'balanco', label: 'Balanço', icon: Landmark },
             { id: 'razao', label: 'Razão por Conta', icon: BookOpen },
             { id: 'resultados', label: 'Demonstração de Resultados', icon: TrendingUp },
             { id: 'fluxo', label: 'Fluxo de Caixa', icon: Waves },
@@ -99,6 +100,7 @@ export default function Accounting() {
         switch (section) {
             case 'diario': return <DiarioGeral {...props} />;
             case 'balancete': return <Balancete {...props} />;
+            case 'balanco': return <Balanco {...props} />;
             case 'razao': return <RazaoConta {...props} />;
             case 'resultados': return <Resultados {...props} />;
             case 'fluxo': return <FluxoCaixa {...props} />;

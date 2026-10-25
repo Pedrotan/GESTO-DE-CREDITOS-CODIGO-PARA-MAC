@@ -26,8 +26,8 @@ export const MODULE_LABELS: Record<AuditModule, string> = {
     contencioso: 'Contencioso', cobranca: 'Cobrança', despesas: 'Despesas', autenticacao: 'Autenticação', auditoria: 'Auditoria',
 };
 export const ACTION_LABELS: Record<AuditAction, string> = {
-    create: 'Criação', update: 'Edição', delete: 'Eliminação', view_sensitive: 'Consulta de dados sensíveis', export: 'Exportação', login: 'Login',
-    login_failed: 'Login falhado', logout: 'Logout', approve: 'Aprovação', reject: 'Rejeição', cancel: 'Anulação', reversal: 'Estorno',
+    create: 'Criação', update: 'Edição', delete: 'Eliminação', view_sensitive: 'Consulta de dados sensíveis', export: 'Exportação', login: 'Início de sessão',
+    login_failed: 'Início de sessão falhado', logout: 'Fim de sessão', approve: 'Aprovação', reject: 'Rejeição', cancel: 'Anulação', reversal: 'Estorno',
     permission_change: 'Alteração de permissões', settings_change: 'Alteração de configurações', override: 'Sobreposição manual',
     access_denied: 'Acesso negado', security: 'Evento de segurança', view: 'Consulta', import: 'Importação', restore: 'Reposição', disburse: 'Desembolso',
 };

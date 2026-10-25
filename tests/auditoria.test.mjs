@@ -159,20 +159,20 @@ test('I3 · sobrepor o risco com "gggggggg" é rejeitado; com justificação vá
     } finally { database.close(); }
 });
 
-test('I4 · 5 logins falhados seguidos aparecem como "Login falhado" e geram alerta', async () => {
+test('I4 · 5 logins falhados seguidos aparecem como "Início de sessão falhado" e geram alerta', async () => {
     const M = await loadModules();
     const database = await createDatabase(M);
     try {
         for (let index = 1; index <= 5; index++) await M.ServicoAuditoria.addLog('login_failure', 'user', `Tentativa de login falhada (${index}) para utilizador: Operador de Caixa`, 'u1', 'Operador de Caixa', null, null, { ip: '10.0.0.7' });
         const list = events(M, await M.ServicoAuditoriaAvancada.loadRows(null));
         assert.equal(list.length, 5);
-        assert.ok(list.every(event => M.A.ACTION_LABELS[event.action] === 'Login falhado' && event.result === 'failed'));
+        assert.ok(list.every(event => M.A.ACTION_LABELS[event.action] === 'Início de sessão falhado' && event.result === 'failed'));
         const alerts = M.A.detectAlerts(list);
         const failed = alerts.find(alert => alert.ruleId === 'failed_logins');
         assert.ok(failed);
         assert.equal(failed.eventIds.length, 5);
         assert.equal(M.A.auditKpis(list).loginFailed, 5);
-        console.log(`    I4: 5 × «Login falhado» · alerta «${failed.title}» (${failed.severity})`);
+        console.log(`    I4: 5 × «Início de sessão falhado» · alerta «${failed.title}» (${failed.severity})`);
     } finally { database.close(); }
 });
 

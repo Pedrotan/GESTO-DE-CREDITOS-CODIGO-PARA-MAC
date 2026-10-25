@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { CheckCircle2, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, XCircle } from 'lucide-react';
+import { contractNumberOf } from '@/bibliotecas/pagamentos-analise';
 import { Badge } from '@/componentes/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { Switch } from '@/componentes/ui/switch';
@@ -7,7 +8,8 @@ import { TableCell, TableRow } from '@/componentes/ui/table';
 import { formatDateTime } from '@/bibliotecas/formatters';
 import { ACCOUNT_CLASS_LABELS, CHART_OF_ACCOUNTS, accountCode, accountDefinition, accountName, entryTypeLabel } from '@/bibliotecas/plano-contas';
 import {
-    accountLedger, cashFlow, incomeStatement, receivablesForecast, trialBalanceForPeriod, type AccountMovement, type DateRange, type TrialBalanceRow,
+    accountLedger, balanceAnomalies, balanceSheet, cashFlow, entriesWithoutLines, incomeStatement, receivablesForecast, trialBalanceForPeriod,
+    type AccountMovement, type BalanceSheetLine, type DateRange, type TrialBalanceRow,
 } from '@/bibliotecas/relatorios-contabeis';
 import { BotoesExportar, Indicador, SeccaoCabecalho, TabelaPaginada, type Coluna } from './comum';
 import { money } from './formato';
@@ -22,6 +24,8 @@ export function Balancete({ data, range, rangeLabel }: { data: ContabilidadeData
     const result = useMemo(() => trialBalanceForPeriod(data.journal, range, showEmpty), [data.journal, range, showEmpty]);
     const rows = result.rows.filter(row => accountClass === 'all' || row.accountClass === accountClass);
     const diff = result.totals.debitMinor - result.totals.creditMinor;
+    const anomalies = useMemo(() => balanceAnomalies(data.journal, range.end), [data.journal, range.end]);
+    const withoutLines = useMemo(() => entriesWithoutLines(data.journal, range), [data.journal, range]);
     const columns: Coluna<TrialBalanceRow>[] = [
         { key: 'code', header: 'Código', render: row => <span className="font-mono text-xs">{accountCode(row.account, data.catalog)}</span> },
         { key: 'name', header: 'Conta', className: 'min-w-[220px]', render: row => <div><p className="font-medium">{accountName(row.account, data.catalog)}</p><p className="text-[11px] text-muted-foreground">{ACCOUNT_CLASS_LABELS[row.accountClass as keyof typeof ACCOUNT_CLASS_LABELS]} · natureza {row.nature === 'debit' ? 'devedora' : 'credora'}</p></div> },
@@ -57,6 +61,7 @@ export function Balancete({ data, range, rangeLabel }: { data: ContabilidadeData
                     <div><p className="text-sm font-bold">{result.balanced ? 'Balancete equilibrado' : 'Balancete desequilibrado'}</p><p className="text-xs text-muted-foreground">Débitos = créditos nos saldos inicial, do período e final.</p></div>
                 </div>
             </div>
+            <AvisosContabeis anomalies={anomalies} withoutLines={withoutLines} />
             <div className="mb-3 flex flex-wrap items-center gap-4">
                 <Select value={accountClass} onValueChange={setAccountClass}>
                     <SelectTrigger className="w-56"><SelectValue /></SelectTrigger>
@@ -65,6 +70,89 @@ export function Balancete({ data, range, rangeLabel }: { data: ContabilidadeData
                 <label className="flex items-center gap-2 text-sm"><Switch checked={showEmpty} onCheckedChange={setShowEmpty} />Mostrar contas sem movimentos</label>
             </div>
             <TabelaPaginada columns={columns} rows={rows} rowKey={row => row.account} pageSize={50} footer={footer} />
+        </div>
+    );
+}
+
+/** Avisos que impedem leituras erradas: saldos impossíveis e lançamentos sem partidas (fora dos livros). */
+function AvisosContabeis({ anomalies, withoutLines }: { anomalies: ReturnType<typeof balanceAnomalies>; withoutLines: { count: number; totalMinor: number } }) {
+    if (!anomalies.length && !withoutLines.count) return null;
+    return (
+        <div className="mb-4 space-y-2">
+            {anomalies.map(item => (
+                <p key={item.account} className={`flex items-start gap-2 rounded-xl border p-3 text-sm ${item.severity === 'high' ? 'border-red-300 bg-red-50/70 text-red-800 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300' : 'border-amber-300 bg-amber-50/70 text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'}`}>
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span><strong>{item.name}: {sided(item.balanceMinor)}.</strong> {item.message}</span>
+                </p>
+            ))}
+            {withoutLines.count > 0 && (
+                <p className="flex items-start gap-2 rounded-xl border border-amber-300 bg-amber-50/70 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span><strong>{withoutLines.count} lançamento(s) antigo(s) sem partidas dobradas ({money(withoutLines.totalMinor)}).</strong> Não entram no balancete nem no balanço; reveja-os na Auditoria Contabilística.</span>
+                </p>
+            )}
+        </div>
+    );
+}
+
+/** Balanço: Activo = Passivo + Capital Próprio (com o resultado do exercício), na data final do período. */
+export function Balanco({ data, range, rangeLabel }: { data: ContabilidadeData; range: DateRange; rangeLabel: string }) {
+    const sheet = useMemo(() => balanceSheet(data.journal, range.end), [data.journal, range.end]);
+    const anomalies = useMemo(() => balanceAnomalies(data.journal, range.end), [data.journal, range.end]);
+    const withoutLines = useMemo(() => entriesWithoutLines(data.journal, { start: null, end: range.end }), [data.journal, range.end]);
+    const block = (title: string, lines: BalanceSheetLine[], totalMinor: number, extra?: BalanceSheetLine) => (
+        <div className="rounded-xl border">
+            <p className="border-b bg-muted/50 px-4 py-2 text-sm font-black">{title}</p>
+            <table className="w-full text-sm">
+                <tbody>
+                    {[...lines, ...(extra ? [extra] : [])].map(line => (
+                        <tr key={line.account} className="border-b last:border-0">
+                            <td className="px-4 py-2 font-mono text-xs text-muted-foreground">{line.code}</td>
+                            <td className="py-2">{line.account.startsWith('__') ? line.name : accountName(line.account, data.catalog)}</td>
+                            <td className={`px-4 py-2 text-right font-mono ${line.amountMinor < 0 ? 'text-red-600' : ''}`}>{money(line.amountMinor)}</td>
+                        </tr>
+                    ))}
+                    {!lines.length && !extra && <tr><td colSpan={3} className="px-4 py-3 text-center text-xs text-muted-foreground">Sem saldos.</td></tr>}
+                    <tr className="bg-muted/40 font-bold"><td colSpan={2} className="px-4 py-2">Total</td><td className="px-4 py-2 text-right font-mono">{money(totalMinor)}</td></tr>
+                </tbody>
+            </table>
+        </div>
+    );
+    const resultLine: BalanceSheetLine = { account: '__resultado', code: '88', name: 'Resultado do exercício (proveitos − custos)', amountMinor: sheet.resultMinor };
+    return (
+        <div>
+            <SeccaoCabecalho title="Balanço" description={`Situação patrimonial no fim de ${rangeLabel}: o que a empresa tem (Activo) e como é financiado (Passivo e Capital Próprio). Documento interno de gestão, a validar pelo contabilista.`}
+                actions={<BotoesExportar build={() => ({
+                    title: 'Balanço', subtitle: `Fim de ${rangeLabel}`, fileName: `balanco-${rangeLabel}`, numericColumns: [3],
+                    head: ['Secção', 'Código', 'Conta', 'Valor'],
+                    body: [
+                        ...sheet.assets.map(line => ['Activo', line.code, accountName(line.account, data.catalog), money(line.amountMinor)]),
+                        ['Activo', '', 'Total do Activo', money(sheet.assetsMinor)],
+                        ...sheet.liabilities.map(line => ['Passivo', line.code, accountName(line.account, data.catalog), money(line.amountMinor)]),
+                        ['Passivo', '', 'Total do Passivo', money(sheet.liabilitiesMinor)],
+                        ...sheet.equity.map(line => ['Capital Próprio', line.code, accountName(line.account, data.catalog), money(line.amountMinor)]),
+                        ['Capital Próprio', '88', resultLine.name, money(sheet.resultMinor)],
+                        ['Capital Próprio', '', 'Total do Capital Próprio', money(sheet.equityMinor)],
+                    ],
+                    footer: [['', '', 'Passivo + Capital Próprio', money(sheet.liabilitiesMinor + sheet.equityMinor)], ['', '', sheet.balanced ? 'Balanço equilibrado' : 'BALANÇO DESEQUILIBRADO', money(sheet.differenceMinor)]],
+                })} />} />
+            <div className="mb-4 grid gap-3 md:grid-cols-4">
+                <Indicador label="Total do Activo" value={money(sheet.assetsMinor)} />
+                <Indicador label="Total do Passivo" value={money(sheet.liabilitiesMinor)} />
+                <Indicador label="Capital Próprio (com resultado)" value={money(sheet.equityMinor)} />
+                <div className={`flex items-center gap-3 rounded-xl border p-3 ${sheet.balanced ? 'border-emerald-300 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/30' : 'border-red-300 bg-red-50/60 dark:border-red-900 dark:bg-red-950/30'}`}>
+                    {sheet.balanced ? <CheckCircle2 className="h-7 w-7 text-emerald-600" /> : <XCircle className="h-7 w-7 text-red-600" />}
+                    <div><p className="text-sm font-bold">{sheet.balanced ? 'Balanço equilibrado' : `Diferença de ${money(sheet.differenceMinor)}`}</p><p className="text-xs text-muted-foreground">Activo = Passivo + Capital Próprio.</p></div>
+                </div>
+            </div>
+            <AvisosContabeis anomalies={anomalies} withoutLines={withoutLines} />
+            <div className="grid gap-4 lg:grid-cols-2">
+                {block('Activo', sheet.assets, sheet.assetsMinor)}
+                <div className="space-y-4">
+                    {block('Passivo', sheet.liabilities, sheet.liabilitiesMinor)}
+                    {block('Capital Próprio', sheet.equity, sheet.equityMinor, resultLine)}
+                </div>
+            </div>
         </div>
     );
 }
@@ -79,7 +167,7 @@ export function RazaoConta({ data, range, rangeLabel }: { data: ContabilidadeDat
     const columns: Coluna<AccountMovement>[] = [
         { key: 'seq', header: 'N.º', render: item => <span className="font-mono text-xs">{String(item.sequence).padStart(5, '0')}</span> },
         { key: 'date', header: 'Data', className: 'whitespace-nowrap', render: item => <span className="text-xs">{formatDateTime(item.timestamp)}</span> },
-        { key: 'desc', header: 'Descrição', className: 'min-w-[240px]', render: item => <div><p>{item.description}</p><p className="text-[11px] text-muted-foreground">{entryTypeLabel(item.type)}{item.creditId ? ` · Contrato ${item.creditId}` : ''}</p></div> },
+        { key: 'desc', header: 'Descrição', className: 'min-w-[240px]', render: item => <div><p>{item.description}</p><p className="text-[11px] text-muted-foreground">{entryTypeLabel(item.type)}{item.creditId ? ` · Contrato ${contractNumberOf(item.creditId)}` : ''}</p></div> },
         { key: 'debit', header: 'Débito', align: 'right', className: 'whitespace-nowrap font-mono', render: item => item.debitMinor ? money(item.debitMinor) : '' },
         { key: 'credit', header: 'Crédito', align: 'right', className: 'whitespace-nowrap font-mono', render: item => item.creditMinor ? money(item.creditMinor) : '' },
         { key: 'balance', header: 'Saldo', align: 'right', className: 'whitespace-nowrap font-mono font-bold', render: item => <span className={item.balanceMinor < 0 ? 'text-red-600' : ''}>{money(item.balanceMinor)}</span> },
