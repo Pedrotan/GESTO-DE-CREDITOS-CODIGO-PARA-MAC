@@ -148,7 +148,7 @@ const normalizeBaseUrl = (url: string) => {
     return value;
 };
 
-const getDeviceId = () => {
+export const getDeviceId = () => {
     let value = localStorage.getItem(DEVICE_KEY);
     if (!value) {
         value = crypto.randomUUID();

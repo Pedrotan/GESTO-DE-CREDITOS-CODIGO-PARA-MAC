@@ -118,6 +118,12 @@ export interface ElectronAPI {
     readLicenseKeys: () => Promise<{ success: boolean; publicKey?: string; hasPrivateKey?: boolean; error?: string }>;
     generateLicenseKeypair: () => Promise<{ success: boolean; publicKey: string; hasPrivateKey: boolean }>;
     signLicensePayload: (payload: string) => Promise<{ success: boolean; payload: string; signature: string }>;
+    // Facturação Electrónica AGT (as chaves ficam no processo principal)
+    agtEstado: () => Promise<import('../bibliotecas/fiscal/ponte-agt').EstadoPonte>;
+    agtImportarChave: (payload: { tipo: 'contribuinte' | 'saft'; pem: string; nif?: string }) => Promise<{ success: boolean; bits?: number; impressao?: string }>;
+    agtAssinarDocumento: (payload: Record<string, unknown>) => Promise<{ success: boolean; jws: string }>;
+    agtHashSaft: (mensagens: string[]) => Promise<{ success: boolean; hashes: string[] }>;
+    agtChamar: (payload: { ambiente: string; servico: string; corpo: Record<string, unknown> }) => Promise<import('../bibliotecas/fiscal/ponte-agt').RespostaAgt>;
 }
 
 declare global {

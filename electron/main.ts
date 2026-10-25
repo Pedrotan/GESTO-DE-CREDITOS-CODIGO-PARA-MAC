@@ -30,6 +30,8 @@ import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-toke
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import { assertIntranetLicense } from './intranet-license';
+// @ts-ignore — módulo JS partilhado com a API da VPS (vercel-api/agt.js)
+import { assinarDocumento as agtAssinarDocumento, chamarAgt, descreverChave as agtDescreverChave, hashSaft as agtHashSaft, lerChavePrivada as agtLerChave, AGT_CAMPOS_ASSINATURA } from '../vercel-api/_agt-nucleo.js';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
 installStructuredConsole('tango-electron-main');
@@ -1066,7 +1068,13 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_recibo_linha: "hr_payroll",
   rh_rubrica_pontual: "hr_payroll",
   // rh_alerta fica sem permissão própria: os alertas são derivados e a tarefa diária corre para qualquer utilizador autenticado.
-  rh_plano_ferias: "hr_manage"
+  rh_plano_ferias: "hr_manage",
+  // Facturação electrónica AGT e SAF-T
+  fiscal_settings: "manage_fiscal",
+  fiscal_series: "manage_fiscal",
+  fiscal_documents: "manage_fiscal",
+  fiscal_agt_requests: "manage_fiscal",
+  fiscal_saft_exports: "manage_fiscal"
 };
 // Processamento salarial: calcular exige hr_payroll; aprovar, pagar e fechar exigem hr_payroll_approve e o
 // utilizador autenticado como responsável (1.º parâmetro); aprovar o que o próprio calculou e reabrir um
@@ -1760,6 +1768,71 @@ function registerCloudLicenseHandlers() {
     }, 10 * 60_000);
     try { cloudLicenseStatusNow(); } catch (error) { console.warn("[Licença]", (error as Error)?.message); }
   }
+}
+// ─── Facturação Electrónica AGT ─────────────────────────────────────────────────────────────────────────────
+// As chaves privadas (contribuinte e hash SAF-T) ficam cifradas pelo cofre do sistema operativo (safeStorage),
+// por conta de empresa, e nunca passam para o renderer. O renderer só pede assinaturas de documentos com os
+// campos da especificação, hashes SAF-T e chamadas aos 7 serviços da AGT (o jwsSignature é feito aqui).
+function registerAgtHandlers(accountDir: () => string) {
+  const agtDir = () => path.join(accountDir(), "agt");
+  const keyFile = (tipo: "contribuinte" | "saft") => path.join(agtDir(), `${tipo}.bin`);
+  const readKey = (tipo: "contribuinte" | "saft") => {
+    const file = keyFile(tipo);
+    if (!fs.existsSync(file)) return null;
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("Armazenamento seguro indisponível neste computador.");
+    return agtLerChave(safeStorage.decryptString(fs.readFileSync(file)), tipo === "saft" ? 1024 : 2048);
+  };
+  const readNif = () => {
+    try { return String(JSON.parse(fs.readFileSync(path.join(agtDir(), "contribuinte.json"), "utf8")).nif || ""); }
+    catch { return ""; }
+  };
+  const describe = (tipo: "contribuinte" | "saft") => {
+    try { const key = readKey(tipo); return key ? agtDescreverChave(key) : { carregada: false }; }
+    catch (error: any) { return { carregada: false, erro: error?.message || String(error) }; }
+  };
+  ipcMain.handle("agt-estado", async (event) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    return { success: true, nif: readNif(), contribuinte: describe("contribuinte"), saft: describe("saft") };
+  });
+  ipcMain.handle("agt-importar-chave", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    const actor = assertUserPermission(event, "manage_fiscal");
+    if (!["admin", "super_admin"].includes(String(actor.role))) throw new Error("Só administradores podem importar chaves da AGT.");
+    const tipo = payload?.tipo === "saft" ? "saft" : payload?.tipo === "contribuinte" ? "contribuinte" : null;
+    if (!tipo || typeof payload?.pem !== "string" || payload.pem.length > 20_000) throw new Error("Chave inválida.");
+    if (tipo === "contribuinte" && !/^\d{10}$/.test(String(payload?.nif || ""))) throw new Error("Indique o NIF (10 dígitos) a que a chave pertence.");
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("Armazenamento seguro indisponível neste computador.");
+    const key = agtLerChave(payload.pem, tipo === "saft" ? 1024 : 2048);
+    fs.mkdirSync(agtDir(), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(keyFile(tipo), safeStorage.encryptString(key.export({ type: "pkcs8", format: "pem" }).toString()), { mode: 0o600 });
+    if (tipo === "contribuinte") fs.writeFileSync(path.join(agtDir(), "contribuinte.json"), JSON.stringify({ nif: String(payload.nif) }), { mode: 0o600 });
+    return { success: true, ...agtDescreverChave(key) };
+  });
+  ipcMain.handle("agt-assinar-documento", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    const key = readKey("contribuinte");
+    if (!key) throw new Error("A chave do contribuinte ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    return { success: true, jws: agtAssinarDocumento(payload, readNif(), key) };
+  });
+  ipcMain.handle("agt-hash-saft", async (event, mensagens) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    const key = readKey("saft");
+    if (!key) throw new Error("A chave do hash SAF-T ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    if (!Array.isArray(mensagens) || mensagens.length > 500) throw new Error("Pedido de hash inválido.");
+    return { success: true, hashes: mensagens.map((m: unknown) => agtHashSaft(m, key)) };
+  });
+  ipcMain.handle("agt-chamar", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    if (!payload || !(payload.servico in AGT_CAMPOS_ASSINATURA)) throw new Error("Serviço AGT desconhecido.");
+    const key = readKey("contribuinte");
+    if (!key) throw new Error("A chave do contribuinte ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    const resultado = await chamarAgt({ ambiente: payload.ambiente, servico: payload.servico, corpo: payload.corpo, nif: readNif(), chave: key });
+    return { success: true, ...resultado };
+  });
 }
 function registerMainHandlers() {
   const assertMasterSession = (event: Electron.IpcMainInvokeEvent) => {
@@ -2512,6 +2585,7 @@ app.whenReady().then(async () => {
   ipcMain.on("is-packaged", (event) => {
     event.returnValue = app.isPackaged;
   });
+  registerAgtHandlers(() => getAccountBaseDir(activeAccount.id));
   ipcMain.handle("accounts-list", async (event) => {
     assertTrustedIpcSender(event);
     return getPublicAccounts();

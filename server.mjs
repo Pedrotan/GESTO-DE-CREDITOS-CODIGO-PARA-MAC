@@ -200,6 +200,7 @@ await loadHandler('tenants', path.join(apiBaseDir, 'tenants.js'));
 await loadHandler('usage-report', path.join(apiBaseDir, 'usage-report.js'));
 await loadHandler('lookup-document', path.join(apiBaseDir, 'lookup-document.js'));
 await loadHandler('licencas', path.join(apiBaseDir, 'licencas.js'));
+await loadHandler('agt', path.join(apiBaseDir, 'agt.js'));
 
 console.log(`[VPS API] ${Object.keys(handlers).length} rotas centrais carregadas com sucesso.`);
 

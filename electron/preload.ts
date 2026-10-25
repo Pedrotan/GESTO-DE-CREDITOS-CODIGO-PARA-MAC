@@ -310,6 +310,15 @@ const api = Object.freeze({
     generateLicenseKeypair: () => ipcRenderer.invoke('generate-license-keypair'),
     signLicensePayload: (payload: string) => ipcRenderer.invoke('sign-license-payload', ensureText(payload, 'Payload da licenca', 64_000)),
 
+    // Facturação Electrónica AGT (chaves e assinaturas ficam no processo principal)
+    agtEstado: () => ipcRenderer.invoke('agt-estado'),
+    agtImportarChave: (payload: { tipo: 'contribuinte' | 'saft'; pem: string; nif?: string }) => ipcRenderer.invoke('agt-importar-chave', {
+        tipo: payload?.tipo, pem: ensureText(payload?.pem, 'Chave', 20_000), nif: payload?.nif ? ensureText(payload.nif, 'NIF', 20) : undefined,
+    }),
+    agtAssinarDocumento: (payload: Record<string, unknown>) => ipcRenderer.invoke('agt-assinar-documento', payload),
+    agtHashSaft: (mensagens: string[]) => ipcRenderer.invoke('agt-hash-saft', mensagens),
+    agtChamar: (payload: { ambiente: string; servico: string; corpo: Record<string, unknown> }) => ipcRenderer.invoke('agt-chamar', payload),
+
     dbNuclearReset: (confirmation?: string) => ipcRenderer.invoke('db-nuclear-reset', {
         confirmation: confirmation ? ensureText(confirmation, 'Confirmacao', 64) : ''
     })

@@ -43,6 +43,12 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_credits_status ON credits(status)",
   "CREATE INDEX IF NOT EXISTS idx_credits_status_dueDate ON credits(status, dueDate)",
   "CREATE INDEX IF NOT EXISTS idx_credits_usuario ON credits(usuario_id)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_agt_requests_created ON fiscal_agt_requests(createdAt)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_agt ON fiscal_documents(agtStatus, agtNextAttemptAt)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_date ON fiscal_documents(documentDate)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_payment ON fiscal_documents(paymentId)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_request ON fiscal_documents(agtRequestId)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_series_lookup ON fiscal_series(deviceId, documentType, seriesYear, contingency, status)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_lines_transaction ON ledger_lines(transactionId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_source ON ledger_transactions(sourceType, sourceId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_timestamp ON ledger_transactions(timestamp)",
@@ -114,6 +120,11 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS credit_writeoffs ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL UNIQUE, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL, entryId TEXT NOT NULL, createdAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, productId TEXT, amortizationMethod TEXT DEFAULT 'FLAT', requestedBy TEXT, requestedAt TEXT, approvedBy TEXT, approvalNotes TEXT, supplierId TEXT, supplierProfitRate REAL, reinforcedAmount REAL DEFAULT 0, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )",
+  "CREATE TABLE IF NOT EXISTS fiscal_agt_requests ( id TEXT PRIMARY KEY, service TEXT NOT NULL, requestId TEXT, documentNos TEXT NOT NULL DEFAULT '[]', httpStatus INTEGER, resultCode TEXT, durationMs INTEGER, error TEXT, deviceId TEXT, createdAt TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS fiscal_documents ( id TEXT PRIMARY KEY, idempotencyKey TEXT NOT NULL UNIQUE, documentNo TEXT NOT NULL UNIQUE, documentType TEXT NOT NULL, seriesId TEXT NOT NULL, sequenceNumber INTEGER NOT NULL, documentStatus TEXT NOT NULL DEFAULT 'N' CHECK(documentStatus IN ('N','C')), rejectedDocumentNo TEXT, referenceDocumentNo TEXT, documentDate TEXT NOT NULL, systemEntryDate TEXT NOT NULL, clientId TEXT, customerTaxId TEXT NOT NULL, customerCountry TEXT NOT NULL DEFAULT 'AO', customerName TEXT NOT NULL, customerAddress TEXT, creditId TEXT, paymentId TEXT, netTotalMinor INTEGER NOT NULL, taxPayableMinor INTEGER NOT NULL, grossTotalMinor INTEGER NOT NULL, withholdingMinor INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL, jwsSignature TEXT NOT NULL, saftHash TEXT NOT NULL, saftHashControl TEXT NOT NULL DEFAULT '1', deviceId TEXT NOT NULL, agtStatus TEXT NOT NULL DEFAULT 'pendente' CHECK(agtStatus IN ('pendente','enviado','em_validacao','valido','valido_penal','invalido','erro_envio','simulado','anulado')), agtRequestId TEXT, agtErrors TEXT NOT NULL DEFAULT '[]', agtAttempts INTEGER NOT NULL DEFAULT 0, agtLastAttemptAt TEXT, agtNextAttemptAt TEXT, agtValidatedAt TEXT, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL, UNIQUE(seriesId, sequenceNumber) )",
+  "CREATE TABLE IF NOT EXISTS fiscal_saft_exports ( id TEXT PRIMARY KEY, fiscalYear INTEGER NOT NULL, startDate TEXT NOT NULL, endDate TEXT NOT NULL, basis TEXT NOT NULL, fileName TEXT NOT NULL, fileSize INTEGER NOT NULL, sha256 TEXT NOT NULL, invoicesCount INTEGER NOT NULL DEFAULT 0, paymentsCount INTEGER NOT NULL DEFAULT 0, totalDebitMinor INTEGER NOT NULL DEFAULT 0, totalCreditMinor INTEGER NOT NULL DEFAULT 0, warnings INTEGER NOT NULL DEFAULT 0, xml TEXT NOT NULL, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS fiscal_series ( id TEXT PRIMARY KEY, seriesCode TEXT NOT NULL UNIQUE, seriesYear INTEGER NOT NULL, documentType TEXT NOT NULL, establishment TEXT NOT NULL DEFAULT 'SEDE', contingency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'A' CHECK(status IN ('A','U','F')), firstNumber INTEGER NOT NULL DEFAULT 1, lastNumber INTEGER NOT NULL, nextNumber INTEGER NOT NULL DEFAULT 1, deviceId TEXT NOT NULL, simulated INTEGER NOT NULL DEFAULT 0, agtSyncedAt TEXT, createdAt TEXT NOT NULL, CHECK(nextNumber >= firstNumber) )",
+  "CREATE TABLE IF NOT EXISTS fiscal_settings ( id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )",
   "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS ledger_lines ( id TEXT PRIMARY KEY, transactionId TEXT NOT NULL, account TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('debit', 'credit')), component TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), FOREIGN KEY(transactionId) REFERENCES ledger_transactions(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS ledger_transactions ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, sourceType TEXT NOT NULL, sourceId TEXT NOT NULL, description TEXT, totalDebitMinor INTEGER NOT NULL CHECK(totalDebitMinor > 0), totalCreditMinor INTEGER NOT NULL CHECK(totalCreditMinor > 0), integrityHash TEXT NOT NULL, previousHash TEXT NOT NULL, hashVersion INTEGER NOT NULL DEFAULT 2, usuario_id TEXT, CHECK(totalDebitMinor = totalCreditMinor) )",
@@ -212,6 +223,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_update BEFORE UPDATE ON credit_writeoffs BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_delete BEFORE DELETE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_update BEFORE UPDATE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_immutable BEFORE UPDATE OF documentNo, documentType, seriesId, sequenceNumber, documentDate, systemEntryDate, customerTaxId, customerName, netTotalMinor, taxPayableMinor, grossTotalMinor, payload, jwsSignature, saftHash ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documento fiscal imutável: use uma nota de crédito ou uma correcção')",
+  "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_no_delete BEFORE DELETE ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documentos fiscais não podem ser apagados')",
+  "CREATE TRIGGER IF NOT EXISTS trg_fiscal_saft_exports_immutable BEFORE UPDATE ON fiscal_saft_exports BEGIN SELECT RAISE(ABORT, 'Exportações SAF-T são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_delete BEFORE DELETE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_update BEFORE UPDATE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_transactions_immutable_delete BEFORE DELETE ON ledger_transactions BEGIN SELECT RAISE(ABORT, 'As transações do ledger são imutáveis')",
@@ -342,6 +356,11 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) SELECT id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt FROM credit_writeoffs_old",
   "INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate, productId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO fiscal_agt_requests (id, service, requestId, documentNos, httpStatus, resultCode, durationMs, error, deviceId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO fiscal_documents (id, idempotencyKey, documentNo, documentType, seriesId, sequenceNumber, documentStatus, rejectedDocumentNo, referenceDocumentNo, documentDate, systemEntryDate, clientId, customerTaxId, customerCountry, customerName, customerAddress, creditId, paymentId, netTotalMinor, taxPayableMinor, grossTotalMinor, withholdingMinor, payload, jwsSignature, saftHash, saftHashControl, deviceId, agtStatus, agtErrors, agtAttempts, agtNextAttemptAt, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO fiscal_saft_exports (id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, totalDebitMinor, totalCreditMinor, warnings, xml, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO fiscal_series (id, seriesCode, seriesYear, documentType, establishment, contingency, status, firstNumber, lastNumber, nextNumber, deviceId, simulated, agtSyncedAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO fiscal_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
   "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO ledger_lines (id, transactionId, account, side, component, amountMinor) VALUES (?,?,?,?,?,?)",
   "INSERT INTO ledger_transactions (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor, totalCreditMinor, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
@@ -481,6 +500,15 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM credits",
   "SELECT * FROM credits WHERE id = ?",
   "SELECT * FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT * FROM fiscal_agt_requests ORDER BY createdAt DESC LIMIT 300",
+  "SELECT * FROM fiscal_documents WHERE agtRequestId = ?",
+  "SELECT * FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('pendente','erro_envio') AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) ORDER BY systemEntryDate LIMIT 30",
+  "SELECT * FROM fiscal_documents WHERE documentDate >= ? AND documentDate <= ? ORDER BY systemEntryDate DESC",
+  "SELECT * FROM fiscal_documents WHERE documentNo = ?",
+  "SELECT * FROM fiscal_documents WHERE id = ?",
+  "SELECT * FROM fiscal_documents WHERE idempotencyKey = ?",
+  "SELECT * FROM fiscal_series ORDER BY seriesYear DESC, documentType, createdAt",
+  "SELECT * FROM fiscal_series WHERE deviceId = ? AND documentType = ? AND seriesYear = ? AND contingency = ? AND establishment = ? AND status IN ('A','U') AND nextNumber <= lastNumber ORDER BY simulated, createdAt LIMIT 1",
   "SELECT * FROM internal_messages ORDER BY timestamp ASC",
   "SELECT * FROM ledger_lines ORDER BY rowid",
   "SELECT * FROM ledger_lines WHERE transactionId = ? ORDER BY id",
@@ -561,6 +589,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM warranties WHERE id = ?",
   "SELECT 1 AS ok",
   "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?",
+  "SELECT COALESCE(SUM(grossTotalMinor), 0) AS total FROM fiscal_documents WHERE documentType = 'NC' AND referenceDocumentNo = ?",
   "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?",
   "SELECT COUNT(*) AS n FROM users",
   "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?",
@@ -581,6 +610,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT a.id, a.timestamp, a.userId, a.userName, a.action, a.entity, a.details, a.previousState, a.newState, a.metadata, c.seq, c.integrityHash, c.previousHash FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE a.userId = ? ORDER BY a.timestamp DESC LIMIT ?",
   "SELECT account, component, amountMinor FROM ledger_lines WHERE transactionId = ? AND side = 'credit'",
   "SELECT account, side, SUM(amountMinor) AS total FROM ledger_lines WHERE account IN ('cash', 'bank') GROUP BY account, side",
+  "SELECT agtRequestId, MAX(agtAttempts) AS tentativas FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('enviado','em_validacao') AND agtRequestId IS NOT NULL AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) GROUP BY agtRequestId LIMIT 20",
   "SELECT alertKey FROM audit_alerts",
   "SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE id = ?",
   "SELECT auditId, previousHash, integrityHash, seq FROM audit_log_chain ORDER BY seq",
@@ -596,6 +626,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, paidAt FROM credit_installments WHERE status <> 'cancelled'",
   "SELECT creditId, stage FROM legal_cases WHERE deletedAt IS NULL AND stage <> 'closed'",
   "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments",
+  "SELECT d.*, s.simulated FROM fiscal_documents d JOIN fiscal_series s ON s.id = d.seriesId WHERE d.documentDate >= ? AND d.documentDate <= ? AND s.simulated = 0 ORDER BY d.documentType, d.seriesId, d.sequenceNumber",
+  "SELECT data FROM fiscal_settings WHERE id = ?",
   "SELECT data_url FROM rh_documento_ficheiro WHERE documento_id = ?",
   "SELECT day FROM accounting_daily_closes WHERE day = ?",
   "SELECT day, status, brokenSeq, verifiedAt FROM audit_daily_closes ORDER BY day DESC LIMIT 1",
@@ -606,6 +638,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT fileName, fileData, format FROM report_history WHERE id = ?",
   "SELECT fileName, mimeType, dataUrl, uploadedAt, uploadedBy FROM payment_proofs WHERE paymentId = ?",
   "SELECT fileName, movements FROM accounting_bank_imports",
+  "SELECT fileName, xml FROM fiscal_saft_exports WHERE id = ?",
   "SELECT fileName,mime,data,digest FROM accounting_receipts WHERE entryId = ?",
   "SELECT i.creditId, c.clientId, c.clientName, i.installmentNumber, i.dueDate, i.principalMinor, i.interestMinor, i.lateInterestMinor, i.paidPrincipalMinor, i.paidInterestMinor, i.paidLateInterestMinor FROM credit_installments i JOIN credits c ON c.id = i.creditId WHERE c.deletedAt IS NULL AND c.status IN ('active', 'overdue', 'defaulted', 'renegotiated', 'paid')",
   "SELECT id FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
@@ -642,6 +675,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, deletedBy FROM clients WHERE deletedAt IS NOT NULL",
   "SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC",
+  "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100",
   "SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome",
   "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, installmentNumber, dueDate, status FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
@@ -665,6 +699,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp",
   "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs",
+  "SELECT id, timestamp, userName, action, details FROM audit_logs WHERE details LIKE 'Fiscal:%' ORDER BY timestamp DESC LIMIT 300",
   "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp",
   "SELECT id, timestamp, userName, action, entity, details, metadata FROM audit_logs WHERE details LIKE ? OR metadata LIKE ? ORDER BY timestamp DESC LIMIT 500",
   "SELECT id, totalDueMinor, totalDue, deletedAt FROM credits WHERE id = ?",
@@ -683,6 +718,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT password FROM users WHERE id = ?",
   "SELECT paymentDate, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'",
   "SELECT paymentDate, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'",
+  "SELECT paymentId FROM fiscal_documents WHERE paymentId IS NOT NULL",
   "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT principalAmountMinor, principalAmount FROM credits WHERE id = ?",
@@ -699,6 +735,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT role, name FROM users WHERE id = ?",
   "SELECT role, name, branchId FROM users WHERE id = ?",
   "SELECT rowid AS ledgerSequence, * FROM accounting_entries ORDER BY rowid ASC",
+  "SELECT saftHash FROM fiscal_documents WHERE seriesId = ? AND sequenceNumber < ? ORDER BY sequenceNumber DESC LIMIT 1",
+  "SELECT saftHash FROM fiscal_documents WHERE seriesId = ? ORDER BY sequenceNumber DESC LIMIT 1",
+  "SELECT service, httpStatus, resultCode, durationMs, error, createdAt FROM fiscal_agt_requests WHERE documentNos LIKE ? ORDER BY createdAt DESC LIMIT 30",
   "SELECT sessionTimeout FROM company_settings WHERE id = 1",
   "SELECT side, SUM(amountMinor) AS total FROM ledger_lines WHERE account = ? GROUP BY side",
   "SELECT sql FROM sqlite_master WHERE type='table' AND name='credit_writeoffs'",
@@ -766,6 +805,16 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE credits SET status = ?, daysOverdue = ? WHERE id = ? AND status = ? AND deletedAt IS NULL",
   "UPDATE credits SET targetMonthId = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credits SET usuario_id = ? WHERE id = ? AND deletedAt IS NULL",
+  "UPDATE fiscal_documents SET agtNextAttemptAt = ? WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'em_validacao', agtAttempts = ?, agtNextAttemptAt = ? WHERE agtRequestId = ? AND agtStatus IN ('enviado','em_validacao')",
+  "UPDATE fiscal_documents SET agtStatus = 'enviado', agtRequestId = ?, agtErrors = '[]', agtLastAttemptAt = ?, agtNextAttemptAt = ?, agtAttempts = agtAttempts + 1 WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'erro_envio', agtErrors = ?, agtLastAttemptAt = ?, agtNextAttemptAt = ?, agtAttempts = ? WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'invalido', agtErrors = ?, agtLastAttemptAt = ?, agtNextAttemptAt = NULL, agtAttempts = agtAttempts + 1 WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'invalido', agtErrors = ?, agtNextAttemptAt = NULL WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'pendente', agtRequestId = NULL, agtNextAttemptAt = ? WHERE agtRequestId = ?",
+  "UPDATE fiscal_documents SET agtStatus = ?, agtValidatedAt = ?, agtErrors = '[]', agtNextAttemptAt = NULL WHERE id = ?",
+  "UPDATE fiscal_series SET nextNumber = nextNumber + 1, status = 'U' WHERE id = ? AND nextNumber = ?",
+  "UPDATE fiscal_series SET status = ?, lastNumber = ?, agtSyncedAt = ? WHERE id = ?",
   "UPDATE internal_messages SET read = 1 WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
@@ -1042,6 +1091,30 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "85e8c86491075057c76cb5eb62d22e2f49d62c0902977bac3c0d851db997c67a",
     "CREATE INDEX IF NOT EXISTS idx_credits_usuario ON credits(usuario_id)"
+  ],
+  [
+    "b5c3a92fd17bc5cf379cb3724f2ff80c3d00ae28eda79b54bbd9fc0712f37080",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_agt_requests_created ON fiscal_agt_requests(createdAt)"
+  ],
+  [
+    "62082a4bc989141156a436d0d8779fbed0bdf170d7530a99f072a1d20e2a9aa4",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_agt ON fiscal_documents(agtStatus, agtNextAttemptAt)"
+  ],
+  [
+    "a1e63845ae3594b35e3c808ae35df2d2d5ddcfbc2d1faeff6515000e49ada8a1",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_date ON fiscal_documents(documentDate)"
+  ],
+  [
+    "d07dd84b669cdb9e3e2108d10b6924f279bbe566641e9f097e5ee79f04e4487b",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_payment ON fiscal_documents(paymentId)"
+  ],
+  [
+    "5581fcb47619034d6ff006538bb6502aa675f6e06056c9e0f496fc3fec7ffb58",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_request ON fiscal_documents(agtRequestId)"
+  ],
+  [
+    "d7b3e9e2ef6a0849595bb5ab79c44fdf198a8e0c8a9b2b01fabef3c7511ed4e9",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_series_lookup ON fiscal_series(deviceId, documentType, seriesYear, contingency, status)"
   ],
   [
     "e59f5a8d8de9b9b8df0159cfd945c9285585c9e3519cfdd35a701df7c254e60c",
@@ -1326,6 +1399,26 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "2777cdd03e0ebd2be15beeacf0f37a3b504220a8a3655a76018f7da6a6038cf2",
     "CREATE TABLE IF NOT EXISTS dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )"
+  ],
+  [
+    "680aa96a04bc33070585de21bfeacd718c2c1a854d0bddefd58161c5bd2e01d3",
+    "CREATE TABLE IF NOT EXISTS fiscal_agt_requests ( id TEXT PRIMARY KEY, service TEXT NOT NULL, requestId TEXT, documentNos TEXT NOT NULL DEFAULT '[]', httpStatus INTEGER, resultCode TEXT, durationMs INTEGER, error TEXT, deviceId TEXT, createdAt TEXT NOT NULL )"
+  ],
+  [
+    "7f99fb023578e21d3dc49c24f86ae5359a6aa1f42b0c126effaceb15728cc18c",
+    "CREATE TABLE IF NOT EXISTS fiscal_documents ( id TEXT PRIMARY KEY, idempotencyKey TEXT NOT NULL UNIQUE, documentNo TEXT NOT NULL UNIQUE, documentType TEXT NOT NULL, seriesId TEXT NOT NULL, sequenceNumber INTEGER NOT NULL, documentStatus TEXT NOT NULL DEFAULT 'N' CHECK(documentStatus IN ('N','C')), rejectedDocumentNo TEXT, referenceDocumentNo TEXT, documentDate TEXT NOT NULL, systemEntryDate TEXT NOT NULL, clientId TEXT, customerTaxId TEXT NOT NULL, customerCountry TEXT NOT NULL DEFAULT 'AO', customerName TEXT NOT NULL, customerAddress TEXT, creditId TEXT, paymentId TEXT, netTotalMinor INTEGER NOT NULL, taxPayableMinor INTEGER NOT NULL, grossTotalMinor INTEGER NOT NULL, withholdingMinor INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL, jwsSignature TEXT NOT NULL, saftHash TEXT NOT NULL, saftHashControl TEXT NOT NULL DEFAULT '1', deviceId TEXT NOT NULL, agtStatus TEXT NOT NULL DEFAULT 'pendente' CHECK(agtStatus IN ('pendente','enviado','em_validacao','valido','valido_penal','invalido','erro_envio','simulado','anulado')), agtRequestId TEXT, agtErrors TEXT NOT NULL DEFAULT '[]', agtAttempts INTEGER NOT NULL DEFAULT 0, agtLastAttemptAt TEXT, agtNextAttemptAt TEXT, agtValidatedAt TEXT, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL, UNIQUE(seriesId, sequenceNumber) )"
+  ],
+  [
+    "ad1f30d4fdff8b456a70b006ddca9b7d6d70632d238ee15e1d09114030aad365",
+    "CREATE TABLE IF NOT EXISTS fiscal_saft_exports ( id TEXT PRIMARY KEY, fiscalYear INTEGER NOT NULL, startDate TEXT NOT NULL, endDate TEXT NOT NULL, basis TEXT NOT NULL, fileName TEXT NOT NULL, fileSize INTEGER NOT NULL, sha256 TEXT NOT NULL, invoicesCount INTEGER NOT NULL DEFAULT 0, paymentsCount INTEGER NOT NULL DEFAULT 0, totalDebitMinor INTEGER NOT NULL DEFAULT 0, totalCreditMinor INTEGER NOT NULL DEFAULT 0, warnings INTEGER NOT NULL DEFAULT 0, xml TEXT NOT NULL, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL )"
+  ],
+  [
+    "6f8a22f0004de7aed58cf026fea5dfce324f2dd8b217e5fa62c71a95f0e03b3a",
+    "CREATE TABLE IF NOT EXISTS fiscal_series ( id TEXT PRIMARY KEY, seriesCode TEXT NOT NULL UNIQUE, seriesYear INTEGER NOT NULL, documentType TEXT NOT NULL, establishment TEXT NOT NULL DEFAULT 'SEDE', contingency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'A' CHECK(status IN ('A','U','F')), firstNumber INTEGER NOT NULL DEFAULT 1, lastNumber INTEGER NOT NULL, nextNumber INTEGER NOT NULL DEFAULT 1, deviceId TEXT NOT NULL, simulated INTEGER NOT NULL DEFAULT 0, agtSyncedAt TEXT, createdAt TEXT NOT NULL, CHECK(nextNumber >= firstNumber) )"
+  ],
+  [
+    "dc3057db3dfe5bcc05a4763060b5885a6e079ae326405bdf2a377933e4feff49",
+    "CREATE TABLE IF NOT EXISTS fiscal_settings ( id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )"
   ],
   [
     "fb7e45c39f9b488c3e81075c0d0373560da4bb5ca01ca39229616fab92888fb7",
@@ -1718,6 +1811,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "8543aac3ec3557b02bfa7691d38946b3cf6f038aec82144c91353d46b200bff2",
     "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_update BEFORE UPDATE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')"
+  ],
+  [
+    "f529fae7dd7330628be984b4e704f3844cf95963c8032243d317ed41e00e493d",
+    "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_immutable BEFORE UPDATE OF documentNo, documentType, seriesId, sequenceNumber, documentDate, systemEntryDate, customerTaxId, customerName, netTotalMinor, taxPayableMinor, grossTotalMinor, payload, jwsSignature, saftHash ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documento fiscal imutável: use uma nota de crédito ou uma correcção')"
+  ],
+  [
+    "c6022f24abdbbe26d9b41c32a5adb3f2d6bcb6d786f302adc954b169611e9b6c",
+    "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_no_delete BEFORE DELETE ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documentos fiscais não podem ser apagados')"
+  ],
+  [
+    "0cb46d210ca86b6da1666bc3c80b241aa05dc6d0941bacbeaa3103723afc38b4",
+    "CREATE TRIGGER IF NOT EXISTS trg_fiscal_saft_exports_immutable BEFORE UPDATE ON fiscal_saft_exports BEGIN SELECT RAISE(ABORT, 'Exportações SAF-T são imutáveis')"
   ],
   [
     "c2c721f2f30495f9ec562c1fe57797d7287d68e3f93f08729552bfdeecd1a1f2",
@@ -2238,6 +2343,26 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "1554539be5261997025e02344b1afdfdee3c3ff4eef5334f56b630ab3e021357",
     "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate, productId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+    "e45579f9fc14cb1b28570af5742f16a27c0519bc4d100a60419410300817ae95",
+    "INSERT INTO fiscal_agt_requests (id, service, requestId, documentNos, httpStatus, resultCode, durationMs, error, deviceId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "a74b65cdd427f2a8fff52dd85acdf1fb622d8387ac55194044590d48850f7b3d",
+    "INSERT INTO fiscal_documents (id, idempotencyKey, documentNo, documentType, seriesId, sequenceNumber, documentStatus, rejectedDocumentNo, referenceDocumentNo, documentDate, systemEntryDate, clientId, customerTaxId, customerCountry, customerName, customerAddress, creditId, paymentId, netTotalMinor, taxPayableMinor, grossTotalMinor, withholdingMinor, payload, jwsSignature, saftHash, saftHashControl, deviceId, agtStatus, agtErrors, agtAttempts, agtNextAttemptAt, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "f520f800531ac24564e634de8ac0a6e1dd7be11f1a4607596ae9b040f8c5e8d6",
+    "INSERT INTO fiscal_saft_exports (id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, totalDebitMinor, totalCreditMinor, warnings, xml, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "8bab43baca8eb66b858b335151365b93661bb61ad23e40a02fb03120a1d63cd4",
+    "INSERT INTO fiscal_series (id, seriesCode, seriesYear, documentType, establishment, contingency, status, firstNumber, lastNumber, nextNumber, deviceId, simulated, agtSyncedAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "2f7e71e6819bb45eed44ca6cb36697c7fa8b2162b1ca13c80b7618e301825f64",
+    "INSERT INTO fiscal_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
   ],
   [
     "354403cb3fbc65e11a3acb6f2ed18990fe20472096e214c9192ca4884b2e5c20",
@@ -2796,6 +2921,42 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "61ce2502d240b71b9e3e1ed42549a767f8b5a77e92c8e683af48d2e123b6f839",
+    "SELECT * FROM fiscal_agt_requests ORDER BY createdAt DESC LIMIT 300"
+  ],
+  [
+    "563096e8b231eb931f283546f8781f7432c0e429c6a1180ef2dc854cd47df42a",
+    "SELECT * FROM fiscal_documents WHERE agtRequestId = ?"
+  ],
+  [
+    "3660cc6492ebe4bb16c18fdaeaf3065eca21c03f71e9ef1456278e0ca494fe07",
+    "SELECT * FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('pendente','erro_envio') AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) ORDER BY systemEntryDate LIMIT 30"
+  ],
+  [
+    "c303511c2c21c3c7df3da150c6a509b97626b8207703d644b0b38168dcd9e7cc",
+    "SELECT * FROM fiscal_documents WHERE documentDate >= ? AND documentDate <= ? ORDER BY systemEntryDate DESC"
+  ],
+  [
+    "d69ee3fce3a74ff9c159aaa37ebfed8243a7572aa162218ec6e3d1712d6d7278",
+    "SELECT * FROM fiscal_documents WHERE documentNo = ?"
+  ],
+  [
+    "c9f22afc9fd885b5d53970ca96dc53ac0fadeecdb28b89b18c8bfd4b6aac4ead",
+    "SELECT * FROM fiscal_documents WHERE id = ?"
+  ],
+  [
+    "fa8795a6acd1fa30da00549d7255b4562383517eed3a96687d73ac00d889fb4b",
+    "SELECT * FROM fiscal_documents WHERE idempotencyKey = ?"
+  ],
+  [
+    "d044e84628a10258a5aeb8b91dd44eb04263e3878a84beaa7872278ca9ff92b0",
+    "SELECT * FROM fiscal_series ORDER BY seriesYear DESC, documentType, createdAt"
+  ],
+  [
+    "2b29bdadbd17875d0041194ecf8951d1909166c5fa3f2b3072b98ca8c655d9f8",
+    "SELECT * FROM fiscal_series WHERE deviceId = ? AND documentType = ? AND seriesYear = ? AND contingency = ? AND establishment = ? AND status IN ('A','U') AND nextNumber <= lastNumber ORDER BY simulated, createdAt LIMIT 1"
+  ],
+  [
     "42597f4fe4167298886486ecbbafd7d8c62f12964e527109a63d7723d92a8d19",
     "SELECT * FROM internal_messages ORDER BY timestamp ASC"
   ],
@@ -3116,6 +3277,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?"
   ],
   [
+    "a646fb134e62d14655230b245826a7bd21658f4f5d0d298dd7d40d17ef40ddb0",
+    "SELECT COALESCE(SUM(grossTotalMinor), 0) AS total FROM fiscal_documents WHERE documentType = 'NC' AND referenceDocumentNo = ?"
+  ],
+  [
     "e5a42ef884eebe05b3a6108a251c953eface73ad6c2e61447bfb114bbcdb355f",
     "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?"
   ],
@@ -3196,6 +3361,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT account, side, SUM(amountMinor) AS total FROM ledger_lines WHERE account IN ('cash', 'bank') GROUP BY account, side"
   ],
   [
+    "bc585e997ddd923fb32ead7bad2aa615e4e21bd002741480ae58ab8f77c33f6d",
+    "SELECT agtRequestId, MAX(agtAttempts) AS tentativas FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('enviado','em_validacao') AND agtRequestId IS NOT NULL AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) GROUP BY agtRequestId LIMIT 20"
+  ],
+  [
     "93b44992fae09c07597bdccfb6526e1e8fead71048ddb05ee6a8cbe4cab89ef7",
     "SELECT alertKey FROM audit_alerts"
   ],
@@ -3256,6 +3425,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments"
   ],
   [
+    "c8de5e0d09d6295151cfd5e5d96430e9a51e920e3b538ef73f3148e3d0e842d3",
+    "SELECT d.*, s.simulated FROM fiscal_documents d JOIN fiscal_series s ON s.id = d.seriesId WHERE d.documentDate >= ? AND d.documentDate <= ? AND s.simulated = 0 ORDER BY d.documentType, d.seriesId, d.sequenceNumber"
+  ],
+  [
+    "e865c3abfb2b61f9962b0cb9958b20136f2afd2e7d3c8431c456686255a7685f",
+    "SELECT data FROM fiscal_settings WHERE id = ?"
+  ],
+  [
     "cb2f4cab7cb0f2c54b908b6763633f1490649749afbea38b0913d9a9ae1f794a",
     "SELECT data_url FROM rh_documento_ficheiro WHERE documento_id = ?"
   ],
@@ -3294,6 +3471,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "4629ad582104b26009bd7f5a5e9a6c7d5353ba93dd6d1f6fb2f5d99d93b5a60a",
     "SELECT fileName, movements FROM accounting_bank_imports"
+  ],
+  [
+    "49dac65253995df0863e135564c18df4383a19f13115b5f40bdbf6172b65dca0",
+    "SELECT fileName, xml FROM fiscal_saft_exports WHERE id = ?"
   ],
   [
     "4bd4bd0a9d5d1caf21761f9d617217f012a9b8995c0f6777f07bec985e660537",
@@ -3440,6 +3621,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC"
   ],
   [
+    "c8235665d1c2ef00849d4d1bc120f5f9b3f39f126a47cdb580d8a51b6c677fb5",
+    "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100"
+  ],
+  [
     "9f8d1be53f9d38c18734596b7746c96512bbed2514143d020d3875878437bf1b",
     "SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome"
   ],
@@ -3532,6 +3717,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs"
   ],
   [
+    "15fa05a49cfb8f2fbdcf5a9cdaecf7c7d59171916c4713b89d2e2170df8ed7b2",
+    "SELECT id, timestamp, userName, action, details FROM audit_logs WHERE details LIKE 'Fiscal:%' ORDER BY timestamp DESC LIMIT 300"
+  ],
+  [
     "4c603e933bf26c91ba8819985b723329ba01977ff95541ac85776f7622f1bda8",
     "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp"
   ],
@@ -3604,6 +3793,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT paymentDate, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'"
   ],
   [
+    "c3ae21f924689cb6dda76b92daacb1037966c811723ce50e9d925f274969bb7e",
+    "SELECT paymentId FROM fiscal_documents WHERE paymentId IS NOT NULL"
+  ],
+  [
     "d97d7ae68294c41233c982840721ac90ca3447c1b22adcb80b583cdbceab48d0",
     "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
@@ -3666,6 +3859,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "be96f977f4c6c5ccde3e8d8a555a7e0eeebc5197084882551764119cec4c22c8",
     "SELECT rowid AS ledgerSequence, * FROM accounting_entries ORDER BY rowid ASC"
+  ],
+  [
+    "35e58df133f60ae4922f6a6ebc9b91214d6566179926b42461932b4b2298c6ec",
+    "SELECT saftHash FROM fiscal_documents WHERE seriesId = ? AND sequenceNumber < ? ORDER BY sequenceNumber DESC LIMIT 1"
+  ],
+  [
+    "0ac8e46fd603367f813790b5367b99c08448651c683bf52bb29117fd34f7caee",
+    "SELECT saftHash FROM fiscal_documents WHERE seriesId = ? ORDER BY sequenceNumber DESC LIMIT 1"
+  ],
+  [
+    "c488eba4035d6f40df767d80942f035261b05fa84aa1b283e8353e74bfafb012",
+    "SELECT service, httpStatus, resultCode, durationMs, error, createdAt FROM fiscal_agt_requests WHERE documentNos LIKE ? ORDER BY createdAt DESC LIMIT 30"
   ],
   [
     "bb293c2fc380f941ebdcbc4b3e08ce6bbcd5a0286b82c3624ea7c7b63b9210ec",
@@ -3934,6 +4139,46 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "3318a33f79c6f7deabcd665a679e1ee65c099db75c73e875ea91243967e1bd94",
     "UPDATE credits SET usuario_id = ? WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "a198323addabcb08b50a971f2a3f0d89b2df0dfb5c0a67fc3ec35ac65e8f3726",
+    "UPDATE fiscal_documents SET agtNextAttemptAt = ? WHERE id = ?"
+  ],
+  [
+    "b635bbc75952dade73eb04d800c859c3903cc81a10ce4b15da6a19c4826f8013",
+    "UPDATE fiscal_documents SET agtStatus = 'em_validacao', agtAttempts = ?, agtNextAttemptAt = ? WHERE agtRequestId = ? AND agtStatus IN ('enviado','em_validacao')"
+  ],
+  [
+    "50e84c76f0a73ea9b9295d40718e21f64772573e1085bfb70b9e50b909abae28",
+    "UPDATE fiscal_documents SET agtStatus = 'enviado', agtRequestId = ?, agtErrors = '[]', agtLastAttemptAt = ?, agtNextAttemptAt = ?, agtAttempts = agtAttempts + 1 WHERE id = ?"
+  ],
+  [
+    "df5161d4089065b39fdb3b5131e6cbf5843eac6fe590bb54853fe414ccd730d5",
+    "UPDATE fiscal_documents SET agtStatus = 'erro_envio', agtErrors = ?, agtLastAttemptAt = ?, agtNextAttemptAt = ?, agtAttempts = ? WHERE id = ?"
+  ],
+  [
+    "f53981da78376aee5d152f949f412545ceb80e1c5758c5c48cf59365a7193fd1",
+    "UPDATE fiscal_documents SET agtStatus = 'invalido', agtErrors = ?, agtLastAttemptAt = ?, agtNextAttemptAt = NULL, agtAttempts = agtAttempts + 1 WHERE id = ?"
+  ],
+  [
+    "17f90c3a687f74e343426ca53b5c7622cb26756df9f10b675f2be89d8aebd960",
+    "UPDATE fiscal_documents SET agtStatus = 'invalido', agtErrors = ?, agtNextAttemptAt = NULL WHERE id = ?"
+  ],
+  [
+    "3d2289462ceb11184814449819cc16adeb1388d9618cc0acc0433cf7cfecc527",
+    "UPDATE fiscal_documents SET agtStatus = 'pendente', agtRequestId = NULL, agtNextAttemptAt = ? WHERE agtRequestId = ?"
+  ],
+  [
+    "ae746bcd1f9dad255e0d3ce4edbfc70e2466869cedbb23ac9d251a96ee507434",
+    "UPDATE fiscal_documents SET agtStatus = ?, agtValidatedAt = ?, agtErrors = '[]', agtNextAttemptAt = NULL WHERE id = ?"
+  ],
+  [
+    "e31515f273a6356a781179a056d70435a7dd0bea576d42fe0ee77ee016871b0d",
+    "UPDATE fiscal_series SET nextNumber = nextNumber + 1, status = 'U' WHERE id = ? AND nextNumber = ?"
+  ],
+  [
+    "940410b8bff9d13f6c09b69d5e549d2b6166c89b4b75fb36096037b1f8234c8a",
+    "UPDATE fiscal_series SET status = ?, lastNumber = ?, agtSyncedAt = ? WHERE id = ?"
   ],
   [
     "9d9336ca8747e039dc5456d53c24237c97b0b67f0a54f71ec4221485798c1e6d",

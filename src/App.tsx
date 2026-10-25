@@ -10,6 +10,7 @@ import { LigacaoEmpresaWeb } from "@/componentes/layout/LigacaoEmpresaWeb";
 import { GuardaSubscricaoWeb } from "@/componentes/layout/GuardaSubscricaoWeb";
 import { BackupReminder } from "@/componentes/layout/BackupReminder";
 import { AutoBackupManager } from "@/componentes/layout/AutoBackupManager";
+import { FilaFiscalGlobal } from "@/componentes/fiscal/FilaFiscalGlobal";
 import { SplashScreen } from "@/componentes/layout/SplashScreen";
 import { isPublicWebBuild } from "@/bibliotecas/ambiente";
 
@@ -230,6 +231,7 @@ const AppContent = () => {
       <HashRouter>
         <BackupReminder />
         <AutoBackupManager />
+        <FilaFiscalGlobal />
         <Suspense fallback={suspenseFallback}>
           <Routes>
             <Route path="/login" element={<Navigate to="/entrar" replace />} />

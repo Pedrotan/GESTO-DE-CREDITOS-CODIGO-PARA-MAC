@@ -44,6 +44,9 @@ export const SYNC_EXCLUDED_TABLES = new Set([
     'audit_entry_seals', 'audit_daily_closes',
     // Linhas de bloqueio dos limites: só servem de guarda na transacção local (o consumo sincroniza em limit_ledger).
     'limit_locks',
+    // Fiscal: o registo das chamadas à AGT e as cópias dos ficheiros SAF-T ficam no computador que os fez
+    // (os documentos, as séries e a configuração fiscal sincronizam normalmente).
+    'fiscal_agt_requests', 'fiscal_saft_exports',
 ]);
 
 export const normalizeSqlText = (sql: string) =>
