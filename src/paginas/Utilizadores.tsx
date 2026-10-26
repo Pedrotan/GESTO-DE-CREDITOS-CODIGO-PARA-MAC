@@ -5,6 +5,8 @@ import { cn, getFileUrl } from '@/bibliotecas/utils';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
 import { ROLES, User, Role } from '@/tipos/autenticacao';
+import { AtribuirNivel } from '@/componentes/utilizadores/AtribuirNivel';
+import { db } from '@/bibliotecas/bd';
 import {
     PerfilAcesso, MODULOS_SISTEMA, ROTULOS_AREAS, DESCRICOES_ACOES,
     AcaoModulo, ExcecaoPermissao, ConfiguracaoAlcada, AmbitoDados,
@@ -75,6 +77,35 @@ export default function Utilizadores() {
     }, [reloadUsers]);
 
     const perfis = useMemo(() => ServicoControloAcesso.obterPerfis(), []);
+    // «Atribuir novo nível»: só Super Administradores mudam o perfil de acesso (incluindo de outros Super Administradores).
+    const [nivelAlvo, setNivelAlvo] = useState<User | null>(null);
+    const podeAtribuirNivel = currentUser?.role === 'super_admin';
+    // A interface trata todos os Super Administradores como «conta principal»; a marca verdadeira (dona da instalação)
+    // só existe na base de dados, por isso lê-se de lá ao abrir o modal.
+    const [contasPrincipais, setContasPrincipais] = useState<Set<string>>(new Set());
+    useEffect(() => {
+        if (!nivelAlvo) return;
+        void db.all<{ id: string }>('SELECT id FROM users WHERE isOwner = 1').then(rows => setContasPrincipais(new Set(rows.map(row => String(row.id))))).catch(() => setContasPrincipais(new Set()));
+    }, [nivelAlvo]);
+    const contaMarcadaPrincipal = (u: User | null) => Boolean(u && contasPrincipais.has(u.id));
+    const bloqueioNivel = (u: User | null) => !u ? null
+        : u.id === currentUser?.id ? 'Não pode mudar o seu próprio nível. Peça a outro Super Administrador.'
+            : contaMarcadaPrincipal(u) ? 'Esta é a conta principal da instalação: o nível dela só pode ser alterado pela própria.'
+                : null;
+    const atribuirNivel = async (role: string, motivo: string) => {
+        if (!nivelAlvo || !currentUser) return;
+        const erroMotivo = await ServicoAuditoriaAvancada.checkJustification(motivo, currentUser.id);
+        if (erroMotivo) throw new Error(erroMotivo);
+        ServicoControloAcesso.verificarUltimoSuperAdmin(users, nivelAlvo.id, nivelAlvo.status, role);
+        const perfil = perfis.find(item => item.id === role);
+        const antes = ROLES[nivelAlvo.role]?.label || nivelAlvo.role;
+        const depois = ROLES[role]?.label || perfil?.nome || role;
+        await updateUser(nivelAlvo.id, { role: role as Role, permissions: perfil?.permissoesBase || [] });
+        await addLog('update', 'user', `Atribuiu novo nível a ${nivelAlvo.name}: ${antes} → ${depois}. Motivo: ${motivo}`, currentUser.id, currentUser.name,
+            { role: antes }, { role: depois }, { targetUserId: nivelAlvo.id, targetUserName: nivelAlvo.name, reason: motivo, origin: 'atribuir_nivel' });
+        await reloadUsers?.();
+        toast({ title: 'Nível atribuído', description: `${nivelAlvo.name} passa a ${depois}.` });
+    };
 
     // Estados de diálogo e filtros
     const [filtroCardAtivo, setFiltroCardAtivo] = useState<FiltroCard>('todos');
@@ -925,6 +956,18 @@ export default function Utilizadores() {
                                                         <Lock className="h-4 w-4" />
                                                     </Button>}
 
+                                                    {/* Atribuir novo nível (só Super Administradores) */}
+                                                    {podeAtribuirNivel && <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-indigo-600 hover:bg-indigo-50 dark:text-indigo-400 dark:hover:bg-indigo-950/30"
+                                                        title="Atribuir novo nível de acesso"
+                                                        aria-label={`Atribuir novo nível a ${u.name}`}
+                                                        onClick={() => setNivelAlvo(u)}
+                                                    >
+                                                        <ShieldCheck className="h-4 w-4" />
+                                                    </Button>}
+
                                                     {/* Ficha PDF */}
                                                     <Button
                                                         variant="ghost"
@@ -1686,6 +1729,14 @@ export default function Utilizadores() {
                 actionLabel={alertModal.actionLabel}
                 cancelLabel={alertModal.cancelLabel}
                 onConfirm={alertModal.onConfirm}
+            />
+            <AtribuirNivel
+                open={Boolean(nivelAlvo)}
+                onOpenChange={open => { if (!open) setNivelAlvo(null); }}
+                target={nivelAlvo}
+                perfis={perfis}
+                bloqueio={bloqueioNivel(nivelAlvo)}
+                onConfirm={atribuirNivel}
             />
         </MainLayout>
     );

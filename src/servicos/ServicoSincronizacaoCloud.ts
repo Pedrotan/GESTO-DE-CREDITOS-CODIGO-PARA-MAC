@@ -1103,3 +1103,33 @@ export const receiveUsersFromCloud = async (): Promise<UsersRosterOutcome> => {
         };
     }
 };
+
+// ── Presença em tempo real ───────────────────────────────────────────────────────────
+export type PresenceEntry = { userKey: string; lastSeen: string; devices: number; platforms: Array<'pc' | 'web'> };
+
+/** Identificador opaco do utilizador para o servidor (o servidor não recebe ids nem nomes). */
+export const presenceUserKey = async (tenantId: string, userId: string) => {
+    const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`tango-presence:${tenantId.toUpperCase()}:${userId}`)));
+    return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+};
+
+/**
+ * Sinal de presença deste dispositivo (ou fim de sessão com `active = false`) e lista de quem da empresa está ligado,
+ * em qualquer computador ou navegador. Sem ligação à nuvem devolve null (a página usa só este dispositivo).
+ */
+export const sendPresence = async (userId: string, active = true): Promise<{ tenantId: string; online: PresenceEntry[]; windowSeconds: number } | null> => {
+    const config = activeConfig || webCloudSyncConfig();
+    if (!config || !userId || (typeof navigator !== 'undefined' && navigator.onLine === false)) return null;
+    const userKey = await presenceUserKey(config.tenantId, userId);
+    const response = await fetch(`${normalizeBaseUrl(config.url)}/api/presence`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+        credentials: 'same-origin',
+        body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), userKey, platform: window.electronAPI ? 'pc' : 'web', active }),
+        keepalive: !active,
+        signal: AbortSignal.timeout(15_000),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.success !== true || !Array.isArray(body.online)) return null;
+    return { tenantId: config.tenantId, online: body.online, windowSeconds: Number(body.windowSeconds) || 150 };
+};

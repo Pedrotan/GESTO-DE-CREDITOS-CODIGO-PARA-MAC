@@ -117,9 +117,9 @@ export default function RelatoriosFiscais() {
       </div>
 
       <Tabs value={separador} onValueChange={setSeparador}>
-        <TabsList className="mb-5 h-auto w-full gap-1 bg-transparent p-0">
+        <TabsList className="mb-5">
           {SEPARADORES.map(s => (
-            <TabsTrigger key={s.id} value={s.id} className="gap-1.5 rounded-lg border border-transparent px-3 py-2 data-[state=active]:border-border data-[state=active]:bg-card data-[state=active]:shadow-sm">
+            <TabsTrigger key={s.id} value={s.id} className="gap-1.5">
               <s.icon className="h-4 w-4" />{s.label}
               {s.id === 'documentos' && resumo.rejeitados > 0 && <span className="rounded-full bg-red-600 px-1.5 text-[10px] text-white">{resumo.rejeitados}</span>}
             </TabsTrigger>

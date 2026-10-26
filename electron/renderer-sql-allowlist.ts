@@ -683,6 +683,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ? LIMIT 1",
   "SELECT id FROM users WHERE LOWER(username) = ? AND id <> ? LIMIT 1",
   "SELECT id FROM users WHERE email = ?",
+  "SELECT id FROM users WHERE isOwner = 1",
   "SELECT id FROM users WHERE role IN ('admin','super_admin','credit_director') AND (status IS NULL OR status <> 'blocked')",
   "SELECT id FROM users WHERE role IN ('super_admin', 'internal_auditor') AND (status IS NULL OR status <> 'blocked')",
   "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?",
@@ -3681,6 +3682,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "a4821a27a4f2a9662ba6234e4ab77093378c0235e7dc51960e0315ae94766d15",
     "SELECT id FROM users WHERE email = ?"
+  ],
+  [
+    "dabd815610d8fc580756935c59189d49fe08d23f449002ba30dbb349db6aaf4d",
+    "SELECT id FROM users WHERE isOwner = 1"
   ],
   [
     "a0c2a7f0d5cd98b706cb5be27130f5073bf7c22a5e00a9f883341133491e2c67",

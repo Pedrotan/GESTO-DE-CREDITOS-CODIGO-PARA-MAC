@@ -202,6 +202,7 @@ await loadHandler('verify-company', path.join(apiBaseDir, 'verify-company.js'));
 await loadHandler('registration-request', path.join(apiBaseDir, 'registration-request.js'));
 await loadHandler('company-email-verification', path.join(apiBaseDir, 'company-email-verification.js'));
 await loadHandler('sync', path.join(apiBaseDir, 'sync.js'));
+await loadHandler('presence', path.join(apiBaseDir, 'presence.js'));
 await loadHandler('tenants', path.join(apiBaseDir, 'tenants.js'));
 await loadHandler('usage-report', path.join(apiBaseDir, 'usage-report.js'));
 await loadHandler('lookup-document', path.join(apiBaseDir, 'lookup-document.js'));
