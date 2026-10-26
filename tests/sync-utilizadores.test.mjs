@@ -99,7 +99,9 @@ const cloud = await bundle('src/servicos/ServicoSincronizacaoCloud.ts', {
         export const scopedStorageKey = key => key + ':default';
         export const getScopedLocalStorageItem = key => localStorage.getItem(key + ':default');`,
     '@/bibliotecas/ligacao-financeira': 'export const setFinancialConnectionProbe = () => {};',
-    '@/bibliotecas/adaptador-sqlite': `export const sqlite = {
+    '@/bibliotecas/adaptador-sqlite': `export const REPLICA_BACKUP_AT_KEY = 'tango_replica_backup_at_v1';
+    export const RESTORE_REPLICA_FLAG = 'tango_restore_replica_v1';
+    export const sqlite = {
         all: (sql, params) => globalThis.__sqlite.all(sql, params),
         run: (sql, params) => globalThis.__sqlite.run(sql, params),
         transaction: statements => globalThis.__sqlite.transaction(statements),
@@ -420,4 +422,20 @@ test('carga ilegível fica retida após avançar o cursor e recupera com a chave
     } finally {
         cloud.stopCloudSync();
     }
+});
+
+test('servidor aceita um lote grande (100 alterações + utilizadores + resto da transacção) em vez de bloquear o dispositivo', async () => {
+    server.ops = [];
+    const operations = Array.from({ length: 150 }, (_, index) => ({ id: nodeCrypto.randomUUID(), deviceId: 'pc-lote', payload: `cifrado-${index}` }));
+    const res = {
+        statusCode: 200, headers: {},
+        status(code) { this.statusCode = code; return this; },
+        setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+        json(body) { this.body = body; return this; },
+    };
+    await syncHandler({ method: 'POST', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-lote', cursor: 0, operations } }, res);
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.equal(res.body.success, true);
+    assert.equal(server.ops.length, 150);
 });

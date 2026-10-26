@@ -7,12 +7,12 @@ import { Label } from '@/componentes/ui/label';
 import { Textarea } from '@/componentes/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/componentes/ui/table';
-import { rebuildBrowserReplica, reprocessRetainedOperations, syncCloudNow, getLastCloudSyncStatus } from '@/servicos/ServicoSincronizacaoCloud';
+import { rebuildBrowserReplica, replicaBackupAt, restoreBrowserReplicaBackup, reprocessRetainedOperations, syncCloudNow, getLastCloudSyncStatus } from '@/servicos/ServicoSincronizacaoCloud';
 import { useData } from '@/contextos/ContextoDados';
 import { Fragment } from 'react';
 import { CONFLICT_STATUS_LABELS, conflictArchiveStatements, conflictNote, conflictOperationDetails, conflictReason, conflictStatus, entityLabel, filterConflicts, type SyncConflict } from '@/bibliotecas/sync-conflitos';
 import { downloadConflictReport } from '@/bibliotecas/sync-conflitos-relatorio';
-import { RefreshCw, CheckCircle2, AlertTriangle, ShieldCheck, Archive, ArchiveRestore, Download, Search, ChevronLeft, ChevronRight, ArrowUpDown, CloudDownload } from 'lucide-react';
+import { RefreshCw, CheckCircle2, AlertTriangle, ShieldCheck, Archive, ArchiveRestore, Download, Search, ChevronLeft, ChevronRight, ArrowUpDown, CloudDownload, History } from 'lucide-react';
 
 const dateText = (value?: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('pt-AO') : '—';
 const selectClass = 'h-10 rounded-md border border-input bg-background px-3 text-sm';
@@ -124,6 +124,10 @@ export function ConflictReview({ actorId, actorName, canManage }: { actorId?: st
                 </select></label>}
                 {canManage && <Button size="sm" disabled={busy || loading} onClick={() => void handleReprocess()}><ShieldCheck className="mr-2 h-4 w-4" />Reprocessar registos seguros</Button>}
                 {canManage && !window.electronAPI && <Button variant="outline" size="sm" disabled={busy || loading} onClick={() => { setError(''); setRebuildOpen(true); }}><CloudDownload className="mr-2 h-4 w-4" />Receber tudo de novo da nuvem</Button>}
+                {!window.electronAPI && replicaBackupAt() && <Button variant="outline" size="sm" disabled={busy} title="Repõe a cópia deste navegador guardada antes de «Receber tudo de novo» e recebe por cima o que mudou na nuvem."
+                    onClick={() => { if (window.confirm(`Repor a cópia deste navegador de ${new Date(replicaBackupAt()!).toLocaleString('pt-AO')}? O que mudou na nuvem desde então volta a ser recebido por cima.`)) { try { restoreBrowserReplicaBackup(); } catch (cause) { reportError(cause); } } }}>
+                    <History className="mr-2 h-4 w-4" />Repor cópia anterior
+                </Button>}
             </div>
         </div></CardHeader>
         <CardContent className="space-y-4">
@@ -162,7 +166,7 @@ export function ConflictReview({ actorId, actorName, canManage }: { actorId?: st
             {canManage && detail.status === 'pending' && <><Label htmlFor="sync-conflict-note">Decisão e referência da operação manual (10 a 1000 caracteres)</Label><Textarea id="sync-conflict-note" value={note} maxLength={1000} onChange={event => setNote(event.target.value)} /><p className="text-xs text-muted-foreground">Marcar reconciliado apenas regista a decisão; não executa a operação financeira. Use após a reconciliação manual.</p><div className="flex flex-wrap gap-2"><Button disabled={busy || note.trim().length < 10} onClick={() => void decide('accepted')}>Marcar reconciliado</Button><Button variant="destructive" disabled={busy || note.trim().length < 10} onClick={() => void decide('rejected')}>Rejeitar alteração</Button></div></>}{error && <p role="alert" className="text-destructive">{error}</p>}
         </div>}</DialogContent></Dialog>
         <Dialog open={rebuildOpen} onOpenChange={open => { if (!busy) setRebuildOpen(open); }}><DialogContent><DialogHeader><DialogTitle>Receber tudo de novo da nuvem</DialogTitle><DialogDescription>Apaga a cópia local deste navegador e volta a receber todos os dados da empresa. Resolve conflitos antigos que já não se conseguem reaplicar.</DialogDescription></DialogHeader>
-            <p className="text-sm text-muted-foreground">Só é feito se não houver alterações deste navegador por enviar. A página recarrega e a primeira sincronização pode demorar alguns minutos. Os computadores e os outros navegadores não são afectados.</p>
+            <p className="text-sm text-muted-foreground">Só é feito se não houver alterações deste navegador por enviar e se a sincronização estiver a funcionar. Antes de apagar, a cópia actual fica guardada e pode ser reposta com «Repor cópia anterior». A página recarrega e a primeira sincronização pode demorar alguns minutos. Os computadores e os outros navegadores não são afectados.</p>
             {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
             <div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setRebuildOpen(false)}>Cancelar</Button><Button disabled={busy} onClick={() => void handleRebuild()}>{busy ? 'A preparar…' : 'Receber tudo de novo'}</Button></div></DialogContent></Dialog>
         <Dialog open={!!archiveDialog} onOpenChange={open => { if (!open && !busy) setArchiveDialog(null); }}><DialogContent><DialogHeader><DialogTitle>{archiveDialog?.action === 'archive' ? 'Arquivar' : 'Restaurar'} {archiveDialog?.ids.length} registo(s)</DialogTitle><DialogDescription>{archiveDialog?.action === 'archive' ? 'Os conflitos sairão da fila pendente sem aplicar as alterações remotas. Continuarão no histórico e poderão ser restaurados.' : 'Os conflitos voltarão à fila pendente e poderão ser reprocessados pela sincronização.'}</DialogDescription></DialogHeader><Label htmlFor="sync-archive-note">Motivo (10 a 1000 caracteres)</Label><Textarea id="sync-archive-note" value={archiveNote} maxLength={1000} onChange={event => setArchiveNote(event.target.value)} />{error && <p role="alert" className="text-sm text-destructive">{error}</p>}<div className="flex justify-end gap-2"><Button variant="outline" disabled={busy} onClick={() => setArchiveDialog(null)}>Cancelar</Button><Button disabled={busy || archiveNote.trim().length < 10} onClick={() => void saveArchive()}>{busy ? 'A guardar…' : 'Confirmar'}</Button></div></DialogContent></Dialog>

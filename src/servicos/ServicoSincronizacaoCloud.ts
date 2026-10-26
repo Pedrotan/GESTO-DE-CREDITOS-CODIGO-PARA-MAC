@@ -4,7 +4,7 @@ import { portableCompanyImage } from '@/bibliotecas/imagem-portatil';
 import { lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGREDO_CODIGO_EMPRESA } from '@/bibliotecas/cofre-segredos';
 import { secureCloudUrl } from '@/servicos/ServicoLigacaoNuvem';
 import { setFinancialConnectionProbe } from '@/bibliotecas/ligacao-financeira';
-import { sqlite, type SqlTransactionStatement } from '@/bibliotecas/adaptador-sqlite';
+import { REPLICA_BACKUP_AT_KEY, RESTORE_REPLICA_FLAG, sqlite, type SqlTransactionStatement } from '@/bibliotecas/adaptador-sqlite';
 import { RENDERER_SQL_BY_ID, RENDERER_SQL_ID_BY_STATEMENT } from '../../electron/renderer-sql-allowlist.ts';
 import {
     REBUILD_REPLICA_FLAG,
@@ -74,13 +74,17 @@ const USERS_ROSTER_AT_KEY = 'cloud_sync_users_roster_at_v1';
 const KEY_FINGERPRINT_KEY = 'cloud_sync_key_fingerprint_v1';
 /** Avisa o login de que chegaram utilizadores (versão web). */
 export const USERS_SYNCED_EVENT = 'tango-users-synced';
-const MAX_PUSH_OPERATIONS = 100;
+const MAX_PUSH_OPERATIONS = 80;
+/** Lote actual: começa em MAX_PUSH_OPERATIONS e reduz-se a metade se o servidor recusar por excesso (413). */
+let pushLimit = MAX_PUSH_OPERATIONS;
 // Bytes por pedido (envio e recepção): com ficheiros, 100 operações podiam passar o limite do servidor e,
 // em ligações lentas, não chegar dentro do tempo.
 const MAX_PUSH_BYTES = 1_500_000;
 const MAX_PULL_BYTES = 2_000_000;
 const MAX_PULL_ROUNDS = 10;
-const SYNC_INTERVAL_MS = 30_000;
+// Quase tempo real: recebe o que os outros dispositivos fizeram a cada 10 s (e logo ao gravar, ao voltar à janela
+// ou ao recuperar a Internet).
+const SYNC_INTERVAL_MS = 10_000;
 const INCOMPLETE_GROUP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SYNCABLE_SQL = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
 
@@ -740,6 +744,10 @@ export const rebuildBrowserReplica = async () => {
     if (window.electronAPI) throw new Error('No computador os conflitos resolvem-se sozinhos depois de instalar a versão nova.');
     const pending = await getPendingSyncCount();
     if (pending > 0) throw new Error(`Ainda há ${pending} alteração(ões) deste navegador por enviar. Sincronize primeiro e tente de novo.`);
+    // Só com a sincronização a funcionar: se não se consegue enviar nem receber agora, a cópia nova ficaria vazia.
+    if (lastStatus.state === 'error') throw new Error('A sincronização está com erro neste momento. Resolva a ligação (ou aguarde «Sincronizado») antes de receber tudo de novo.');
+    const retained = (await readAll(UNREADABLE_STORE)).length + (await readAll(INCOMING_STORE)).length;
+    if (retained > 0) throw new Error(`Há ${retained} alteração(ões) recebidas e ainda por aplicar neste navegador. Aguarde a sincronização terminar.`);
     localStorage.setItem(scopedStorageKey(CURSOR_KEY), '0');
     // Este navegador não volta a enviar a fotografia completa: os dados vêm todos da nuvem.
     localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
@@ -747,6 +755,17 @@ export const rebuildBrowserReplica = async () => {
     localStorage.removeItem(scopedStorageKey(USERS_STATE_KEY));
     localStorage.removeItem(scopedStorageKey(USERS_ROSTER_AT_KEY));
     localStorage.setItem(REBUILD_REPLICA_FLAG, new Date().toISOString());
+    window.location.reload();
+};
+
+/** Data da cópia guardada antes da última reconstrução deste navegador (null = não há). */
+export const replicaBackupAt = () => (window.electronAPI ? null : localStorage.getItem(REPLICA_BACKUP_AT_KEY));
+
+/** Repõe a cópia anterior à reconstrução e volta a receber da nuvem o que mudou desde então (por cima). */
+export const restoreBrowserReplicaBackup = () => {
+    if (window.electronAPI || !replicaBackupAt()) throw new Error('Não há cópia anterior guardada neste navegador.');
+    localStorage.setItem(scopedStorageKey(CURSOR_KEY), '0');
+    localStorage.setItem(RESTORE_REPLICA_FLAG, new Date().toISOString());
     window.location.reload();
 };
 
@@ -824,7 +843,7 @@ export const syncCloudNow = async () => {
                 : null;
 
             for (let round = 0; round < MAX_PULL_ROUNDS; round++) {
-                const { batch: queued, more } = await getQueuedOperations();
+                const { batch: queued, more } = await getQueuedOperations(pushLimit);
                 const supported = queued.filter(operation => ['statement', 'snapshot', 'dynamic'].includes(operation.kind));
                 const outgoing: Array<{ id: string; deviceId: string; payload: string; kind?: 'users' }> = await Promise.all(
                     supported.map(async operation => ({ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) })));
@@ -843,6 +862,13 @@ export const syncCloudNow = async () => {
                     signal: AbortSignal.timeout(requestTimeout(requestBody.length + MAX_PULL_BYTES))
                 });
                 const body = await response.json().catch(() => ({}));
+                // Lote recusado por ser grande demais: envia em lotes menores em vez de ficar bloqueado (e sem receber).
+                if (response.status === 413 && pushLimit > 1) {
+                    pushLimit = Math.max(1, Math.floor(pushLimit / 2));
+                    console.warn(`[CloudSync] Lote recusado pelo tamanho: a enviar ${pushLimit} alteração(ões) de cada vez.`);
+                    round -= 1;
+                    continue;
+                }
                 if (!response.ok || body.success !== true) throw Object.assign(new Error(body.message || body.error || `Resposta inválida do servidor de sincronização (${response.status}).`), { status: response.status, code: body.code });
                 if (!Array.isArray(body.operations) || typeof body.hasMore !== 'boolean'
                     || !Number.isSafeInteger(Number(body.cursor)) || Number(body.cursor) < cursor) {

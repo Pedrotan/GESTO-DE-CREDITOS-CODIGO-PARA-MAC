@@ -15,6 +15,14 @@ const IDB_NAME = IS_DEV ? 'TangoGestaoCreditosERP_DevDB' : 'TangoGestaoCreditosE
 const IDB_STORE = 'sqlite_store';
 const IDB_KEY = 'main_db';
 
+/**
+ * Cópia de segurança da base deste navegador, feita antes de «Receber tudo de novo da nuvem». Se a recepção não
+ * trouxer os dados (ex.: alterações que nunca chegaram à nuvem), a cópia anterior pode ser reposta.
+ */
+const IDB_BACKUP_NAME = `${IDB_NAME}_CopiaAnterior`;
+export const REPLICA_BACKUP_AT_KEY = 'tango_replica_backup_at_v1';
+export const RESTORE_REPLICA_FLAG = 'tango_restore_replica_v1';
+
 const deleteIdb = (name: string) => new Promise<void>(resolve => {
     const request = indexedDB.deleteDatabase(name);
     request.onsuccess = () => resolve();
@@ -29,9 +37,9 @@ export type SqlTransactionStatement = {
     expectChanges?: number;
 };
 
-const loadFromIDB = (): Promise<Uint8Array | null> => {
+const loadFromIDB = (name = IDB_NAME): Promise<Uint8Array | null> => {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = (e: any) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
@@ -56,9 +64,9 @@ const loadFromIDB = (): Promise<Uint8Array | null> => {
     });
 };
 
-const saveToIDB = (data: Uint8Array): Promise<void> => {
+const saveToIDB = (data: Uint8Array, name = IDB_NAME): Promise<void> => {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = (e: any) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
@@ -106,8 +114,19 @@ const initDB = async (): Promise<Database> => {
         }
         // 2. Verificar IndexedDB
         else {
-            if (localStorage.getItem(REBUILD_REPLICA_FLAG)) {
+            if (localStorage.getItem(RESTORE_REPLICA_FLAG)) {
+                // Repor a cópia anterior à reconstrução (os dados mais recentes da nuvem voltam a chegar por cima).
+                localStorage.removeItem(RESTORE_REPLICA_FLAG);
+                const backup = await loadFromIDB(IDB_BACKUP_NAME).catch(() => null);
+                if (backup) await saveToIDB(backup);
+            } else if (localStorage.getItem(REBUILD_REPLICA_FLAG)) {
                 localStorage.removeItem(REBUILD_REPLICA_FLAG);
+                // Nunca se apaga sem guardar: a cópia actual fica como «cópia anterior» (a última reconstrução).
+                const current = await loadFromIDB().catch(() => null);
+                if (current) {
+                    await saveToIDB(current, IDB_BACKUP_NAME);
+                    localStorage.setItem(REPLICA_BACKUP_AT_KEY, new Date().toISOString());
+                }
                 await deleteIdb(IDB_NAME);
                 await deleteIdb('TangoCloudSyncQueue');
             }

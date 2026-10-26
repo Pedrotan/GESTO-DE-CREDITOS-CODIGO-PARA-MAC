@@ -3,7 +3,10 @@ import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { authorizeTenant, sha256 } from './_autorizacao-empresa.js';
 
-const MAX_OPERATIONS = 100;
+// Alterações por pedido. Os clientes enviam lotes de até 100, mais a lista de utilizadores e o resto de uma transacção
+// que não pode ser partida: com o limite antigo de 100 esse lote era recusado sempre e o dispositivo deixava de
+// sincronizar (nem enviava nem recebia). O tamanho do pedido continua limitado pelo servidor (8 MB).
+const MAX_OPERATIONS = 2000;
 const MAX_PAYLOAD_LENGTH = 2_000_000;
 const PULL_LIMIT = 500;
 // Bytes por resposta: em ligações lentas uma página de 500 operações com ficheiros não chegava a tempo.
