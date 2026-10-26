@@ -109,6 +109,8 @@ export const ENTRY_TYPE_LABELS: Record<string, string> = {
     writeoff: 'Abate de crédito',
     journal_reversal: 'Estorno de lançamento',
     payment_reversal: 'Estorno de pagamento',
+    credit_removal: 'Estorno de crédito eliminado',
+    credit_restore: 'Novo desembolso (crédito restaurado)',
 };
 
 export const SOURCE_TYPE_LABELS: Record<string, string> = {
@@ -122,6 +124,8 @@ export const SOURCE_TYPE_LABELS: Record<string, string> = {
     writeoff: 'Abate',
     provision: 'Provisão',
     journal_reversal: 'Estorno',
+    credit_removal: 'Crédito eliminado',
+    credit_restore: 'Crédito restaurado',
 };
 
 export const COMPONENT_LABELS: Record<string, string> = {

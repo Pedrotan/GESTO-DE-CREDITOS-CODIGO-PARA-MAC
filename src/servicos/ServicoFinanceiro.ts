@@ -480,7 +480,7 @@ export class ServicoFinanceiro {
         const disbursed = !['pending_approval', 'rejected', 'cancelled'].includes(normalizedCredit.status);
         if (disbursed) {
             await this.assertNotFrozen();
-            await this.assertCashAvailable(principalMinor, 'o desembolso deste crédito');
+            await this.assertCashAvailable(principalMinor, 'o desembolso deste crédito', await this.fundingAccountForClient(normalizedCredit.clientId));
         }
         const entry: any = disbursed ? await buildDisbursementAccountingEntry({
             id: `origination:${normalizedCredit.id}`, creditId: normalizedCredit.id, clientId: normalizedCredit.clientId,
@@ -620,7 +620,7 @@ export class ServicoFinanceiro {
         const interestMinor = toMinorUnits(reinforcementInterest(input.amount, Number(storedCredit.interestRate), storedCredit.amortizationMethod || 'FLAT'), 'Juro do reforço');
         if (interestMinor !== toMinorUnits(input.interestAmount, 'Juro indicado')) throw new Error('Os juros do reforço divergiram da taxa do contrato. Atualize os dados.');
         await this.assertNotFrozen();
-        await this.assertCashAvailable(amountMinor, 'o reforço de capital');
+        await this.assertCashAvailable(amountMinor, 'o reforço de capital', await this.fundingAccountForClient(input.credit.clientId));
         const timestamp = new Date();
         const entry: any = await buildDisbursementAccountingEntry({
             id: input.idempotencyKey, creditId: input.credit.id, clientId: input.credit.clientId,
@@ -731,7 +731,7 @@ export class ServicoFinanceiro {
         };
         if (approved) {
             await this.assertNotFrozen();
-            await this.assertCashAvailable(toMinorUnits(input.credit.principalAmount, 'Capital do crédito'), 'o desembolso deste crédito');
+            await this.assertCashAvailable(toMinorUnits(input.credit.principalAmount, 'Capital do crédito'), 'o desembolso deste crédito', await this.fundingAccountForClient(input.credit.clientId));
         }
         const entry: any = approved ? await buildDisbursementAccountingEntry({
             id: `origination:${input.credit.id}`, creditId: input.credit.id,
@@ -787,9 +787,13 @@ export class ServicoFinanceiro {
 
     /** Histórico das decisões de aprovação/rejeição (mais recentes primeiro). */
     static async getCreditApprovals(): Promise<CreditApprovalRecord[]> {
-        const rows = await db.all<any>(`SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments,
-            decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt
-            FROM credit_approvals ORDER BY decidedAt DESC`).catch(() => []);
+        // Decisões de créditos ou clientes eliminados (lixeira ou apagados) não aparecem: o registo fica guardado.
+        const rows = await db.all<any>(`SELECT a.id, a.creditId, a.clientId, a.clientName, a.principalAmount, a.interestRate, a.installments,
+            a.decision, a.reason, a.requestedBy, a.requestedAt, a.decidedBy, a.decidedById, a.decidedAt
+            FROM credit_approvals a
+            WHERE NOT EXISTS (SELECT 1 FROM credits c WHERE c.id = a.creditId AND c.deletedAt IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM clients k WHERE k.id = a.clientId AND k.deletedAt IS NOT NULL)
+            ORDER BY a.decidedAt DESC`).catch(() => []);
         return rows.map(row => ({
             ...row,
             principalAmount: Number(row.principalAmount) || 0,
@@ -807,6 +811,131 @@ export class ServicoFinanceiro {
 
     static async restoreCredit(id: string): Promise<void> {
         await RepositorioCredito.restore(id);
+    }
+
+    // ── Créditos eliminados e o razão ────────────────────────────────────────────────
+    // Um crédito que vai para a lixeira (ou é apagado) deixa de existir na carteira, mas o desembolso continuava no
+    // razão: o dinheiro ficava "na carteira" de um contrato inexistente e Caixa e Bancos mostrava menos do que havia.
+    // O estorno devolve o capital ainda em dívida à conta de onde saiu e anula os juros ainda por receber. O restauro
+    // volta a lançar o desembolso. Ids determinísticos (crédito + data): dois computadores não duplicam o lançamento.
+
+    /** Saldos do razão de um crédito (cêntimos): capital em carteira e juros/mora por receber. */
+    private static async creditLedgerBalances(creditId: string) {
+        const rows = await db.all<{ account: string; side: string; total: number }>(`SELECT l.account, l.side, SUM(l.amountMinor) AS total
+            FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId
+            WHERE a.creditId = ? AND l.account IN ('portfolio', 'receivable_interest', 'receivable_late_interest')
+            GROUP BY l.account, l.side`, [creditId]);
+        const net = (account: string) => rows.filter(row => row.account === account)
+            .reduce((sum, row) => sum + (row.side === 'debit' ? 1 : -1) * Number(row.total || 0), 0);
+        return { portfolio: net('portfolio'), interest: net('receivable_interest'), late: net('receivable_late_interest') };
+    }
+
+    /** Conta usada no desembolso (caixa ou banco); sem desembolso registado, a conta habitual do cliente. */
+    private static async disbursementAccount(creditId: string, clientId?: string): Promise<'cash' | 'bank'> {
+        const row = await db.get<{ credit: string }>(`SELECT credit FROM accounting_entries WHERE creditId = ? AND type = 'disbursement'
+            ORDER BY timestamp LIMIT 1`, [creditId]).catch(() => undefined);
+        if (row?.credit === 'cash' || row?.credit === 'bank') return row.credit;
+        return this.fundingAccountForClient(clientId);
+    }
+
+    private static removalKey = (value: string | null | undefined) => String(value || '').replace(/[^0-9]/g, '').slice(0, 17) || '0';
+
+    /** Créditos eliminados que ainda têm capital ou juros por receber no razão (o que o estorno vai regularizar). */
+    static async removedCreditsPendingReversal(): Promise<Array<{ creditId: string; clientName: string; principalMinor: number; interestMinor: number }>> {
+        const removed = await db.all<{ id: string; clientName: string; deletedAt: string }>('SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL').catch(() => []);
+        const pending: Array<{ creditId: string; clientName: string; principalMinor: number; interestMinor: number }> = [];
+        for (const credit of removed) {
+            if (await db.get('SELECT id FROM accounting_entries WHERE id = ?', [`credit-removal:${credit.id}:${this.removalKey(credit.deletedAt)}`])) continue;
+            const balances = await this.creditLedgerBalances(credit.id);
+            const principalMinor = Math.max(0, balances.portfolio);
+            const interestMinor = Math.max(0, balances.interest) + Math.max(0, balances.late);
+            if (principalMinor || interestMinor) pending.push({ creditId: credit.id, clientName: credit.clientName, principalMinor, interestMinor });
+        }
+        return pending;
+    }
+
+    /**
+     * Estorna no razão os créditos eliminados que ainda lá têm capital ou juros por receber (todos, ou só os indicados).
+     * Devolve o número de estornos lançados e o valor total devolvido a Caixa e Bancos (cêntimos).
+     */
+    static async reverseRemovedCredits(actor: { id: string; name: string }, creditIds?: string[]): Promise<{ entries: number; returnedMinor: number }> {
+        await this.assertNotFrozen();
+        const only = creditIds ? new Set(creditIds) : null;
+        const removed = (await db.all<{ id: string; clientId: string; clientName: string; deletedAt: string }>(
+            'SELECT id, clientId, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL')).filter(credit => !only || only.has(credit.id));
+        let entries = 0;
+        let returnedMinor = 0;
+        for (const credit of removed) {
+            const id = `credit-removal:${credit.id}:${this.removalKey(credit.deletedAt)}`;
+            if (await db.get('SELECT id FROM accounting_entries WHERE id = ?', [id])) continue;
+            const balances = await this.creditLedgerBalances(credit.id);
+            const principal = Math.max(0, balances.portfolio);
+            const interest = Math.max(0, balances.interest);
+            const late = Math.max(0, balances.late);
+            if (!principal && !interest && !late) continue;
+            const funding = await this.disbursementAccount(credit.id, credit.clientId);
+            const lines: JournalLineInput[] = ([
+                { account: funding, side: 'debit', amountMinor: principal, component: 'settlement' },
+                { account: 'portfolio', side: 'credit', amountMinor: principal, component: 'principal' },
+                { account: 'revenue_interest', side: 'debit', amountMinor: interest, component: 'interest_receivable' },
+                { account: 'receivable_interest', side: 'credit', amountMinor: interest, component: 'interest_receivable' },
+                { account: 'revenue_late_interest', side: 'debit', amountMinor: late, component: 'late_receivable' },
+                { account: 'receivable_late_interest', side: 'credit', amountMinor: late, component: 'late_receivable' },
+            ] as JournalLineInput[]).filter(line => line.amountMinor > 0);
+            const clientExists = credit.clientId ? await db.get('SELECT id FROM clients WHERE id = ?', [credit.clientId]) : null;
+            const entry: any = await buildJournalEntry({
+                id, type: 'credit_removal', sourceType: 'credit_removal', sourceId: credit.id, creditId: credit.id,
+                clientId: clientExists ? credit.clientId : undefined, processedBy: actor.name, usuario_id: actor.id,
+                description: `Estorno do desembolso do crédito eliminado ${credit.id} (${credit.clientName})`,
+                justification: 'Crédito enviado para a lixeira ou apagado: o capital em dívida volta à conta de origem.', lines,
+            }, await this.previousAccountingHash(), new Date());
+            await db.transaction([
+                { ...this.accountingInsert(entry), expectChanges: 1 },
+                ...this.ledgerStatements(entry),
+                this.journalAudit(entry, actor.id, actor.name, `Estorno do desembolso do crédito eliminado ${credit.id}`,
+                    { creditId: credit.id, principalMinor: principal, interestMinor: interest, lateMinor: late, account: funding }),
+            ]);
+            entries += 1;
+            returnedMinor += principal;
+        }
+        return { entries, returnedMinor };
+    }
+
+    /** Restauro: volta a lançar o que o estorno da eliminação devolveu (exige saldo, como um desembolso). */
+    static async restoreRemovedCreditLedger(creditId: string, actor: { id: string; name: string }): Promise<void> {
+        const rows = await db.all<{ type: string; account: string; side: string; total: number }>(`SELECT a.type, l.account, l.side, SUM(l.amountMinor) AS total
+            FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId
+            WHERE a.creditId = ? AND a.type IN ('credit_removal', 'credit_restore') GROUP BY a.type, l.account, l.side`, [creditId]);
+        if (!rows.length) return;
+        const net = (account: string) => rows.filter(row => row.account === account)
+            .reduce((sum, row) => sum + (row.side === 'credit' ? 1 : -1) * Number(row.total || 0), 0);
+        const principal = Math.max(0, net('portfolio'));
+        const interest = Math.max(0, net('receivable_interest'));
+        const late = Math.max(0, net('receivable_late_interest'));
+        if (!principal && !interest && !late) return;
+        await this.assertNotFrozen();
+        const credit = await db.get<{ clientId: string; clientName: string }>('SELECT clientId, clientName FROM credits WHERE id = ?', [creditId]);
+        const funding = await this.disbursementAccount(creditId, credit?.clientId);
+        if (principal) await this.assertCashAvailable(principal, 'restaurar este crédito (o desembolso volta a sair de Caixa e Bancos)', funding);
+        const lines: JournalLineInput[] = ([
+            { account: 'portfolio', side: 'debit', amountMinor: principal, component: 'principal' },
+            { account: funding, side: 'credit', amountMinor: principal, component: 'settlement' },
+            { account: 'receivable_interest', side: 'debit', amountMinor: interest, component: 'interest_receivable' },
+            { account: 'revenue_interest', side: 'credit', amountMinor: interest, component: 'interest_receivable' },
+            { account: 'receivable_late_interest', side: 'debit', amountMinor: late, component: 'late_receivable' },
+            { account: 'revenue_late_interest', side: 'credit', amountMinor: late, component: 'late_receivable' },
+        ] as JournalLineInput[]).filter(line => line.amountMinor > 0);
+        const entry: any = await buildJournalEntry({
+            id: `credit-restore:${creditId}:${this.removalKey(new Date().toISOString())}`, type: 'credit_restore', sourceType: 'credit_restore',
+            sourceId: creditId, creditId, clientId: credit?.clientId || undefined, processedBy: actor.name, usuario_id: actor.id,
+            description: `Novo desembolso do crédito restaurado ${creditId} (${credit?.clientName || ''})`,
+            justification: 'Crédito restaurado da lixeira: o desembolso estornado volta a ser lançado.', lines,
+        }, await this.previousAccountingHash(), new Date());
+        await db.transaction([
+            { ...this.accountingInsert(entry), expectChanges: 1 },
+            ...this.ledgerStatements(entry),
+            this.journalAudit(entry, actor.id, actor.name, `Novo desembolso do crédito restaurado ${creditId}`, { creditId, principalMinor: principal, account: funding }),
+        ]);
     }
 
     /** Sai da lixeira sem restauro. Os lançamentos contabilísticos ficam: são imutáveis por lei e pela cadeia de hashes. */
@@ -1166,11 +1295,17 @@ export class ServicoFinanceiro {
         return (minor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    private static async assertCashAvailable(amountMinor: number, purpose: string) {
+    private static async assertCashAvailable(amountMinor: number, purpose: string, account?: 'cash' | 'bank') {
         if (!(await this.getAccountingConfig()).cashGuard) return;
         const balances = await this.liquidBalancesMinor();
         if (balances.total < amountMinor) {
             throw new Error(`Saldo de Caixa e Bancos insuficiente para ${purpose}: disponível ${this.formatMinor(balances.total)} Kz, necessário ${this.formatMinor(amountMinor)} Kz. Registe a entrada de capital ou o financiamento em Contabilidade › Lançamentos.`);
+        }
+        // O dinheiro sai de uma conta concreta: com saldo só no banco, um pagamento em numerário deixava a Caixa negativa
+        // (dinheiro entregue que a contabilidade não sabe de onde veio).
+        if (account && balances[account] < amountMinor) {
+            const [here, other] = account === 'cash' ? ['Caixa', 'Bancos'] : ['Bancos', 'Caixa'];
+            throw new Error(`Saldo em ${here} insuficiente para ${purpose}: disponível ${this.formatMinor(balances[account])} Kz em ${here} (${this.formatMinor(balances.total - balances[account])} Kz em ${other}), necessário ${this.formatMinor(amountMinor)} Kz. Registe a transferência ${other} → ${here} em Contabilidade › Lançamentos, ou mude a forma de entrega do valor ao cliente.`);
         }
     }
 

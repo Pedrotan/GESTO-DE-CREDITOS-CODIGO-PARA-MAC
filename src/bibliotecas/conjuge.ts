@@ -5,7 +5,11 @@
 
 export const MARITAL_WITH_SPOUSE = ['CASADO', 'UNIAO_DE_FACTO'];
 
-export const SPOUSE_TEXT_FIELDS = ['spouseName', 'spouseBi', 'spouseNif', 'spousePhone', 'spouseEmail', 'spouseBirthDate', 'spouseOccupation'] as const;
+export const SPOUSE_TEXT_FIELDS = ['spouseName', 'spouseBi', 'spouseNif', 'spousePhone', 'spouseEmail', 'spouseBirthDate', 'spouseOccupation',
+    'spouseBirthPlace', 'spouseProvince', 'spouseMunicipality', 'spouseNeighborhood', 'spouseZone'] as const;
+
+/** Naturalidade e morada do cônjuge: obrigatórias quando os dados do cônjuge são fornecidos. */
+export const SPOUSE_ADDRESS_FIELDS = ['spouseBirthPlace', 'spouseProvince', 'spouseMunicipality', 'spouseNeighborhood', 'spouseZone'] as const;
 
 export type SpouseFields = {
     maritalStatus?: string | null;
@@ -16,6 +20,11 @@ export type SpouseFields = {
     spouseEmail?: string | null;
     spouseBirthDate?: string | null;
     spouseOccupation?: string | null;
+    spouseBirthPlace?: string | null;
+    spouseProvince?: string | null;
+    spouseMunicipality?: string | null;
+    spouseNeighborhood?: string | null;
+    spouseZone?: string | null;
     spouseIncome?: number | null;
     spouseDataRefused?: boolean | number | null;
     spouseDataRefusedAt?: string | null;
@@ -53,6 +62,7 @@ export const SPOUSE_STATUS_LABELS: Record<SpouseDataStatus, string> = {
 export function spouseFieldsToSave(data: SpouseFields, previous: SpouseFields | null | undefined, actorName: string, now = new Date()): Required<Omit<SpouseFields, 'maritalStatus'>> {
     const empty = {
         spouseName: '', spouseBi: '', spouseNif: '', spousePhone: '', spouseEmail: '', spouseBirthDate: '', spouseOccupation: '', spouseIncome: 0,
+        spouseBirthPlace: '', spouseProvince: '', spouseMunicipality: '', spouseNeighborhood: '', spouseZone: '',
     };
     if (!needsSpouse(data.maritalStatus)) {
         return { ...empty, spouseDataRefused: false, spouseDataRefusedAt: '', spouseDataRefusedBy: '', spouseConsentAt: '', spouseConsentBy: '' };
@@ -75,6 +85,11 @@ export function spouseFieldsToSave(data: SpouseFields, previous: SpouseFields | 
         spouseEmail: String(data.spouseEmail || '').trim(),
         spouseBirthDate: String(data.spouseBirthDate || '').trim(),
         spouseOccupation: String(data.spouseOccupation || '').trim(),
+        spouseBirthPlace: String(data.spouseBirthPlace || '').trim(),
+        spouseProvince: String(data.spouseProvince || '').trim(),
+        spouseMunicipality: String(data.spouseMunicipality || '').trim(),
+        spouseNeighborhood: String(data.spouseNeighborhood || '').trim(),
+        spouseZone: String(data.spouseZone || '').trim(),
         spouseIncome: Math.max(0, Number(data.spouseIncome) || 0),
         spouseDataRefused: false, spouseDataRefusedAt: '', spouseDataRefusedBy: '',
         spouseConsentAt: filled ? String(previous?.spouseConsentAt || now.toISOString()) : '',

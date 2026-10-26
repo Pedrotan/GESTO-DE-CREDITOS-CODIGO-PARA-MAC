@@ -382,7 +382,17 @@ const createTables = async () => {
             spouseConsentAt TEXT,
             spouseConsentBy TEXT,
             legalRepresentative TEXT,
-            legalRepRole TEXT
+            legalRepRole TEXT,
+            birthPlace TEXT,
+            province TEXT,
+            municipality TEXT,
+            neighborhood TEXT,
+            zone TEXT,
+            spouseBirthPlace TEXT,
+            spouseProvince TEXT,
+            spouseMunicipality TEXT,
+            spouseNeighborhood TEXT,
+            spouseZone TEXT
         );
 
         CREATE TABLE IF NOT EXISTS credits (
@@ -1410,6 +1420,17 @@ const createTables = async () => {
     await safeAddColumn("clients", "spouseConsentBy", "TEXT");
     await safeAddColumn("clients", "legalRepresentative", "TEXT");
     await safeAddColumn("clients", "legalRepRole", "TEXT");
+    // Naturalidade e morada (província, município, bairro, zona) do cliente e do cônjuge.
+    await safeAddColumn("clients", "birthPlace", "TEXT");
+    await safeAddColumn("clients", "province", "TEXT");
+    await safeAddColumn("clients", "municipality", "TEXT");
+    await safeAddColumn("clients", "neighborhood", "TEXT");
+    await safeAddColumn("clients", "zone", "TEXT");
+    await safeAddColumn("clients", "spouseBirthPlace", "TEXT");
+    await safeAddColumn("clients", "spouseProvince", "TEXT");
+    await safeAddColumn("clients", "spouseMunicipality", "TEXT");
+    await safeAddColumn("clients", "spouseNeighborhood", "TEXT");
+    await safeAddColumn("clients", "spouseZone", "TEXT");
 
     const multiTenancyTables = ["clients", "credits", "payments", "contracts", "warranties", "legal_cases", "payment_references", "accounting_entries"];
     for (const table of multiTenancyTables) {

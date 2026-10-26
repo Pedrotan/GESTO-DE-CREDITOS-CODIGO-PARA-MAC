@@ -63,7 +63,7 @@ import { ServicoFornecedor } from '@/servicos/ServicoFornecedor';
 import { ServicoTarefaCalendario } from '@/servicos/ServicoTarefaCalendario';
 import { ServicoTaxasJuro } from '@/servicos/ServicoTaxasJuro';
 import { SHARED_SETTING_KEYS, ServicoDefinicoesPartilhadas } from '@/servicos/ServicoDefinicoesPartilhadas';
-import { hideFromAccounting, isRemovedFromAccounting, loadDataRemovalState } from '@/bibliotecas/eliminacao-dados';
+import { hideFromAccounting, loadDataRemovalState } from '@/bibliotecas/eliminacao-dados';
 
 /** Onde eliminar os dados (modal de eliminação): créditos e contratos, contabilidade e apagar já sem lixeira. */
 export type DataRemovalOptions = { withCredits?: boolean; accounting?: boolean; purge?: boolean };
@@ -575,8 +575,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const filteredSuppliers = React.useMemo(() => filterByUser(suppliers), [suppliers, filterByUser]);
     const filteredSimulations = React.useMemo(() => filterByUser(simulations), [simulations, filterByUser]);
     const filteredLogs = React.useMemo(() => filterByUser(logs), [logs, filterByUser]);
-    // Lançamentos de clientes ou contratos eliminados com «Contabilidade» marcada (ou apagados definitivamente) não aparecem.
-    const filteredAccountingEntries = React.useMemo(() => filterByUser(accountingEntries).filter(entry => !isRemovedFromAccounting(entry)),
+    // Todos os lançamentos contam (os de créditos eliminados são anulados por estorno no razão, nunca escondidos).
+    const filteredAccountingEntries = React.useMemo(() => filterByUser(accountingEntries),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [accountingEntries, filterByUser, removalVersion]);
     const filteredNotifications = React.useMemo(() => {
@@ -1396,6 +1396,15 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         await addLog('delete', 'client', `Removeu documento do cliente: ${client.name}`, user?.id, user?.name, client, { ...client, documents: updatedDocuments }, { documentId: docId });
     };
 
+    /** Estorno no razão dos créditos eliminados; uma falha (ex.: contabilidade congelada) fica para a Auditoria regularizar. */
+    const reverseRemovedCreditsSafely = async (creditIds: string[], user: { id: string; name: string }) => {
+        try {
+            await ServicoFinanceiro.reverseRemovedCredits(user, creditIds);
+        } catch (error) {
+            console.warn('[ContextoDados] Estorno do desembolso adiado para a Auditoria:', error);
+        }
+    };
+
     const deleteClient = async (id: string, user?: { id: string; name: string }, options: DataRemovalOptions = {}) => {
         const client = clients.find(c => c.id === id);
         if (!user) {
@@ -1412,6 +1421,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const clientCredits = withCredits ? credits.filter(c => c.clientId === id) : [];
         if (options.accounting) await hideFromAccounting({ clients: [id], credits: clientCredits.map(c => c.id) }, user.id);
         if (options.purge) await ServicoCliente.hardDelete(id, user.id);
+        // O dinheiro desembolsado para os créditos eliminados volta à conta de origem no razão (estorno).
+        if (clientCredits.length) await reverseRemovedCreditsSafely(clientCredits.map(c => c.id), user);
         if (clientCredits.length) {
             const creditIds = new Set(clientCredits.map(c => c.id));
             setCredits(prev => prev.filter(c => c.clientId !== id));
@@ -1439,6 +1450,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const restoreClient = async (id: string, user?: { id: string; name: string }) => {
         const client = deletedClients.find(c => c.id === id);
+        const actor = user || (authUser ? { id: authUser.id, name: authUser.name } : { id: 'system', name: 'Sistema' });
+        // Antes de restaurar: o desembolso estornado volta a sair de Caixa e Bancos (recusa se não houver saldo).
+        // Só os créditos que voltam com o cliente (eliminados ao mesmo tempo, como em ServicoCliente.restore).
+        const sameRemoval = (value?: Date | string) => Boolean(value && client?.deletedAt && new Date(value).getTime() === new Date(client.deletedAt).getTime());
+        for (const credit of deletedCredits.filter(item => item.clientId === id && sameRemoval(item.deletedAt))) await ServicoFinanceiro.restoreRemovedCreditLedger(credit.id, actor);
         await ServicoCliente.restore(id);
         void refreshData();
         if (client) {
@@ -1679,6 +1695,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             await ServicoFinanceiro.deleteCredit(id, user.id);
             if (options.accounting) await hideFromAccounting({ credits: [id] }, user.id);
             if (options.purge) await ServicoFinanceiro.hardDeleteCredit(id, user.id);
+            await reverseRemovedCreditsSafely([id], user);
             setContracts(prev => prev.filter(contract => contract.id !== id));
             if (options.accounting || options.purge) void refreshData();
             const deletedCredit = { ...credit!, deletedAt: new Date(), deletedBy: user.id } as Credit;
@@ -1718,6 +1735,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const restoreCredit = async (id: string, user?: { id: string; name: string }) => {
         const credit = deletedCredits.find(c => c.id === id);
+        await ServicoFinanceiro.restoreRemovedCreditLedger(id, user || (authUser ? { id: authUser.id, name: authUser.name } : { id: 'system', name: 'Sistema' }));
         await ServicoFinanceiro.restoreCredit(id);
         void refreshData();
         if (credit) {

@@ -55,6 +55,12 @@ export interface Client {
   // Dados do cônjuge. Em Angola, casados em comunhão de bens respondem
   // solidariamente pela dívida, por isso a identificação do cônjuge é
   // recolhida junto com a do titular.
+  /** Naturalidade e morada administrativa (obrigatórias no cadastro). */
+  birthPlace?: string;
+  province?: string;
+  municipality?: string;
+  neighborhood?: string;
+  zone?: string;
   spouseName?: string;
   spouseBi?: string;
   spouseNif?: string;
@@ -64,6 +70,11 @@ export interface Client {
   /** Profissão / entidade empregadora do cônjuge. */
   spouseOccupation?: string;
   spouseIncome?: number;
+  spouseBirthPlace?: string;
+  spouseProvince?: string;
+  spouseMunicipality?: string;
+  spouseNeighborhood?: string;
+  spouseZone?: string;
   /** O cliente recusou fornecer os dados do cônjuge («Ignorar»): quando e por quem foi registado. */
   spouseDataRefused?: boolean;
   spouseDataRefusedAt?: string;

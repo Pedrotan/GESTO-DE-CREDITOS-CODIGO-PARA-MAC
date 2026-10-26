@@ -525,10 +525,17 @@ const applyUserRoster = async (roster: UsersRoster) => {
     const updates = columns.filter(column => column !== 'id').map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ');
     const upsert = `INSERT INTO users (${list}) VALUES (${target.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`;
     const statements: SqlTransactionStatement[] = [];
+    // Alterações feitas neste navegador e ainda não enviadas (ex.: nova palavra-passe) ganham à lista recebida:
+    // a lista de outro dispositivo pode ser anterior a elas.
+    const sentState: Record<string, string> = JSON.parse(localStorage.getItem(scopedStorageKey(USERS_STATE_KEY)) || '{}');
+    const hasSentBefore = Object.keys(sentState).length > 0;
+    const localNow = hasSentBefore ? (await readLocalUsers()).fingerprints : {};
+    const appliedIds: string[] = [];
     for (const row of roster.rows || []) {
         if (!Array.isArray(row)) continue;
         const value = (column: string) => row[incoming.indexOf(column)] ?? null;
         const id = String(value('id') || '');
+        if (hasSentBefore && localNow[id] && sentState[id] !== localNow[id]) continue;
         const email = String(value('email') || '').trim().toLowerCase();
         // Sem perfil (role) não se sabe que permissões dar: o utilizador não entra.
         if (!id || !email || !value('password') || !value('role')) continue;
@@ -550,6 +557,7 @@ const applyUserRoster = async (roster: UsersRoster) => {
             return current;
         });
         statements.push({ sql: upsert, params });
+        appliedIds.push(id);
     }
     for (const id of roster.deleted || []) statements.push({ sql: 'DELETE FROM users WHERE id = ?', params: [String(id)] });
     if (!statements.length) return 0;
@@ -575,10 +583,39 @@ const applyUserRoster = async (roster: UsersRoster) => {
         applyingRemote = false;
     }
     if (!applied) throw new Error('Nenhum utilizador recebido pôde ser gravado neste navegador.');
-    // O que chegou não volta a ser enviado por este navegador.
-    await saveUsersState();
+    // O que chegou não volta a ser enviado por este navegador. Só os registos recebidos ficam marcados: uma alteração
+    // local ainda por enviar não pode ser dada como enviada (perdia-se, ex.: a palavra-passe nova nunca saía daqui).
+    if (!hasSentBefore) await saveUsersState();
+    else {
+        const { fingerprints } = await readLocalUsers();
+        for (const id of appliedIds) if (fingerprints[id]) sentState[id] = fingerprints[id];
+        for (const id of roster.deleted || []) delete sentState[String(id)];
+        localStorage.setItem(scopedStorageKey(USERS_STATE_KEY), JSON.stringify(sentState));
+    }
     window.dispatchEvent(new Event(USERS_SYNCED_EVENT));
     return applied;
+};
+
+/**
+ * Navegador: depois de um login com palavra-passe, o registo de quem entrou volta a ser enviado uma vez. É a palavra-passe
+ * acabada de confirmar, por isso corrige uma alteração que versões anteriores davam por enviada sem a enviar (os outros
+ * dispositivos ficavam com a antiga e o login falhava neles).
+ */
+export const republishSignedInUser = (userId: string) => {
+    if (window.electronAPI || !userId) return;
+    try {
+        const flag = scopedStorageKey(`cloud_sync_user_republished_v1:${userId}`);
+        if (localStorage.getItem(flag)) return;
+        const state: Record<string, string> = JSON.parse(localStorage.getItem(scopedStorageKey(USERS_STATE_KEY)) || '{}');
+        if (Object.keys(state).length) {
+            delete state[userId];
+            localStorage.setItem(scopedStorageKey(USERS_STATE_KEY), JSON.stringify(state));
+        }
+        localStorage.setItem(flag, new Date().toISOString());
+        if (activeConfig) scheduleSync(1500);
+    } catch (error) {
+        console.warn('[CloudSync] Não foi possível marcar o utilizador para reenvio:', error);
+    }
 };
 
 /** Navegador: utilizadores criados, alterados ou removidos aqui desde a última sincronização. */
@@ -601,9 +638,9 @@ const isUsersRoster = (operation: SyncOperation) => (operation as any).kind === 
 const applyOperations = async (operations: SyncOperation[], caughtUp = true): Promise<ApplyResult> => {
     const accepted = operations.filter(operation => operation.commandVersion === 1 && activeConfig && sameTenant(operation.tenantId, activeConfig.tenantId));
     const waiting = await readAll(INCOMING_STORE);
-    // Listas de utilizadores que ficaram por aplicar (ex.: chegaram ao computador sem sessão iniciada).
-    const rosters = [...waiting, ...accepted].filter(isUsersRoster)
-        .sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
+    // Listas de utilizadores que ficaram por aplicar (ex.: chegaram ao computador sem sessão iniciada), pela ordem
+    // de chegada ao servidor: os relógios dos dispositivos podem diferir e uma lista antiga não pode ganhar a uma nova.
+    const rosters = [...waiting, ...accepted].filter(isUsersRoster);
     const valid = accepted.filter(operation => !isUsersRoster(operation));
     const retryRosters: SyncOperation[] = [];
     let rosterApplied = 0;

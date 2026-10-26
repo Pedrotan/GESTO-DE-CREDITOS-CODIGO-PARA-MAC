@@ -191,7 +191,8 @@ export function cashFlow(journal: JournalEntry[], range: DateRange) {
         if (before(entry.timestamp, range)) { opening += net; continue; }
         if (!inRange(entry.timestamp, range)) continue;
         if (entry.type === 'transfer') { addFlow('transfers', net); continue; }
-        if (entry.type === 'disbursement') { addFlow('disbursements', net); continue; }
+        if (entry.type === 'disbursement' || entry.type === 'credit_removal' || entry.type === 'credit_restore') { addFlow('disbursements', net); continue; }
+        // Estorno do desembolso de um crédito eliminado (e novo desembolso ao restaurar) corrigem a linha dos desembolsos.
         if (entry.type === 'capital_entry') { addFlow('capital', net); continue; }
         if (entry.type === 'loan_received') { addFlow('loans', net); continue; }
         if (entry.type === 'expense' || entry.sourceType === 'expense') { addFlow('expenses', net); continue; }

@@ -4,6 +4,7 @@ import { User, Role, AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
 import { db } from '@/bibliotecas/bd';
 import { usersListSqlFromColumns } from '@/bibliotecas/sql-utilizadores';
 import bcrypt from 'bcryptjs';
+import { republishSignedInUser } from '@/servicos/ServicoSincronizacaoCloud';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { hasFullAuthority } from '@/bibliotecas/conta-principal';
@@ -750,6 +751,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             setUser(userWithLogin);
             sessionStorage.setItem('user', JSON.stringify(userWithLogin));
+            republishSignedInUser(String(foundUser.id));
             void reloadUsers();
 
             // Log de auditoria para login bem-sucedido

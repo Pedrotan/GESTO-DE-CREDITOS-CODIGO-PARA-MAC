@@ -114,9 +114,16 @@ export function LigacaoNuvemOnboarding({ onBack, onLinked }: { onBack: () => voi
             try {
                 pulled = await pullEverything();
                 setPhase('users');
-                const roster = await receiveUsersFromCloud();
-                if (roster.state === 'applied') pulled += 1;
-                users = Number((await db.get<{ total: number }>('SELECT COUNT(*) AS total FROM users'))?.total || 0);
+                // O histórico já traz os utilizadores pela ordem em que mudaram (a palavra-passe mais recente fica).
+                // A "última lista completa" do servidor vem de um computador e pode ser mais antiga do que as
+                // alterações feitas depois na web: só se usa quando o histórico não trouxe nenhum utilizador.
+                const countUsers = async () => Number((await db.get<{ total: number }>('SELECT COUNT(*) AS total FROM users'))?.total || 0);
+                users = await countUsers();
+                if (!users) {
+                    const roster = await receiveUsersFromCloud();
+                    if (roster.state === 'applied') pulled += 1;
+                    users = await countUsers();
+                }
             } finally {
                 stopCloudSync();
             }

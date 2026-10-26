@@ -17,7 +17,7 @@ export class RepositorioCliente extends RepositorioBase {
     }
 
     static async insert(client: Client): Promise<void> {
-        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         const params = [
             client.id, client.name, client.nif, client.phone, client.email, client.address,
             client.creditLimit, client.usedCredit, client.availableCredit, client.monthlyIncome || 0,
@@ -51,7 +51,17 @@ export class RepositorioCliente extends RepositorioBase {
             client.spouseDataRefusedAt || null,
             client.spouseDataRefusedBy || null,
             client.spouseConsentAt || null,
-            client.spouseConsentBy || null
+            client.spouseConsentBy || null,
+            client.birthPlace || null,
+            client.province || null,
+            client.municipality || null,
+            client.neighborhood || null,
+            client.zone || null,
+            client.spouseBirthPlace || null,
+            client.spouseProvince || null,
+            client.spouseMunicipality || null,
+            client.spouseNeighborhood || null,
+            client.spouseZone || null
         ];
         await this.execute(sql, params);
     }
@@ -103,7 +113,17 @@ export class RepositorioCliente extends RepositorioBase {
             spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt),
             spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy),
             spouseConsentAt = COALESCE(?, spouseConsentAt),
-            spouseConsentBy = COALESCE(?, spouseConsentBy)
+            spouseConsentBy = COALESCE(?, spouseConsentBy),
+            birthPlace = COALESCE(?, birthPlace),
+            province = COALESCE(?, province),
+            municipality = COALESCE(?, municipality),
+            neighborhood = COALESCE(?, neighborhood),
+            zone = COALESCE(?, zone),
+            spouseBirthPlace = COALESCE(?, spouseBirthPlace),
+            spouseProvince = COALESCE(?, spouseProvince),
+            spouseMunicipality = COALESCE(?, spouseMunicipality),
+            spouseNeighborhood = COALESCE(?, spouseNeighborhood),
+            spouseZone = COALESCE(?, spouseZone)
             WHERE id = ?`;
         const params = [
             updates.name, updates.nif, updates.phone, updates.email, updates.address,
@@ -138,6 +158,16 @@ export class RepositorioCliente extends RepositorioBase {
             updates.spouseDataRefusedBy ?? null,
             updates.spouseConsentAt ?? null,
             updates.spouseConsentBy ?? null,
+            updates.birthPlace ?? null,
+            updates.province ?? null,
+            updates.municipality ?? null,
+            updates.neighborhood ?? null,
+            updates.zone ?? null,
+            updates.spouseBirthPlace ?? null,
+            updates.spouseProvince ?? null,
+            updates.spouseMunicipality ?? null,
+            updates.spouseNeighborhood ?? null,
+            updates.spouseZone ?? null,
             id
         ];
         await this.execute(sql, params);
