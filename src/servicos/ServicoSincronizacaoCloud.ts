@@ -33,6 +33,7 @@ import {
 import { reportUsageIfDue } from '@/servicos/ServicoRelatorioUso';
 import { syncHealth, syncIssues, type SyncCounts, type SyncIssue } from '@/bibliotecas/estado-sincronizacao';
 import { conflictArchiveStatements, type SyncConflict } from '@/bibliotecas/sync-conflitos';
+import { clientesEnvolvidos, planoReconciliacaoClientes, type ClienteParaFusao, type ReferenciaCliente, type TabelaReferencia } from '@/bibliotecas/fusao-clientes';
 import { balanceMismatches, CREDIT_BALANCE_CHECK_SQL, type BalanceMismatch, type CreditBalanceRow } from '@/bibliotecas/saldos-derivados';
 import { bucketOf, tableDigest, type IntegrityReport, type TableDigest } from '@/bibliotecas/integridade-sync';
 
@@ -374,6 +375,26 @@ const setAsideOversized = async (ids: string[], reason: string) => {
 /** Alterações guardadas aqui que não cabem no servidor (contam como por enviar). */
 export const getOversizedCount = async () => (await readAll<QueuedOperation>(STORE_NAME)).filter(operation => operation.oversized).length;
 
+// As alterações postas de parte quando o servidor aceitava menos (ex.: a ficha de um cliente com os documentos do BI)
+// ficavam para sempre neste dispositivo: o cliente nunca chegava aos outros. De 6 em 6 horas (e na primeira
+// sincronização depois de actualizar) voltam à fila as que já cabem no limite actual; as partes de uma transacção
+// seguem juntas. Se o servidor voltar a recusar, ficam de novo de parte.
+const OVERSIZED_RETRY_KEY = 'cloud_sync_oversized_retry_v1';
+const OVERSIZED_RETRY_MS = 6 * 60 * 60_000;
+const retryOversized = async () => {
+    const last = Number(localStorage.getItem(scopedStorageKey(OVERSIZED_RETRY_KEY)) || 0);
+    if (Date.now() - last < OVERSIZED_RETRY_MS) return 0;
+    localStorage.setItem(scopedStorageKey(OVERSIZED_RETRY_KEY), String(Date.now()));
+    const aside = (await readAll<QueuedOperation>(STORE_NAME)).filter(operation => operation.oversized);
+    const stillTooLarge = new Set(aside.filter(operation => encryptedSize(operation) > MAX_OPERATION_BYTES).map(operation => operation.txId || operation.id));
+    const retry = aside.filter(operation => !stillTooLarge.has(operation.txId || operation.id)).map(operation => ({ ...operation, oversized: undefined }));
+    if (retry.length) {
+        await putOperations(retry);
+        console.info(`[CloudSync] ${retry.length} alteração(ões) postas de parte voltam a ser enviadas (já cabem no limite do servidor).`);
+    }
+    return retry.length;
+};
+
 // Tempo de espera proporcional ao volume: em ligações lentas (dezenas de KB/s) 2 MB levam minutos.
 const requestTimeout = (bytes: number) => Math.min(300_000, 30_000 + Math.ceil(bytes / 10));
 
@@ -680,8 +701,9 @@ const quoteIdentifier = (value: string) => `"${value.replace(/"/g, '""')}"`;
 // de uma tabela grande ocupava a base mais de 60 s e as outras consultas falhavam por timeout.
 const BOOTSTRAP_PAGE_SIZE = 200;
 const BOOTSTRAP_FILE_TABLES: Record<string, number> = { payment_proofs: 5, credit_documents: 5, rh_documento_ficheiro: 5 };
-// O servidor aceita até 2 MB por operação cifrada (base64 ≈ +35%): linhas maiores não se enviam.
-const MAX_SNAPSHOT_ROW_CHARS = 1_400_000;
+// Uma alteração cifrada pode ter até MAX_OPERATION_BYTES (11,5 MB; base64 ≈ +35%): cerca de 8 MB de dados. Antes o
+// limite era 1,4 MB e as fichas com documentos (BI digitalizado) nunca entravam nas cópias de autocura e reparação.
+const MAX_SNAPSHOT_ROW_CHARS = 8_000_000;
 const createBootstrapOperations = async () => {
     if (localStorage.getItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY)) === 'true'
         && localStorage.getItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY)) === 'true'
@@ -736,7 +758,6 @@ const applyGroups = async (groups: RemoteGroup[]): Promise<ApplyResult> => {
             tableColumns: localTableColumns,
             retainedForRow: (table, rowId) => sqlite.all<{ id: string; operation: string }>(RETAINED_FOR_ROW_SQL, [table, rowId, JSON.stringify(rowId)]),
             rowExists: async (table, rowId) => (await sqlite.all(`SELECT 1 AS found FROM ${quoteIdentifier(table)} WHERE id = ? LIMIT 1`, [rowId])).length > 0,
-            queryOne: async (sql, params) => (await sqlite.all<Record<string, unknown>>(sql, params as unknown[]))[0],
             transaction: statements => sqlite.transaction(statements as SqlTransactionStatement[]),
         });
     } finally {
@@ -1092,6 +1113,52 @@ export const reprocessRetainedOperations = async (force = false): Promise<number
     }
 };
 
+// Clientes repetidos entre dispositivos (ver fusao-clientes.ts): corre na primeira sincronização de cada sessão e
+// sempre que chega algo novo. Só neste dispositivo — todos fazem o mesmo a partir dos mesmos dados.
+const REFERENCIAS_CLIENTE: Record<TabelaReferencia, string> = {
+    credits: 'SELECT id, clientId, clientName FROM credits',
+    contracts: 'SELECT id, clientId, clientName FROM contracts',
+    warranties: 'SELECT id, clientId, NULL AS clientName FROM warranties',
+    legal_cases: 'SELECT id, clientId, NULL AS clientName FROM legal_cases',
+    collection_messages: 'SELECT id, clientId, clientName FROM collection_messages',
+    credit_approvals: 'SELECT id, clientId, clientName FROM credit_approvals',
+    simulations: 'SELECT id, clientId, clientName FROM simulations',
+};
+// Alterações de clientes retidas (e arquivadas) por NIF ou telefone repetido, quando a base ainda os recusava.
+const RETIDO_POR_NIF = /UNIQUE constraint failed: clients\.(nif|phone)/iu;
+let clientsReconciled = false;
+export const reconcileClients = async (): Promise<{ restaurados: number; fundidos: number; religados: number; reactivados: number }> => {
+    let reactivados = 0;
+    const archived = await sqlite.all<{ id: string; operation: string }>(`SELECT id, operation FROM sync_conflicts WHERE status = 'archived' AND entityType = 'clients'`);
+    const revive = archived.filter(row => {
+        try { return RETIDO_POR_NIF.test(String(JSON.parse(row.operation)?.reason || '')); } catch { return false; }
+    });
+    if (revive.length) {
+        await sqlite.transaction(revive.map(row => ({ sql: `UPDATE sync_conflicts SET status = 'pending', resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'archived'`, params: [row.id] })));
+        reactivados = revive.length;
+        reprocessDirty = true;
+        await reprocessRetainedOperations();
+    }
+    const clientes = await sqlite.all<ClienteParaFusao>('SELECT id, name, nif, createdAt, deletedAt, deletedBy FROM clients');
+    const ids = clientesEnvolvidos(clientes);
+    if (!ids.size) return { restaurados: 0, fundidos: 0, religados: 0, reactivados };
+    const lista = [...ids];
+    const marcas = lista.map(() => '?').join(', ');
+    const referencias: ReferenciaCliente[] = [];
+    for (const [table, sql] of Object.entries(REFERENCIAS_CLIENTE) as Array<[TabelaReferencia, string]>) {
+        try {
+            const rows = await sqlite.all<{ id: string; clientId: string; clientName?: string | null }>(`${sql} WHERE clientId IN (${marcas})`, lista);
+            referencias.push(...rows.map(row => ({ table, id: String(row.id), clientId: String(row.clientId), clientName: row.clientName })));
+        } catch { /* tabela ou coluna ainda inexistente nesta base */ }
+    }
+    const plano = planoReconciliacaoClientes(clientes, referencias);
+    for (let start = 0; start < plano.statements.length; start += 200) {
+        await sqlite.transaction(plano.statements.slice(start, start + 200) as SqlTransactionStatement[]);
+    }
+    if (plano.statements.length) console.log(`[CloudSync] Clientes: ${plano.restaurados} reposto(s), ${plano.fundidos} fundido(s) (mesmo NIF e nome), ${plano.religados} registo(s) religado(s).`);
+    return { restaurados: plano.restaurados, fundidos: plano.fundidos, religados: plano.religados, reactivados };
+};
+
 const emitStatus = (detail: CloudSyncStatus) => {
     lastStatus = detail;
     window.dispatchEvent(new CustomEvent('tango-cloud-sync-status', { detail }));
@@ -1244,6 +1311,7 @@ export const syncCloudNow = async () => {
             }
             await createBootstrapOperations();
             await createJournalHealOperations().catch(error => console.warn('[CloudSync] Autocura:', error));
+            await retryOversized().catch(error => console.warn('[CloudSync] Alterações postas de parte:', error));
             const key = await writeKeyFor(config);
             const readKeys = await readKeysFor(config);
             let cursor = Number(localStorage.getItem(scopedStorageKey(CURSOR_KEY)) || '0');
@@ -1420,6 +1488,15 @@ export const syncCloudNow = async () => {
             // Dependências podem ter chegado numa página posterior (cliente antes de crédito, por exemplo).
             totalPulled += await reprocessRetainedOperations();
             await resolveHealedTransactions().catch(error => console.warn('[CloudSync] Autocura de transacções:', error));
+            if (totalPulled || !clientsReconciled) {
+                try {
+                    const outcome = await reconcileClients();
+                    clientsReconciled = true;
+                    if (outcome.restaurados || outcome.fundidos || outcome.religados || outcome.reactivados) totalPulled += 1;
+                } catch (error) {
+                    console.warn('[CloudSync] Reconciliação de clientes:', error);
+                }
+            }
             // Primeiro recebe o perfil existente. Só depois completa os campos ainda não partilhados:
             // uma instalação nova/vazia nunca substitui a identidade que já está na nuvem.
             let identityError: string | undefined;

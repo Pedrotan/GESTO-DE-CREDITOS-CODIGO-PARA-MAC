@@ -58,6 +58,14 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ? WHERE id = ? AND status = 'pending' AND requestedById <> ?"
   ],
   [
+    "9b3cbe6d16ceb7fa743613315b61019d5b35b526401dcf6039bc037cab8c8c8b",
+    "UPDATE clients SET deletedAt = ? WHERE id = ?"
+  ],
+  [
+    "5566ac857b1b80d1c914fa6f1eebf723587e95c49d22f62e3044b0f82d90fcae",
+    "UPDATE clients SET deletedAt = NULL WHERE id = ? AND deletedAt = ?"
+  ],
+  [
     "8de17c2ce2fe717a10fff4708d6a6460a59536f37d5cfe7fc2e6aea082bf1be4",
     "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber) WHERE id = ?"
   ],

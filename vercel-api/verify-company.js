@@ -94,7 +94,7 @@ export default async function handler(req, res) {
       res.setHeader('Retry-After', String(remaining));
       return send(res, 429, { success: false, code: 'LOCKED', message: `Demasiadas tentativas falhadas. Tente novamente em ${Math.ceil(remaining / 60)} minuto(s).` });
     }
-    const failure = (details) => registerAuthFailure(sql, req, { scope: 'company_code', subject: trusted ? '' : tenantId, type: 'company_code_failed',
+    const failure = (details) => registerAuthFailure(sql, req, { scope: 'company_code', ...(trusted ? { trustedSubject: tenantId } : { subject: tenantId }), type: 'company_code_failed',
       title: 'Código de acesso de empresa errado', details });
 
     // Garantir que a tabela existe e suporta o campo access_code

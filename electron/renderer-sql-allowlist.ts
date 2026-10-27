@@ -25,6 +25,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_clients_createdAt ON clients(createdAt)",
   "CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email)",
   "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)",
+  "CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif)",
+  "CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone)",
   "CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)",
   "CREATE INDEX IF NOT EXISTS idx_clients_usuario ON clients(usuario_id)",
   "CREATE INDEX IF NOT EXISTS idx_collection_credit ON collection_events(creditId, createdAt)",
@@ -262,8 +264,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_rh_rubrica_pontual_delete BEFORE DELETE ON rh_rubrica_pontual WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_rubrica_pontual_insert BEFORE INSERT ON rh_rubrica_pontual WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado')",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_requests_pending ON accounting_requests(kind, targetId) WHERE status = 'pending'",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_promise_decision ON collection_events(relatedId) WHERE kind IN ('promise_kept','promise_broken')",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_reinforcement_idempotency ON credit_reinforcements(idempotencyKey)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(idempotencyKey) WHERE idempotencyKey IS NOT NULL",
@@ -307,6 +307,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM users WHERE id = ?",
   "DELETE FROM warranties WHERE id = ?",
   "DROP INDEX IF EXISTS idx_clients_nif_active",
+  "DROP INDEX IF EXISTS idx_clients_phone_active",
   "DROP TABLE credit_writeoffs_old",
   "DROP TABLE credits_old",
   "DROP TABLE dictionary_old",
@@ -689,6 +690,13 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?",
   "SELECT id, ano, lei_referencia, vigencia_inicio, vigencia_fim FROM rh_irt_tabela ORDER BY vigencia_inicio DESC",
   "SELECT id, chave, valor, descricao, vigencia_inicio, vigencia_fim FROM rh_parametro ORDER BY chave, vigencia_inicio DESC",
+  "SELECT id, clientId, NULL AS clientName FROM legal_cases",
+  "SELECT id, clientId, NULL AS clientName FROM warranties",
+  "SELECT id, clientId, clientName FROM collection_messages",
+  "SELECT id, clientId, clientName FROM contracts",
+  "SELECT id, clientId, clientName FROM credit_approvals",
+  "SELECT id, clientId, clientName FROM credits",
+  "SELECT id, clientId, clientName FROM simulations",
   "SELECT id, clientId, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod, productId FROM credits WHERE deletedAt IS NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'",
@@ -698,7 +706,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, clientId, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL",
-  "SELECT id, createdAt FROM clients WHERE nif = ? AND deletedAt IS NULL AND id <> ? LIMIT 1",
   "SELECT id, createdAt, startDate FROM credits",
   "SELECT id, creditId, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt FROM credit_installments",
   "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC",
@@ -715,6 +722,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, lateInterestMinor, version FROM credit_installments WHERE creditId = ?",
   "SELECT id, name, email, username, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature, ip FROM users",
   "SELECT id, name, email, username, role, avatar, status, permissions FROM users",
+  "SELECT id, name, nif, createdAt, deletedAt, deletedBy FROM clients",
   "SELECT id, name, nif, expiryDate, deletedAt FROM clients WHERE deletedAt IS NULL",
   "SELECT id, name, nif, phone, riskLevel, fatherName, motherName, spouseName, spouseBi, spouseNif, spousePhone, legalRepresentative FROM clients WHERE deletedAt IS NULL",
   "SELECT id, name, role FROM users WHERE LOWER(email) = ?",
@@ -722,6 +730,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'",
   "SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome",
   "SELECT id, nome, responsavel_id, activo FROM rh_departamento ORDER BY nome",
+  "SELECT id, operation FROM sync_conflicts WHERE status = 'archived' AND entityType = 'clients'",
   "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)",
   "SELECT id, operation, entityType FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000",
   "SELECT id, paymentDate FROM payments WHERE receiptSeq IS NULL AND status = 'confirmed' AND deletedAt IS NULL ORDER BY paymentDate, id",
@@ -794,19 +803,20 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ? WHERE id = ? AND status = 'pending' AND (requestedById <> ? OR ? = 1)",
   "UPDATE audit_alerts SET status = ?, assignedTo = ?, assignedToName = ?, dueAt = ?, updatedAt = ?, closedBy = ?, closedByName = ?, closedAt = ? WHERE id = ?",
   "UPDATE clients SET biAlertSentAt = ? WHERE id = ?",
-  "UPDATE clients SET deletedAt = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = ?, deletedBy = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
-  "UPDATE clients SET deletedAt = NULL WHERE id = ? AND deletedAt = ?",
+  "UPDATE clients SET deletedAt = NULL, deletedBy = NULL WHERE id = ?",
   "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone) WHERE id = ?",
   "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'",
   "UPDATE clients SET usedCredit = ?, availableCredit = ?, status = ? WHERE id = ?",
+  "UPDATE collection_messages SET clientId = ? WHERE id = ?",
   "UPDATE company_settings SET installDate = ? WHERE installDate IS NULL",
   "UPDATE company_settings SET name = 'Tango Gestão de Créditos' WHERE name = 'Provisório' OR name = 'Empresa' OR name IS NULL OR name = ''",
   "UPDATE company_settings SET name = ?, nif = ?, logo = COALESCE(?, logo), enableMultiTenant = COALESCE(?, enableMultiTenant) WHERE id = 1",
   "UPDATE company_settings SET rescueKey = NULL WHERE rescueKey = ?",
+  "UPDATE contracts SET clientId = ? WHERE id = ?",
   "UPDATE contracts SET clientId = COALESCE(?, clientId), clientName = COALESCE(?, clientName), title = COALESCE(?, title), value = COALESCE(?, value), startDate = COALESCE(?, startDate), endDate = COALESCE(?, endDate), status = COALESCE(?, status), terms = COALESCE(?, terms), usuario_id = COALESCE(?, usuario_id) WHERE id = ?",
   "UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL",
   "UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL",
@@ -819,6 +829,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE contracts SET status = 'active' WHERE id = ? AND status = 'paid'",
   "UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'",
   "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?",
+  "UPDATE credit_approvals SET clientId = ? WHERE id = ?",
   "UPDATE credit_documents SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL",
   "UPDATE credit_import_batches SET rowsCount = ?, totalMinor = ? WHERE id = ?",
   "UPDATE credit_import_batches SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ? WHERE id = ? AND status = 'active'",
@@ -831,6 +842,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE credit_restructurings SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'",
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, dueDate = ?, status = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
+  "UPDATE credits SET clientId = ? WHERE id = ?",
   "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL",
   "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
@@ -858,6 +870,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE fiscal_series SET nextNumber = nextNumber + 1, status = 'U' WHERE id = ? AND nextNumber = ?",
   "UPDATE fiscal_series SET status = ?, lastNumber = ?, agtSyncedAt = ? WHERE id = ?",
   "UPDATE internal_messages SET read = 1 WHERE id = ?",
+  "UPDATE legal_cases SET clientId = ? WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE limit_escalations SET requiredLevelIndex = ?, requiredLevelId = ?, requiredLevelName = ?, levelSince = ?, escalationCount = escalationCount + 1, lastReminderAt = ? WHERE id = ? AND status = 'pending' AND levelSince = ?",
@@ -929,10 +942,12 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_processamento SET pago_por = ?, pago_por_nome = ?, pago_em = ?, conta_pagamento = ?, estado = 'pago', actualizado_em = ? WHERE id = ? AND estado = 'aprovado'",
   "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_tipo_ausencia SET nome = ?, justificada = ?, remunerada = ?, desconta_salario = ?, desconta_ferias = ?, exige_documento = ?, activo = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE simulations SET clientId = ? WHERE id = ?",
   "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
   "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE sync_conflicts SET status = 'pending', resolutionNote = NULL, resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'rejected' AND resolutionNote LIKE '[ARQUIVADO] %'",
+  "UPDATE sync_conflicts SET status = 'pending', resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'archived'",
   "UPDATE sync_conflicts SET status = 'rejected', resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE sync_conflicts SET status = ?, resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE user_limits SET maxTransaction = ?, dailyLimit = ?, monthlyLimit = ?, restrictionsEnabled = ?, updatedAt = ? WHERE role = ?",
@@ -948,6 +963,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE users SET status = ? WHERE id = ?",
   "UPDATE users SET twoFactorEnabled = 0, twoFactorSecret = NULL WHERE id = ?",
   "UPDATE users SET twoFactorEnabled = 1, twoFactorSecret = ? WHERE id = ?",
+  "UPDATE warranties SET clientId = ? WHERE id = ?",
   "UPDATE warranties SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE warranties SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "VACUUM",
@@ -1061,6 +1077,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "85f174ddb85172c5cf5e729abb4804907cf3cf504649a60d7dc383f11ea26dd4",
     "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)"
+  ],
+  [
+    "e03dd8e0accdde717eea82a0ca97c72d5d236dba20d06b89efddc7962e73b4cd",
+    "CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif)"
+  ],
+  [
+    "fbd6b0585e0c0951af55aa03095120e8b86877f3d461f1e53fcf1266667554da",
+    "CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone)"
   ],
   [
     "96299303e3d38664eba27b4f101a4901d150a668c8b152dc6b567652194827f7",
@@ -2011,14 +2035,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_requests_pending ON accounting_requests(kind, targetId) WHERE status = 'pending'"
   ],
   [
-    "33729af6d1e203ba1f48414b43bd63b24ba95038d224d5d5f8521d77f65dd7b8",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'"
-  ],
-  [
-    "a7a28bc6b5aa5857ac463a89666e101ffb03bc9a5733a4064f49c4aaf5d8dff2",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL"
-  ],
-  [
     "98ef793ae9c9e227203aa1ea7c9b62ba503858622b98230fb7a106c3e90761ab",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_promise_decision ON collection_events(relatedId) WHERE kind IN ('promise_kept','promise_broken')"
   ],
@@ -2189,6 +2205,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "5bf42e7bb449ba579ef5ae96f613bd7514c17ffeb4a602d24953e47088997078",
     "DROP INDEX IF EXISTS idx_clients_nif_active"
+  ],
+  [
+    "5c4c4174166886c4e9d2f03b83a998dd060185c4ce35d94a4faefdeea22d7546",
+    "DROP INDEX IF EXISTS idx_clients_phone_active"
   ],
   [
     "81652dce873daf175c414215ec2a3e118105b451463d13e646d72a9d8e7de881",
@@ -3719,6 +3739,34 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, chave, valor, descricao, vigencia_inicio, vigencia_fim FROM rh_parametro ORDER BY chave, vigencia_inicio DESC"
   ],
   [
+    "8b60c066ad16f773d327287db66902a129be619f57e06a56780dbf245c551eb9",
+    "SELECT id, clientId, NULL AS clientName FROM legal_cases"
+  ],
+  [
+    "34e9a9b233bd13368de58eafe519413202debb13e23c5a76c316630851f11b77",
+    "SELECT id, clientId, NULL AS clientName FROM warranties"
+  ],
+  [
+    "3e9d3040daab8b484eba3e0bff42f812371b82f2d8dc6d3da017c2afacdb556c",
+    "SELECT id, clientId, clientName FROM collection_messages"
+  ],
+  [
+    "0c0e058ea529801a27880053b460a58e22a6eef545c3b963ccb14f3ca6ff862f",
+    "SELECT id, clientId, clientName FROM contracts"
+  ],
+  [
+    "a2b1bb8850d78e9d316ca624e8b9d17884f4bbdaaed8c4d6ecd2a7043e07a48b",
+    "SELECT id, clientId, clientName FROM credit_approvals"
+  ],
+  [
+    "84e4d4993174c13982a947d70dc15e7b756ca5f740bf911d7926dd1fc9f667ba",
+    "SELECT id, clientId, clientName FROM credits"
+  ],
+  [
+    "86cd5c13ec91eee3e3ac2acf35ed531d4e2fbfe6cabe6cf8f632dbf8b7da5e4c",
+    "SELECT id, clientId, clientName FROM simulations"
+  ],
+  [
     "e8bf3e4eaef1d3b357eb2e4c3af9957b7bf7bc8b5df2c3691ecdf035d51cc9ec",
     "SELECT id, clientId, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL"
   ],
@@ -3753,10 +3801,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "b8c34b3dcd738a62a2244c14b48b42d82d38c255ea5b00bb5c652e54154a37b1",
     "SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL"
-  ],
-  [
-    "2d8894d312a636bdd370385f3d9c7d55f4faafb956f5ed30d1e2a84d9c2916dc",
-    "SELECT id, createdAt FROM clients WHERE nif = ? AND deletedAt IS NULL AND id <> ? LIMIT 1"
   ],
   [
     "463f0161a81c45d9b44e81bb00da9c1d600a8475d6e0916fba7a26d628571e1c",
@@ -3823,6 +3867,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, name, email, username, role, avatar, status, permissions FROM users"
   ],
   [
+    "710e50450bcb49366133a2306c95dae6ac8a76a1299da24277fde0d54509727d",
+    "SELECT id, name, nif, createdAt, deletedAt, deletedBy FROM clients"
+  ],
+  [
     "778d419b2ac687743b5cbc33649fb974d0d615ff3d43dde2572e18522a4de31b",
     "SELECT id, name, nif, expiryDate, deletedAt FROM clients WHERE deletedAt IS NULL"
   ],
@@ -3849,6 +3897,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "9669f694073b70deffb681c56c5cee2b8a107ef71f5cf16951a43e11176d5609",
     "SELECT id, nome, responsavel_id, activo FROM rh_departamento ORDER BY nome"
+  ],
+  [
+    "801485cfd2c135183065ae4383f664c096e46018f85e749720cbd1ecf5b42ff3",
+    "SELECT id, operation FROM sync_conflicts WHERE status = 'archived' AND entityType = 'clients'"
   ],
   [
     "d00a2d87c007892593f34120855957ac7bdf2a0f59a521a5cc2bf2d324e72ae0",
@@ -4139,10 +4191,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET biAlertSentAt = ? WHERE id = ?"
   ],
   [
-    "9b3cbe6d16ceb7fa743613315b61019d5b35b526401dcf6039bc037cab8c8c8b",
-    "UPDATE clients SET deletedAt = ? WHERE id = ?"
-  ],
-  [
     "7b34b8c9a3bf8f4de98752190284240b321a44636de583dd3b86796447af9e1f",
     "UPDATE clients SET deletedAt = ?, deletedBy = ? WHERE id = ?"
   ],
@@ -4151,8 +4199,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?"
   ],
   [
-    "5566ac857b1b80d1c914fa6f1eebf723587e95c49d22f62e3044b0f82d90fcae",
-    "UPDATE clients SET deletedAt = NULL WHERE id = ? AND deletedAt = ?"
+    "1c39c1848fdc4301f994e78dd3f8c4c9f27960ce37be1510047a9a24efba1d41",
+    "UPDATE clients SET deletedAt = NULL, deletedBy = NULL WHERE id = ?"
   ],
   [
     "254e0e1286c08e459be91d2b89add0d879ada5c708955afb9f5aae1927b0c0f2",
@@ -4175,6 +4223,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET usedCredit = ?, availableCredit = ?, status = ? WHERE id = ?"
   ],
   [
+    "f9cefe92a518cf9804e547a552999c6258d2ffb8f24c91b4562a449e6264bea4",
+    "UPDATE collection_messages SET clientId = ? WHERE id = ?"
+  ],
+  [
     "d22eef7acbed00c1607c1fb515f4c922bc8cef0c745b906abeb35ecbc671943a",
     "UPDATE company_settings SET installDate = ? WHERE installDate IS NULL"
   ],
@@ -4189,6 +4241,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "cd2d870a39f3cc21c902caf66fb4044863c21d91a3c2c3456a16e4b612d34c18",
     "UPDATE company_settings SET rescueKey = NULL WHERE rescueKey = ?"
+  ],
+  [
+    "c4132819a7a00dfd05bc48c79925cee616e37f8a76b5e95719414be82b7f1e6b",
+    "UPDATE contracts SET clientId = ? WHERE id = ?"
   ],
   [
     "1f47bc88d56694d6fd29862949abbba5a1b22c46856ed92b0cb36f33c234b486",
@@ -4239,6 +4295,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?"
   ],
   [
+    "bc70593ff4f818b19289e1c9178a389a97bcedf81f082e34232c4c6875c0fdd4",
+    "UPDATE credit_approvals SET clientId = ? WHERE id = ?"
+  ],
+  [
     "8aad810ee85a2d79fcbb22a23e2bbf03a7cd6cede00098829920fd3d50529b77",
     "UPDATE credit_documents SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL"
   ],
@@ -4285,6 +4345,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "f69867e4afcb45c93c007faba8e3422dcab19098b32e3772f8c9ae75d2ebb8f5",
     "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, dueDate = ?, status = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
+  ],
+  [
+    "8f1b664e1445ba7cda6dd6603cc05500665097c02fddd2b0584b1cbdb513b0ba",
+    "UPDATE credits SET clientId = ? WHERE id = ?"
   ],
   [
     "a725143990d6d068b5042e81ee952a0bef767210d8e5e6ac633b401000cf06c5",
@@ -4393,6 +4457,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "9d9336ca8747e039dc5456d53c24237c97b0b67f0a54f71ec4221485798c1e6d",
     "UPDATE internal_messages SET read = 1 WHERE id = ?"
+  ],
+  [
+    "bbe65cc3d309f609d3b7dbfed343489465bdcf929f3e52198ffac0b7b8ce9af7",
+    "UPDATE legal_cases SET clientId = ? WHERE id = ?"
   ],
   [
     "48f5379958a85341393f726117a65debb862872e854e80356cb01c70f42d13d2",
@@ -4679,6 +4747,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_tipo_ausencia SET nome = ?, justificada = ?, remunerada = ?, desconta_salario = ?, desconta_ferias = ?, exige_documento = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
+    "8107e8ea8d73edb0c8ebcee1566a6feea7c335dab6ecd551021a310f75426f2e",
+    "UPDATE simulations SET clientId = ? WHERE id = ?"
+  ],
+  [
     "f10327fdeff9b931d3d425a969d8addf50641449157d526ae2fa1c81ee86f4e0",
     "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?"
   ],
@@ -4693,6 +4765,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d8cbfaf1464662df9dfc78f3270a83832ab0ea264725dffb847f2855cf12f4df",
     "UPDATE sync_conflicts SET status = 'pending', resolutionNote = NULL, resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'rejected' AND resolutionNote LIKE '[ARQUIVADO] %'"
+  ],
+  [
+    "def8bd483d3614b8fbb5467be1d03fa676283d152af0120f564147902f5a1bbd",
+    "UPDATE sync_conflicts SET status = 'pending', resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'archived'"
   ],
   [
     "4fb8c9043c09b4d19574f86d32e24f2360d63dcd3c1be2ef5aa7a3597795a0c4",
@@ -4753,6 +4829,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "1ff138a36f4d6b781ba0ec321225c7c8eeff36b3124db2ec0346e191d11ccb0c",
     "UPDATE users SET twoFactorEnabled = 1, twoFactorSecret = ? WHERE id = ?"
+  ],
+  [
+    "3a628feb712f30c36fe759a9504a6ab788a7867dfaf8922d938252c155b94f36",
+    "UPDATE warranties SET clientId = ? WHERE id = ?"
   ],
   [
     "03bd597f05be2c560ba84217c309a16043cbfb0c3e32bde60225e50191d3d6d0",

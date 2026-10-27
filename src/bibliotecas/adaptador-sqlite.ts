@@ -718,10 +718,12 @@ const createTables = async () => {
         CREATE INDEX IF NOT EXISTS idx_payments_credit_date ON payments(creditId, paymentDate);
         CREATE INDEX IF NOT EXISTS idx_audit_user_timestamp ON audit_logs(userId, timestamp);
 
-        -- Índices Parciais para Unicidade com Soft Delete
+        -- NIF e telefone: o registo de clientes recusa repetidos; a base aceita-os para que nenhum cliente vindo de
+        -- outro dispositivo fique de fora (ver fusao-clientes.ts).
         DROP INDEX IF EXISTS idx_clients_nif_active;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO';
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL;
+        DROP INDEX IF EXISTS idx_clients_phone_active;
+        CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif);
+        CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
 
         CREATE TABLE IF NOT EXISTS message_templates (
             id TEXT PRIMARY KEY,
@@ -1259,9 +1261,11 @@ const createTables = async () => {
     await safeAddColumn("clients", "restoredAt", "TEXT");
     await safeAddColumn("clients", "originalState", "TEXT");
     
+    // Sem unicidade na base (o registo de clientes verifica): um cliente vindo de outro dispositivo nunca fica de fora.
     await executeSql("DROP INDEX IF EXISTS idx_clients_nif_active");
-    await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'");
-    await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL");
+    await executeSql("DROP INDEX IF EXISTS idx_clients_phone_active");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif)");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone)");
 
     try {
         await executeSql("UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'");

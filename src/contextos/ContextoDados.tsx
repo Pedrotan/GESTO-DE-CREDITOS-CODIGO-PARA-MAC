@@ -1304,6 +1304,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 throw new Error(`Já existe um cliente registado com o NIF "${nif}" (${duplicateNif.name}). Por favor, utilize um NIF diferente.`);
             }
         }
+        // O telefone também não se repete no registo (a base aceita-o para receber clientes de outros dispositivos).
+        const phone = (client.phone || '').trim();
+        const duplicatePhone = phone ? clients.find(c => (c.phone || '').trim() === phone) : undefined;
+        if (duplicatePhone) {
+            throw new Error(`Já existe um cliente registado com o telefone "${phone}" (${duplicatePhone.name}). Por favor, utilize outro telefone.`);
+        }
 
         const targetUserId = activeContextUserId || actor?.id || authUser?.id;
         const clientWithUser = withCalculatedClientLimit({ ...client, usuario_id: targetUserId }, credits, payments);
@@ -1332,6 +1338,13 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             const duplicateNif = clients.find(c => c.id !== id && c.nif === newNif);
             if (duplicateNif) {
                 throw new Error(`Já existe um cliente registado com o NIF "${newNif}" (${duplicateNif.name}). Por favor, utilize um NIF diferente.`);
+            }
+        }
+        const newPhone = (updates.phone || '').trim();
+        if (newPhone && newPhone !== (current.phone || '').trim()) {
+            const duplicatePhone = clients.find(c => c.id !== id && (c.phone || '').trim() === newPhone);
+            if (duplicatePhone) {
+                throw new Error(`Já existe um cliente registado com o telefone "${newPhone}" (${duplicatePhone.name}). Por favor, utilize outro telefone.`);
             }
         }
 

@@ -229,67 +229,6 @@ export type RemoteDeps = {
     retainedForRow?: (table: string, rowId: string) => Promise<Array<{ id: string; operation: string }>>;
     /** O registo existe aqui? (para reconhecer uma transacção que já foi aplicada e voltou a chegar) */
     rowExists?: (table: string, rowId: string) => Promise<boolean>;
-    /** Primeira linha de uma consulta local (para a fusão de clientes com o mesmo NIF). */
-    queryOne?: (sql: string, params: unknown[]) => Promise<Record<string, unknown> | undefined>;
-};
-
-// ── Mesmo cliente registado em dois dispositivos (mesmo NIF, outro ID) ───────────────────────────────────────────
-// O NIF é único entre os clientes activos: o cliente que chega com o NIF de outro cliente activo deste dispositivo é a
-// mesma pessoa registada em dois sítios. Todos os dispositivos aplicam a mesma regra: fica o registo mais antigo (e, em
-// empate, o de menor ID); o outro fica «fundido» (apagado, com a indicação) e os créditos, contratos e restantes
-// registos dele passam para o que fica. Os lançamentos contabilísticos não mudam (nunca se alteram).
-export const CLIENT_NIF_CLASH = /UNIQUE constraint failed: clients\.nif/iu;
-export const CLIENT_MERGE_PARKED = '__fusao__';
-const CLIENT_REFERENCES = ['credits', 'contracts', 'warranties', 'legal_cases', 'collection_messages', 'credit_approvals', 'simulations'];
-
-/** Qual dos dois registos fica: o mais antigo; em empate (ou sem data), o de menor ID. */
-export const clientMergeWinner = (a: { id: string; createdAt?: unknown }, b: { id: string; createdAt?: unknown }) => {
-    const time = (value: unknown) => {
-        const parsed = Date.parse(String(value || ''));
-        return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
-    };
-    const diff = time(a.createdAt) - time(b.createdAt);
-    if (diff !== 0) return diff < 0 ? a : b;
-    return a.id <= b.id ? a : b;
-};
-
-/** Comandos que aplicam a transacção recebida fundindo o cliente dela com o cliente local do mesmo NIF. */
-export const clientMergeStatements = async (group: RemoteGroup, statements: SyncStatement[], deps: RemoteDeps): Promise<SyncStatement[] | null> => {
-    if (!deps.queryOne) return null;
-    for (const operation of group.operations) {
-        if (operation.kind !== 'statement' || !operation.statementId) continue;
-        const sql = deps.sqlById.get(operation.statementId);
-        if (!sql || mutationTable(sql) !== 'clients' || !/^\s*INSERT\b/iu.test(sql)) continue;
-        const columns = statementColumns(sql);
-        const value = (column: string) => {
-            const index = columns.indexOf(column);
-            return index >= 0 ? operation.params?.[index] : undefined;
-        };
-        const incoming = { id: String(value('id') ?? ''), createdAt: value('createdAt') };
-        const nif = value('nif');
-        if (!incoming.id || nif === undefined || nif === null || nif === '') continue;
-        const local = await deps.queryOne('SELECT id, createdAt FROM clients WHERE nif = ? AND deletedAt IS NULL AND id <> ? LIMIT 1', [nif, incoming.id]);
-        if (!local?.id) continue;
-        const existing = { id: String(local.id), createdAt: local.createdAt };
-        const winner = clientMergeWinner(incoming, existing);
-        const loser = winner.id === incoming.id ? existing : incoming;
-        const now = new Date().toISOString();
-        const references: SyncStatement[] = [];
-        for (const table of CLIENT_REFERENCES) {
-            if ((await deps.tableColumns(table)).has('clientId')) {
-                references.push({ sql: `UPDATE ${quoteIdentifier(table)} SET clientId = ? WHERE clientId = ?`, params: [winner.id, loser.id] });
-            }
-        }
-        return [
-            // O cliente local sai do caminho do NIF enquanto a transacção recebida grava o seu.
-            { sql: 'UPDATE clients SET deletedAt = ? WHERE id = ?', params: [CLIENT_MERGE_PARKED, existing.id] },
-            ...statements,
-            { sql: 'UPDATE clients SET deletedAt = ?, deletedBy = ? WHERE id = ?', params: [now, `Fundido com o cliente ${winner.id} (mesmo NIF)`, loser.id] },
-            { sql: 'UPDATE clients SET deletedAt = NULL WHERE id = ? AND deletedAt = ?', params: [winner.id, CLIENT_MERGE_PARKED] },
-            ...references,
-        ];
-    }
-    return null;
 };
 
 /**
@@ -411,17 +350,6 @@ export const applyRemoteGroups = async (
             // nunca um conflito para alguém rever. A próxima cópia ou a alteração original tratam do registo.
             // Excepção: uma cópia de uma versão mais recente fica retida como as outras alterações dessa versão.
             if (group.operations.every(operation => operation.heal) && !isOtherVersionReason(reason)) continue;
-            // Mesmo cliente registado em dois dispositivos (mesmo NIF): funde-os e aplica a transacção.
-            if (CLIENT_NIF_CLASH.test(reason)) {
-                try {
-                    const merged = await clientMergeStatements(group, await buildRemoteStatements(group, deps), deps);
-                    if (merged) {
-                        await deps.transaction(merged);
-                        applied += group.operations.length;
-                        continue;
-                    }
-                } catch { /* a fusão não foi possível: fica como conflito, como antes */ }
-            }
             // Transacção que já tinha sido aplicada aqui e voltou a chegar: não é conflito (e resolve os antigos).
             if (!isOtherVersionReason(reason) && await groupAlreadyApplied(group, deps).catch(() => false)) {
                 applied += group.operations.length;
