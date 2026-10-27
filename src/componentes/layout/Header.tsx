@@ -12,6 +12,7 @@ import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Badge } from '@/componentes/ui/badge';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { PainelSincronizacao } from '@/componentes/sync/PainelSincronizacao';
 import { useData } from '@/contextos/ContextoDados';
 import { formatCurrency, formatDateTime } from '@/bibliotecas/formatters';
 import { cn, getFileUrl } from '@/bibliotecas/utils';
@@ -80,11 +81,13 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   const multiTenantAllowed = licenseAllowsFeature(licenseInfo, 'multi_empresa');
   const cloudLinked = Boolean(companySettings?.syncEnabled && isCloudSyncUrl(companySettings?.syncUrl));
   const pendingLabel = cloudStatus.pending ? `${cloudStatus.pending} pendente${cloudStatus.pending === 1 ? '' : 's'}` : '';
+  // «Verificar»: há conflitos, alterações retidas, ilegíveis ou grandes demais (a lista abre ao clicar no ícone).
+  const attentionCount = (cloudStatus.issues || []).filter(issue => issue.attention).reduce((total, issue) => total + issue.count, 0);
   const cloudStatusLabel = cloudStatus.state === 'synced' ? 'Sincronizado'
     : cloudStatus.state === 'error' ? (pendingLabel || 'Sem sincronizar')
       : cloudStatus.state === 'syncing' ? 'A sincronizar'
-        // Alterações retidas não aparecem aqui: o sistema reaplica-as ou corrige-as sozinho (autocura).
-        : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
+        : cloudStatus.state === 'attention' ? `Verificar${attentionCount ? ` (${attentionCount})` : ''}`
+          : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
   const lastSyncText = cloudStatus.at ? ` Última tentativa: ${new Date(cloudStatus.at).toLocaleTimeString('pt-AO')}.` : '';
   const syncIndicatorTitle = serverInfo?.isRunning ? 'Servidor da rede local activo'
     : dbAdapterMode === 'remote' ? 'Ligado a um servidor da rede local'
@@ -92,6 +95,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
         ? cloudStatus.state === 'error'
           ? `Sincronização com a versão web falhou: ${cloudStatus.message || 'erro'}. Vai tentar de novo automaticamente.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
           : cloudStatus.state === 'synced' ? `Sincronizado com a versão web.${cloudStatus.message ? ` ${cloudStatus.message}` : ''}${lastSyncText}`
+          : cloudStatus.state === 'attention' ? `Verificar: ${cloudStatus.message || 'há alterações retidas'}. Clique para ver a lista.${lastSyncText}`
             : `${cloudStatus.message || 'A sincronizar com a versão web.'}${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
         : window.electronAPI ? 'Modo Local: clique para ligar este computador à versão web' : 'Modo Local';
   const canOpenCloudLink = Boolean(window.electronAPI) && !serverInfo?.isRunning && dbAdapterMode !== 'remote' && !cloudLinked;
@@ -509,16 +513,17 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           {/* Indicador de Intranet (só com licença que permite a rede local) */}
           <IndicadorIntranet />
 
-          {/* Indicador de Sincronização */}
+          {/* Indicador de Sincronização (ligado à nuvem: abre o estado real e a lista do que precisa de atenção) */}
+          {(() => { const cloudPanel = cloudLinked && !serverInfo?.isRunning && dbAdapterMode !== 'remote'; const indicator = (
           <div
-            role={canOpenCloudLink ? 'button' : undefined}
-            tabIndex={canOpenCloudLink ? 0 : undefined}
+            role={canOpenCloudLink || cloudPanel ? 'button' : undefined}
+            tabIndex={canOpenCloudLink || cloudPanel ? 0 : undefined}
             title={syncIndicatorTitle}
             onClick={canOpenCloudLink ? () => window.dispatchEvent(new Event(OPEN_CLOUD_LINK_EVENT)) : undefined}
             onKeyDown={canOpenCloudLink ? (event) => { if (event.key === 'Enter') window.dispatchEvent(new Event(OPEN_CLOUD_LINK_EVENT)); } : undefined}
             className={cn(
             "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 min-[1800px]:px-3",
-            canOpenCloudLink && "cursor-pointer",
+            (canOpenCloudLink || cloudPanel) && "cursor-pointer",
             serverInfo?.isRunning
               ? "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400"
               : dbAdapterMode === 'remote'
@@ -526,6 +531,8 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                 : cloudLinked
                   ? cloudStatus.state === 'error'
                     ? "bg-red-50 border-red-300 text-red-700 dark:bg-red-950/30 dark:border-red-800 dark:text-red-400"
+                    : cloudStatus.state === 'attention'
+                      ? "bg-orange-50 border-orange-400 text-orange-700 dark:bg-orange-950/30 dark:border-orange-700 dark:text-orange-300"
                     : cloudStatus.state === 'synced'
                       ? "bg-emerald-50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400"
                       : "bg-amber-50 border-amber-300 text-amber-700 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-400"
@@ -548,6 +555,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
             ) : cloudLinked ? (
               <>
                 {cloudStatus.state === 'error' ? <CloudOff className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />
+                  : cloudStatus.state === 'attention' ? <AlertCircle className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />
                   : cloudStatus.state === 'syncing' ? <RefreshCw className="h-5 w-5 animate-spin min-[1800px]:h-6 min-[1800px]:w-6" />
                     : <Cloud className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />}
                 <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase min-[1800px]:inline">
@@ -562,7 +570,10 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                 </span>
               </>
             )}
-          </div>
+          </div>);
+          return cloudPanel
+            ? <PainelSincronizacao status={cloudStatus} canSeeAll={user?.role === 'super_admin'}>{indicator}</PainelSincronizacao>
+            : indicator; })()}
         </div>
 
         {/* Theme Toggle */}

@@ -610,7 +610,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?",
   "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?",
   "SELECT COUNT(*) AS total FROM rh_funcionario",
-  "SELECT COUNT(*) AS total FROM sync_conflicts WHERE status = 'pending'",
   "SELECT COUNT(*) AS total FROM users",
   "SELECT COUNT(*) as count FROM dictionary",
   "SELECT COUNT(*) as count FROM legal_cases WHERE priority = ?",
@@ -704,6 +703,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, deletedBy FROM clients WHERE deletedAt IS NOT NULL",
   "SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC",
+  "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5",
   "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100",
   "SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome",
   "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
@@ -3395,10 +3395,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COUNT(*) AS total FROM rh_funcionario"
   ],
   [
-    "e49c62f5e71e40fd3d20bbfc46f50c904c091f8b2831c6c5a6abda582d920f70",
-    "SELECT COUNT(*) AS total FROM sync_conflicts WHERE status = 'pending'"
-  ],
-  [
     "546fc080b502ec3f405a7152cdd13bacabfba6517b3b553cba8956272fcf915e",
     "SELECT COUNT(*) AS total FROM users"
   ],
@@ -3769,6 +3765,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "a968fbb38a8a55fceb9493e0a6a0bf3f4ff3d80b2c499e350eb816df04055421",
     "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC"
+  ],
+  [
+    "a446576f662ca1a898bf08ea15d902dee6f59cd51c6a8bf9489af753f59be6bf",
+    "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5"
   ],
   [
     "c8235665d1c2ef00849d4d1bc120f5f9b3f39f126a47cdb580d8a51b6c677fb5",

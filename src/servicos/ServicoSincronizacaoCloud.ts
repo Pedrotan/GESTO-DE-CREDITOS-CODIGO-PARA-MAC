@@ -29,6 +29,7 @@ import {
     type SyncOperation,
 } from '@/bibliotecas/sync-operacoes';
 import { reportUsageIfDue } from '@/servicos/ServicoRelatorioUso';
+import { syncHealth, syncIssues, type SyncCounts, type SyncIssue } from '@/bibliotecas/estado-sincronizacao';
 
 // Sincronização local-first entre todos os dispositivos da empresa (app de computador e navegadores).
 // Cada escrita local gera operações cifradas que vão para a nuvem; as operações dos outros dispositivos
@@ -121,8 +122,12 @@ let failureCount = 0;
 let retryNotBefore = 0;
 
 export type CloudSyncStatus = {
-    state: 'idle' | 'syncing' | 'synced' | 'pending' | 'error';
+    /** attention = «Verificar»: há conflitos, alterações retidas, ilegíveis ou grandes demais para ver. */
+    state: 'idle' | 'syncing' | 'synced' | 'pending' | 'attention' | 'error';
     pending?: number;
+    /** Contagens reais deste dispositivo e a lista do que precisa de atenção (mostrada ao clicar no ícone). */
+    counts?: SyncCounts;
+    issues?: SyncIssue[];
     message?: string;
     at?: string;
     pushed?: number;
@@ -900,13 +905,29 @@ export const getOtherVersionRetainedCount = async () => {
     }).length;
 };
 
+/** Contagens que decidem o ícone: fila, retidas, ilegíveis, grandes demais e conflitos por ver. */
+const collectSyncCounts = async (extra: Partial<SyncCounts> = {}): Promise<SyncCounts> => {
+    const queue = await readAll<QueuedOperation>(STORE_NAME).catch(() => [] as QueuedOperation[]);
+    const oversized = queue.filter(operation => operation.oversized).length;
+    const waiting = (await readAll(INCOMING_STORE).catch(() => [])).length;
+    const unreadable = (await readAll<EncryptedPending>(UNREADABLE_STORE).catch(() => [] as EncryptedPending[]))
+        .filter(item => !activeConfig || item.tenantId === activeConfig.tenantId).length;
+    const rows = await sqlite.all<{ operation: string }>(`SELECT operation FROM sync_conflicts WHERE status = 'pending'`).catch(() => []);
+    const otherVersion = rows.filter(row => {
+        try { return isOtherVersionReason(JSON.parse(row.operation)?.reason); } catch { return false; }
+    }).length;
+    return { pending: queue.length - oversized, oversized, waiting, unreadable, conflicts: rows.length - otherVersion, otherVersion, ...extra };
+};
+
 /** Alterações locais ainda por enviar para a nuvem. */
 export const getPendingSyncCount = async () => (await readAll(STORE_NAME)).length;
 
 const emitPending = async () => {
     if (lastStatus.state === 'syncing') return;
     const pending = await getPendingSyncCount().catch(() => 0);
-    emitStatus({ ...lastStatus, state: lastStatus.state === 'error' ? 'error' : 'pending', pending });
+    // Uma gravação local não esconde um erro nem algo que já precisava de atenção.
+    const state = lastStatus.state === 'error' || lastStatus.state === 'attention' ? lastStatus.state : 'pending';
+    emitStatus({ ...lastStatus, state, pending });
 };
 
 /**
@@ -1140,18 +1161,16 @@ export const syncCloudNow = async () => {
             const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped, usersRoster };
             failureCount = 0;
             retryNotBefore = 0;
-            const pending = await getPendingSyncCount();
-            const waiting = (await readAll(INCOMING_STORE)).length;
-            const conflicts = Number((await sqlite.all<{ total: number }>("SELECT COUNT(*) AS total FROM sync_conflicts WHERE status = 'pending'"))[0]?.total || 0);
-            // Operações antigas ilegíveis (cifradas com um Código de Acesso anterior) ficam guardadas para recuperação,
-            // mas não impedem a sincronização: não deixam o estado "pendente" para sempre nem alarmam o cabeçalho.
-            // Alterações retidas (conflitos) não deixam o estado «por sincronizar»: são reaplicadas ou corrigidas pela
-            // autocura sozinhas, e só o Super Administrador as vê nas Definições.
-            const incomplete = pending > 0 || waiting > 0 || hasMoreRemote || Boolean(identityError);
-            const message = identityError || (incomplete ? 'Ainda existem alterações por enviar ou receber.'
-                    : totalSkipped ? `${totalSkipped} operações antigas, cifradas com um Código de Acesso anterior, continuam guardadas para recuperação.` : undefined);
-            emitStatus({ state: incomplete ? 'pending' : 'synced', message, pending: pending + waiting, pushed: totalPushed, pulled: totalPulled, conflicts, skipped: totalSkipped, usersSent, usersRoster: lastUsersRoster, at: new Date().toISOString() });
-            if (hasMoreRemote || pending) scheduleSync(1000);
+            // «Sincronizado» só sem nada por enviar, nada retido, nada ilegível e nenhum conflito por ver; o que precisa
+            // de atenção fica «Verificar», com a lista ao clicar no ícone.
+            const counts = await collectSyncCounts({ hasMoreRemote, identityError });
+            const issues = syncIssues(counts);
+            const state = syncHealth(counts);
+            const message = identityError || (state === 'attention' ? issues.filter(issue => issue.attention).map(issue => issue.title).join(' · ')
+                : state === 'pending' ? 'Ainda existem alterações por enviar ou receber.' : undefined);
+            emitStatus({ state, message, counts, issues, pending: counts.pending + counts.waiting, pushed: totalPushed, pulled: totalPulled,
+                conflicts: counts.conflicts + counts.otherVersion, skipped: counts.unreadable, usersSent, usersRoster: lastUsersRoster, at: new Date().toISOString() });
+            if (hasMoreRemote || counts.pending) scheduleSync(1000);
             return result;
         } catch (error: any) {
             const message = error?.name === 'TimeoutError' ? 'O servidor demorou muito a responder.'
@@ -1163,7 +1182,8 @@ export const syncCloudNow = async () => {
             retryNotBefore = Date.now() + delay;
             const pending = await getPendingSyncCount().catch(() => 0);
             const licenseRefused = /^LICENCA_/.test(String(error?.code || '')) ? String(error.code) : undefined;
-            emitStatus({ state: 'error', message, pending, at: new Date().toISOString(), authFailed: error?.status === 401, licenseRefused });
+            const counts = await collectSyncCounts().catch(() => undefined);
+            emitStatus({ state: 'error', message, pending, counts, issues: counts ? syncIssues(counts) : undefined, at: new Date().toISOString(), authFailed: error?.status === 401, licenseRefused });
             scheduleSync(delay);
             return { success: false, message };
         }
