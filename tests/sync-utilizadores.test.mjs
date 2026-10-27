@@ -661,3 +661,36 @@ test('servidor entrega cada alteração com o número de ordem (a ordem real, us
     assert.ok(seqs.every(Number.isSafeInteger) && seqs[1] > seqs[0], 'números crescentes do servidor');
     assert.equal(received.cursor, seqs[1]);
 });
+
+test('integridade no PC: a pedido do servidor reenvia a cópia dos registos dos grupos pedidos e mostra o estado', async () => {
+    server.ops = [];
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    for (let index = 0; index < 6; index++) database.run(`INSERT INTO clients VALUES ('c${index}', 'Cliente ${index}')`);
+    // Sem cópia completa inicial: só a reparação pode enviar estes registos.
+    for (const key of ['cloud_sync_bootstrap_v3', 'cloud_sync_repair_snapshot_v4', 'cloud_sync_heal_snapshot_v1']) localStorage.setItem(`${key}:default`, 'true');
+    let asked = false;
+    const result = await withFetch(previous => async (url, init) => {
+        const response = await previous(url, init);
+        const body = await response.json();
+        if (!asked && JSON.parse(init.body).diagnostics) {
+            asked = true;
+            body.integrity = { missingTables: 1, contentTables: 0, missing: [{ table: 'clients', buckets: [0] }],
+                repairRequests: [{ table: 'clients', buckets: Array.from({ length: 16 }, (_, index) => index) }] };
+        }
+        return { ...response, json: async () => body };
+    }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try {
+            // A primeira chamada pode juntar-se a uma sincronização ainda a terminar: repete até os registos chegarem.
+            let last;
+            for (let attempt = 0; attempt < 5 && server.ops.length < 6; attempt++) last = await cloud.syncCloudNow();
+            return { second: last, status: cloud.getLastCloudSyncStatus() };
+        } finally { cloud.stopCloudSync(); }
+    });
+    assert.ok(asked);
+    assert.equal(result.second.success, true, JSON.stringify(result.second));
+    assert.equal(server.ops.length, 6, 'os 6 registos foram reenviados como cópias');
+    assert.equal(cloud.getLastIntegrity()?.missingTables, 1);
+    assert.ok(result.status.issues.some(issue => issue.kind === 'integrityMissing'));
+});

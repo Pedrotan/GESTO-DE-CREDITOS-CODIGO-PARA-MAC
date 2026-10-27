@@ -12,7 +12,14 @@ const text = (value, max) => {
   return clean ? clean.slice(0, max) : null;
 };
 
-export const ensureSyncDevicesTable = async (sql) => {
+// Prepara a tabela uma vez por arranque do servidor (e de novo se falhar).
+let ensured = null;
+export const ensureSyncDevicesTable = (sql) => {
+  if (!ensured) ensured = createSyncDevicesTable(sql).catch(error => { ensured = null; throw error; });
+  return ensured;
+};
+
+const createSyncDevicesTable = async (sql) => {
   await sql(`
     CREATE TABLE IF NOT EXISTS tango_sync_devices (
       tenant_hash TEXT NOT NULL,
@@ -43,6 +50,9 @@ export const ensureSyncDevicesTable = async (sql) => {
   await sql(`ALTER TABLE tango_sync_devices ADD COLUMN IF NOT EXISTS users_fingerprint JSONB`);
   // Créditos deste dispositivo cujo total gravado não é a soma das prestações.
   await sql(`ALTER TABLE tango_sync_devices ADD COLUMN IF NOT EXISTS balance_mismatches INTEGER`);
+  // Verificação de integridade: último resumo por tabela e pedidos de reparação para este dispositivo reenviar.
+  await sql(`ALTER TABLE tango_sync_devices ADD COLUMN IF NOT EXISTS integrity JSONB`);
+  await sql(`ALTER TABLE tango_sync_devices ADD COLUMN IF NOT EXISTS repair_requests JSONB`);
 };
 
 /** [hash do email, ID] de cada utilizador: só hashes curtos e IDs aleatórios (nunca emails nem nomes). */
@@ -154,6 +164,7 @@ export const listSyncDevices = async (sql, tenantHash) => {
     clockSkewMs: row.clock_skew_ms === null ? null : Number(row.clock_skew_ms),
     userClashes: row.user_clashes ?? null,
     balanceMismatches: row.balance_mismatches ?? null,
+    integrity: row.integrity ? (typeof row.integrity === 'string' ? JSON.parse(row.integrity) : row.integrity) : null,
     usersFingerprint: Array.isArray(row.users_fingerprint) ? row.users_fingerprint
       : typeof row.users_fingerprint === 'string' ? JSON.parse(row.users_fingerprint) : [],
   }));

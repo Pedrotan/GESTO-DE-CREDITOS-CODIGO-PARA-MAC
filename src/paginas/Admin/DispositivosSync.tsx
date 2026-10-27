@@ -9,6 +9,7 @@ export type SyncDevice = {
     pending: number | null; oversized: number | null; waiting: number | null; unreadable: number | null; conflicts: number | null; otherVersion: number | null;
     rejected413: number; last413At: string | null; lastError: string | null; lastErrorAt: string | null; clockSkewMs: number | null;
     userClashes: number | null; users: number; balanceMismatches: number | null;
+    integrityAt: string | null; integrityMissing: string[] | null; integrityContent: string[] | null;
 };
 /** O mesmo utilizador (hash do email) com IDs diferentes entre dispositivos. */
 export type UserIdDivergence = { userHash: string; ids: Array<{ id: string; deviceIds: string[] }> };
@@ -95,7 +96,7 @@ export function DispositivosSync({ tenant, onClose, load }: {
                     <div className="overflow-x-auto rounded-xl border">
                         <table className="w-full text-xs">
                             <thead className="bg-muted/60 text-left">
-                                <tr>{['Dispositivo', 'Versão', 'Última sincronização', 'Cursor', 'Por enviar', 'Grandes demais', 'Conflitos', 'Outra versão', 'Ilegíveis', 'IDs diferentes', 'Saldos ≠ prestações', 'Recusas 413', 'Relógio', 'Último erro'].map(head => <th key={head} className="whitespace-nowrap px-2 py-2 font-bold">{head}</th>)}</tr>
+                                <tr>{['Dispositivo', 'Versão', 'Última sincronização', 'Cursor', 'Por enviar', 'Grandes demais', 'Conflitos', 'Outra versão', 'Ilegíveis', 'IDs diferentes', 'Saldos ≠ prestações', 'Integridade', 'Recusas 413', 'Relógio', 'Último erro'].map(head => <th key={head} className="whitespace-nowrap px-2 py-2 font-bold">{head}</th>)}</tr>
                             </thead>
                             <tbody>
                                 {devices.map(device => {
@@ -119,6 +120,10 @@ export function DispositivosSync({ tenant, onClose, load }: {
                                             <td className={`px-2 py-2 ${device.unreadable ? bad : ''}`}>{device.unreadable ?? '—'}</td>
                                             <td className={`px-2 py-2 ${device.userClashes ? bad : ''}`} title={`${device.users} utilizador(es) neste dispositivo`}>{device.userClashes ?? '—'}</td>
                                             <td className={`px-2 py-2 ${device.balanceMismatches ? bad : ''}`} title="Créditos cujo total gravado não é a soma das prestações neste dispositivo">{device.balanceMismatches ?? '—'}</td>
+                                            <td className={`max-w-[12rem] px-2 py-2 text-[11px] ${device.integrityMissing?.length ? bad : ''}`} title={device.integrityAt ? `Último resumo: ${when(device.integrityAt)}` : 'Ainda sem resumo'}>
+                                                {!device.integrityMissing ? '—' : device.integrityMissing.length === 0 && !device.integrityContent?.length ? 'igual'
+                                                    : [device.integrityMissing.length ? `registos diferentes: ${device.integrityMissing.join(', ')}` : '', device.integrityContent?.length ? `conteúdo: ${device.integrityContent.join(', ')}` : ''].filter(Boolean).join(' · ')}
+                                            </td>
                                             <td className={`px-2 py-2 ${device.rejected413 ? bad : ''}`} title={device.last413At ? `Última: ${when(device.last413At)}` : undefined}>{device.rejected413}</td>
                                             <td className={`whitespace-nowrap px-2 py-2 ${clockOff ? bad : ''}`}>{skew(device.clockSkewMs)}</td>
                                             <td className="max-w-[16rem] px-2 py-2 text-[11px]">{device.lastError ? <><p>{device.lastError}</p><p className="text-muted-foreground">{when(device.lastErrorAt)}</p></> : '—'}</td>

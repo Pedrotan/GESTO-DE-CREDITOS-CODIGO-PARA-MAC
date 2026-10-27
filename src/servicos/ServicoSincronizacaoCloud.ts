@@ -33,6 +33,7 @@ import {
 import { reportUsageIfDue } from '@/servicos/ServicoRelatorioUso';
 import { syncHealth, syncIssues, type SyncCounts, type SyncIssue } from '@/bibliotecas/estado-sincronizacao';
 import { balanceMismatches, CREDIT_BALANCE_CHECK_SQL, type BalanceMismatch, type CreditBalanceRow } from '@/bibliotecas/saldos-derivados';
+import { bucketOf, tableDigest, type IntegrityReport, type TableDigest } from '@/bibliotecas/integridade-sync';
 
 // Sincronização local-first entre todos os dispositivos da empresa (app de computador e navegadores).
 // Cada escrita local gera operações cifradas que vão para a nuvem; as operações dos outros dispositivos
@@ -115,6 +116,69 @@ export const checkCreditBalances = async (force = false): Promise<BalanceMismatc
     return balanceCheck.mismatches;
 };
 
+// ── Verificação de integridade periódica ────────────────────────────────────────────────────────────────────
+// De 15 em 15 minutos, só quando não há nada a caminho (nada por enviar nem por receber), resume cada tabela em 16
+// grupos de registos; o servidor compara com os outros dispositivos e pede as reparações. Nas tabelas de ficheiros
+// só entram os IDs (não se lê o ficheiro).
+const INTEGRITY_EVERY_MS = 15 * 60_000;
+const MAX_REPAIR_ROWS = 5000;
+let integrityComputedAt = 0;
+let integrityToSend: IntegrityReport | null = null;
+let lastIntegrity: { missingTables: number; contentTables: number; missing?: Array<{ table: string; buckets: number[] }> } | null = null;
+/** Último estado da integridade devolvido pelo servidor (para o ícone). */
+export const getLastIntegrity = () => lastIntegrity;
+
+const syncableTablesWithId = async () => {
+    const tables = await sqlite.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").catch(() => []);
+    const result: string[] = [];
+    for (const { name } of tables) {
+        if (!/^[a-z_][a-z0-9_]*$/iu.test(name) || !isSyncableTable(name)) continue;
+        if ((await localTableColumns(name)).has('id')) result.push(name);
+    }
+    return result;
+};
+
+const computeIntegrityReport = async (): Promise<IntegrityReport> => {
+    const tables: Record<string, TableDigest> = {};
+    for (const table of await syncableTablesWithId()) {
+        const idsOnly = Boolean(BOOTSTRAP_FILE_TABLES[table.toLowerCase()]);
+        const rows = await sqlite.all<Record<string, unknown>>(idsOnly ? `SELECT id FROM ${quoteIdentifier(table)}` : `SELECT * FROM ${quoteIdentifier(table)}`)
+            .catch(() => [] as Array<Record<string, unknown>>);
+        tables[table] = tableDigest(rows);
+        await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    return { at: new Date().toISOString(), tables };
+};
+
+/** Prepara um resumo novo quando é altura e o dispositivo está em dia (senão a diferença seria só «a caminho»). */
+const prepareIntegrity = async (caughtUp: boolean) => {
+    if (!caughtUp || Date.now() - integrityComputedAt < INTEGRITY_EVERY_MS) return;
+    integrityComputedAt = Date.now();
+    integrityToSend = await computeIntegrityReport().catch(error => { console.warn('[CloudSync] Integridade:', error); return null; });
+};
+
+/** Pedidos do servidor: reenviar a cópia completa dos registos destes grupos (os outros recebem o que lhes falta). */
+const createRepairOperations = async (requests: Array<{ table: string; buckets: number[] }>) => {
+    const operations: SyncOperation[] = [];
+    let order = 0;
+    for (const request of requests) {
+        if (!/^[a-z_][a-z0-9_]*$/iu.test(request.table) || !isSyncableTable(request.table) || !(await localTableColumns(request.table)).has('id')) continue;
+        const wanted = new Set(request.buckets.map(Number));
+        const rows = await sqlite.all<Record<string, unknown>>(`SELECT * FROM ${quoteIdentifier(request.table)}`).catch(() => [] as Array<Record<string, unknown>>);
+        for (const row of rows) {
+            if (operations.length >= MAX_REPAIR_ROWS) break;
+            if (!wanted.has(bucketOf(String(row.id ?? '')))) continue;
+            const operation = snapshotOperation(request.table, row, order++, false);
+            if (operation) operations.push(operation);
+        }
+    }
+    if (operations.length) {
+        await putOperations(operations);
+        console.info(`[CloudSync] Integridade: ${operations.length} registo(s) reenviados a pedido de outro dispositivo.`);
+    }
+    return operations.length;
+};
+
 const syncDiagnostics = async (lastError?: string) => {
     const counts = await collectSyncCounts().catch(() => null);
     const mismatches = await checkCreditBalances().catch(() => [] as BalanceMismatch[]);
@@ -126,6 +190,7 @@ const syncDiagnostics = async (lastError?: string) => {
             conflicts: counts.conflicts, otherVersion: counts.otherVersion, userClashes: counts.userClashes,
         } : {}),
         users: activeConfig ? await usersFingerprint(activeConfig.tenantId).catch(() => []) : [],
+        ...(integrityToSend ? { integrity: integrityToSend } : {}),
         // Créditos (não campos) com totais diferentes das prestações.
         balanceMismatches: new Set(mismatches.map(item => item.creditId)).size,
         rejected413: rejected413SinceReport,
@@ -353,8 +418,49 @@ const writeHealJournal = (journal: HealJournal) => {
     const entries = Object.entries(journal).sort((a, b) => a[1] - b[1]).slice(-HEAL_JOURNAL_MAX);
     localStorage.setItem(scopedStorageKey(HEAL_JOURNAL_KEY), JSON.stringify(Object.fromEntries(entries)));
 };
+// Lápides: registos apagados (aqui ou vindos de outro dispositivo) nos últimos 90 dias. Uma cópia de autocura ou de
+// reparação feita por um dispositivo que ainda não recebeu a eliminação não pode fazer o registo voltar.
+const TOMBSTONES_KEY = 'cloud_sync_tombstones_v1';
+const TOMBSTONE_MAX_AGE_MS = 90 * 24 * 60 * 60_000;
+const TOMBSTONES_MAX = 20_000;
+const readTombstones = (): Record<string, number> => {
+    try { return JSON.parse(localStorage.getItem(scopedStorageKey(TOMBSTONES_KEY)) || '{}') || {}; } catch { return {}; }
+};
+const noteTombstones = (statements: Array<{ sql: string; params?: unknown[] }>) => {
+    const deletes = statements.filter(statement => /^\s*DELETE\b/iu.test(statement.sql));
+    if (!deletes.length) return;
+    const tombstones = readTombstones();
+    const now = Date.now();
+    for (const statement of deletes) {
+        const table = mutationTable(statement.sql);
+        const rowId = table ? statementRowId(statement.sql, statement.params || []) : null;
+        if (table && rowId) tombstones[`${table}\u0001${rowId}`] = now;
+    }
+    const kept = Object.entries(tombstones).filter(([, at]) => now - at < TOMBSTONE_MAX_AGE_MS).sort((a, b) => a[1] - b[1]).slice(-TOMBSTONES_MAX);
+    localStorage.setItem(scopedStorageKey(TOMBSTONES_KEY), JSON.stringify(Object.fromEntries(kept)));
+};
+/** Tira das alterações recebidas as cópias de registos apagados e regista as eliminações que chegaram. */
+const applyTombstones = (groups: RemoteGroup[]): RemoteGroup[] => {
+    noteTombstones(groups.flatMap(group => group.operations).flatMap(operation => {
+        const sql = operation.kind === 'statement' && operation.statementId ? SYNC_SQL_BY_ID.get(operation.statementId) : undefined;
+        return sql ? [{ sql, params: operation.params }] : [];
+    }));
+    const tombstones = readTombstones();
+    if (!Object.keys(tombstones).length) return groups;
+    return groups.map(group => ({
+        ...group,
+        operations: group.operations.filter(operation => {
+            if (!operation.heal || operation.kind !== 'snapshot') return true;
+            const columns = operation.columns || [];
+            const rowId = columns.includes('id') ? String(operation.params?.[columns.indexOf('id')] ?? '') : '';
+            return !tombstones[`${operation.table}\u0001${rowId}`];
+        }),
+    })).filter(group => group.operations.length > 0);
+};
+
 /** Regista os registos alterados aqui: daqui a um minuto segue a cópia completa de cada um (autocura). */
 const noteHealRows = (statements: Array<{ sql: string; params?: unknown[] }>) => {
+    noteTombstones(statements);
     const journal = readHealJournal();
     const now = Date.now();
     let changed = false;
@@ -902,7 +1008,7 @@ const applyOperations = async (operations: SyncOperation[], caughtUp = true): Pr
     // Transacções que nunca chegam completas não podem ficar à espera para sempre — mas o prazo conta desde que
     // as partes chegaram aqui e só depois de recebidas todas as páginas (o resto pode vir na página seguinte).
     const { expired, waiting: stillWaiting } = splitExpired(stampReceived(pending, new Date().toISOString()), Date.now(), caughtUp, INCOMPLETE_GROUP_MAX_AGE_MS);
-    const groups: RemoteGroup[] = complete.map(group => ({ operations: group }));
+    const groups: RemoteGroup[] = applyTombstones(complete.map(group => ({ operations: group })));
     // Partes de uma transacção incompleta não são aplicadas: vão para revisão, com o comando original guardado.
     for (const operation of expired) groups.push({ operations: [markIncomplete(operation)] });
 
@@ -1044,7 +1150,10 @@ const collectSyncCounts = async (extra: Partial<SyncCounts> = {}): Promise<SyncC
         try { return isOtherVersionReason(JSON.parse(row.operation)?.reason); } catch { return false; }
     }).length;
     const userClashes = (await getUserIdClashes().catch(() => [])).length;
-    return { pending: queue.length - oversized, oversized, waiting, unreadable, conflicts: rows.length - otherVersion, otherVersion, userClashes, ...extra };
+    return {
+        pending: queue.length - oversized, oversized, waiting, unreadable, conflicts: rows.length - otherVersion, otherVersion, userClashes,
+        integrityMissing: lastIntegrity?.missingTables || 0, integrityContent: lastIntegrity?.contentTables || 0, ...extra,
+    };
 };
 
 /** Alterações locais ainda por enviar para a nuvem. */
@@ -1186,6 +1295,19 @@ export const syncCloudNow = async () => {
                 await deleteOperations(queued.map(operation => operation.id));
                 // O servidor registou o diagnóstico com as recusas contadas até aqui.
                 if (diagnostics) rejected413SinceReport = Math.max(0, rejected413SinceReport - diagnostics.rejected413);
+                // Integridade: o resumo foi entregue; o servidor diz o estado deste dispositivo e o que reenviar a outros.
+                if (diagnostics && body.integrity && typeof body.integrity === 'object') {
+                    if (diagnostics.integrity) integrityToSend = null;
+                    lastIntegrity = {
+                        missingTables: Number(body.integrity.missingTables) || 0,
+                        contentTables: Number(body.integrity.contentTables) || 0,
+                        missing: Array.isArray(body.integrity.missing) ? body.integrity.missing : [],
+                    };
+                    if (Array.isArray(body.integrity.repairRequests) && body.integrity.repairRequests.length) {
+                        await createRepairOperations(body.integrity.repairRequests).catch(error => console.warn('[CloudSync] Reparação:', error));
+                        scheduleSync(1000);
+                    }
+                }
                 // Envio aceite: o lote volta a crescer aos poucos depois de ter sido reduzido por um 413.
                 if (pushLimit < MAX_PUSH_OPERATIONS) pushLimit = Math.min(MAX_PUSH_OPERATIONS, pushLimit * 2);
                 if (round === 0 && usersOut?.digest) {
@@ -1301,6 +1423,8 @@ export const syncCloudNow = async () => {
             // «Sincronizado» só sem nada por enviar, nada retido, nada ilegível e nenhum conflito por ver; o que precisa
             // de atenção fica «Verificar», com a lista ao clicar no ícone.
             const counts = await collectSyncCounts({ hasMoreRemote, identityError });
+            // Em dia: prepara o próximo resumo de integridade (segue na próxima sincronização).
+            await prepareIntegrity(!hasMoreRemote && counts.pending === 0 && counts.waiting === 0);
             const issues = syncIssues(counts);
             const state = syncHealth(counts);
             const message = identityError || (state === 'attention' ? issues.filter(issue => issue.attention).map(issue => issue.title).join(' · ')

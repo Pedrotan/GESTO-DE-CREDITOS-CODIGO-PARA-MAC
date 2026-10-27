@@ -17,13 +17,17 @@ export type SyncCounts = {
     otherVersion: number;
     /** Utilizadores com o mesmo email e outro ID noutro dispositivo (criados em separado). */
     userClashes?: number;
+    /** Verificação de integridade: tabelas com registos em falta (ou a mais) face aos outros dispositivos. */
+    integrityMissing?: number;
+    /** Tabelas com os mesmos registos mas conteúdo diferente (só assinalado). */
+    integrityContent?: number;
     /** O servidor ainda tem mais para entregar. */
     hasMoreRemote?: boolean;
     /** Falha a publicar a identidade da empresa. */
     identityError?: string;
 };
 
-export type SyncIssueKind = 'conflicts' | 'otherVersion' | 'unreadable' | 'oversized' | 'userClashes' | 'identity' | 'pending' | 'waiting';
+export type SyncIssueKind = 'conflicts' | 'otherVersion' | 'unreadable' | 'oversized' | 'userClashes' | 'integrityMissing' | 'integrityContent' | 'identity' | 'pending' | 'waiting';
 export type SyncIssue = { kind: SyncIssueKind; count: number; title: string; detail: string; attention: boolean };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -54,6 +58,16 @@ export const syncIssues = (counts: SyncCounts): SyncIssue[] => {
         kind: 'userClashes', count: counts.userClashes, attention: true,
         title: plural(counts.userClashes, 'utilizador com outro ID noutro computador', 'utilizadores com outro ID noutro computador'),
         detail: 'A mesma pessoa foi criada em separado em dois dispositivos. As mensagens do chat e o histórico de um não aparecem no outro até os unificar.',
+    });
+    if (counts.integrityMissing) issues.push({
+        kind: 'integrityMissing', count: counts.integrityMissing, attention: true,
+        title: plural(counts.integrityMissing, 'tabela com registos diferentes dos outros dispositivos', 'tabelas com registos diferentes dos outros dispositivos'),
+        detail: 'A verificação de integridade encontrou registos em falta ou a mais. Os em falta são pedidos a outro dispositivo e entram sozinhos.',
+    });
+    if (counts.integrityContent) issues.push({
+        kind: 'integrityContent', count: counts.integrityContent, attention: false,
+        title: plural(counts.integrityContent, 'tabela com conteúdo diferente', 'tabelas com conteúdo diferente'),
+        detail: 'Os mesmos registos com valores diferentes noutro dispositivo. Fica assinalado; as alterações retidas são corrigidas pela autocura.',
     });
     if (counts.identityError) issues.push({ kind: 'identity', count: 1, attention: true, title: 'Identidade da empresa por sincronizar', detail: counts.identityError });
     if (counts.pending > 0) issues.push({

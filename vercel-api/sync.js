@@ -4,6 +4,7 @@ import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOr
 import { authorizeTenant, sha256 } from './_autorizacao-empresa.js';
 import { recordSyncDevice } from './_dispositivos-sync.js';
 import { notifySyncChange, openSyncEvents } from './_avisos-sync.js';
+import { syncIntegrity } from './_integridade-sync.js';
 
 // Alterações por pedido. Os clientes enviam lotes de até 100, mais a lista de utilizadores e o resto de uma transacção
 // que não pode ser partida: com o limite antigo de 100 esse lote era recusado sempre e o dispositivo deixava de
@@ -252,10 +253,13 @@ export default async function handler(req, res) {
     }
 
     await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics, outcome: { synced: true, cursor: nextCursor } });
+    // Integridade: só na volta com diagnóstico (a primeira de cada sincronização).
+    const integrity = body.diagnostics ? await syncIntegrity(sql, tenantHash, deviceId, body.diagnostics.integrity) : undefined;
     return send(res, 200, {
       success: true,
       cursor: nextCursor,
       hasMore,
+      ...(integrity ? { integrity } : {}),
       ...(usersRoster !== undefined ? { usersRoster } : {}),
       operations: page
         .filter(row => row.device_id !== deviceId)

@@ -8,6 +8,7 @@ import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
 import { changeLicensePlan, importLegacyKeys, legacyKeyStatuses, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, setLicenseModules, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
 import { createMasterSession, isValidMasterSession, revokeMasterSession } from './_sessao-master.js';
 import { listSyncDevices, userIdDivergences } from './_dispositivos-sync.js';
+import { integrityPlan } from './_integridade-sync.js';
 import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
 
 const KEY_TOOLS = { generate: generateLicenseKey, parse: parseLicenseKey, hash: licenseKeyHash, prefix: licenseKeyPrefix };
@@ -275,7 +276,11 @@ export default async function handler(req, res) {
       const devices = await listSyncDevices(sql, tenant.tenant_hash);
       return send(res, 200, {
         success: true, tenantName: tenant.name, serverTime: new Date().toISOString(),
-        devices: devices.map(({ usersFingerprint, ...device }) => ({ ...device, users: usersFingerprint.length })),
+        devices: devices.map(({ usersFingerprint, integrity, ...device }) => {
+          const plan = integrity ? integrityPlan(devices, device.deviceId) : null;
+          return { ...device, users: usersFingerprint.length, integrityAt: integrity?.at || null,
+            integrityMissing: plan ? plan.missing.map(item => item.table) : null, integrityContent: plan ? plan.content : null };
+        }),
         userIdDivergences: userIdDivergences(devices),
       });
     }
