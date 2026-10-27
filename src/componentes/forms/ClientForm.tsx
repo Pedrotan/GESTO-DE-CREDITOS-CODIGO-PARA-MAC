@@ -73,7 +73,8 @@ import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { needsSpouse, spouseFieldsToSave } from '@/bibliotecas/conjuge';
-import { CAMPOS_MORADA, PROVINCIAS_ANGOLA, campoConjuge, validarNaturalidadeMorada } from '@/bibliotecas/morada-cliente';
+import { CAMPOS_MORADA, campoConjuge, validarNaturalidadeMorada, type CampoMorada } from '@/bibliotecas/morada-cliente';
+import { MUNICIPIOS_POR_PROVINCIA, PROVINCIAS_DPA, municipioDPA, municipiosDaProvincia, provinciaDPA, semAcentos } from '@/bibliotecas/dpa-angola';
 import { cn } from '@/bibliotecas/utils';
 import { formatAngolanPhone } from '@/bibliotecas/formatters';
 import { analisarTelefoneAngola, telefoneOpcionalValido } from '@/bibliotecas/operadoras-telefone';
@@ -246,29 +247,73 @@ function isPdfDocument(doc: ClientDocument): boolean {
     return doc.type === 'pdf' || doc.data?.startsWith('data:application/pdf');
 }
 
+/** Opções da lista de escolha (pesquisa também sem acentos); um valor antigo fora da lista continua visível. */
+const opcoesDPA = (nomes: string[], actual: string, subLabel?: (nome: string) => string) => {
+    const opcoes = nomes.map(nome => ({ value: nome, label: nome, keywords: semAcentos(nome), subLabel: subLabel?.(nome) }));
+    return actual && !nomes.includes(actual)
+        ? [{ value: actual, label: actual, keywords: semAcentos(actual), subLabel: 'Valor antigo, fora da nova DPA', className: 'text-amber-700' }, ...opcoes]
+        : opcoes;
+};
+
 /** Naturalidade, província, município, bairro e zona (do cliente ou, com `conjuge`, do cônjuge). */
 function CamposNaturalidadeMorada({ form, conjuge = false, semNaturalidade = false }: { form: any; conjuge?: boolean; semNaturalidade?: boolean }) {
-    const listId = conjuge ? 'provincias-angola-conjuge' : 'provincias-angola';
+    const nome = (key: CampoMorada) => (conjuge ? campoConjuge(key) : key);
+    const provincia = String(form.watch(nome('province')) || '');
+    const municipios = municipiosDaProvincia(provincia);
+    const escolherProvincia = (valor: string) => {
+        form.setValue(nome('province'), valor, { shouldDirty: true, shouldValidate: true });
+        // O município só fica se pertencer à província escolhida.
+        const municipio = municipioDPA(valor, form.getValues(nome('municipality')));
+        if (municipio !== form.getValues(nome('municipality'))) form.setValue(nome('municipality'), municipio, { shouldDirty: true });
+    };
+    const classeCampo = "h-10 rounded-xl border-slate-200 bg-white text-sm";
     return (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
-            <datalist id={listId}>{PROVINCIAS_ANGOLA.map(nome => <option key={nome} value={nome} />)}</datalist>
             {CAMPOS_MORADA.filter(campo => !(semNaturalidade && campo.key === 'birthPlace')).map(campo => (
                 <FormField
                     key={campo.key}
                     control={form.control}
-                    name={(conjuge ? campoConjuge(campo.key) : campo.key) as any}
-                    render={({ field }) => (
-                        <FormItem>
-                            <FormLabel className="text-xs font-bold text-slate-700">
-                                {campo.label}{conjuge ? ' do Cônjuge' : ''}<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
-                            </FormLabel>
-                            <FormControl>
-                                <Input {...field} value={field.value || ''} placeholder={campo.placeholder} list={campo.key === 'province' ? listId : undefined}
-                                    className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
-                            </FormControl>
-                            <FormMessage />
-                        </FormItem>
-                    )}
+                    name={nome(campo.key) as any}
+                    render={({ field }) => {
+                        const valor = String(field.value || '');
+                        return (
+                            <FormItem>
+                                <FormLabel className="text-xs font-bold text-slate-700">
+                                    {campo.label}{conjuge ? ' do Cônjuge' : ''}<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
+                                </FormLabel>
+                                {campo.key === 'province' ? (
+                                    <SearchableSelect
+                                        options={opcoesDPA(PROVINCIAS_DPA, provinciaDPA(valor) || valor, nomeProvincia => `${MUNICIPIOS_POR_PROVINCIA[nomeProvincia].length} municípios`)}
+                                        value={provinciaDPA(valor) || valor}
+                                        onValueChange={escolherProvincia}
+                                        placeholder={campo.placeholder}
+                                        searchPlaceholder="Pesquisar província…"
+                                        emptyMessage="Nenhuma província encontrada."
+                                        className={classeCampo}
+                                        contentClassName="min-w-[260px]"
+                                    />
+                                ) : campo.key === 'municipality' ? (
+                                    <SearchableSelect
+                                        options={opcoesDPA(municipios, municipioDPA(provincia, valor) || valor)}
+                                        value={municipioDPA(provincia, valor) || valor}
+                                        onValueChange={field.onChange}
+                                        disabled={!municipios.length}
+                                        placeholder={municipios.length ? campo.placeholder : 'Escolha primeiro a província'}
+                                        searchPlaceholder="Pesquisar município…"
+                                        emptyMessage="Nenhum município encontrado nesta província."
+                                        className={classeCampo}
+                                        contentClassName="min-w-[260px]"
+                                    />
+                                ) : (
+                                    <FormControl>
+                                        <Input {...field} value={valor} placeholder={campo.placeholder}
+                                            className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                    </FormControl>
+                                )}
+                                <FormMessage />
+                            </FormItem>
+                        );
+                    }}
                 />
             ))}
         </div>
@@ -544,7 +589,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                     form.setValue('address', addressVal, { shouldValidate: true, shouldDirty: true, shouldTouch: true });
                 }
                 // Província de emissão do BI como sugestão (só se ainda estiver vazia; o operador confirma ou corrige).
-                const provinciaBI = clientType === 'PARTICULAR' ? inferirProvinciaDoBI(nifValue) : '';
+                const provinciaBI = clientType === 'PARTICULAR' ? provinciaDPA(inferirProvinciaDoBI(nifValue)) : '';
                 if (provinciaBI && !form.getValues('province')) form.setValue('province', provinciaBI, { shouldDirty: true });
 
                 setIsNameAutoFilled(true);
