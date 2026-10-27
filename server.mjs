@@ -357,9 +357,15 @@ const server = http.createServer(async (req, res) => {
       try {
         const chunks = [];
         let bodySize = 0;
+        // A sincronização leva lotes cifrados (com documentos anexados); o PC envia até ~4 MB por pedido e uma só
+        // transacção grande pode passar disso. O nginx aceita até 50 MB.
+        const maxBody = (req.url || '').startsWith('/api/sync') ? 32 * 1024 * 1024 : 8 * 1024 * 1024;
         for await (const chunk of req) {
           bodySize += chunk.length;
-          if (bodySize > 8 * 1024 * 1024) return res.status(413).json({ success: false, message: 'Pedido demasiado grande.' });
+          if (bodySize > maxBody) {
+            console.warn(`[VPS Servidor] Pedido recusado por tamanho (${bodySize}+ bytes) em ${req.url}.`);
+            return res.status(413).json({ success: false, code: 'BODY_TOO_LARGE', message: 'Pedido demasiado grande.' });
+          }
           chunks.push(chunk);
         }
         req.rawBody = Buffer.concat(chunks);

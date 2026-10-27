@@ -439,3 +439,80 @@ test('servidor aceita um lote grande (100 alterações + utilizadores + resto da
     assert.equal(res.body.success, true);
     assert.equal(server.ops.length, 150);
 });
+
+// ── Ponto 0: envios recusados por tamanho nunca se perdem nem bloqueiam a fila ──────────────────────────────────
+const fakeRes = () => ({
+    statusCode: 200, headers: {},
+    status(code) { this.statusCode = code; return this; },
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+    json(body) { this.body = body; return this; },
+});
+
+test('servidor: alteração acima do limite é recusada com o identificador e nada é gravado', async () => {
+    server.ops = [];
+    const grande = { id: nodeCrypto.randomUUID(), deviceId: 'pc-grande', payload: 'x'.repeat(12_000_001) };
+    const normal = { id: nodeCrypto.randomUUID(), deviceId: 'pc-grande', payload: 'cifrado' };
+    const res = fakeRes();
+    await syncHandler({ method: 'POST', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-grande', cursor: 0, operations: [normal, grande] } }, res);
+    assert.equal(res.statusCode, 413);
+    assert.equal(res.body.code, 'OPERATION_TOO_LARGE');
+    assert.deepEqual(res.body.operationIds, [grande.id]);
+    assert.equal(server.ops.length, 0, 'o pedido não é gravado a meio');
+    // Uma alteração com 11 MB (cliente com documentos) já é aceite.
+    const media = { id: nodeCrypto.randomUUID(), deviceId: 'pc-grande', payload: 'y'.repeat(11_000_000) };
+    const aceite = fakeRes();
+    await syncHandler({ method: 'POST', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-grande', cursor: 0, operations: [media] } }, aceite);
+    assert.equal(aceite.statusCode, 200, JSON.stringify(aceite.body));
+});
+
+const withFetch = async (wrapper, run) => {
+    const previous = globalThis.fetch;
+    globalThis.fetch = wrapper(previous);
+    try { return await run(); } finally { globalThis.fetch = previous; }
+};
+
+test('PC: lote recusado por tamanho volta a seguir em lotes menores, sem perder nada', async () => {
+    server.ops = [];
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    for (let index = 0; index < 12; index++) database.run(`INSERT INTO clients VALUES ('c${index}', 'Cliente ${index}')`);
+    let refused = 0;
+    const result = await withFetch(previous => async (url, init) => {
+        const body = JSON.parse(init.body);
+        // Proxy com limite apertado: recusa qualquer pedido com mais de 3 alterações (sem dizer quais).
+        if (body.operations.length > 3) { refused += 1; return { ok: false, status: 413, json: async () => ({ success: false, code: 'BODY_TOO_LARGE' }) }; }
+        return previous(url, init);
+    }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try { return await cloud.syncCloudNow(); } finally { cloud.stopCloudSync(); }
+    });
+    assert.equal(result.success, true, result.message);
+    assert.ok(refused > 0, 'houve recusas');
+    assert.equal(server.ops.length, 12, 'todos os registos chegaram ao servidor');
+    assert.equal(await cloud.getPendingSyncCount(), 0);
+});
+
+test('PC: alteração que o servidor não aceita fica de parte, guardada, e as outras seguem', async () => {
+    server.ops = [];
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    for (let index = 0; index < 4; index++) database.run(`INSERT INTO clients VALUES ('c${index}', 'Cliente ${index}')`);
+    let rejectedId = null;
+    const result = await withFetch(previous => async (url, init) => {
+        const body = JSON.parse(init.body);
+        if (!rejectedId && body.operations.length) rejectedId = body.operations[0].id;
+        if (body.operations.some(operation => operation.id === rejectedId)) {
+            return { ok: false, status: 413, json: async () => ({ success: false, code: 'OPERATION_TOO_LARGE', operationIds: [rejectedId] }) };
+        }
+        return previous(url, init);
+    }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try { return await cloud.syncCloudNow(); } finally { cloud.stopCloudSync(); }
+    });
+    assert.equal(result.success, true, result.message);
+    assert.equal(server.ops.length, 3, 'as outras três chegaram');
+    assert.equal(await cloud.getPendingSyncCount(), 1, 'a recusada continua guardada neste dispositivo');
+    assert.equal(await cloud.getOversizedCount(), 1);
+});

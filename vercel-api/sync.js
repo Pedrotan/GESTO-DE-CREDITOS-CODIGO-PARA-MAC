@@ -7,12 +7,20 @@ import { authorizeTenant, sha256 } from './_autorizacao-empresa.js';
 // que não pode ser partida: com o limite antigo de 100 esse lote era recusado sempre e o dispositivo deixava de
 // sincronizar (nem enviava nem recebia). O tamanho do pedido continua limitado pelo servidor (8 MB).
 const MAX_OPERATIONS = 2000;
-const MAX_PAYLOAD_LENGTH = 2_000_000;
+// Uma alteração cifrada. Clientes com documentos anexados (BI, comprovativos em base64) passavam os 2 MB antigos:
+// a alteração era recusada e, como a fila não avança sem ela, o dispositivo deixava de enviar tudo o resto.
+const MAX_PAYLOAD_LENGTH = 12_000_000;
 const PULL_LIMIT = 500;
 // Bytes por resposta: em ligações lentas uma página de 500 operações com ficheiros não chegava a tempo.
 const DEFAULT_PULL_BYTES = 3_000_000;
 const MIN_PULL_BYTES = 200_000;
 const MAX_PULL_BYTES = 8_000_000;
+
+/** Regista no servidor cada envio recusado (sem dados da empresa): data, dispositivo, alterações e tamanho. */
+const logRejected = (req, tenantId, deviceId, count, reason) => {
+  const bytes = req.rawBody?.length ?? Buffer.byteLength(JSON.stringify(req.body || {}));
+  console.warn(`[sync] Envio recusado (${reason}): empresa ${tenantId ? sha256(tenantId).slice(0, 12) : '?'}, dispositivo ${String(deviceId || '?').slice(0, 40)}, ${count} alteração(ões), ${bytes} bytes.`);
+};
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -42,7 +50,8 @@ export default async function handler(req, res) {
     return send(res, 400, { success: false, message: 'Identificação da sincronização inválida.' });
   }
   if (operations.length > MAX_OPERATIONS) {
-    return send(res, 413, { success: false, message: 'Foram enviadas demasiadas alterações de uma só vez.' });
+    logRejected(req, tenantId, deviceId, operations.length, 'demasiadas alterações');
+    return send(res, 413, { success: false, code: 'TOO_MANY_OPERATIONS', message: 'Foram enviadas demasiadas alterações de uma só vez.' });
   }
 
   const tenantHash = sha256(tenantId);
@@ -100,11 +109,18 @@ export default async function handler(req, res) {
 
     const validatedOperations = [];
     let roster = null;
+    // Alterações maiores do que o limite: o dispositivo põe-nas de parte (sem as perder) e envia as restantes.
+    const tooLarge = operations.filter(operation => String(operation?.payload || '').length > MAX_PAYLOAD_LENGTH).map(operation => String(operation?.id || ''));
+    if (tooLarge.length) {
+      logRejected(req, tenantId, deviceId, operations.length, `${tooLarge.length} alteração(ões) acima de ${MAX_PAYLOAD_LENGTH} caracteres`);
+      return send(res, 413, { success: false, code: 'OPERATION_TOO_LARGE', operationIds: tooLarge, maxPayloadLength: MAX_PAYLOAD_LENGTH, message: 'Há alterações demasiado grandes para enviar.' });
+    }
     for (const operation of operations) {
       const id = String(operation?.id || '');
       const sourceDevice = String(operation?.deviceId || deviceId);
       const payload = String(operation?.payload || '');
-      if (!/^[0-9a-f-]{20,80}$/i.test(id) || sourceDevice.length > 100 || !payload || payload.length > MAX_PAYLOAD_LENGTH) {
+      if (!/^[0-9a-f-]{20,80}$/i.test(id) || sourceDevice.length > 100 || !payload) {
+        logRejected(req, tenantId, deviceId, operations.length, 'alteração inválida');
         return send(res, 400, { success: false, message: 'Alteração de sincronização inválida.' });
       }
       validatedOperations.push({ operation_id: id, device_id: sourceDevice, payload });

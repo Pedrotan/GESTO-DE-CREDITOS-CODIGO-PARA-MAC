@@ -90,9 +90,14 @@ export const USERS_SYNCED_EVENT = 'tango-users-synced';
 const MAX_PUSH_OPERATIONS = 80;
 /** Lote actual: começa em MAX_PUSH_OPERATIONS e reduz-se a metade se o servidor recusar por excesso (413). */
 let pushLimit = MAX_PUSH_OPERATIONS;
-// Bytes por pedido (envio e recepção): com ficheiros, 100 operações podiam passar o limite do servidor e,
-// em ligações lentas, não chegar dentro do tempo.
-const MAX_PUSH_BYTES = 1_500_000;
+// Bytes por pedido, medidos já cifrados (a cifra em base64 acrescenta cerca de um terço): com ficheiros, um lote
+// medido antes da cifra podia passar o limite do servidor e, em ligações lentas, não chegar dentro do tempo.
+const MAX_PUSH_BYTES = 4_000_000;
+// Uma só alteração cifrada acima disto não cabe no servidor (12 MB): fica de parte, guardada, sem bloquear a fila.
+const MAX_OPERATION_BYTES = 11_500_000;
+/** Tamanho aproximado da alteração depois de cifrada (texto UTF-8 em base64, mais o IV). */
+const encryptedSize = (operation: SyncOperation) => Math.ceil(new TextEncoder().encode(JSON.stringify(operation)).length / 3) * 4 + 64;
+type QueuedOperation = SyncOperation & { oversized?: string };
 const MAX_PULL_BYTES = 2_000_000;
 const MAX_PULL_ROUNDS = 10;
 // Quase tempo real: recebe o que os outros dispositivos fizeram a cada 10 s (e logo ao gravar, ao voltar à janela
@@ -221,11 +226,12 @@ const readAll = async <T extends { createdAt: string } = SyncOperation>(store: s
 
 // Envia no máximo MAX_PUSH_OPERATIONS (e cerca de MAX_PUSH_BYTES), sem nunca partir uma transacção entre dois envios.
 const getQueuedOperations = async (limit = MAX_PUSH_OPERATIONS): Promise<{ batch: SyncOperation[]; more: boolean }> => {
-    const all = await readAll(STORE_NAME);
+    // As alterações postas de parte por serem grandes demais continuam guardadas, mas não entram nos lotes.
+    const all = (await readAll<QueuedOperation>(STORE_NAME)).filter(operation => !operation.oversized);
     const batch: SyncOperation[] = [];
     let bytes = 0;
     for (let index = 0; index < all.length; index++) {
-        const size = JSON.stringify(all[index]).length;
+        const size = encryptedSize(all[index]);
         if (batch.length && (batch.length >= limit || bytes + size > MAX_PUSH_BYTES)) {
             const lastTx = batch[batch.length - 1].txId;
             if (lastTx) batch.push(...all.slice(index).filter(operation => operation.txId === lastTx));
@@ -236,6 +242,24 @@ const getQueuedOperations = async (limit = MAX_PUSH_OPERATIONS): Promise<{ batch
     }
     return { batch, more: batch.length < all.length };
 };
+
+/**
+ * Põe de parte alterações que o servidor não aceita por tamanho (e as outras partes da mesma transacção, que não
+ * podem seguir sozinhas). Ficam na fila, marcadas, para não se perderem nem bloquearem o envio do resto.
+ */
+const setAsideOversized = async (ids: string[], reason: string) => {
+    if (!ids.length) return 0;
+    const all = await readAll<QueuedOperation>(STORE_NAME);
+    const txIds = new Set(all.filter(operation => ids.includes(operation.id) && operation.txId).map(operation => operation.txId));
+    const marked = all.filter(operation => ids.includes(operation.id) || (operation.txId && txIds.has(operation.txId)))
+        .map(operation => ({ ...operation, oversized: reason }));
+    await putOperations(marked);
+    console.warn(`[CloudSync] ${marked.length} alteração(ões) postas de parte: ${reason}. Ficam guardadas neste dispositivo.`);
+    return marked.length;
+};
+
+/** Alterações guardadas aqui que não cabem no servidor (contam como por enviar). */
+export const getOversizedCount = async () => (await readAll<QueuedOperation>(STORE_NAME)).filter(operation => operation.oversized).length;
 
 // Tempo de espera proporcional ao volume: em ligações lentas (dezenas de KB/s) 2 MB levam minutos.
 const requestTimeout = (bytes: number) => Math.min(300_000, 30_000 + Math.ceil(bytes / 10));
@@ -934,11 +958,20 @@ export const syncCloudNow = async () => {
                 }).catch(error => { console.warn('[CloudSync] Utilizadores não enviados:', error); return null; })
                 : null;
 
+            let sizeRetries = 0;
             for (let round = 0; round < MAX_PULL_ROUNDS; round++) {
                 const { batch: queued, more } = await getQueuedOperations(pushLimit);
                 const supported = queued.filter(operation => ['statement', 'snapshot', 'dynamic'].includes(operation.kind));
                 const outgoing: Array<{ id: string; deviceId: string; payload: string; kind?: 'users' }> = await Promise.all(
                     supported.map(async operation => ({ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) })));
+                // Alteração que, cifrada, não cabe no servidor: fica de parte (guardada) e o resto segue já.
+                const tooLarge = outgoing.filter(item => item.payload.length > MAX_OPERATION_BYTES).map(item => item.id);
+                if (tooLarge.length) {
+                    await setAsideOversized(tooLarge, `maior do que ${Math.round(MAX_OPERATION_BYTES / 1_000_000)} MB depois de cifrada`);
+                    if (++sizeRetries > 30) throw new Error('Não foi possível preparar um envio dentro do limite do servidor.');
+                    round -= 1;
+                    continue;
+                }
                 // Lista completa: o servidor guarda também a última à parte, para a versão web a pedir directamente.
                 if (round === 0 && usersOut?.payload && usersOut.id) outgoing.push({ id: usersOut.id, deviceId: getDeviceId(), payload: usersOut.payload, kind: 'users' });
                 const requestBody = JSON.stringify({
@@ -954,10 +987,24 @@ export const syncCloudNow = async () => {
                     signal: AbortSignal.timeout(requestTimeout(requestBody.length + MAX_PULL_BYTES))
                 });
                 const body = await response.json().catch(() => ({}));
-                // Lote recusado por ser grande demais: envia em lotes menores em vez de ficar bloqueado (e sem receber).
-                if (response.status === 413 && pushLimit > 1) {
-                    pushLimit = Math.max(1, Math.floor(pushLimit / 2));
-                    console.warn(`[CloudSync] Lote recusado pelo tamanho: a enviar ${pushLimit} alteração(ões) de cada vez.`);
+                // Lote recusado por ser grande demais. Nada é apagado da fila: o lote volta a seguir mais pequeno; se o
+                // servidor indicar as alterações grandes demais, ou se já for uma só, essas ficam de parte (guardadas).
+                if (response.status === 413) {
+                    const named = Array.isArray(body.operationIds) ? body.operationIds.map(String) : [];
+                    // Sem avanço possível (ex.: a lista de utilizadores é que é grande demais): erro, nunca um ciclo.
+                    if (++sizeRetries > 30) throw Object.assign(new Error(body.message || 'O servidor recusou o envio por ser grande demais.'), { status: 413 });
+                    if (body.code === 'OPERATION_TOO_LARGE' && named.length) {
+                        if (!await setAsideOversized(named, 'recusada pelo servidor por ser grande demais')) {
+                            throw Object.assign(new Error(body.message || 'O servidor recusou o envio por ser grande demais.'), { status: 413 });
+                        }
+                    } else if (pushLimit > 1 && queued.length > 1) {
+                        pushLimit = Math.max(1, Math.floor(pushLimit / 2));
+                        console.warn(`[CloudSync] Lote recusado pelo tamanho: a enviar ${pushLimit} alteração(ões) de cada vez.`);
+                    } else if (queued.length) {
+                        await setAsideOversized(queued.map(operation => operation.id), 'recusada pelo servidor por ser grande demais');
+                    } else {
+                        throw Object.assign(new Error(body.message || 'O servidor recusou o pedido por ser grande demais.'), { status: 413 });
+                    }
                     round -= 1;
                     continue;
                 }
@@ -967,6 +1014,8 @@ export const syncCloudNow = async () => {
                     throw new Error('Resposta de sincronização incompleta. As alterações locais foram mantidas para nova tentativa.');
                 }
                 await deleteOperations(queued.map(operation => operation.id));
+                // Envio aceite: o lote volta a crescer aos poucos depois de ter sido reduzido por um 413.
+                if (pushLimit < MAX_PUSH_OPERATIONS) pushLimit = Math.min(MAX_PUSH_OPERATIONS, pushLimit * 2);
                 if (round === 0 && usersOut?.digest) {
                     localStorage.setItem(scopedStorageKey(USERS_DIGEST_KEY), usersOut.digest);
                     localStorage.setItem(scopedStorageKey(USERS_IDS_KEY), JSON.stringify(usersOut.ids || []));
