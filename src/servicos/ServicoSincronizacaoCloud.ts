@@ -5,7 +5,8 @@ import { lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGRED
 import { secureCloudUrl } from '@/servicos/ServicoLigacaoNuvem';
 import { setFinancialConnectionProbe } from '@/bibliotecas/ligacao-financeira';
 import { REPLICA_BACKUP_AT_KEY, RESTORE_REPLICA_FLAG, sqlite, type SqlTransactionStatement } from '@/bibliotecas/adaptador-sqlite';
-import { RENDERER_SQL_BY_ID, RENDERER_SQL_ID_BY_STATEMENT } from '../../electron/renderer-sql-allowlist.ts';
+import { RENDERER_SQL_ID_BY_STATEMENT } from '../../electron/renderer-sql-allowlist.ts';
+import { SYNC_SQL_BY_ID } from '../../electron/sync-sql.ts';
 import {
     REBUILD_REPLICA_FLAG,
     SYNC_EXCLUDED_TABLES,
@@ -240,6 +241,8 @@ const deleteOperations = async (ids: string[], store = STORE_NAME) => {
     database.close();
 };
 
+const clearStore = async (store: string) => deleteOperations((await readAll(store)).map(operation => operation.id), store);
+
 const isSyncableOperation = (sql: string) => SYNCABLE_SQL.test(sql) && isSyncableTable(mutationTable(sql));
 
 type StatementCommand = Omit<SyncOperation, 'id' | 'deviceId' | 'createdAt'>;
@@ -470,7 +473,7 @@ const applyGroups = async (groups: RemoteGroup[]): Promise<ApplyResult> => {
         const electronApply = window.electronAPI?.syncApplyRemote;
         if (electronApply) return await electronApply(groups);
         return await applyRemoteGroups(groups, {
-            sqlById: RENDERER_SQL_BY_ID,
+            sqlById: SYNC_SQL_BY_ID,
             tableColumns: localTableColumns,
             transaction: statements => sqlite.transaction(statements as SqlTransactionStatement[]),
         });
@@ -666,6 +669,7 @@ const applyOperations = async (operations: SyncOperation[], caughtUp = true): Pr
     for (const operation of expired) groups.push({ operations: [markIncomplete(operation)] });
 
     const result = await applyGroups(groups);
+    if (result.applied > 0) reprocessDirty = true;
     await deleteOperations(waiting.map(operation => operation.id), INCOMING_STORE);
     await putOperations([...stillWaiting, ...retryRosters], INCOMING_STORE);
     return { ...result, applied: result.applied + rosterApplied };
@@ -709,20 +713,26 @@ let lastUsersRoster: UsersRosterOutcome | undefined;
 let rejectedRosterAt: string | undefined;
 export const getLastUsersRoster = () => lastUsersRoster;
 
-// Reprocessa automaticamente operações seguras (inserções e snapshots) que tenham sido retidas em sync_conflicts
-// devido a esquemas temporariamente desalinhados ou dependências de chaves estrangeiras.
-export const reprocessRetainedOperations = async (): Promise<number> => {
+// Reprocessa automaticamente operações retidas em sync_conflicts que nunca foram aplicadas: inserções e snapshots,
+// comandos de outra versão que esta já conhece e alterações que falharam por o registo de que dependiam ainda não
+// existir. Só volta a tentar quando chegou ou se aplicou algo novo (não repete as mesmas falhas a cada 10 s).
+let reprocessDirty = true;
+export const reprocessRetainedOperations = async (force = false): Promise<number> => {
+    if (!force && !reprocessDirty) return 0;
+    reprocessDirty = false;
     try {
         const rows = await sqlite.all<{ id: string; operation: string; entityType?: string }>(
             `SELECT id, operation, entityType FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000`
         );
         if (!rows || rows.length === 0) return 0;
 
-        const groups = reprocessableGroups(rows, RENDERER_SQL_BY_ID);
+        const groups = reprocessableGroups(rows, SYNC_SQL_BY_ID);
         if (groups.length === 0) return 0;
         const result = await applyGroups(groups);
         if (result.applied > 0) {
-            console.log(`[CloudSync] ${result.applied} registos seguros de sync_conflicts reprocessados e aplicados com sucesso.`);
+            // Uma alteração aplicada pode desbloquear as que dependiam dela: tenta de novo na próxima passagem.
+            reprocessDirty = true;
+            console.log(`[CloudSync] ${result.applied} registos de sync_conflicts reprocessados e aplicados com sucesso.`);
         }
         return result.applied;
     } catch (err) {
@@ -746,8 +756,10 @@ export const rebuildBrowserReplica = async () => {
     if (pending > 0) throw new Error(`Ainda há ${pending} alteração(ões) deste navegador por enviar. Sincronize primeiro e tente de novo.`);
     // Só com a sincronização a funcionar: se não se consegue enviar nem receber agora, a cópia nova ficaria vazia.
     if (lastStatus.state === 'error') throw new Error('A sincronização está com erro neste momento. Resolva a ligação (ou aguarde «Sincronizado») antes de receber tudo de novo.');
-    const retained = (await readAll(UNREADABLE_STORE)).length + (await readAll(INCOMING_STORE)).length;
-    if (retained > 0) throw new Error(`Há ${retained} alteração(ões) recebidas e ainda por aplicar neste navegador. Aguarde a sincronização terminar.`);
+    // As alterações recebidas e ainda por aplicar (partes de transacções à espera do resto, cargas ilegíveis) estão
+    // todas no servidor e voltam a ser recebidas desde o início: não se perdem ao reconstruir, por isso não bloqueiam.
+    await clearStore(INCOMING_STORE);
+    await clearStore(UNREADABLE_STORE);
     localStorage.setItem(scopedStorageKey(CURSOR_KEY), '0');
     // Este navegador não volta a enviar a fotografia completa: os dados vêm todos da nuvem.
     localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
@@ -915,6 +927,8 @@ export const syncCloudNow = async () => {
                 localStorage.setItem(scopedStorageKey(CURSOR_KEY), String(cursor));
                 hasMoreRemote = body.hasMore;
                 if (!body.hasMore && !more) break;
+                // Histórico grande (navegador novo, «Receber tudo de novo»): mostra quanto já chegou.
+                emitStatus({ state: 'syncing', pulled: totalPulled, pushed: totalPushed, conflicts: totalConflicts });
             }
             if (usersRoster) lastUsersRoster = usersRoster;
 

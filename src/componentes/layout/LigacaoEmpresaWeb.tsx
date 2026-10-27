@@ -106,6 +106,18 @@ export const LigacaoEmpresaWeb = () => {
     const [isBusy, setIsBusy] = useState(false);
     // Ligação concluída: o portal continua visível (com a confirmação) até o utilizador seguir para o login.
     const [isFinishing, setIsFinishing] = useState(false);
+    const [progress, setProgress] = useState('');
+
+    // Primeiro acesso neste navegador: o histórico da empresa pode demorar a chegar; mostra quanto já foi recebido.
+    useEffect(() => {
+        if (!isFinishing) return;
+        const onStatus = (event: Event) => {
+            const pulled = Number((event as CustomEvent<{ pulled?: number }>).detail?.pulled || 0);
+            if (pulled > 0) setProgress(`A receber os dados da empresa… ${pulled.toLocaleString('pt-AO')} registos`);
+        };
+        window.addEventListener('tango-cloud-sync-status', onStatus);
+        return () => window.removeEventListener('tango-cloud-sync-status', onStatus);
+    }, [isFinishing]);
     const [errorMessage, setErrorMessage] = useState('');
     const [infoModal, setInfoModal] = useState<InfoModal>(null);
     const [request, setRequest] = useState({ companyName: '', contactName: '', phone: '', email: '', message: '' });
@@ -212,6 +224,7 @@ export const LigacaoEmpresaWeb = () => {
             const effectiveSyncUrl = serverUrl || window.location.origin;
 
             setIsFinishing(true);
+            setProgress('Empresa validada. A receber os dados da nuvem…');
             localStorage.setItem('tango_company_status', 'ACTIVE');
             localStorage.setItem('tango_active_tenant_authorized', 'true');
             localStorage.setItem('tango_active_tenant_id', verifiedTenantId);
@@ -730,7 +743,7 @@ export const LigacaoEmpresaWeb = () => {
                                             className="h-12 w-full gap-2 rounded-xl bg-gradient-to-r from-[#5314d4] to-[#631af0] text-sm font-bold text-white shadow-lg shadow-purple-600/25 hover:from-[#480ebb] hover:to-[#5514d4] hover:shadow-purple-600/40 transition-all disabled:opacity-50"
                                         >
                                             {isBusy ? (
-                                                <><Loader2 className="h-4 w-4 animate-spin" /> A validar credenciais…</>
+                                                <><Loader2 className="h-4 w-4 animate-spin" /> {progress || 'A validar credenciais…'}</>
                                             ) : (
                                                 <><ShieldCheck className="h-4 w-4" /> Validar e Ligar Empresa</>
                                             )}

@@ -14,7 +14,7 @@ import * as url from 'url';
 import * as nodemailer from 'nodemailer';
 import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
-import { RENDERER_SQL_BY_ID } from './renderer-sql-allowlist';
+import { SYNC_SQL_BY_ID } from './sync-sql';
 import { applyRemoteGroups, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
@@ -3659,7 +3659,7 @@ app.whenReady().then(async () => {
     if (!Array.isArray(groups) || groups.length > 500) throw new TypeError("Lote de sincronização inválido.");
     const columnsCache = new Map<string, Set<string>>();
     const result = await applyRemoteGroups(groups as RemoteGroup[], {
-      sqlById: RENDERER_SQL_BY_ID,
+      sqlById: SYNC_SQL_BY_ID,
       tableColumns: async (table) => {
         if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return new Set();
         if (!columnsCache.has(table)) {

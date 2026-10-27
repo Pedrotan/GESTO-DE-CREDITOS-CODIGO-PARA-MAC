@@ -207,6 +207,15 @@ export const applyRemoteGroups = async (
     return { applied, conflicts };
 };
 
+/**
+ * Alteração com condição própria (`expectChanges`) que falhou porque o registo ainda não existia aqui ou ainda não
+ * estava no estado esperado (o crédito chegou depois, numa versão que este dispositivo não conhecia). Nunca foi
+ * aplicada e a condição protege-a: volta a ser tentada pela ordem original e só se aplica se a condição se cumprir
+ * agora; se o registo foi mesmo alterado nos dois lados, continua pendente para revisão.
+ */
+export const isGuardedRetry = (operation: SyncOperation, reason: string | undefined) => operation.expectChanges !== undefined
+    && /Conflito de concorr[eê]ncia|esperadas \d+ altera/iu.test(String(reason || ''));
+
 /** Conflitos antigos que podem ser aplicados com segurança: só inserções (snapshots e INSERT). */
 export const isSafeToReprocess = (operation: SyncOperation, sqlById: Map<string, string>) => {
     if (operation.kind === 'snapshot') return true;
@@ -269,7 +278,7 @@ export const reprocessableGroups = (rows: Array<{ id: string; operation: string 
             && !!operation.statementId && sqlById.has(operation.statementId);
         if (operation.txId && Number(operation.txSize) > 1) {
             byTx.set(operation.txId, [...(byTx.get(operation.txId) || []), { id: row.id, operation }]);
-        } else if (unknownBefore || isSafeToReprocess(operation, sqlById)) {
+        } else if (unknownBefore || isGuardedRetry(operation, reason) || isSafeToReprocess(operation, sqlById)) {
             groups.push({ operations: [operation], resolvesConflictIds: [row.id] });
         }
     }

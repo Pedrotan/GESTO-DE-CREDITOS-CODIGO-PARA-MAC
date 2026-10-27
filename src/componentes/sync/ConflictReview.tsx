@@ -59,7 +59,7 @@ export function ConflictReview({ actorId, actorName, canManage }: { actorId?: st
 
     const handleReprocess = async () => {
         setBusy(true); setError(''); setSuccess('');
-        try { const count = await reprocessRetainedOperations(); await syncCloudNow(); await refresh(); setSuccess(`${count} registo(s) seguro(s) reprocessados. Os restantes continuam disponíveis para revisão.`); }
+        try { const count = await reprocessRetainedOperations(true); await syncCloudNow(); await refresh(); setSuccess(`${count} registo(s) seguro(s) reprocessados. Os restantes continuam disponíveis para revisão.`); }
         catch (cause) { reportError(cause); } finally { setBusy(false); }
     };
     const [rebuildOpen, setRebuildOpen] = useState(false);
