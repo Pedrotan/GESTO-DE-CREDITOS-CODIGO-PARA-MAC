@@ -4,7 +4,7 @@ import { Button } from '@/componentes/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { Progress } from '@/componentes/ui/progress';
 import { formatBytes, parseSseChunk, type UpdateStatus } from '@/bibliotecas/actualizacoes';
-import { UPDATE_DIALOG_ATTR, flushPendingWork, hasOpenEditor } from '@/bibliotecas/trabalho-aberto';
+import { UPDATE_DIALOG_ATTR, flushPendingWork, hasOpenEditor, openEditorTitle } from '@/bibliotecas/trabalho-aberto';
 
 // Aviso de versão nova do Tango ERP.
 //  - Desktop: o processo principal verifica (arranque, ~4 h, aviso em tempo real) e este modal mostra versão,
@@ -12,11 +12,14 @@ import { UPDATE_DIALOG_ATTR, flushPendingWork, hasOpenEditor } from '@/bibliotec
 //  - Web: compara a build aberta com /version.json do servidor e oferece recarregar sem perder o que está aberto.
 
 
-const WEB_CHECK_MS = 10 * 60_000;
+const WEB_CHECK_MS = 2 * 60_000;
 const OPEN_UPDATE_EVENT = 'tango:abrir-actualizacao';
 const WEB_SNOOZE_KEY = 'tango_web_update_snooze';
 
-const editorBlockMessage = 'Tem um formulário aberto. Guarde-o ou feche-o primeiro; a actualização espera por si.';
+const editorBlockMessage = () => {
+    const title = openEditorTitle();
+    return `Tem um formulário aberto${title ? ` («${title}»)` : ''}. Guarde-o ou feche-o primeiro; a actualização espera por si.`;
+};
 
 function AvisoDesktop() {
     const api = window.electronAPI?.updates;
@@ -59,7 +62,7 @@ function AvisoDesktop() {
     };
 
     const restart = async () => {
-        if (hasOpenEditor()) { setNotice(editorBlockMessage); return; }
+        if (hasOpenEditor()) { setNotice(editorBlockMessage()); return; }
         setNotice(''); setSaving(true);
         try {
             const pending = await flushPendingWork();
@@ -150,7 +153,10 @@ function AvisoWeb() {
         void check();
         const timer = window.setInterval(() => void check(), WEB_CHECK_MS);
         const onVisible = () => { if (document.visibilityState === 'visible') void check(); };
+        const onBack = () => void check();
         document.addEventListener('visibilitychange', onVisible);
+        window.addEventListener('focus', onBack);
+        window.addEventListener('online', onBack);
         // Aviso em tempo real: só um sinal para voltar a ler /version.json.
         let source: EventSource | null = null;
         try {
@@ -159,8 +165,20 @@ function AvisoWeb() {
                 const { events } = parseSseChunk(`data: ${event.data}\n\n`);
                 if (events.some(item => item.type === 'update.available')) window.setTimeout(() => void check(), Math.round(Math.random() * 30_000));
             };
+            // Publicar na VPS reinicia o servidor: a ligação cai e volta a abrir, sinal de que pode haver build nova.
+            let opened = false;
+            source.onopen = () => {
+                if (opened) window.setTimeout(() => void check(), 5_000 + Math.round(Math.random() * 20_000));
+                opened = true;
+            };
         } catch { /* sem EventSource: fica a verificação periódica */ }
-        return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', onVisible); source?.close(); };
+        return () => {
+            window.clearInterval(timer);
+            document.removeEventListener('visibilitychange', onVisible);
+            window.removeEventListener('focus', onBack);
+            window.removeEventListener('online', onBack);
+            source?.close();
+        };
     }, [check, currentBuild]);
 
     // «Atualizar quando terminar»: recarrega logo que o formulário aberto for fechado.
@@ -170,8 +188,9 @@ function AvisoWeb() {
         return () => window.clearInterval(timer);
     }, [waiting]);
 
-    const reload = async () => {
-        if (hasOpenEditor()) { setNotice(editorBlockMessage); setWaiting(true); return; }
+    const reload = async (force = false) => {
+        if (!force && hasOpenEditor()) { setNotice(editorBlockMessage()); setWaiting(true); return; }
+        setWaiting(false);
         setNotice('A enviar alterações pendentes…');
         await flushPendingWork(15_000);
         window.location.reload();
@@ -188,15 +207,24 @@ function AvisoWeb() {
             <DialogContent {...{ [UPDATE_DIALOG_ATTR]: '' }} className="max-w-md">
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2"><Rocket className="h-6 w-6" /> Nova versão disponível</DialogTitle>
-                    <DialogDescription>Foi publicada a versão {newVersion} da aplicação web (está a usar a {__TANGO_APP_VERSION__}). Basta recarregar a página.</DialogDescription>
+                    <DialogDescription>
+                        {newVersion === __TANGO_APP_VERSION__
+                            ? `Foram publicadas correcções da versão ${newVersion} da aplicação web. Basta recarregar a página.`
+                            : `Foi publicada a versão ${newVersion} da aplicação web (está a usar a ${__TANGO_APP_VERSION__}). Basta recarregar a página.`}
+                    </DialogDescription>
                 </DialogHeader>
                 <p className="text-sm text-muted-foreground">Os dados já guardados não se perdem. Se tiver um formulário aberto, guarde-o primeiro.</p>
                 {notice && <p className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">{notice}</p>}
                 <DialogFooter className="gap-2">
                     <Button variant="outline" onClick={later}>Mais tarde</Button>
-                    <Button className="gap-2" onClick={() => void reload()}>
-                        {waiting ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} {waiting ? 'Atualiza quando terminar' : 'Atualizar agora'}
-                    </Button>
+                    {waiting ? (
+                        <>
+                            <Button variant="outline" className="gap-2" disabled><Loader2 className="h-4 w-4 animate-spin" /> Atualiza quando terminar</Button>
+                            <Button className="gap-2" onClick={() => void reload(true)}><RefreshCw className="h-4 w-4" /> Atualizar mesmo assim</Button>
+                        </>
+                    ) : (
+                        <Button className="gap-2" onClick={() => void reload()}><RefreshCw className="h-4 w-4" /> Atualizar agora</Button>
+                    )}
                 </DialogFooter>
             </DialogContent>
         </Dialog>

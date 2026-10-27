@@ -7,10 +7,26 @@ import { getPendingSyncCount, syncCloudNow } from '@/servicos/ServicoSincronizac
 /** Marca a janela do próprio aviso de actualização (não conta como trabalho aberto). */
 export const UPDATE_DIALOG_ATTR = 'data-tango-update';
 
-/** Há algum formulário ou janela de edição aberta além do aviso de actualização? */
-export const hasOpenEditor = (root: ParentNode = document) =>
+// Campos que guardam trabalho: a palavra-passe («Sessão expirada», MFA) e os campos escondidos não contam.
+const WORK_FIELDS = 'input:not([type="password"]):not([type="hidden"]), textarea, select, [contenteditable="true"]';
+
+/** Página de entrada: ainda não há sessão nem trabalho que se possa perder. */
+const onLoginPage = () => typeof window !== 'undefined' && /^#\/entrar\b/.test(window.location.hash);
+
+/** Janelas de edição abertas além do aviso de actualização. */
+export const openEditors = (root: ParentNode = document) => onLoginPage() ? [] :
     Array.from(root.querySelectorAll('[role="dialog"], [role="alertdialog"]'))
-        .some(element => !element.closest(`[${UPDATE_DIALOG_ATTR}]`) && !!element.querySelector('input, textarea, select, [contenteditable="true"]'));
+        .filter(element => !element.closest(`[${UPDATE_DIALOG_ATTR}]`) && element.getAttribute('data-state') !== 'closed' && !!element.querySelector(WORK_FIELDS));
+
+/** Há algum formulário ou janela de edição aberta além do aviso de actualização? */
+export const hasOpenEditor = (root: ParentNode = document) => openEditors(root).length > 0;
+
+/** Título da primeira janela de edição aberta, para dizer ao utilizador qual tem de fechar. */
+export const openEditorTitle = (root: ParentNode = document) => {
+    const editor = openEditors(root)[0];
+    const title = editor?.querySelector('h2, [id$="-title"]')?.textContent?.trim();
+    return title || null;
+};
 
 /**
  * Envia para a nuvem o que ainda está pendente (até 30 s). Devolve quantas alterações ficaram por enviar:
