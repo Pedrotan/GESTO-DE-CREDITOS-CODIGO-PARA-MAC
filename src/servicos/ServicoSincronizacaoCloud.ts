@@ -21,6 +21,7 @@ import {
     mutationTable,
     normalizeSqlText,
     statementRowId,
+    isOtherVersionReason,
     CONFLICT_RESOLVE_SQL,
     HEAL_NOTE,
     type ApplyResult,
@@ -745,7 +746,11 @@ const webUsersChange = async () => {
 const isUsersRoster = (operation: SyncOperation) => (operation as any).kind === 'users';
 
 const applyOperations = async (operations: SyncOperation[], caughtUp = true): Promise<ApplyResult> => {
-    const accepted = operations.filter(operation => operation.commandVersion === 1 && activeConfig && sameTenant(operation.tenantId, activeConfig.tenantId));
+    // Só a empresa activa. Uma operação de formato mais recente segue também: a aplicação retém-na como «de outra
+    // versão» (antes era deitada fora aqui e, com o cursor a avançar, perdia-se).
+    const foreign = operations.filter(operation => !activeConfig || !sameTenant(operation.tenantId, activeConfig.tenantId));
+    if (foreign.length) console.warn(`[CloudSync] ${foreign.length} alteração(ões) de outra empresa ignoradas.`);
+    const accepted = operations.filter(operation => !foreign.includes(operation));
     const waiting = await readAll(INCOMING_STORE);
     // Listas de utilizadores que ficaram por aplicar (ex.: chegaram ao computador sem sessão iniciada), pela ordem
     // de chegada ao servidor: os relógios dos dispositivos podem diferir e uma lista antiga não pode ganhar a uma nova.
@@ -882,6 +887,17 @@ export const restoreBrowserReplicaBackup = () => {
     localStorage.setItem(scopedStorageKey(CURSOR_KEY), '0');
     localStorage.setItem(RESTORE_REPLICA_FLAG, new Date().toISOString());
     window.location.reload();
+};
+
+/**
+ * Alterações recebidas que este dispositivo ainda não consegue aplicar por serem de outra versão do sistema (comando
+ * desconhecido ou formato mais recente). Ficam retidas e aplicam-se sozinhas quando os dois tiverem a mesma versão.
+ */
+export const getOtherVersionRetainedCount = async () => {
+    const rows = await sqlite.all<{ operation: string }>(`SELECT operation FROM sync_conflicts WHERE status = 'pending'`).catch(() => []);
+    return rows.filter(row => {
+        try { return isOtherVersionReason(JSON.parse(row.operation)?.reason); } catch { return false; }
+    }).length;
 };
 
 /** Alterações locais ainda por enviar para a nuvem. */

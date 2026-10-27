@@ -16,7 +16,8 @@ export type SyncOperation = {
     columns?: string[];
     params: unknown[];
     createdAt: string;
-    commandVersion: 1;
+    /** Formato da operação. Esta versão escreve 1; uma versão futura pode escrever outro número. */
+    commandVersion: number;
     tenantId: string;
     entityId?: string;
     bootstrap?: boolean;
@@ -82,6 +83,15 @@ const quoteIdentifier = (value: string) => `"${value.replace(/"/g, '""')}"`;
 /** Pedido de «receber tudo de novo da nuvem» (versão web): a cópia local é apagada no arranque, antes de abrir. */
 export const REBUILD_REPLICA_FLAG = 'tango_rebuild_replica_v1';
 export const UNKNOWN_COMMAND_REASON = 'Comando remoto desconhecido nesta versão do sistema.';
+/** Formatos de operação que esta versão sabe aplicar. */
+export const SUPPORTED_COMMAND_VERSIONS = new Set([1]);
+// Operação num formato de uma versão mais recente: fica retida (antes era deitada fora ao chegar e o cursor
+// avançava, perdendo-a) e é aplicada quando este dispositivo actualizar.
+export const UNSUPPORTED_VERSION_PREFIX = 'Formato de alteração de uma versão mais recente';
+export const unsupportedVersionReason = (version: unknown) => `${UNSUPPORTED_VERSION_PREFIX} (formato ${String(version)}).`;
+/** Retida por ser de outra versão do sistema (comando desconhecido ou formato mais recente). */
+export const isOtherVersionReason = (reason: string | undefined) =>
+    reason === UNKNOWN_COMMAND_REASON || String(reason || '').startsWith(UNSUPPORTED_VERSION_PREFIX);
 export const CONFLICT_INSERT_SQL = `INSERT OR IGNORE INTO sync_conflicts (id, entityType, entityId, operation, status, createdAt)
                           VALUES (?, ?, ?, ?, 'pending', ?)`;
 export const CONFLICT_RESOLVE_SQL = `UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'`;
@@ -164,6 +174,7 @@ export const buildRemoteStatements = async (
 ): Promise<SyncStatement[]> => {
     const statements: SyncStatement[] = [];
     for (const operation of group.operations) {
+        if (!SUPPORTED_COMMAND_VERSIONS.has(Number(operation.commandVersion))) throw new Error(unsupportedVersionReason(operation.commandVersion));
         if (operation.kind === 'statement') {
             const sql = operation.statementId ? deps.sqlById.get(operation.statementId) : undefined;
             if (!sql) throw new Error(UNKNOWN_COMMAND_REASON);
@@ -261,7 +272,8 @@ export const applyRemoteGroups = async (
             }
             // Cópia de autocura que não se aplica aqui (ex.: cadeia contabilística noutra ordem): é só uma ajuda,
             // nunca um conflito para alguém rever. A próxima cópia ou a alteração original tratam do registo.
-            if (group.operations.every(operation => operation.heal)) continue;
+            // Excepção: uma cópia de uma versão mais recente fica retida como as outras alterações dessa versão.
+            if (group.operations.every(operation => operation.heal) && !isOtherVersionReason(reason)) continue;
             conflicts += group.operations.length;
             // Conflitos já existentes (reprocessamento) continuam pendentes; os novos são registados.
             if (!group.resolvesConflictIds?.length) {
@@ -337,10 +349,14 @@ export const reprocessableGroups = (rows: Array<{ id: string; operation: string 
         const { reason, ...clean } = parsed;
         const operation = restoreIncomplete(clean);
         if (!operation) continue;
+        // Formato que esta versão ainda não sabe aplicar: continua retido, sem tentativas inúteis a cada sincronização.
+        if (!SUPPORTED_COMMAND_VERSIONS.has(Number(operation.commandVersion))) continue;
         // Retida só porque esta versão ainda não conhecia o comando: nunca foi aplicada, por isso aplicá-la depois
         // de actualizar é seguro (antes ficavam presas para sempre as alterações que não eram inserções).
-        const unknownBefore = reason === UNKNOWN_COMMAND_REASON && operation.kind === 'statement'
-            && !!operation.statementId && sqlById.has(operation.statementId);
+        const unknownBefore = (reason === UNKNOWN_COMMAND_REASON && operation.kind === 'statement'
+            && !!operation.statementId && sqlById.has(operation.statementId))
+            // Formato de uma versão mais recente que esta versão já sabe ler (depois de actualizar).
+            || (String(reason || '').startsWith(UNSUPPORTED_VERSION_PREFIX) && SUPPORTED_COMMAND_VERSIONS.has(Number(operation.commandVersion)));
         if (operation.txId && Number(operation.txSize) > 1) {
             byTx.set(operation.txId, [...(byTx.get(operation.txId) || []), { id: row.id, operation }]);
         } else if (unknownBefore || isGuardedRetry(operation, reason) || isSafeToReprocess(operation, sqlById)) {

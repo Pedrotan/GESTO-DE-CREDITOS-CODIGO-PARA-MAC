@@ -747,6 +747,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
   "SELECT name FROM users WHERE id = ?",
+  "SELECT operation FROM sync_conflicts WHERE status = 'pending'",
   "SELECT password FROM users WHERE id = ?",
   "SELECT paymentDate, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'",
   "SELECT paymentDate, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'",
@@ -3940,6 +3941,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "87154d352aba922e5478ffd6c3bbd39dc54e18b2a0a2cc568af9b33788aec220",
     "SELECT name FROM users WHERE id = ?"
+  ],
+  [
+    "22488534dfe722c430a6d902ab8a33cf231f623862608ff4b99cf735a72dda9f",
+    "SELECT operation FROM sync_conflicts WHERE status = 'pending'"
   ],
   [
     "cd7425ad37f05c39d77544341e93a100b38f87d46cbfa2509baa808deca16090",

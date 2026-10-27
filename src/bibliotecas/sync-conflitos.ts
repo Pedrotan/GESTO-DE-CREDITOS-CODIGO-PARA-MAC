@@ -67,6 +67,7 @@ export const translateReason = (reason: string) => {
     if (noTable) return `Esta versão do sistema ainda não tem «${entityLabel(noTable[1])}». Actualize o programa.`;
     if (/database is locked|SQLITE_BUSY/i.test(text)) return 'A base de dados estava ocupada. Carregue em «Reprocessar registos seguros».';
     if (/Pagamento já registado no ledger/i.test(text)) return 'O lançamento contabilístico deste pagamento já está registado neste dispositivo.';
+    if (/Formato de alteração de uma versão mais recente/i.test(text)) return 'Alteração feita numa versão mais recente do sistema. Fica guardada e é aplicada automaticamente quando este dispositivo actualizar.';
     if (/Comando remoto desconhecido/i.test(text)) return 'Alteração feita noutra versão do sistema que este dispositivo ainda não reconhece. Fica guardada e é aplicada automaticamente quando os dois dispositivos tiverem a mesma versão.';
     if (/Conflito de concorrência|esperadas \d+ alterações/i.test(text)) return 'O mesmo registo foi alterado noutro dispositivo ao mesmo tempo.';
     return text.replace(/\bledger\b/gi, 'razão').replace(/\bsnapshot\b/gi, 'cópia de registo');
