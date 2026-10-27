@@ -40,21 +40,34 @@ const heal = (table: string, row: Record<string, unknown>): SyncOperation => ({
 });
 const one = <T>(db: DatabaseSync, sql: string) => db.prepare(sql).get() as T;
 
-test('autocura: cria o registo que falta e só substitui o que é mais antigo', async () => {
+test('autocura: cria o registo que falta e só substitui o que ficou divergente (e por uma cópia mais recente)', async () => {
     const { database, deps } = base();
-    database.exec(`INSERT INTO credits VALUES ('cr-antigo', 'pending_approval', 1), ('cr-novo', 'active', 5);
+    database.exec(`INSERT INTO credits VALUES ('cr-antigo', 'pending_approval', 1), ('cr-novo', 'active', 5), ('cr-saudavel', 'blocked', 1);
         INSERT INTO clients VALUES ('cl1', 'Nome antigo', '2026-10-27T08:00:00.000Z');`);
+    // Alterações retidas aqui sobre cr-antigo, cr-novo e cl1: estes registos ficaram divergentes.
+    const retida = (table: string, id: string): SyncOperation => ({
+        id: `retida-${id}`, deviceId: 'outro', kind: 'statement', statementId: 'desconhecido', params: [id], createdAt: '2026-10-27T08:00:00.000Z',
+        commandVersion: 1, tenantId: 't', entityId: id, table,
+    });
+    await deps.transaction(['credits:cr-antigo', 'credits:cr-novo', 'clients:cl1'].flatMap(key => {
+        const [table, id] = key.split(':');
+        return conflictStatements([retida(table, id)], 'Conflito de concorrência: esperadas 1 alterações, obtidas 0.', new Map([['desconhecido', `UPDATE ${table} SET x = ? WHERE id = ?`]]));
+    }));
     const result = await applyRemoteGroups([
         heal('credits', { id: 'cr-falta', status: 'active', version: 2 }),
         heal('credits', { id: 'cr-antigo', status: 'active', version: 2 }),
         heal('credits', { id: 'cr-novo', status: 'pending_approval', version: 3 }),
+        heal('credits', { id: 'cr-saudavel', status: 'active', version: 9 }),
         heal('clients', { id: 'cl1', name: 'Nome novo', updatedAt: '2026-10-27T09:00:00.000Z' }),
     ].map(operation => ({ operations: [operation] })), deps);
-    assert.deepEqual(result, { applied: 4, conflicts: 0 });
+    assert.deepEqual(result, { applied: 5, conflicts: 0 });
     assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-falta'").status, 'active', 'registo em falta criado');
-    assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-antigo'").status, 'active', 'cópia mais recente substitui');
+    assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-antigo'").status, 'active', 'divergente: a cópia mais recente substitui');
     assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-novo'").status, 'active', 'a cópia mais antiga nunca ganha');
+    assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-saudavel'").status, 'blocked',
+        'sem nada retido, a linha inteira de outro dispositivo não desfaz o que foi alterado aqui');
     assert.equal(one<{ name: string }>(database, "SELECT name FROM clients WHERE id = 'cl1'").name, 'Nome novo');
+    assert.equal(one<{ n: number }>(database, "SELECT COUNT(*) AS n FROM sync_conflicts WHERE status = 'pending'").n, 0, 'as alterações retidas ficam resolvidas');
 });
 
 test('autocura: lançamentos contabilísticos só se acrescentam e uma cópia que não se aplica nunca vira conflito', async () => {

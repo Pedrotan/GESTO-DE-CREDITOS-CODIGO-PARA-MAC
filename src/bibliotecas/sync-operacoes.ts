@@ -180,18 +180,24 @@ export const buildRemoteStatements = async (
             const allowed = await deps.tableColumns(table);
             if (!columns.every(column => IDENTIFIER.test(column) && allowed.has(column))) throw new Error('Snapshot remoto com colunas desconhecidas.');
             const values = `(${columns.map(quoteIdentifier).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`;
-            const freshness = operation.heal && columns.includes('id') ? FRESHNESS_COLUMNS.find(column => columns.includes(column)) : undefined;
+            const rawId = operation.heal ? operation.params?.[columns.indexOf('id')] : undefined;
+            const rowId = rawId === undefined || rawId === null || rawId === '' ? null : String(rawId);
+            const freshness = rowId ? FRESHNESS_COLUMNS.find(column => columns.includes(column)) : undefined;
             const updates = columns.filter(column => column !== 'id');
             statements.push({
-                // Cópia de autocura: cria o que falta e só substitui um registo mais antigo do que ela.
+                // Cópia de autocura: cria sempre o registo que falta. Um registo que já existe só é substituído
+                // quando ficou divergente aqui (há uma alteração retida sobre ele) e a cópia é mais recente: a
+                // linha inteira de outro dispositivo nunca desfaz um campo que um terceiro alterou entretanto.
                 sql: freshness && updates.length
                     ? `INSERT INTO ${quoteIdentifier(table)} ${values} ON CONFLICT(id) DO UPDATE SET ${updates.map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ')}`
                         + ` WHERE excluded.${quoteIdentifier(freshness)} > COALESCE(${quoteIdentifier(table)}.${quoteIdentifier(freshness)}, ${freshness === 'version' ? '-1' : "''"})`
+                        + ` AND EXISTS (SELECT 1 FROM sync_conflicts AS c WHERE c.status = 'pending' AND (c.entityType = ? OR c.entityType = 'desconhecido') AND (c.entityId = ? OR instr(c.operation, ?) > 0))`
                     : `INSERT OR IGNORE INTO ${quoteIdentifier(table)} ${values}`,
-                params: operation.params || [],
+                params: freshness && updates.length
+                    ? [...(operation.params || []), table, rowId, JSON.stringify(rowId)]
+                    : operation.params || [],
             });
-            const rowId = operation.heal ? operation.params?.[columns.indexOf('id')] : undefined;
-            if (rowId !== undefined && rowId !== null && rowId !== '') {
+            if (rowId) {
                 statements.push({ sql: HEAL_RESOLVE_SQL, params: [HEAL_NOTE, new Date().toISOString(), table, String(rowId), JSON.stringify(String(rowId))] });
             }
         } else {
