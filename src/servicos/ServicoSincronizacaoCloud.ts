@@ -32,6 +32,7 @@ import {
 } from '@/bibliotecas/sync-operacoes';
 import { reportUsageIfDue } from '@/servicos/ServicoRelatorioUso';
 import { syncHealth, syncIssues, type SyncCounts, type SyncIssue } from '@/bibliotecas/estado-sincronizacao';
+import { balanceMismatches, CREDIT_BALANCE_CHECK_SQL, type BalanceMismatch, type CreditBalanceRow } from '@/bibliotecas/saldos-derivados';
 
 // Sincronização local-first entre todos os dispositivos da empresa (app de computador e navegadores).
 // Cada escrita local gera operações cifradas que vão para a nuvem; as operações dos outros dispositivos
@@ -103,8 +104,20 @@ const APP_VERSION = typeof __TANGO_APP_VERSION__ === 'string' ? __TANGO_APP_VERS
  * Diagnóstico deste dispositivo para o servidor (tango_sync_devices): só números e o último erro, nunca dados da
  * empresa. A hora do computador serve para o servidor medir a diferença do relógio.
  */
+// Créditos cujo total gravado não é a soma das prestações (medição para decidir recalcular os saldos em cada PC).
+const BALANCE_CHECK_EVERY_MS = 10 * 60_000;
+let balanceCheck: { at: number; mismatches: BalanceMismatch[] } | null = null;
+/** Diferenças entre os totais gravados de cada crédito e as somas das prestações deste dispositivo. */
+export const checkCreditBalances = async (force = false): Promise<BalanceMismatch[]> => {
+    if (!force && balanceCheck && Date.now() - balanceCheck.at < BALANCE_CHECK_EVERY_MS) return balanceCheck.mismatches;
+    const rows = await sqlite.all<CreditBalanceRow>(CREDIT_BALANCE_CHECK_SQL).catch(() => [] as CreditBalanceRow[]);
+    balanceCheck = { at: Date.now(), mismatches: balanceMismatches(rows) };
+    return balanceCheck.mismatches;
+};
+
 const syncDiagnostics = async (lastError?: string) => {
     const counts = await collectSyncCounts().catch(() => null);
+    const mismatches = await checkCreditBalances().catch(() => [] as BalanceMismatch[]);
     return {
         platform: window.electronAPI ? 'desktop' : 'web',
         appVersion: APP_VERSION,
@@ -113,6 +126,8 @@ const syncDiagnostics = async (lastError?: string) => {
             conflicts: counts.conflicts, otherVersion: counts.otherVersion, userClashes: counts.userClashes,
         } : {}),
         users: activeConfig ? await usersFingerprint(activeConfig.tenantId).catch(() => []) : [],
+        // Créditos (não campos) com totais diferentes das prestações.
+        balanceMismatches: new Set(mismatches.map(item => item.creditId)).size,
         rejected413: rejected413SinceReport,
         lastError,
         clientTime: Date.now(),

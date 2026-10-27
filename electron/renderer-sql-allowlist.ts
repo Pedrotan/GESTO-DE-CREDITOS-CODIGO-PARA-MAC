@@ -630,6 +630,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT alertKey FROM audit_alerts",
   "SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE id = ?",
   "SELECT auditId, previousHash, integrityHash, seq FROM audit_log_chain ORDER BY seq",
+  "SELECT c.id, c.clientName, c.status, c.currentBalanceMinor, c.currentBalance, c.accruedInterestMinor, c.accruedInterest, c.lateInterestMinor, c.lateInterest, c.totalDueMinor, c.totalDue, SUM(i.principalMinor - i.paidPrincipalMinor) AS duePrincipalMinor, SUM(i.interestMinor - i.paidInterestMinor) AS dueInterestMinor, SUM(i.lateInterestMinor - i.paidLateInterestMinor) AS dueLateInterestMinor FROM credits c JOIN credit_installments i ON i.creditId = c.id AND i.status <> 'cancelled' WHERE c.deletedAt IS NULL GROUP BY c.id",
   "SELECT c.id, c.principalAmount, c.principalAmountMinor, c.createdAt, c.requestedBy, c.usuario_id, cl.riskLevel FROM credits c LEFT JOIN clients cl ON cl.id = c.clientId WHERE c.deletedAt IS NULL AND c.createdAt >= ?",
   "SELECT c.id, c.startDate, c.installments, COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER)) AS principalMinor, MAX(0, COALESCE(c.totalDueMinor, CAST(ROUND(c.totalDue * 100) AS INTEGER)) - COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER))) AS interestMinor FROM credits c WHERE NOT EXISTS (SELECT 1 FROM credit_installments i WHERE i.creditId = c.id)",
   "SELECT clientId, SUM(COALESCE(currentBalanceMinor, ROUND(currentBalance * 100))) AS balance FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue','defaulted','renegotiated','pending_approval') GROUP BY clientId",
@@ -3474,6 +3475,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "e7063397d1756aca147a353a1d010dcdde988d06eb88cff546be75b1c0e8f9ef",
     "SELECT auditId, previousHash, integrityHash, seq FROM audit_log_chain ORDER BY seq"
+  ],
+  [
+    "d70e4dc1c0e021e8860c50f60ac54b2ea3c6dba0da393aebe4265e7bca796a7c",
+    "SELECT c.id, c.clientName, c.status, c.currentBalanceMinor, c.currentBalance, c.accruedInterestMinor, c.accruedInterest, c.lateInterestMinor, c.lateInterest, c.totalDueMinor, c.totalDue, SUM(i.principalMinor - i.paidPrincipalMinor) AS duePrincipalMinor, SUM(i.interestMinor - i.paidInterestMinor) AS dueInterestMinor, SUM(i.lateInterestMinor - i.paidLateInterestMinor) AS dueLateInterestMinor FROM credits c JOIN credit_installments i ON i.creditId = c.id AND i.status <> 'cancelled' WHERE c.deletedAt IS NULL GROUP BY c.id"
   ],
   [
     "c9ebf60c9fe43c0665579afed41fd2cc88b4a3b34649a3a8b099dffbd4ed8cef",
