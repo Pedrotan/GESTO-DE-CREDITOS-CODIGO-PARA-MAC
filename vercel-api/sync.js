@@ -3,6 +3,7 @@ import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { authorizeTenant, sha256 } from './_autorizacao-empresa.js';
 import { recordSyncDevice } from './_dispositivos-sync.js';
+import { notifySyncChange, openSyncEvents } from './_avisos-sync.js';
 
 // Alterações por pedido. Os clientes enviam lotes de até 100, mais a lista de utilizadores e o resto de uma transacção
 // que não pode ser partida: com o limite antigo de 100 esse lote era recusado sempre e o dispositivo deixava de
@@ -30,14 +31,42 @@ const send = (res, status, body) => {
   res.json(body);
 };
 
+/** Abre o canal de avisos de uma empresa, com a mesma autenticação da sincronização (código ou sessão da web). */
+const openEvents = async (req, res, databaseUrl) => {
+  const query = req.query || Object.fromEntries(new URL(String(req.url || ''), 'http://local').searchParams);
+  const tenantId = String(query.tenantId || '').trim();
+  const deviceId = String(query.deviceId || '').trim();
+  if (!tenantId || tenantId.length > 200 || !deviceId || deviceId.length > 100) {
+    return send(res, 400, { success: false, message: 'Identificação do canal de avisos inválida.' });
+  }
+  const client = neon(databaseUrl);
+  const sql = (text, params) => client.query(text, params);
+  try {
+    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 30, windowMs: 60_000, scope: 'sync-events' })) return;
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const auth = await authorizeTenant(sql, tenantId, req.headers['x-sync-passkey'] || bearer, req);
+    if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code, message: auth.message });
+  } catch (error) {
+    console.error('[sync][events]', error);
+    return send(res, 500, { success: false, message: 'O servidor não conseguiu validar o acesso.' });
+  }
+  return openSyncEvents(req, res, sha256(tenantId), deviceId);
+};
+
 export default async function handler(req, res) {
   if (!applyCors(req, res)) {
     await recordRejectedOrigin(req);
     return send(res, 403, { success: false, message: 'Origem não autorizada.' });
   }
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
-  if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
   const databaseUrl = process.env.DATABASE_URL;
+  // GET /api/sync/events: canal de avisos em tempo real (só «há novidades»; os dados vêm pelo POST /api/sync).
+  if (/^\/api\/sync\/events(?:[/?]|$)/u.test(String(req.url || ''))) {
+    if (req.method !== 'GET') return send(res, 405, { success: false, message: 'Método não permitido.' });
+    if (!databaseUrl) return send(res, 503, { success: false, message: 'Sincronização cloud ainda não configurada no servidor.' });
+    return openEvents(req, res, databaseUrl);
+  }
+  if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
   if (!databaseUrl) {
     return send(res, 503, { success: false, message: 'Sincronização cloud ainda não configurada no servidor.' });
   }
@@ -144,6 +173,8 @@ export default async function handler(req, res) {
          ON CONFLICT (tenant_hash, operation_id) DO NOTHING`,
         [tenantHash, JSON.stringify(validatedOperations)]
       );
+      // Tempo real: os outros dispositivos ligados da empresa vão buscar já o que chegou.
+      notifySyncChange(tenantHash, deviceId);
     }
     if (roster) {
       await sql(

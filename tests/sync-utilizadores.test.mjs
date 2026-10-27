@@ -567,3 +567,81 @@ test('mesma pessoa criada em dois dispositivos com IDs diferentes: o choque fica
     assert.ok(diagnostics.users.some(([, id]) => id === 'osvaldo-web'));
     assert.ok(!JSON.stringify(diagnostics.users).includes('osvaldo@'));
 });
+
+test('tempo real: quem envia alterações avisa os outros dispositivos ligados da empresa (não a si próprio)', async () => {
+    server.ops = [];
+    const { EventEmitter } = await import('node:events');
+    const openChannel = async (deviceId, passkey = SERVER_CODE) => {
+        const req = Object.assign(new EventEmitter(), {
+            method: 'GET', url: `/api/sync/events?tenantId=${encodeURIComponent(TENANT)}&deviceId=${deviceId}`,
+            headers: { 'x-sync-passkey': passkey }, socket: { remoteAddress: '127.0.0.1' },
+        });
+        const res = Object.assign(new EventEmitter(), {
+            statusCode: 200, headers: {}, chunks: [], writableEnded: false,
+            status(code) { this.statusCode = code; return this; },
+            setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+            writeHead(code, headers) { this.statusCode = code; for (const [name, value] of Object.entries(headers || {})) this.headers[name.toLowerCase()] = value; return this; },
+            write(chunk) { this.chunks.push(String(chunk)); return true; },
+            json(body) { this.body = body; return this; },
+            end(chunk) { if (chunk) this.chunks.push(String(chunk)); this.writableEnded = true; return this; },
+        });
+        await syncHandler(req, res);
+        return { req, res, events: () => res.chunks.join('').match(/"type":"sync\.changed"/g)?.length || 0 };
+    };
+    const pcBenguela = await openChannel('pc-benguela');
+    const pcLuanda = await openChannel('pc-luanda');
+    assert.equal(pcBenguela.res.statusCode, 200);
+    assert.equal(pcBenguela.res.headers['content-type'], 'text/event-stream; charset=utf-8');
+    assert.equal(pcBenguela.res.headers['x-accel-buffering'], 'no', 'o nginx entrega logo');
+    const intruso = await openChannel('pc-intruso', 'TG-ERRADO-0000');
+    assert.equal(intruso.res.statusCode, 401, 'sem o código da empresa não há canal');
+
+    const res = fakeRes();
+    await syncHandler({ method: 'POST', url: '/api/sync', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-luanda', cursor: 0, operations: [{ id: nodeCrypto.randomUUID(), deviceId: 'pc-luanda', payload: 'cifrado' }] } }, res);
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.equal(pcBenguela.events(), 1, 'Benguela é avisado');
+    assert.equal(pcLuanda.events(), 0, 'quem enviou não é avisado');
+    // Sem alterações novas não há aviso.
+    await syncHandler({ method: 'POST', url: '/api/sync', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-luanda', cursor: 0, operations: [] } }, fakeRes());
+    assert.equal(pcBenguela.events(), 1);
+    pcBenguela.req.emit('close');
+    pcLuanda.req.emit('close');
+});
+
+test('tempo real no PC: um aviso faz sincronizar logo e desligar fecha o canal', async () => {
+    server.ops = [];
+    useDevice();
+    globalThis.document = {};
+    let streamController = null;
+    let aborted = false;
+    const posts = [];
+    try {
+        await withFetch(previous => async (url, init = {}) => {
+            if (String(url).includes('/api/sync/events')) {
+                assert.equal(init.headers?.['x-sync-passkey'], SERVER_CODE, 'o canal leva o código da empresa');
+                init.signal?.addEventListener('abort', () => { aborted = true; try { streamController?.error(new Error('fechado')); } catch { /* já fechado */ } });
+                const body = new ReadableStream({ start(controller) { streamController = controller; controller.enqueue(new TextEncoder().encode('retry: 5000\ndata: {"type":"connected"}\n\n')); } });
+                return { ok: true, status: 200, body };
+            }
+            posts.push(Date.now());
+            return previous(url, init);
+        }, async () => {
+            cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+            const waitFor = async (check, ms = 3000) => { const end = Date.now() + ms; while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 20)); return check(); };
+            assert.ok(await waitFor(() => cloud.isRealtimeConnected()), 'canal ligado');
+            await waitFor(() => posts.length >= 1);
+            await new Promise(r => setTimeout(r, 300));
+            const before = posts.length;
+            streamController.enqueue(new TextEncoder().encode('data: {"type":"sync.changed","at":"2026-10-27T12:00:00Z"}\n\n'));
+            assert.ok(await waitFor(() => posts.length > before, 2000), 'o aviso provoca uma sincronização em menos de 2 s');
+            cloud.stopCloudSync();
+            assert.ok(await waitFor(() => aborted), 'desligar fecha o canal');
+            assert.equal(cloud.isRealtimeConnected(), false);
+        });
+    } finally {
+        cloud.stopCloudSync();
+        delete globalThis.document;
+    }
+});

@@ -1267,13 +1267,86 @@ export const syncCloudNow = async () => {
             scheduleSync(delay);
             return { success: false, message };
         }
-    })().finally(() => { syncPromise = null; });
+    })().finally(() => { syncPromise = null; lastSyncFinishedAt = Date.now(); });
     return syncPromise;
 };
 
 const scheduleSync = (delay = 750) => {
     if (syncDebounce) clearTimeout(syncDebounce);
     syncDebounce = setTimeout(() => syncCloudNow().catch(console.warn), delay);
+};
+
+// ── Aviso em tempo real ──────────────────────────────────────────────────────────────────────────────────────
+// Canal /api/sync/events: o servidor avisa «há novidades» quando outro dispositivo da empresa envia alterações e
+// este sincroniza logo (chat e dados em cerca de 1 s). Lido com fetch (e não EventSource) para levar o código da
+// empresa no cabeçalho, como o resto da sincronização. Religa sozinho, cada vez mais devagar se continuar a falhar;
+// ao religar sincroniza logo. Com o canal ligado, a verificação periódica passa a 60 s (só como segurança).
+const REALTIME_POLL_MS = 60_000;
+const REALTIME_RETRY_MS = [1_000, 3_000, 10_000, 30_000, 60_000];
+let realtimeAbort: AbortController | null = null;
+let realtimeConnected = false;
+let lastSyncFinishedAt = 0;
+/** O canal de avisos em tempo real está ligado (para o painel do ícone e os testes). */
+export const isRealtimeConnected = () => realtimeConnected;
+
+const pause = (ms: number, signal: AbortSignal) => new Promise<void>(resolve => {
+    if (signal.aborted) return resolve();
+    const handle = setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => { clearTimeout(handle); resolve(); }, { once: true });
+});
+
+const startRealtime = (config: CloudSyncConfig) => {
+    // Só onde há ecrã e leitura de respostas em fluxo (navegador e computador); não nos testes sem DOM.
+    if (typeof document === 'undefined' || typeof TextDecoder === 'undefined') return;
+    const controller = new AbortController();
+    realtimeAbort = controller;
+    void (async () => {
+        let attempt = 0;
+        while (!controller.signal.aborted) {
+            let waitMs = REALTIME_RETRY_MS[Math.min(attempt, REALTIME_RETRY_MS.length - 1)];
+            try {
+                const url = `${normalizeBaseUrl(config.url)}/api/sync/events?tenantId=${encodeURIComponent(config.tenantId)}&deviceId=${encodeURIComponent(getDeviceId())}`;
+                const response = await fetch(url, { headers: authHeaders(config), credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
+                // Código recusado: não insiste (a sincronização normal mostra o erro); tenta de novo mais tarde.
+                if (response.status === 401 || response.status === 403) waitMs = 5 * 60_000;
+                else if (response.ok && response.body) {
+                    realtimeConnected = true;
+                    attempt = 0;
+                    scheduleSync(200);
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    for (;;) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+                        let end = buffer.indexOf('\n\n');
+                        while (end >= 0) {
+                            const message = buffer.slice(0, end);
+                            buffer = buffer.slice(end + 2);
+                            // Vários dispositivos avisados ao mesmo tempo não pedem todos no mesmo milissegundo.
+                            if (/"type":"sync\.changed"/u.test(message)) scheduleSync(150 + Math.round(Math.random() * 350));
+                            end = buffer.indexOf('\n\n');
+                        }
+                    }
+                    waitMs = REALTIME_RETRY_MS[0];
+                }
+            } catch {
+                /* sem ligação ou servidor a reiniciar: volta a tentar */
+            }
+            realtimeConnected = false;
+            if (controller.signal.aborted) break;
+            attempt += 1;
+            await pause(waitMs + Math.round(Math.random() * 1_000), controller.signal);
+        }
+        realtimeConnected = false;
+    })();
+};
+
+const stopRealtime = () => {
+    realtimeAbort?.abort();
+    realtimeAbort = null;
+    realtimeConnected = false;
 };
 
 export const startCloudSync = (config: CloudSyncConfig) => {
@@ -1289,8 +1362,14 @@ export const startCloudSync = (config: CloudSyncConfig) => {
     window.addEventListener('online', onlineHandler);
     window.addEventListener('focus', focusHandler);
     window.addEventListener('tango-local-db-write', writeHandler);
-    timer = setInterval(() => { if (Date.now() >= retryNotBefore) scheduleSync(0); }, SYNC_INTERVAL_MS);
+    timer = setInterval(() => {
+        if (Date.now() < retryNotBefore) return;
+        // Com o aviso em tempo real ligado, a sondagem periódica é só uma rede de segurança.
+        if (realtimeConnected && Date.now() - lastSyncFinishedAt < REALTIME_POLL_MS) return;
+        scheduleSync(0);
+    }, SYNC_INTERVAL_MS);
     scheduleSync(100);
+    startRealtime(activeConfig);
     // Versão web (cópia da nuvem): as operações financeiras só avançam com o servidor contactável; a sonda
     // sincroniza antes (envia o que falta e recebe o mais recente) e, sem ligação, a operação é recusada.
     if (!window.electronAPI) setFinancialConnectionProbe(async () => {
@@ -1302,6 +1381,7 @@ export const startCloudSync = (config: CloudSyncConfig) => {
 };
 
 export const stopCloudSync = () => {
+    stopRealtime();
     setFinancialConnectionProbe(null);
     if (timer) clearInterval(timer);
     if (syncDebounce) clearTimeout(syncDebounce);
