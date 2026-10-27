@@ -797,6 +797,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone) WHERE id = ?",
   "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'",
+  "UPDATE clients SET usedCredit = ?, availableCredit = ?, status = ? WHERE id = ?",
   "UPDATE company_settings SET installDate = ? WHERE installDate IS NULL",
   "UPDATE company_settings SET name = 'Tango Gestão de Créditos' WHERE name = 'Provisório' OR name = 'Empresa' OR name IS NULL OR name = ''",
   "UPDATE company_settings SET name = ?, nif = ?, logo = COALESCE(?, logo), enableMultiTenant = COALESCE(?, enableMultiTenant) WHERE id = 1",
@@ -4143,6 +4144,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "2f7925dfbdf6d1a23a6e49b58530e1a21aeb956df25dfba73b9630f5833ef9e4",
     "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'"
+  ],
+  [
+    "855d6d15c8e80a8a70904062bb8942e9bfbb52f3e6cbf6be66553d891fd89dbc",
+    "UPDATE clients SET usedCredit = ?, availableCredit = ?, status = ? WHERE id = ?"
   ],
   [
     "d22eef7acbed00c1607c1fb515f4c922bc8cef0c745b906abeb35ecbc671943a",

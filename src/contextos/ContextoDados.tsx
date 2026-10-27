@@ -410,10 +410,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const nextLimitState = calculateClientLimitState(client, sourceCredits, sourcePayments);
         if (!limitsChanged(client, nextLimitState)) return;
 
-        const targetUserId = activeContextUserId || user?.id || authUser?.id || client.usuario_id;
-        const updatedClient = { ...client, ...nextLimitState, usuario_id: targetUserId };
-        await ServicoCliente.update(client.id, updatedClient);
-        setClients(prev => prev.map(c => c.id === client.id ? { ...c, ...nextLimitState, usuario_id: targetUserId } : c));
+        // Valores calculados: só neste dispositivo (os outros calculam os seus a partir dos mesmos créditos).
+        await ServicoCliente.updateDerived(client.id, nextLimitState);
+        setClients(prev => prev.map(c => c.id === client.id ? { ...c, ...nextLimitState } : c));
         const statusText = automaticStatusChangeText(client.name, client.status, nextLimitState.status);
         if (statusText) {
             await ServicoAuditoria.addLog('update', 'client', statusText, user?.id || authUser?.id, user?.name || authUser?.name || 'Sistema',
@@ -815,18 +814,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                     creditScore: CreditEntity.calculateScore(creditsByClient[c.id] || [])
                 }));
 
+                // Recalculado ao carregar: grava só aqui e sem auditoria (o registo da mudança é feito por quem a causou,
+                // ao registar o crédito ou o pagamento). Sincronizar estes totais pôs os dispositivos a regravar sem fim.
                 normalizedClients
                     .filter(c => limitsChanged((loadedClients || []).find(original => original.id === c.id) || c, c))
                     .forEach(c => {
-                        ServicoCliente.update(c.id, c).catch(err =>
-                            console.warn("[ContextoDados] Falha ao persistir limite recalculado:", err)
+                        ServicoCliente.updateDerived(c.id, c).catch(err =>
+                            console.warn("[ContextoDados] Falha ao guardar limite recalculado:", err)
                         );
-                        const before = (loadedClients || []).find(original => original.id === c.id)?.status;
-                        const statusText = automaticStatusChangeText(c.name, before, c.status);
-                        if (statusText) {
-                            void ServicoAuditoria.addLog('update', 'client', statusText, authUser?.id, authUser?.name || 'Sistema',
-                                { status: before }, { status: c.status }, { clientId: c.id, automatic: true }).catch(() => undefined);
-                        }
                     });
 
                 setClients(normalizedClients);

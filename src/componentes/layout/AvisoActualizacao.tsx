@@ -14,7 +14,6 @@ import { UPDATE_DIALOG_ATTR, flushPendingWork, hasOpenEditor, openEditorTitle } 
 
 const WEB_CHECK_MS = 2 * 60_000;
 const OPEN_UPDATE_EVENT = 'tango:abrir-actualizacao';
-const WEB_SNOOZE_KEY = 'tango_web_update_snooze';
 
 const editorBlockMessage = () => {
     const title = openEditorTitle();
@@ -141,10 +140,20 @@ function AvisoWeb() {
             if (!response.ok) return;
             const data = await response.json();
             if (typeof data?.buildId !== 'string' || data.buildId === currentBuild) return;
+            // Página de entrada: ainda não há trabalho a perder — recarrega já, para a sessão começar na versão nova.
+            // Uma vez por versão (se a página voltasse com a versão antiga, por uma cache, não fica a recarregar sem fim).
+            let reloadedFor = '';
+            try { reloadedFor = sessionStorage.getItem('tango_login_reload_build') || ''; } catch { /* sem armazenamento */ }
+            if (/^#\/entrar\b/.test(window.location.hash) && reloadedFor !== data.buildId) {
+                try { sessionStorage.setItem('tango_login_reload_build', data.buildId); } catch { /* sem armazenamento */ }
+                await flushPendingWork(5_000);
+                window.location.reload();
+                return;
+            }
+            // Com sessão: a actualização é obrigatória (todos os dispositivos na mesma versão sincronizam sem
+            // alterações retidas); só espera que um formulário aberto seja guardado.
             setNewVersion(String(data.version || 'nova'));
-            let snoozed = 0;
-            try { snoozed = Number(localStorage.getItem(WEB_SNOOZE_KEY) || 0); } catch { /* sem armazenamento */ }
-            if (snoozed < Date.now()) setOpen(true);
+            setOpen(true);
         } catch { /* sem rede: tenta na próxima */ }
     }, [currentBuild]);
 
@@ -196,15 +205,10 @@ function AvisoWeb() {
         window.location.reload();
     };
 
-    const later = () => {
-        setOpen(false); setWaiting(false); setNotice('');
-        try { localStorage.setItem(WEB_SNOOZE_KEY, String(Date.now() + 3_600_000)); } catch { /* sem armazenamento */ }
-    };
-
     if (!newVersion) return null;
     return (
-        <Dialog open={open} onOpenChange={value => { if (!value) later(); }}>
-            <DialogContent {...{ [UPDATE_DIALOG_ATTR]: '' }} className="max-w-md">
+        <Dialog open={open} onOpenChange={() => undefined}>
+            <DialogContent {...{ [UPDATE_DIALOG_ATTR]: '' }} className="max-w-md [&>button]:hidden" onInteractOutside={event => event.preventDefault()} onEscapeKeyDown={event => event.preventDefault()}>
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2"><Rocket className="h-6 w-6" /> Nova versão disponível</DialogTitle>
                     <DialogDescription>
@@ -213,10 +217,9 @@ function AvisoWeb() {
                             : `Foi publicada a versão ${newVersion} da aplicação web (está a usar a ${__TANGO_APP_VERSION__}). Basta recarregar a página.`}
                     </DialogDescription>
                 </DialogHeader>
-                <p className="text-sm text-muted-foreground">Os dados já guardados não se perdem. Se tiver um formulário aberto, guarde-o primeiro.</p>
+                <p className="text-sm text-muted-foreground">A actualização é obrigatória para todos os dispositivos ficarem na mesma versão e sincronizarem em tempo real. Os dados já guardados não se perdem; se tiver um formulário aberto, guarde-o primeiro.</p>
                 {notice && <p className="rounded-xl border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">{notice}</p>}
                 <DialogFooter className="gap-2">
-                    <Button variant="outline" onClick={later}>Mais tarde</Button>
                     {waiting ? (
                         <>
                             <Button variant="outline" className="gap-2" disabled><Loader2 className="h-4 w-4 animate-spin" /> Atualiza quando terminar</Button>
