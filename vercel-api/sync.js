@@ -5,6 +5,7 @@ import { authorizeTenant, sha256 } from './_autorizacao-empresa.js';
 import { recordSyncDevice } from './_dispositivos-sync.js';
 import { notifySyncChange, openSyncEvents } from './_avisos-sync.js';
 import { syncIntegrity } from './_integridade-sync.js';
+import { tenantLockCte } from './_bloqueio-empresa.js';
 
 // Alterações por pedido. Os clientes enviam lotes de até 100, mais a lista de utilizadores e o resto de uma transacção
 // que não pode ser partida: com o limite antigo de 100 esse lote era recusado sempre e o dispositivo deixava de
@@ -162,12 +163,9 @@ export default async function handler(req, res) {
       if (operation?.kind === 'users') roster = { id, device: sourceDevice, payload };
     }
     if (validatedOperations.length) {
-      // O número (seq) é atribuído quando a gravação começa, mas só fica visível quando termina. Com dois envios
-      // da mesma empresa ao mesmo tempo, o que começou primeiro podia terminar depois: quem recebia nesse instante
-      // avançava o cursor para lá dos números dele e nunca mais os recebia. O bloqueio por empresa (no mesmo
-      // comando, até ao fim da gravação) põe os envios em fila: um número visível garante que os anteriores também.
+      // Bloqueio por empresa (ver _bloqueio-empresa.js): um número visível garante que os anteriores também estão.
       await sql(
-        `WITH tenant_lock AS (SELECT pg_advisory_xact_lock(hashtextextended($1, 7041)) AS locked)
+        `${tenantLockCte('$1')}
          INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload)
          SELECT $1, item.operation_id, item.device_id, item.payload
          FROM tenant_lock, jsonb_to_recordset($2::jsonb) AS item(operation_id TEXT, device_id TEXT, payload TEXT)
@@ -246,10 +244,16 @@ export default async function handler(req, res) {
     const nextCursor = page.length ? Number(page[page.length - 1].seq) : cursor;
 
     // O histórico completo é o que permite a um dispositivo novo receber todos os dados da empresa.
-    // Só se apaga quando a retenção é configurada explicitamente na Vercel.
+    // Só se apaga quando a retenção é configurada explicitamente (TANGO_SYNC_RETENTION_DAYS, mínimo 365 dias), e só
+    // o desta empresa, com o mesmo bloqueio das gravações.
     const retentionDays = Number(process.env.TANGO_SYNC_RETENTION_DAYS || 0);
     if (retentionDays > 0 && Math.random() < 0.01) {
-      await sql(`DELETE FROM tango_sync_operations WHERE created_at < NOW() - ($1 * INTERVAL '1 day')`, [Math.max(365, retentionDays)]);
+      await sql(
+        `${tenantLockCte('$1')}
+         DELETE FROM tango_sync_operations USING tenant_lock
+         WHERE tango_sync_operations.tenant_hash = $1 AND tango_sync_operations.created_at < NOW() - ($2 * INTERVAL '1 day')`,
+        [tenantHash, Math.max(365, retentionDays)]
+      );
     }
 
     await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics, outcome: { synced: true, cursor: nextCursor } });

@@ -9,6 +9,7 @@ import { changeLicensePlan, importLegacyKeys, legacyKeyStatuses, issueLicenseKey
 import { createMasterSession, isValidMasterSession, revokeMasterSession } from './_sessao-master.js';
 import { listSyncDevices, userIdDivergences } from './_dispositivos-sync.js';
 import { integrityPlan } from './_integridade-sync.js';
+import { tenantLockCte } from './_bloqueio-empresa.js';
 import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
 
 const KEY_TOOLS = { generate: generateLicenseKey, parse: parseLicenseKey, hash: licenseKeyHash, prefix: licenseKeyPrefix };
@@ -433,7 +434,9 @@ export default async function handler(req, res) {
     if (action === 'delete') {
       await sql('DELETE FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       if (body.purgeData === true) {
-        await sql('DELETE FROM tango_sync_operations WHERE tenant_hash = $1', [tenantHash]);
+        // Com o bloqueio da empresa: um envio a meio termina antes, não deixa alterações soltas de uma empresa eliminada.
+        await sql(`${tenantLockCte('$1')}
+          DELETE FROM tango_sync_operations USING tenant_lock WHERE tango_sync_operations.tenant_hash = $1`, [tenantHash]);
         await ensureUsageTable(sql);
         await sql('DELETE FROM tango_usage_reports WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       }
