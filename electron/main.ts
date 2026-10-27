@@ -3675,6 +3675,7 @@ app.whenReady().then(async () => {
         if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return false;
         return Boolean(await runQuery("get", `SELECT 1 AS found FROM "${table}" WHERE id = ? LIMIT 1`, [rowId]));
       },
+      queryOne: async (sql, params) => ((await runQuery("get", sql, params)) || undefined) as Record<string, unknown> | undefined,
       transaction: async (statements) => runTransaction(validateDbTransaction(statements))
     });
     if (result.applied) { sealAfterWrite("remote"); sealAuditAfterWrite(); }

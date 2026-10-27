@@ -698,6 +698,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, clientId, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL",
+  "SELECT id, createdAt FROM clients WHERE nif = ? AND deletedAt IS NULL AND id <> ? LIMIT 1",
   "SELECT id, createdAt, startDate FROM credits",
   "SELECT id, creditId, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt FROM credit_installments",
   "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC",
@@ -705,6 +706,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, email FROM users",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC",
+  "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending'",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5",
   "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100",
   "SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome",
@@ -792,7 +794,10 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ? WHERE id = ? AND status = 'pending' AND (requestedById <> ? OR ? = 1)",
   "UPDATE audit_alerts SET status = ?, assignedTo = ?, assignedToName = ?, dueAt = ?, updatedAt = ?, closedBy = ?, closedByName = ?, closedAt = ? WHERE id = ?",
   "UPDATE clients SET biAlertSentAt = ? WHERE id = ?",
+  "UPDATE clients SET deletedAt = ? WHERE id = ?",
+  "UPDATE clients SET deletedAt = ?, deletedBy = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
+  "UPDATE clients SET deletedAt = NULL WHERE id = ? AND deletedAt = ?",
   "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
   "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone) WHERE id = ?",
@@ -3750,6 +3755,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL"
   ],
   [
+    "2d8894d312a636bdd370385f3d9c7d55f4faafb956f5ed30d1e2a84d9c2916dc",
+    "SELECT id, createdAt FROM clients WHERE nif = ? AND deletedAt IS NULL AND id <> ? LIMIT 1"
+  ],
+  [
     "463f0161a81c45d9b44e81bb00da9c1d600a8475d6e0916fba7a26d628571e1c",
     "SELECT id, createdAt, startDate FROM credits"
   ],
@@ -3776,6 +3785,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "a968fbb38a8a55fceb9493e0a6a0bf3f4ff3d80b2c499e350eb816df04055421",
     "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC"
+  ],
+  [
+    "8c01c0096996d2a63475b90acb873157fc6753eabd9cf35b14c6f9c6dfe8ce54",
+    "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending'"
   ],
   [
     "a446576f662ca1a898bf08ea15d902dee6f59cd51c6a8bf9489af753f59be6bf",
@@ -4126,8 +4139,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET biAlertSentAt = ? WHERE id = ?"
   ],
   [
+    "9b3cbe6d16ceb7fa743613315b61019d5b35b526401dcf6039bc037cab8c8c8b",
+    "UPDATE clients SET deletedAt = ? WHERE id = ?"
+  ],
+  [
+    "7b34b8c9a3bf8f4de98752190284240b321a44636de583dd3b86796447af9e1f",
+    "UPDATE clients SET deletedAt = ?, deletedBy = ? WHERE id = ?"
+  ],
+  [
     "cc56e1bbcaa83b9aa4a6a4c3b3a8630e9c084935453c1c62425ac2929ab65c46",
     "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?"
+  ],
+  [
+    "5566ac857b1b80d1c914fa6f1eebf723587e95c49d22f62e3044b0f82d90fcae",
+    "UPDATE clients SET deletedAt = NULL WHERE id = ? AND deletedAt = ?"
   ],
   [
     "254e0e1286c08e459be91d2b89add0d879ada5c708955afb9f5aae1927b0c0f2",

@@ -32,6 +32,7 @@ import {
 } from '@/bibliotecas/sync-operacoes';
 import { reportUsageIfDue } from '@/servicos/ServicoRelatorioUso';
 import { syncHealth, syncIssues, type SyncCounts, type SyncIssue } from '@/bibliotecas/estado-sincronizacao';
+import { conflictArchiveStatements, type SyncConflict } from '@/bibliotecas/sync-conflitos';
 import { balanceMismatches, CREDIT_BALANCE_CHECK_SQL, type BalanceMismatch, type CreditBalanceRow } from '@/bibliotecas/saldos-derivados';
 import { bucketOf, tableDigest, type IntegrityReport, type TableDigest } from '@/bibliotecas/integridade-sync';
 
@@ -735,6 +736,7 @@ const applyGroups = async (groups: RemoteGroup[]): Promise<ApplyResult> => {
             tableColumns: localTableColumns,
             retainedForRow: (table, rowId) => sqlite.all<{ id: string; operation: string }>(RETAINED_FOR_ROW_SQL, [table, rowId, JSON.stringify(rowId)]),
             rowExists: async (table, rowId) => (await sqlite.all(`SELECT 1 AS found FROM ${quoteIdentifier(table)} WHERE id = ? LIMIT 1`, [rowId])).length > 0,
+            queryOne: async (sql, params) => (await sqlite.all<Record<string, unknown>>(sql, params as unknown[]))[0],
             transaction: statements => sqlite.transaction(statements as SqlTransactionStatement[]),
         });
     } finally {
@@ -1135,6 +1137,36 @@ export const restoreBrowserReplicaBackup = () => {
  * Alterações recebidas que este dispositivo ainda não consegue aplicar por serem de outra versão do sistema (comando
  * desconhecido ou formato mais recente). Ficam retidas e aplicam-se sozinhas quando os dois tiverem a mesma versão.
  */
+/**
+ * Arquiva as alterações recebidas que este dispositivo não consegue ler (cifradas com um Código de Acesso anterior):
+ * deixam de contar no ícone. Continuam guardadas no servidor e voltam com «Receber tudo de novo da nuvem».
+ */
+export const archiveUnreadable = async () => {
+    const items = (await readAll<EncryptedPending>(UNREADABLE_STORE)).filter(item => !activeConfig || item.tenantId === activeConfig.tenantId);
+    await deleteOperations(items.map(item => item.id), UNREADABLE_STORE);
+    void emitPending();
+    return items.length;
+};
+
+/**
+ * Arquiva (com auditoria) as alterações retidas de outra versão do sistema. Nada é aplicado nem apagado: ficam na lista
+ * técnica como «Arquivado», podem ser restauradas, e o dispositivo que as fez corrige o registo pela autocura quando
+ * actualizar.
+ */
+export const archiveOtherVersionRetained = async (actor: { id: string; name: string }) => {
+    const rows = await sqlite.all<SyncConflict>(
+        `SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending'`,
+    );
+    const retained = rows.filter(row => {
+        try { return isOtherVersionReason(JSON.parse(row.operation)?.reason); } catch { return false; }
+    });
+    for (let start = 0; start < retained.length; start += 200) {
+        await sqlite.transaction(conflictArchiveStatements(retained.slice(start, start + 200), 'archive', actor.id, actor.name,
+            'Alteração de outra versão do sistema que este dispositivo não sabe aplicar (arquivada no painel de sincronização).') as SqlTransactionStatement[]);
+    }
+    return retained.length;
+};
+
 export const getOtherVersionRetainedCount = async () => {
     const rows = await sqlite.all<{ operation: string }>(`SELECT operation FROM sync_conflicts WHERE status = 'pending'`).catch(() => []);
     return rows.filter(row => {

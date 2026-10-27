@@ -572,7 +572,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
             )}
           </div>);
           return cloudPanel
-            ? <PainelSincronizacao status={cloudStatus} canSeeAll={user?.role === 'super_admin'}>{indicator}</PainelSincronizacao>
+            ? <PainelSincronizacao status={cloudStatus} canSeeAll={user?.role === 'super_admin'} actor={user ? { id: user.id, name: user.name } : null}>{indicator}</PainelSincronizacao>
             : indicator; })()}
         </div>
 
