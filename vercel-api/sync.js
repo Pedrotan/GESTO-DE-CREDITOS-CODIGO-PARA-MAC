@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { authorizeTenant, sha256 } from './_autorizacao-empresa.js';
+import { recordSyncDevice } from './_dispositivos-sync.js';
 
 // Alterações por pedido. Os clientes enviam lotes de até 100, mais a lista de utilizadores e o resto de uma transacção
 // que não pode ser partida: com o limite antigo de 100 esse lote era recusado sempre e o dispositivo deixava de
@@ -49,11 +50,6 @@ export default async function handler(req, res) {
   if (!tenantId || tenantId.length > 200 || !deviceId || deviceId.length > 100) {
     return send(res, 400, { success: false, message: 'Identificação da sincronização inválida.' });
   }
-  if (operations.length > MAX_OPERATIONS) {
-    logRejected(req, tenantId, deviceId, operations.length, 'demasiadas alterações');
-    return send(res, 413, { success: false, code: 'TOO_MANY_OPERATIONS', message: 'Foram enviadas demasiadas alterações de uma só vez.' });
-  }
-
   const tenantHash = sha256(tenantId);
   const client = neon(databaseUrl);
   const sql = (text, params) => client.query(text, params);
@@ -72,6 +68,13 @@ export default async function handler(req, res) {
     if (!await enforceDistributedRateLimit(sql, req, res, {
       limit: 600, windowMs: 60_000, scope: 'sync-tenant', subject: tenantId, dimension: 'subject'
     })) return;
+    // Depois de confirmada a empresa: a recusa fica também no diagnóstico deste dispositivo.
+    if (operations.length > MAX_OPERATIONS) {
+      logRejected(req, tenantId, deviceId, operations.length, 'demasiadas alterações');
+      await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics,
+        outcome: { rejected413: true, error: `Envio recusado: ${operations.length} alterações (máximo ${MAX_OPERATIONS}).` } });
+      return send(res, 413, { success: false, code: 'TOO_MANY_OPERATIONS', message: 'Foram enviadas demasiadas alterações de uma só vez.' });
+    }
     // O executável da empresa informa se foi configurado como multi-empresa (a web mostra o mesmo layout).
     if (typeof body.companyProfile?.multiTenant === 'boolean') {
       await sql(`UPDATE tango_tenants SET multi_tenant = $2 WHERE UPPER(tenant_id) = UPPER($1) AND multi_tenant IS DISTINCT FROM $2`,
@@ -113,6 +116,8 @@ export default async function handler(req, res) {
     const tooLarge = operations.filter(operation => String(operation?.payload || '').length > MAX_PAYLOAD_LENGTH).map(operation => String(operation?.id || ''));
     if (tooLarge.length) {
       logRejected(req, tenantId, deviceId, operations.length, `${tooLarge.length} alteração(ões) acima de ${MAX_PAYLOAD_LENGTH} caracteres`);
+      await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics,
+        outcome: { rejected413: true, error: `Envio recusado: ${tooLarge.length} alteração(ões) grande(s) demais.` } });
       return send(res, 413, { success: false, code: 'OPERATION_TOO_LARGE', operationIds: tooLarge, maxPayloadLength: MAX_PAYLOAD_LENGTH, message: 'Há alterações demasiado grandes para enviar.' });
     }
     for (const operation of operations) {
@@ -167,6 +172,7 @@ export default async function handler(req, res) {
 
     // pull: false só envia (e pede a lista de utilizadores), sem receber alterações: resposta rápida para o login.
     if (body.pull === false) {
+      await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics, outcome: { synced: true, cursor } });
       return send(res, 200, { success: true, cursor, hasMore: false, operations: [], ...(usersRoster !== undefined ? { usersRoster } : {}) });
     }
 
@@ -214,6 +220,7 @@ export default async function handler(req, res) {
       await sql(`DELETE FROM tango_sync_operations WHERE created_at < NOW() - ($1 * INTERVAL '1 day')`, [Math.max(365, retentionDays)]);
     }
 
+    await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics, outcome: { synced: true, cursor: nextCursor } });
     return send(res, 200, {
       success: true,
       cursor: nextCursor,
@@ -225,6 +232,8 @@ export default async function handler(req, res) {
     });
   } catch (error) {
     console.error('[sync]', error);
+    await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics,
+      outcome: { error: `Erro do servidor: ${error?.message || 'falha ao sincronizar'}` } });
     return send(res, 500, { success: false, message: 'O servidor não conseguiu sincronizar os dados.' });
   }
 }

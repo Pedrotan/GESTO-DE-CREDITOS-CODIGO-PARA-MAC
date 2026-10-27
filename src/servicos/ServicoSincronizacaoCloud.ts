@@ -92,6 +92,29 @@ export const USERS_SYNCED_EVENT = 'tango-users-synced';
 const MAX_PUSH_OPERATIONS = 80;
 /** Lote actual: começa em MAX_PUSH_OPERATIONS e reduz-se a metade se o servidor recusar por excesso (413). */
 let pushLimit = MAX_PUSH_OPERATIONS;
+/** Recusas por tamanho (413) recebidas desde o último diagnóstico enviado ao servidor (inclui as de um proxy). */
+let rejected413SinceReport = 0;
+/** Versão real desta instalação (a mesma do ecrã «Sobre»). */
+const APP_VERSION = typeof __TANGO_APP_VERSION__ === 'string' ? __TANGO_APP_VERSION__ : 'desconhecida';
+
+/**
+ * Diagnóstico deste dispositivo para o servidor (tango_sync_devices): só números e o último erro, nunca dados da
+ * empresa. A hora do computador serve para o servidor medir a diferença do relógio.
+ */
+const syncDiagnostics = async (lastError?: string) => {
+    const counts = await collectSyncCounts().catch(() => null);
+    return {
+        platform: window.electronAPI ? 'desktop' : 'web',
+        appVersion: APP_VERSION,
+        ...(counts ? {
+            pending: counts.pending, oversized: counts.oversized, waiting: counts.waiting, unreadable: counts.unreadable,
+            conflicts: counts.conflicts, otherVersion: counts.otherVersion,
+        } : {}),
+        rejected413: rejected413SinceReport,
+        lastError,
+        clientTime: Date.now(),
+    };
+};
 // Bytes por pedido, medidos já cifrados (a cifra em base64 acrescenta cerca de um terço): com ficheiros, um lote
 // medido antes da cifra podia passar o limite do servidor e, em ligações lentas, não chegar dentro do tempo.
 const MAX_PUSH_BYTES = 4_000_000;
@@ -954,6 +977,8 @@ export const syncCloudNow = async () => {
             return { success: false, message: 'Sem ligação à Internet.' };
         }
         if (config.sessionAuth ? !config.cryptoKeys : !config.apiKey || config.apiKey.length < 8) return { success: false, message: 'Configure uma chave de sincronização com pelo menos 8 caracteres.' };
+        // Último erro antes desta tentativa (o estado passa já a «a sincronizar»), para o diagnóstico do servidor.
+        const previousError = lastStatus.state === 'error' ? lastStatus.message : undefined;
         emitStatus({ state: 'syncing' });
         try {
             // Os dados vão cifrados com o Código de Acesso: se mudou, o histórico antigo deixa de ser legível
@@ -1011,8 +1036,10 @@ export const syncCloudNow = async () => {
                 }
                 // Lista completa: o servidor guarda também a última à parte, para a versão web a pedir directamente.
                 if (round === 0 && usersOut?.payload && usersOut.id) outgoing.push({ id: usersOut.id, deviceId: getDeviceId(), payload: usersOut.payload, kind: 'users' });
+                const diagnostics = round === 0 ? await syncDiagnostics(previousError) : undefined;
                 const requestBody = JSON.stringify({
                     tenantId: config.tenantId, deviceId: getDeviceId(), cursor, operations: outgoing, maxBytes: MAX_PULL_BYTES,
+                    ...(diagnostics ? { diagnostics } : {}),
                     ...(round === 0 && profile ? { companyProfile: profile } : {}),
                     ...(round === 0 && isWeb ? { usersRoster: true, usersRosterSince: rosterSince } : {}),
                 });
@@ -1027,6 +1054,7 @@ export const syncCloudNow = async () => {
                 // Lote recusado por ser grande demais. Nada é apagado da fila: o lote volta a seguir mais pequeno; se o
                 // servidor indicar as alterações grandes demais, ou se já for uma só, essas ficam de parte (guardadas).
                 if (response.status === 413) {
+                    rejected413SinceReport += 1;
                     const named = Array.isArray(body.operationIds) ? body.operationIds.map(String) : [];
                     // Sem avanço possível (ex.: a lista de utilizadores é que é grande demais): erro, nunca um ciclo.
                     if (++sizeRetries > 30) throw Object.assign(new Error(body.message || 'O servidor recusou o envio por ser grande demais.'), { status: 413 });
@@ -1051,6 +1079,8 @@ export const syncCloudNow = async () => {
                     throw new Error('Resposta de sincronização incompleta. As alterações locais foram mantidas para nova tentativa.');
                 }
                 await deleteOperations(queued.map(operation => operation.id));
+                // O servidor registou o diagnóstico com as recusas contadas até aqui.
+                if (diagnostics) rejected413SinceReport = Math.max(0, rejected413SinceReport - diagnostics.rejected413);
                 // Envio aceite: o lote volta a crescer aos poucos depois de ter sido reduzido por um 413.
                 if (pushLimit < MAX_PUSH_OPERATIONS) pushLimit = Math.min(MAX_PUSH_OPERATIONS, pushLimit * 2);
                 if (round === 0 && usersOut?.digest) {
@@ -1155,7 +1185,7 @@ export const syncCloudNow = async () => {
             if ((totalPulled || totalConflicts) && config.onRemoteApplied) await config.onRemoteApplied();
             void reportUsageIfDue({
                 url: normalizeBaseUrl(config.url), apiKey: config.sessionAuth ? '' : config.apiKey, tenantId: config.tenantId,
-                deviceId: getDeviceId(), query: (sql, params) => sqlite.all(sql, params), appVersion: `${window.electronAPI ? 'PC' : 'Web'} 3.0.2`,
+                deviceId: getDeviceId(), query: (sql, params) => sqlite.all(sql, params), appVersion: `${window.electronAPI ? 'PC' : 'Web'} ${APP_VERSION}`,
             });
             if (totalSkipped) console.warn(`[CloudSync] ${totalSkipped} operações cifradas permanecem guardadas para recuperação.`);
             const result = { success: true, pushed: totalPushed, pulled: totalPulled, conflicts: totalConflicts, skipped: totalSkipped, usersRoster };

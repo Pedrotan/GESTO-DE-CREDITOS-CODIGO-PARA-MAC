@@ -517,3 +517,21 @@ test('PC: alteração que o servidor não aceita fica de parte, guardada, e as o
     assert.equal(await cloud.getPendingSyncCount(), 1, 'a recusada continua guardada neste dispositivo');
     assert.equal(await cloud.getOversizedCount(), 1);
 });
+
+test('PC envia o diagnóstico (versão, contagens, hora) na primeira volta de cada sincronização', async () => {
+    server.ops = [];
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    const seen = [];
+    await withFetch(previous => async (url, init) => { seen.push(JSON.parse(init.body)); return previous(url, init); }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try { return await cloud.syncCloudNow(); } finally { cloud.stopCloudSync(); }
+    });
+    const diagnostics = seen[0]?.diagnostics;
+    assert.equal(diagnostics?.platform, 'web');
+    assert.equal(typeof diagnostics?.appVersion, 'string');
+    assert.equal(typeof diagnostics?.clientTime, 'number');
+    assert.equal(diagnostics?.rejected413, 0);
+    assert.ok(['pending', 'conflicts', 'unreadable', 'otherVersion'].every(key => typeof diagnostics[key] === 'number'));
+    assert.ok(!JSON.stringify(diagnostics).includes('clients'), 'sem dados da empresa');
+});
