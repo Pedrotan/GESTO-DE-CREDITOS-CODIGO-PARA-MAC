@@ -21,7 +21,9 @@ import {
     mutationTable,
     normalizeSqlText,
     statementRowId,
+    statementColumns,
     isOtherVersionReason,
+    RETAINED_FOR_ROW_SQL,
     CONFLICT_RESOLVE_SQL,
     HEAL_NOTE,
     type ApplyResult,
@@ -607,6 +609,7 @@ const applyGroups = async (groups: RemoteGroup[]): Promise<ApplyResult> => {
         return await applyRemoteGroups(groups, {
             sqlById: SYNC_SQL_BY_ID,
             tableColumns: localTableColumns,
+            retainedForRow: (table, rowId) => sqlite.all<{ id: string; operation: string }>(RETAINED_FOR_ROW_SQL, [table, rowId, JSON.stringify(rowId)]),
             transaction: statements => sqlite.transaction(statements as SqlTransactionStatement[]),
         });
     } finally {
@@ -822,6 +825,42 @@ const webUsersChange = async () => {
 
 const isUsersRoster = (operation: SyncOperation) => (operation as any).kind === 'users';
 
+/**
+ * Cópias de autocura recebidas: marca os campos que este dispositivo alterou no mesmo registo e ainda não enviou
+ * (keepColumns). A alteração local segue depois e ganha nos outros; aqui a cópia não a pode desfazer.
+ */
+const protectLocalPendingColumns = async (groups: RemoteGroup[]) => {
+    const copies = groups.flatMap(group => group.operations).filter(operation => operation.heal && operation.kind === 'snapshot');
+    if (!copies.length) return;
+    const pending = new Map<string, Set<string>>();
+    for (const local of await readAll<QueuedOperation>(STORE_NAME).catch(() => [] as QueuedOperation[])) {
+        let table: string | null = null;
+        let rowId: string | null = null;
+        let columns: string[] = [];
+        if (local.kind === 'snapshot') {
+            table = local.table || null;
+            const localColumns = local.columns || [];
+            rowId = localColumns.includes('id') ? String(local.params?.[localColumns.indexOf('id')] ?? '') : null;
+            columns = localColumns;
+        } else {
+            const sql = local.kind === 'dynamic' ? local.sql : local.statementId ? SYNC_SQL_BY_ID.get(local.statementId) : undefined;
+            if (!sql) continue;
+            table = mutationTable(sql);
+            rowId = statementRowId(sql, local.params || []);
+            columns = statementColumns(sql);
+        }
+        if (!table || !rowId) continue;
+        const key = `${table}\u0001${rowId}`;
+        pending.set(key, new Set([...(pending.get(key) || []), ...columns]));
+    }
+    for (const copy of copies) {
+        const columns = copy.columns || [];
+        const rowId = columns.includes('id') ? String(copy.params?.[columns.indexOf('id')] ?? '') : '';
+        const local = pending.get(`${copy.table}\u0001${rowId}`);
+        if (local?.size) copy.keepColumns = [...local];
+    }
+};
+
 const applyOperations = async (operations: SyncOperation[], caughtUp = true): Promise<ApplyResult> => {
     // Só a empresa activa. Uma operação de formato mais recente segue também: a aplicação retém-na como «de outra
     // versão» (antes era deitada fora aqui e, com o cursor a avançar, perdia-se).
@@ -852,6 +891,7 @@ const applyOperations = async (operations: SyncOperation[], caughtUp = true): Pr
     // Partes de uma transacção incompleta não são aplicadas: vão para revisão, com o comando original guardado.
     for (const operation of expired) groups.push({ operations: [markIncomplete(operation)] });
 
+    await protectLocalPendingColumns(groups);
     const result = await applyGroups(groups);
     if (result.applied > 0) reprocessDirty = true;
     await deleteOperations(waiting.map(operation => operation.id), INCOMING_STORE);
@@ -1156,7 +1196,9 @@ export const syncCloudNow = async () => {
                 for (const item of encrypted.values()) {
                     // Uma operação cifrada com uma chave antiga não pode bloquear a sincronização de tudo o resto.
                     try {
-                        incoming.push(await decryptWithAny(item.payload, readKeys));
+                        const decoded = await decryptWithAny(item.payload, readKeys);
+                        const seq = Number((item as { seq?: unknown }).seq);
+                        incoming.push(Number.isSafeInteger(seq) && seq > 0 ? { ...decoded, serverSeq: seq } : decoded);
                         decodedIds.push(item.id);
                     } catch {
                         unreadable.push({ id: item.id, payload: item.payload, tenantId: config.tenantId, url: config.url, createdAt: new Date().toISOString() });

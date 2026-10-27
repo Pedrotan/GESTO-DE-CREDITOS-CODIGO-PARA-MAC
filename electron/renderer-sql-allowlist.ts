@@ -719,6 +719,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'",
   "SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome",
   "SELECT id, nome, responsavel_id, activo FROM rh_departamento ORDER BY nome",
+  "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)",
   "SELECT id, operation, entityType FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000",
   "SELECT id, paymentDate FROM payments WHERE receiptSeq IS NULL AND status = 'confirmed' AND deletedAt IS NULL ORDER BY paymentDate, id",
   "SELECT id, reportType, title, format, filters, fileName, generatedAt, generatedBy, generatedById FROM report_history ORDER BY generatedAt DESC LIMIT 200",
@@ -924,7 +925,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
   "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
-  "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)",
   "UPDATE sync_conflicts SET status = 'pending', resolutionNote = NULL, resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'rejected' AND resolutionNote LIKE '[ARQUIVADO] %'",
   "UPDATE sync_conflicts SET status = 'rejected', resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE sync_conflicts SET status = ?, resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
@@ -3832,6 +3832,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, nome, responsavel_id, activo FROM rh_departamento ORDER BY nome"
   ],
   [
+    "d00a2d87c007892593f34120855957ac7bdf2a0f59a521a5cc2bf2d324e72ae0",
+    "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)"
+  ],
+  [
     "1308df400a7c24c53059236ef3d0be65f01f195fa81bcdd6e6f1202f40acaf89",
     "SELECT id, operation, entityType FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000"
   ],
@@ -4650,10 +4654,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6ab67be9e4abff9f62321f06e31923459f9ad9eab5998d473946c8903d9ba820",
     "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'"
-  ],
-  [
-    "ef6551e3ab5d9c6c6713ea398c1c1fb2f3c3e1c24d15c78dd7b7b256e81d767d",
-    "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)"
   ],
   [
     "d8cbfaf1464662df9dfc78f3270a83832ab0ea264725dffb847f2855cf12f4df",

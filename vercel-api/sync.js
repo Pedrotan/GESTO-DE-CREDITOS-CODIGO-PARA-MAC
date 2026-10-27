@@ -259,7 +259,8 @@ export default async function handler(req, res) {
       ...(usersRoster !== undefined ? { usersRoster } : {}),
       operations: page
         .filter(row => row.device_id !== deviceId)
-        .map(row => ({ id: row.operation_id, deviceId: row.device_id, payload: row.payload }))
+        // seq: a ordem real das alterações (decidida aqui, não pelo relógio dos PCs), usada pela autocura.
+        .map(row => ({ id: row.operation_id, deviceId: row.device_id, payload: row.payload, seq: Number(row.seq) }))
     });
   } catch (error) {
     console.error('[sync]', error);

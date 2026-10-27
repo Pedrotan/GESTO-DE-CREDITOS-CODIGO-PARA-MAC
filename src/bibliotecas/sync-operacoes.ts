@@ -26,6 +26,10 @@ export type SyncOperation = {
      * substitui-o só quando é mais recente; se não puder ser aplicada, é ignorada (nunca vira conflito).
      */
     heal?: boolean;
+    /** Número de ordem atribuído pelo servidor (a ordem real das alterações, independente do relógio dos PCs). */
+    serverSeq?: number;
+    /** Campos deste registo alterados aqui e ainda por enviar: a cópia de autocura nunca os toca. */
+    keepColumns?: string[];
     /** Operações da mesma transacção local partilham txId e são aplicadas juntas (tudo ou nada). */
     txId?: string;
     txSize?: number;
@@ -96,11 +100,8 @@ export const CONFLICT_INSERT_SQL = `INSERT OR IGNORE INTO sync_conflicts (id, en
                           VALUES (?, ?, ?, ?, 'pending', ?)`;
 export const CONFLICT_RESOLVE_SQL = `UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'`;
 export const HEAL_NOTE = 'Corrigido automaticamente com a cópia mais recente do registo.';
-// Conflitos sobre o registo que a cópia acabou de corrigir (incluindo os de comandos que esta versão não conhece).
-export const HEAL_RESOLVE_SQL = `UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)`;
-// Coluna que diz qual cópia de um registo é a mais recente. Sem nenhuma (ex.: lançamentos contabilísticos, que
-// nunca mudam), a cópia só cria o registo que falta.
-const FRESHNESS_COLUMNS = ['updatedAt', 'version'];
+/** Alterações retidas (conflitos pendentes) que podem dizer respeito a um registo; a confirmação é feita em JS. */
+export const RETAINED_FOR_ROW_SQL = `SELECT id, operation FROM sync_conflicts WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)`;
 
 const splitTopLevel = (text: string) => {
     const parts: string[] = [];
@@ -115,6 +116,19 @@ const splitTopLevel = (text: string) => {
     }
     parts.push(current);
     return parts.map(part => part.trim());
+};
+
+/**
+ * Campos que um comando escreve: as colunas do INSERT ou as do SET do UPDATE. DELETE e comandos sem lista
+ * reconhecível devolvem [] (não dizem que campos repor).
+ */
+export const statementColumns = (sql: string): string[] => {
+    const normalized = normalizeSqlText(sql);
+    const insert = normalized.match(/^(?:INSERT|REPLACE)(?:\s+OR\s+\w+)?\s+INTO\s+\S+\s*\(([^)]*)\)/isu);
+    if (insert) return splitTopLevel(insert[1]).map(column => column.replace(/^["'`[]|["'`\]]$/gu, '')).filter(column => IDENTIFIER.test(column));
+    const update = normalized.match(/^UPDATE\s+\S+\s+SET\s+(.+?)(?:\s+WHERE\s+.*)?$/isu);
+    if (!update) return [];
+    return splitTopLevel(update[1]).map(item => item.match(/^["'`[]?([a-z_][a-z0-9_]*)["'`\]]?\s*=/iu)?.[1] || '').filter(Boolean);
 };
 
 /** Identificador (`id`) do registo que um INSERT/UPDATE/DELETE altera, quando o comando o indica. */
@@ -134,6 +148,46 @@ export const statementRowId = (sql: string, params: unknown[]): string | null =>
     const match = /(?:^|[\s(.])id\s*=\s*\?/iu.exec(normalized.slice(where));
     if (!match) return null;
     return value((normalized.slice(0, where + match.index + match[0].length - 1).match(/\?/gu) || []).length);
+};
+
+/**
+ * Alterações retidas aqui sobre um registo que a cópia de autocura pode repor: só as feitas pelo mesmo dispositivo
+ * que enviou a cópia e anteriores a ela na ordem do servidor (o autor já as tinha aplicado quando fez a cópia). Diz
+ * que conflitos ficam resolvidos e que campos repor (null = todos: comando que esta versão não sabe ler).
+ */
+export const healableRetained = (
+    rows: Array<{ id: string; operation: string }>,
+    copy: { table: string; rowId: string; deviceId: string; serverSeq?: number },
+    sqlById: Map<string, string>,
+) => {
+    const conflictIds: string[] = [];
+    let columns: Set<string> | null = new Set();
+    for (const row of rows) {
+        let retained: SyncOperation & { reason?: string; original?: Partial<SyncOperation> };
+        try { retained = JSON.parse(row.operation); } catch { continue; }
+        if (retained.deviceId !== copy.deviceId) continue;
+        if (retained.serverSeq !== undefined && copy.serverSeq !== undefined && !(copy.serverSeq > retained.serverSeq)) continue;
+        const kind = retained.original?.kind || retained.kind;
+        const statementId = retained.original?.statementId || retained.statementId;
+        const sql = kind === 'statement' && statementId ? sqlById.get(statementId) : kind === 'dynamic' ? (retained.original?.sql || retained.sql) : undefined;
+        let touched: string[] | null;
+        if (kind === 'snapshot') {
+            const snapshotColumns = retained.original?.columns || retained.columns || [];
+            if (String(retained.original?.table || retained.table || '') !== copy.table || String(retained.params?.[snapshotColumns.indexOf('id')] ?? '') !== copy.rowId) continue;
+            touched = snapshotColumns;
+        } else if (sql) {
+            if (mutationTable(sql) !== copy.table || statementRowId(sql, retained.params || []) !== copy.rowId) continue;
+            touched = statementColumns(sql);
+        } else {
+            // Comando que esta versão não conhece: só o identificador da alteração diz o registo; repõe tudo.
+            if (String(retained.entityId || '') !== copy.rowId) continue;
+            touched = null;
+        }
+        conflictIds.push(row.id);
+        if (touched === null) columns = null;
+        else if (columns) touched.forEach(column => columns!.add(column));
+    }
+    return { conflictIds, columns };
 };
 
 export const operationTable = (operation: SyncOperation, sqlById: Map<string, string>) => {
@@ -168,9 +222,16 @@ export const groupOperations = (operations: SyncOperation[]) => {
 };
 
 /** Converte um grupo em SQL local validado. Lança erro se alguma operação não for aceitável. */
+export type RemoteDeps = {
+    sqlById: Map<string, string>;
+    tableColumns: (table: string) => Promise<Set<string>>;
+    /** Alterações retidas candidatas para um registo (RETAINED_FOR_ROW_SQL). Sem isto a autocura só cria o que falta. */
+    retainedForRow?: (table: string, rowId: string) => Promise<Array<{ id: string; operation: string }>>;
+};
+
 export const buildRemoteStatements = async (
     group: RemoteGroup,
-    deps: { sqlById: Map<string, string>; tableColumns: (table: string) => Promise<Set<string>> }
+    deps: RemoteDeps
 ): Promise<SyncStatement[]> => {
     const statements: SyncStatement[] = [];
     for (const operation of group.operations) {
@@ -193,24 +254,23 @@ export const buildRemoteStatements = async (
             const values = `(${columns.map(quoteIdentifier).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`;
             const rawId = operation.heal ? operation.params?.[columns.indexOf('id')] : undefined;
             const rowId = rawId === undefined || rawId === null || rawId === '' ? null : String(rawId);
-            const freshness = rowId ? FRESHNESS_COLUMNS.find(column => columns.includes(column)) : undefined;
-            const updates = columns.filter(column => column !== 'id');
+            // Cópia de autocura: cria sempre o registo que falta. Num registo que já existe, repõe campo a campo só o
+            // que ficou divergente aqui: os campos das alterações retidas feitas pelo dispositivo que enviou a cópia
+            // e anteriores a ela na ordem do servidor (nunca pela hora dos PCs). Campos alterados aqui e ainda por
+            // enviar ficam como estão; os restantes campos chegam pelas alterações normais de cada um.
+            const healed = rowId && deps.retainedForRow
+                ? healableRetained(await deps.retainedForRow(table, rowId), { table, rowId, deviceId: operation.deviceId, serverSeq: operation.serverSeq }, deps.sqlById)
+                : { conflictIds: [] as string[], columns: new Set<string>() };
+            const keep = new Set(['id', ...(operation.keepColumns || [])]);
+            const updates = columns.filter(column => !keep.has(column) && (healed.columns === null || healed.columns.has(column)));
             statements.push({
-                // Cópia de autocura: cria sempre o registo que falta. Um registo que já existe só é substituído
-                // quando ficou divergente aqui (há uma alteração retida sobre ele) e a cópia é mais recente: a
-                // linha inteira de outro dispositivo nunca desfaz um campo que um terceiro alterou entretanto.
-                sql: freshness && updates.length
+                sql: healed.conflictIds.length && updates.length
                     ? `INSERT INTO ${quoteIdentifier(table)} ${values} ON CONFLICT(id) DO UPDATE SET ${updates.map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ')}`
-                        + ` WHERE excluded.${quoteIdentifier(freshness)} > COALESCE(${quoteIdentifier(table)}.${quoteIdentifier(freshness)}, ${freshness === 'version' ? '-1' : "''"})`
-                        + ` AND EXISTS (SELECT 1 FROM sync_conflicts AS c WHERE c.status = 'pending' AND (c.entityType = ? OR c.entityType = 'desconhecido') AND (c.entityId = ? OR instr(c.operation, ?) > 0))`
                     : `INSERT OR IGNORE INTO ${quoteIdentifier(table)} ${values}`,
-                params: freshness && updates.length
-                    ? [...(operation.params || []), table, rowId, JSON.stringify(rowId)]
-                    : operation.params || [],
+                params: operation.params || [],
             });
-            if (rowId) {
-                statements.push({ sql: HEAL_RESOLVE_SQL, params: [HEAL_NOTE, new Date().toISOString(), table, String(rowId), JSON.stringify(String(rowId))] });
-            }
+            const now = new Date().toISOString();
+            for (const conflictId of healed.conflictIds) statements.push({ sql: CONFLICT_RESOLVE_SQL, params: [HEAL_NOTE, now, conflictId] });
         } else {
             throw new Error('Tipo de operação remota desconhecido.');
         }
@@ -245,11 +305,7 @@ export const isAlreadyAppliedError = (reason: string) =>
  */
 export const applyRemoteGroups = async (
     groups: RemoteGroup[],
-    deps: {
-        sqlById: Map<string, string>;
-        tableColumns: (table: string) => Promise<Set<string>>;
-        transaction: (statements: SyncStatement[]) => Promise<unknown>;
-    }
+    deps: RemoteDeps & { transaction: (statements: SyncStatement[]) => Promise<unknown> }
 ): Promise<ApplyResult> => {
     let applied = 0;
     let conflicts = 0;

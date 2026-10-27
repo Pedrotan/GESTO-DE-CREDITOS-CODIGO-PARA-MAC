@@ -1,7 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { applyRemoteGroups, conflictStatements, statementRowId, UNKNOWN_COMMAND_REASON, type SyncOperation, type SyncStatement } from '../src/bibliotecas/sync-operacoes.ts';
+import {
+    applyRemoteGroups, conflictStatements, RETAINED_FOR_ROW_SQL, statementColumns, statementRowId, UNKNOWN_COMMAND_REASON,
+    type SyncOperation, type SyncStatement,
+} from '../src/bibliotecas/sync-operacoes.ts';
 
 test('identifica o registo alterado por cada comando', () => {
     assert.equal(statementRowId('INSERT INTO clients (id, name) VALUES (?, ?)', ['cl1', 'Ana']), 'cl1');
@@ -13,8 +16,16 @@ test('identifica o registo alterado por cada comando', () => {
     assert.equal(statementRowId('INSERT INTO credit_installments (creditId, n) VALUES (?, ?)', ['cr1', 1]), null);
 });
 
-const SCHEMA = `CREATE TABLE credits (id TEXT PRIMARY KEY, status TEXT, version INTEGER NOT NULL DEFAULT 0);
-    CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT, updatedAt TEXT);
+test('identifica os campos que cada comando escreve', () => {
+    assert.deepEqual(statementColumns('INSERT INTO clients (id, name, phone) VALUES (?, ?, ?)'), ['id', 'name', 'phone']);
+    assert.deepEqual(statementColumns(`UPDATE clients SET phone = COALESCE(?, phone), status = 'active', version = version + 1 WHERE id = ?`), ['phone', 'status', 'version']);
+    assert.deepEqual(statementColumns('DELETE FROM clients WHERE id = ?'), []);
+});
+
+const SET_PHONE = 'UPDATE clients SET phone = ? WHERE id = ?';
+const SET_STATUS = 'UPDATE clients SET status = ? WHERE id = ?';
+const SQL = new Map([['set-phone', SET_PHONE], ['set-status', SET_STATUS]]);
+const SCHEMA = `CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT, phone TEXT, status TEXT, updatedAt TEXT);
     CREATE TABLE accounting_entries (id TEXT PRIMARY KEY, amount INTEGER, previousHash TEXT);
     CREATE TRIGGER entries_immutable BEFORE UPDATE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Lançamento imutável'); END;
     CREATE TRIGGER entries_chain BEFORE INSERT ON accounting_entries WHEN NEW.previousHash IS NOT NULL
@@ -32,42 +43,70 @@ const base = () => {
         } catch (error) { database.exec('ROLLBACK'); throw error; }
     };
     const tableColumns = async (table: string) => new Set((database.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string }>).map(r => r.name));
-    return { database, deps: { sqlById: new Map<string, string>(), tableColumns, transaction } };
+    const retainedForRow = async (table: string, rowId: string) =>
+        database.prepare(RETAINED_FOR_ROW_SQL).all(table, rowId, JSON.stringify(rowId)) as Array<{ id: string; operation: string }>;
+    return { database, deps: { sqlById: SQL, tableColumns, retainedForRow, transaction } };
 };
-const heal = (table: string, row: Record<string, unknown>): SyncOperation => ({
-    id: crypto.randomUUID(), deviceId: 'computador-origem', kind: 'snapshot', table, columns: Object.keys(row), params: Object.values(row),
-    createdAt: new Date().toISOString(), commandVersion: 1, tenantId: 't', entityId: String(row.id), heal: true,
+const heal = (table: string, row: Record<string, unknown>, extra: Partial<SyncOperation> = {}): SyncOperation => ({
+    id: crypto.randomUUID(), deviceId: 'pc-luanda', kind: 'snapshot', table, columns: Object.keys(row), params: Object.values(row),
+    createdAt: new Date().toISOString(), commandVersion: 1, tenantId: 't', entityId: String(row.id), heal: true, ...extra,
 });
-const one = <T>(db: DatabaseSync, sql: string) => db.prepare(sql).get() as T;
+const retain = async (deps: ReturnType<typeof base>['deps'], operation: Partial<SyncOperation>, reason = 'Conflito de concorrência: esperadas 1 alterações, obtidas 0.') => {
+    const full = { id: crypto.randomUUID(), kind: 'statement', commandVersion: 1, tenantId: 't', createdAt: '2026-10-27T08:00:00.000Z', ...operation } as SyncOperation;
+    await deps.transaction(conflictStatements([full], reason, SQL));
+    return full.id;
+};
+const one = <T>(db: DatabaseSync, sql: string) => ({ ...(db.prepare(sql).get() as object) }) as T;
+const cliente = (db: DatabaseSync) => one<{ name: string; phone: string; status: string }>(db, "SELECT name, phone, status FROM clients WHERE id = 'cl1'");
+const pendentes = (db: DatabaseSync) => one<{ n: number }>(db, "SELECT COUNT(*) AS n FROM sync_conflicts WHERE status = 'pending'").n;
 
-test('autocura: cria o registo que falta e só substitui o que ficou divergente (e por uma cópia mais recente)', async () => {
+test('autocura: cria o registo que falta; num registo saudável a cópia não mexe em nada', async () => {
     const { database, deps } = base();
-    database.exec(`INSERT INTO credits VALUES ('cr-antigo', 'pending_approval', 1), ('cr-novo', 'active', 5), ('cr-saudavel', 'blocked', 1);
-        INSERT INTO clients VALUES ('cl1', 'Nome antigo', '2026-10-27T08:00:00.000Z');`);
-    // Alterações retidas aqui sobre cr-antigo, cr-novo e cl1: estes registos ficaram divergentes.
-    const retida = (table: string, id: string): SyncOperation => ({
-        id: `retida-${id}`, deviceId: 'outro', kind: 'statement', statementId: 'desconhecido', params: [id], createdAt: '2026-10-27T08:00:00.000Z',
-        commandVersion: 1, tenantId: 't', entityId: id, table,
-    });
-    await deps.transaction(['credits:cr-antigo', 'credits:cr-novo', 'clients:cl1'].flatMap(key => {
-        const [table, id] = key.split(':');
-        return conflictStatements([retida(table, id)], 'Conflito de concorrência: esperadas 1 alterações, obtidas 0.', new Map([['desconhecido', `UPDATE ${table} SET x = ? WHERE id = ?`]]));
-    }));
+    database.exec(`INSERT INTO clients VALUES ('cl1', 'Sukeina', '923000001', 'inactive', '2026-10-27T08:00:00Z')`);
     const result = await applyRemoteGroups([
-        heal('credits', { id: 'cr-falta', status: 'active', version: 2 }),
-        heal('credits', { id: 'cr-antigo', status: 'active', version: 2 }),
-        heal('credits', { id: 'cr-novo', status: 'pending_approval', version: 3 }),
-        heal('credits', { id: 'cr-saudavel', status: 'active', version: 9 }),
-        heal('clients', { id: 'cl1', name: 'Nome novo', updatedAt: '2026-10-27T09:00:00.000Z' }),
-    ].map(operation => ({ operations: [operation] })), deps);
-    assert.deepEqual(result, { applied: 5, conflicts: 0 });
-    assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-falta'").status, 'active', 'registo em falta criado');
-    assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-antigo'").status, 'active', 'divergente: a cópia mais recente substitui');
-    assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-novo'").status, 'active', 'a cópia mais antiga nunca ganha');
-    assert.equal(one<{ status: string }>(database, "SELECT status FROM credits WHERE id = 'cr-saudavel'").status, 'blocked',
-        'sem nada retido, a linha inteira de outro dispositivo não desfaz o que foi alterado aqui');
-    assert.equal(one<{ name: string }>(database, "SELECT name FROM clients WHERE id = 'cl1'").name, 'Nome novo');
-    assert.equal(one<{ n: number }>(database, "SELECT COUNT(*) AS n FROM sync_conflicts WHERE status = 'pending'").n, 0, 'as alterações retidas ficam resolvidas');
+        { operations: [heal('clients', { id: 'cl-falta', name: 'Nova', phone: '9', status: 'active' })] },
+        { operations: [heal('clients', { id: 'cl1', name: 'Outro nome', phone: '000', status: 'active', updatedAt: '2030-01-01T00:00:00Z' }, { serverSeq: 99 })] },
+    ], deps);
+    assert.deepEqual(result, { applied: 2, conflicts: 0 });
+    assert.equal(one<{ name: string }>(database, "SELECT name FROM clients WHERE id = 'cl-falta'").name, 'Nova');
+    assert.deepEqual(cliente(database), { name: 'Sukeina', phone: '923000001', status: 'inactive' }, 'nem uma data «mais recente» do PC muda o registo');
+});
+
+test('autocura campo a campo: só os campos da alteração retida, só do mesmo autor e pela ordem do servidor', async () => {
+    const { database, deps } = base();
+    // Benguela muda o telefone (seq 10) mas a alteração ficou retida aqui; Luanda (aqui) mudou o estado.
+    database.exec(`INSERT INTO clients VALUES ('cl1', 'Sukeina', '923000001', 'blocked', NULL)`);
+    await retain(deps, { deviceId: 'pc-benguela', statementId: 'set-phone', params: ['924111222', 'cl1'], entityId: 'cl1', serverSeq: 10 });
+    // Cópia de outro dispositivo: não é o autor da alteração retida → não repõe nada.
+    await applyRemoteGroups([{ operations: [heal('clients', { id: 'cl1', name: 'Sukeina', phone: '999999999', status: 'active' }, { deviceId: 'pc-huambo', serverSeq: 20 })] }], deps);
+    assert.equal(cliente(database).phone, '923000001');
+    assert.equal(pendentes(database), 1);
+    // Cópia do autor, mas anterior à alteração na ordem do servidor → também não.
+    await applyRemoteGroups([{ operations: [heal('clients', { id: 'cl1', name: 'Sukeina', phone: '911', status: 'active' }, { deviceId: 'pc-benguela', serverSeq: 5 })] }], deps);
+    assert.equal(cliente(database).phone, '923000001');
+    // Cópia do autor posterior: repõe só o telefone; o estado mudado aqui fica (a cópia de Benguela ainda dizia «active»).
+    await applyRemoteGroups([{ operations: [heal('clients', { id: 'cl1', name: 'Sukeina M.', phone: '924111222', status: 'active' }, { deviceId: 'pc-benguela', serverSeq: 30 })] }], deps);
+    assert.deepEqual(cliente(database), { name: 'Sukeina', phone: '924111222', status: 'blocked' });
+    assert.equal(pendentes(database), 0, 'a alteração retida fica resolvida');
+});
+
+test('autocura: campos alterados aqui e ainda por enviar nunca são repostos', async () => {
+    const { database, deps } = base();
+    database.exec(`INSERT INTO clients VALUES ('cl1', 'Sukeina', '923000001', 'inactive', NULL)`);
+    await retain(deps, { deviceId: 'pc-benguela', statementId: 'set-phone', params: ['924111222', 'cl1'], entityId: 'cl1', serverSeq: 10 });
+    await applyRemoteGroups([{ operations: [heal('clients', { id: 'cl1', name: 'Sukeina', phone: '924111222', status: 'active' },
+        { deviceId: 'pc-benguela', serverSeq: 30, keepColumns: ['phone'] })] }], deps);
+    assert.equal(cliente(database).phone, '923000001', 'o telefone alterado aqui segue depois para os outros');
+});
+
+test('autocura: alteração de um comando desconhecido do mesmo autor repõe o registo inteiro (menos o que está por enviar)', async () => {
+    const { database, deps } = base();
+    database.exec(`INSERT INTO clients VALUES ('cl9', 'Antigo', '1', 'inactive', NULL)`);
+    await retain(deps, { deviceId: 'pc-antigo', statementId: 'hash-que-ninguem-conhece', params: ['x'], entityId: 'cl9', serverSeq: 3 }, UNKNOWN_COMMAND_REASON);
+    const outra = await retain(deps, { deviceId: 'pc-antigo', statementId: 'hash-que-ninguem-conhece', params: ['y'], entityId: 'cl-outro', serverSeq: 4 }, UNKNOWN_COMMAND_REASON);
+    await applyRemoteGroups([{ operations: [heal('clients', { id: 'cl9', name: 'Novo', phone: '2', status: 'active' }, { deviceId: 'pc-antigo', serverSeq: 8, keepColumns: ['status'] })] }], deps);
+    assert.deepEqual(one(database, "SELECT name, phone, status FROM clients WHERE id = 'cl9'"), { name: 'Novo', phone: '2', status: 'inactive' });
+    assert.equal(one<{ status: string }>(database, `SELECT status FROM sync_conflicts WHERE id = '${outra}'`).status, 'pending', 'o conflito de outro registo não é tocado');
 });
 
 test('autocura: lançamentos contabilísticos só se acrescentam e uma cópia que não se aplica nunca vira conflito', async () => {
@@ -81,20 +120,5 @@ test('autocura: lançamentos contabilísticos só se acrescentam e uma cópia qu
     assert.equal(result.conflicts, 0);
     assert.equal(one<{ amount: number }>(database, "SELECT amount FROM accounting_entries WHERE id = 'e1'").amount, 100, 'imutável');
     assert.equal(one<{ n: number }>(database, 'SELECT COUNT(*) AS n FROM accounting_entries').n, 2, 'e3 chegou antes do anterior e fica para a próxima cópia');
-    assert.equal(one<{ n: number }>(database, 'SELECT COUNT(*) AS n FROM sync_conflicts').n, 0);
-});
-
-test('autocura: fecha os conflitos do registo corrigido, mesmo os de comandos desconhecidos', async () => {
-    const { database, deps } = base();
-    const desconhecida: SyncOperation = {
-        id: 'op-x', deviceId: 'outro', kind: 'statement', statementId: 'hash-que-ninguem-conhece', params: ['cr9', 'active'],
-        createdAt: '2026-10-27T08:07:59.000Z', commandVersion: 1, tenantId: 't', entityId: 'cr9',
-    };
-    const outra: SyncOperation = { ...desconhecida, id: 'op-y', params: ['cr-outro'], entityId: 'cr-outro' };
-    await deps.transaction([...conflictStatements([desconhecida], UNKNOWN_COMMAND_REASON, new Map()), ...conflictStatements([outra], UNKNOWN_COMMAND_REASON, new Map())]);
-    await applyRemoteGroups([{ operations: [heal('credits', { id: 'cr9', status: 'active', version: 4 })] }], deps);
-    const estados = database.prepare('SELECT id, status, resolutionNote FROM sync_conflicts ORDER BY id').all() as Array<{ id: string; status: string; resolutionNote: string | null }>;
-    assert.equal(estados[0].status, 'accepted');
-    assert.match(String(estados[0].resolutionNote), /Corrigido automaticamente/);
-    assert.equal(estados[1].status, 'pending', 'o conflito de outro registo não é tocado');
+    assert.equal(pendentes(database), 0);
 });

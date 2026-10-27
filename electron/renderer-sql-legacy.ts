@@ -94,6 +94,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "ef6551e3ab5d9c6c6713ea398c1c1fb2f3c3e1c24d15c78dd7b7b256e81d767d",
+    "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)"
+  ],
+  [
     "c9c9c03dd5baf3787e144e614694e145f98b0f380be6ca078745e8909a01fc72",
     "UPDATE users SET lastLogin = ?, status = ?, ip = ? WHERE id = ?"
   ],

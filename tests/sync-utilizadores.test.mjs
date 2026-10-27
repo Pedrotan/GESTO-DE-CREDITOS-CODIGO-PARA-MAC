@@ -645,3 +645,19 @@ test('tempo real no PC: um aviso faz sincronizar logo e desligar fecha o canal',
         delete globalThis.document;
     }
 });
+
+test('servidor entrega cada alteração com o número de ordem (a ordem real, usada pela autocura)', async () => {
+    server.ops = [];
+    const send = async (deviceId, operations, cursor = 0) => {
+        const res = fakeRes();
+        await syncHandler({ method: 'POST', url: '/api/sync', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+            body: { tenantId: TENANT, deviceId, cursor, operations } }, res);
+        return res.body;
+    };
+    await send('pc-a', [{ id: nodeCrypto.randomUUID(), deviceId: 'pc-a', payload: 'p1' }, { id: nodeCrypto.randomUUID(), deviceId: 'pc-a', payload: 'p2' }]);
+    const received = await send('pc-b', []);
+    const seqs = received.operations.map(operation => operation.seq);
+    assert.equal(seqs.length, 2);
+    assert.ok(seqs.every(Number.isSafeInteger) && seqs[1] > seqs[0], 'números crescentes do servidor');
+    assert.equal(received.cursor, seqs[1]);
+});

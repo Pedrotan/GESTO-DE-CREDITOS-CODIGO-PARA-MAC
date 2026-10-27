@@ -15,7 +15,7 @@ import * as nodemailer from 'nodemailer';
 import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
 import { SYNC_SQL_BY_ID } from './sync-sql';
-import { applyRemoteGroups, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
+import { applyRemoteGroups, RETAINED_FOR_ROW_SQL, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
@@ -3668,6 +3668,7 @@ app.whenReady().then(async () => {
         }
         return columnsCache.get(table)!;
       },
+      retainedForRow: async (table, rowId) => ((await runQuery("query", RETAINED_FOR_ROW_SQL, [table, rowId, JSON.stringify(rowId)])) || []) as Array<{ id: string; operation: string }>,
       transaction: async (statements) => runTransaction(validateDbTransaction(statements))
     });
     if (result.applied) { sealAfterWrite("remote"); sealAuditAfterWrite(); }
