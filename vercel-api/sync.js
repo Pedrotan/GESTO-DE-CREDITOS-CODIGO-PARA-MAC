@@ -111,10 +111,15 @@ export default async function handler(req, res) {
       if (operation?.kind === 'users') roster = { id, device: sourceDevice, payload };
     }
     if (validatedOperations.length) {
+      // O número (seq) é atribuído quando a gravação começa, mas só fica visível quando termina. Com dois envios
+      // da mesma empresa ao mesmo tempo, o que começou primeiro podia terminar depois: quem recebia nesse instante
+      // avançava o cursor para lá dos números dele e nunca mais os recebia. O bloqueio por empresa (no mesmo
+      // comando, até ao fim da gravação) põe os envios em fila: um número visível garante que os anteriores também.
       await sql(
-        `INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload)
+        `WITH tenant_lock AS (SELECT pg_advisory_xact_lock(hashtextextended($1, 7041)) AS locked)
+         INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload)
          SELECT $1, item.operation_id, item.device_id, item.payload
-         FROM jsonb_to_recordset($2::jsonb) AS item(operation_id TEXT, device_id TEXT, payload TEXT)
+         FROM tenant_lock, jsonb_to_recordset($2::jsonb) AS item(operation_id TEXT, device_id TEXT, payload TEXT)
          ON CONFLICT (tenant_hash, operation_id) DO NOTHING`,
         [tenantHash, JSON.stringify(validatedOperations)]
       );
