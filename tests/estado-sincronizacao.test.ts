@@ -27,3 +27,9 @@ test('conflitos, retidas de outra versão, ilegíveis e grandes demais: «Verifi
     assert.equal(issues[0].title, '2 conflitos por ver');
     assert.equal(issues[1].title, '1 alteração de outra versão');
 });
+
+test('notas da verificação de integridade (corrigidas sozinhas) aparecem na lista mas não tiram o «Sincronizado»', () => {
+    const counts = { ...zero, integrityMissing: 2, integrityContent: 8 };
+    assert.equal(syncHealth(counts), 'synced');
+    assert.deepEqual(syncIssues(counts).map(issue => [issue.kind, issue.attention]), [['integrityMissing', false], ['integrityContent', false]]);
+});

@@ -68,7 +68,8 @@ const DB_NAME = 'TangoCloudSyncQueue';
 const STORE_NAME = 'operations';
 const INCOMING_STORE = 'incoming';
 const UNREADABLE_STORE = 'unreadable';
-type EncryptedPending = { id: string; payload: string; tenantId: string; url: string; createdAt: string };
+// deviceId/seq: dispositivo de origem e posição no servidor (para reconhecer as cifradas com uma chave já trocada).
+type EncryptedPending = { id: string; payload: string; tenantId: string; url: string; createdAt: string; deviceId?: string; seq?: number };
 const DEVICE_KEY = 'tango_cloud_device_id';
 const CURSOR_KEY = 'cloud_sync_cursor_v1';
 // v2: reenvia uma fotografia completa (inclui dados financeiros, antes retidos) para os outros dispositivos.
@@ -240,6 +241,8 @@ export type CloudSyncStatus = {
     at?: string;
     pushed?: number;
     pulled?: number;
+    /** A receber o histórico: percentagem já recebida (navegador novo ou «Receber tudo de novo»). */
+    progress?: number;
     conflicts?: number;
     /** Operações da nuvem cifradas com uma chave antiga, ignoradas por não poderem ser lidas. */
     skipped?: number;
@@ -499,11 +502,11 @@ const noteHealRows = (statements: Array<{ sql: string; params?: unknown[] }>) =>
     if (changed) writeHealJournal(journal);
 };
 
-const snapshotOperation = (table: string, row: Record<string, unknown>, order: number, bootstrap: boolean): SyncOperation | null => {
+const snapshotOperation = (table: string, row: Record<string, unknown>, order: number, bootstrap: boolean, maxChars = MAX_SNAPSHOT_ROW_CHARS): SyncOperation | null => {
     const columns = Object.keys(row);
     if (!columns.length) return null;
     const params = columns.map(column => row[column] ?? null);
-    if (JSON.stringify(params).length > MAX_SNAPSHOT_ROW_CHARS) return null;
+    if (JSON.stringify(params).length > maxChars) return null;
     return {
         id: crypto.randomUUID(), deviceId: getDeviceId(), kind: 'snapshot', table, columns, params, commandVersion: 1,
         tenantId: activeConfig?.tenantId || '', entityId: String(row.id || ''),
@@ -523,7 +526,9 @@ const createJournalHealOperations = async () => {
         delete journal[key];
         if (!/^[a-z_][a-z0-9_]*$/iu.test(table) || !isSyncableTable(table) || !(await localTableColumns(table)).has('id')) continue;
         const row = (await sqlite.all<Record<string, unknown>>(`SELECT * FROM ${quoteIdentifier(table)} WHERE id = ?`, [rowId]))[0];
-        const operation = row ? snapshotOperation(table, row, order++, false) : null;
+        // A cópia que segue cada edição não leva fichas grandes (5–8 MB a cada alteração); a reparação pedida pelo
+        // servidor e a cópia inicial levam (MAX_SNAPSHOT_ROW_CHARS).
+        const operation = row ? snapshotOperation(table, row, order++, false, JOURNAL_SNAPSHOT_ROW_CHARS) : null;
         if (operation) operations.push(operation);
     }
     await putOperations(operations);
@@ -704,6 +709,7 @@ const BOOTSTRAP_FILE_TABLES: Record<string, number> = { payment_proofs: 5, credi
 // Uma alteração cifrada pode ter até MAX_OPERATION_BYTES (11,5 MB; base64 ≈ +35%): cerca de 8 MB de dados. Antes o
 // limite era 1,4 MB e as fichas com documentos (BI digitalizado) nunca entravam nas cópias de autocura e reparação.
 const MAX_SNAPSHOT_ROW_CHARS = 8_000_000;
+const JOURNAL_SNAPSHOT_ROW_CHARS = 1_400_000;
 const createBootstrapOperations = async () => {
     if (localStorage.getItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY)) === 'true'
         && localStorage.getItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY)) === 'true'
@@ -1159,6 +1165,67 @@ export const reconcileClients = async (): Promise<{ restaurados: number; fundido
     return { restaurados: plano.restaurados, fundidos: plano.fundidos, religados: plano.religados, reactivados };
 };
 
+// Alterações ilegíveis que nunca o vão ser: cifradas por um dispositivo com um código que ele próprio já trocou (este
+// dispositivo lê as alterações mais recentes dele), muito antigas no histórico, ou guardadas por uma versão anterior
+// (sem origem) há mais de uma hora. Saem da lista deste dispositivo; continuam no servidor e voltam com «Receber tudo
+// de novo da nuvem». As de um dispositivo que continua a cifrar com outra chave ficam e mantêm o «Verificar».
+const READABLE_SEQ_KEY = 'cloud_sync_readable_seq_v1';
+const readReadableSeq = (): Record<string, number> => {
+    try { return JSON.parse(localStorage.getItem(scopedStorageKey(READABLE_SEQ_KEY)) || '{}') || {}; } catch { return {}; }
+};
+const writeReadableSeq = (value: Record<string, number>) => localStorage.setItem(scopedStorageKey(READABLE_SEQ_KEY), JSON.stringify(value));
+const UNREADABLE_OLD_SEQ = 5_000;
+const UNREADABLE_LEGACY_MS = 60 * 60_000;
+export const archiveStaleUnreadable = async (cursor: number) => {
+    const readable = readReadableSeq();
+    const now = Date.now();
+    const stale = (await readAll<EncryptedPending>(UNREADABLE_STORE)).filter(item => {
+        if (item.seq && item.deviceId && (readable[item.deviceId] || 0) > item.seq) return true;
+        if (item.seq) return item.seq < cursor - UNREADABLE_OLD_SEQ;
+        return now - Date.parse(item.createdAt || '') > UNREADABLE_LEGACY_MS;
+    });
+    if (!stale.length) return 0;
+    await deleteOperations(stale.map(item => item.id), UNREADABLE_STORE);
+    console.info(`[CloudSync] ${stale.length} alteração(ões) ilegível(is) antiga(s) arquivada(s): cifradas com um Código de Acesso anterior.`);
+    return stale.length;
+};
+
+// Conflitos que já não têm efeito e se resolvem sozinhos: a alteração condicionada de um cliente apagado
+// definitivamente, e um lançamento contabilístico que já existe aqui com o mesmo identificador (o mesmo movimento
+// recebido outra vez, por outra cadeia).
+export const resolveMootConflicts = async () => {
+    const rows = await sqlite.all<{ id: string; entityType: string; operation: string }>(`SELECT id, entityType, operation FROM sync_conflicts WHERE status = 'pending'`);
+    if (!rows.length) return 0;
+    const tombstones = readTombstones();
+    const now = new Date().toISOString();
+    const statements: SqlTransactionStatement[] = [];
+    for (const row of rows) {
+        let operation: (SyncOperation & { reason?: string }) | null = null;
+        try { operation = JSON.parse(row.operation); } catch { continue; }
+        if (!operation) continue;
+        const reason = String(operation.reason || '');
+        const params = Array.isArray(operation.params) ? operation.params : [];
+        if (/esperadas \d+ altera/iu.test(reason) && params.some(param => tombstones[`clients\u0001${String(param)}`])) {
+            statements.push({ sql: CONFLICT_RESOLVE_SQL, params: ['O cliente foi apagado definitivamente; a alteração já não se aplica.', now, row.id] });
+            continue;
+        }
+        if (row.entityType === 'accounting_entries' && /Cadeia contabil/iu.test(reason)) {
+            const columns = operation.columns || [];
+            const entryId = operation.kind === 'snapshot'
+                ? params[columns.indexOf('id')]
+                : statementRowId(SYNC_SQL_BY_ID.get(String(operation.statementId || '')) || '', params);
+            if (entryId && (await sqlite.all('SELECT 1 AS found FROM accounting_entries WHERE id = ? LIMIT 1', [String(entryId)])).length) {
+                statements.push({ sql: CONFLICT_RESOLVE_SQL, params: ['O lançamento já existe neste dispositivo (o mesmo movimento recebido outra vez).', now, row.id] });
+            }
+        }
+    }
+    if (statements.length) {
+        await sqlite.transaction(statements);
+        console.info(`[CloudSync] ${statements.length} conflito(s) sem efeito resolvido(s) automaticamente.`);
+    }
+    return statements.length;
+};
+
 const emitStatus = (detail: CloudSyncStatus) => {
     lastStatus = detail;
     window.dispatchEvent(new CustomEvent('tango-cloud-sync-status', { detail }));
@@ -1434,17 +1501,27 @@ export const syncCloudNow = async () => {
                 const encrypted = new Map([...retained, ...body.operations].map(item => [item.id, item]));
                 const decodedIds: string[] = [];
                 const unreadable: EncryptedPending[] = [];
+                const readableSeq = readReadableSeq();
                 for (const item of encrypted.values()) {
+                    const origin = item as Partial<EncryptedPending> & { seq?: unknown; deviceId?: unknown };
+                    const seq = Number(origin.seq);
+                    const deviceId = String(origin.deviceId || '');
                     // Uma operação cifrada com uma chave antiga não pode bloquear a sincronização de tudo o resto.
                     try {
                         const decoded = await decryptWithAny(item.payload, readKeys);
-                        const seq = Number((item as { seq?: unknown }).seq);
                         incoming.push(Number.isSafeInteger(seq) && seq > 0 ? { ...decoded, serverSeq: seq } : decoded);
                         decodedIds.push(item.id);
+                        if (deviceId && Number.isSafeInteger(seq) && seq > (readableSeq[deviceId] || 0)) readableSeq[deviceId] = seq;
                     } catch {
-                        unreadable.push({ id: item.id, payload: item.payload, tenantId: config.tenantId, url: config.url, createdAt: new Date().toISOString() });
+                        // A data e a origem ficam as da primeira vez (antes renovava-se a cada tentativa e nunca envelhecia).
+                        unreadable.push({
+                            id: item.id, payload: item.payload, tenantId: config.tenantId, url: config.url,
+                            createdAt: origin.createdAt || new Date().toISOString(),
+                            ...(deviceId ? { deviceId } : {}), ...(Number.isSafeInteger(seq) && seq > 0 ? { seq } : {}),
+                        });
                     }
                 }
+                writeReadableSeq(readableSeq);
                 // Guardar a carga cifrada antes de avançar o cursor: uma chave corrigida pode recuperá-la.
                 await putOperations(unreadable, UNREADABLE_STORE);
                 const result = await applyOperations(incoming, !body.hasMore);
@@ -1457,7 +1534,9 @@ export const syncCloudNow = async () => {
                 hasMoreRemote = body.hasMore;
                 if (!body.hasMore && !more) break;
                 // Histórico grande (navegador novo, «Receber tudo de novo»): mostra quanto já chegou.
-                emitStatus({ state: 'syncing', pulled: totalPulled, pushed: totalPushed, conflicts: totalConflicts });
+                const latestSeq = Number(body.latestSeq) || 0;
+                const progress = latestSeq > 0 ? Math.max(0, Math.min(99, Math.floor((cursor / latestSeq) * 100))) : undefined;
+                emitStatus({ state: 'syncing', pulled: totalPulled, pushed: totalPushed, conflicts: totalConflicts, progress });
             }
             if (usersRoster) lastUsersRoster = usersRoster;
 
@@ -1497,6 +1576,8 @@ export const syncCloudNow = async () => {
                     console.warn('[CloudSync] Reconciliação de clientes:', error);
                 }
             }
+            await resolveMootConflicts().catch(error => console.warn('[CloudSync] Conflitos sem efeito:', error));
+            if (!hasMoreRemote) await archiveStaleUnreadable(cursor).catch(error => console.warn('[CloudSync] Alterações ilegíveis antigas:', error));
             // Primeiro recebe o perfil existente. Só depois completa os campos ainda não partilhados:
             // uma instalação nova/vazia nunca substitui a identidade que já está na nuvem.
             let identityError: string | undefined;

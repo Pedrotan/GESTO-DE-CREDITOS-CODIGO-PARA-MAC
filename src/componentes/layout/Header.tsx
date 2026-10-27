@@ -85,7 +85,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   const attentionCount = (cloudStatus.issues || []).filter(issue => issue.attention).reduce((total, issue) => total + issue.count, 0);
   const cloudStatusLabel = cloudStatus.state === 'synced' ? 'Sincronizado'
     : cloudStatus.state === 'error' ? (pendingLabel || 'Sem sincronizar')
-      : cloudStatus.state === 'syncing' ? 'A sincronizar'
+      : cloudStatus.state === 'syncing' ? (cloudStatus.progress !== undefined ? `A receber ${cloudStatus.progress}%` : 'A sincronizar')
         : cloudStatus.state === 'attention' ? `Verificar${attentionCount ? ` (${attentionCount})` : ''}`
           : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
   const lastSyncText = cloudStatus.at ? ` Última tentativa: ${new Date(cloudStatus.at).toLocaleTimeString('pt-AO')}.` : '';

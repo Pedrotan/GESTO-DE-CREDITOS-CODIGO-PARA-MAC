@@ -284,10 +284,15 @@ export default async function handler(req, res) {
     await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics, outcome: { synced: true, cursor: nextCursor } });
     // Integridade: só na volta com diagnóstico (a primeira de cada sincronização).
     const integrity = body.diagnostics ? await syncIntegrity(sql, tenantHash, deviceId, body.diagnostics.integrity) : undefined;
+    // Com mais por receber, a última posição do histórico: o dispositivo mostra a percentagem já recebida.
+    const latestSeq = hasMore
+      ? Number((await sql('SELECT MAX(seq) AS latest FROM tango_sync_operations WHERE tenant_hash = $1', [tenantHash]))[0]?.latest || nextCursor)
+      : nextCursor;
     return send(res, 200, {
       success: true,
       cursor: nextCursor,
       hasMore,
+      latestSeq,
       ...(integrity ? { integrity } : {}),
       ...(usersRoster !== undefined ? { usersRoster } : {}),
       operations: page

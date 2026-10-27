@@ -60,7 +60,7 @@ export const syncIssues = (counts: SyncCounts): SyncIssue[] => {
         detail: 'A mesma pessoa foi criada em separado em dois dispositivos. As mensagens do chat e o histórico de um não aparecem no outro até os unificar.',
     });
     if (counts.integrityMissing) issues.push({
-        kind: 'integrityMissing', count: counts.integrityMissing, attention: true,
+        kind: 'integrityMissing', count: counts.integrityMissing, attention: false,
         title: plural(counts.integrityMissing, 'tabela com registos diferentes dos outros dispositivos', 'tabelas com registos diferentes dos outros dispositivos'),
         detail: 'A verificação de integridade encontrou registos em falta ou a mais. Os em falta são pedidos a outro dispositivo e entram sozinhos.',
     });
@@ -82,9 +82,12 @@ export const syncIssues = (counts: SyncCounts): SyncIssue[] => {
     return issues;
 };
 
-/** «synced» só sem nada pendente nem retido; «attention» quando há algo para ver; «pending» quando só falta tempo. */
+/**
+ * «synced» só sem nada pendente nem retido; «attention» quando há algo para ver; «pending» quando só falta tempo (por
+ * enviar ou por receber). As notas da verificação de integridade (corrigidas sozinhas) não impedem o «Sincronizado».
+ */
 export const syncHealth = (counts: SyncCounts): 'synced' | 'pending' | 'attention' => {
     const issues = syncIssues(counts);
     if (issues.some(issue => issue.attention)) return 'attention';
-    return issues.length ? 'pending' : 'synced';
+    return issues.some(issue => issue.kind === 'pending' || issue.kind === 'waiting') ? 'pending' : 'synced';
 };

@@ -603,6 +603,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM warranties WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE id = ?",
+  "SELECT 1 AS found FROM accounting_entries WHERE id = ? LIMIT 1",
   "SELECT 1 AS ok",
   "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?",
   "SELECT COALESCE(SUM(grossTotalMinor), 0) AS total FROM fiscal_documents WHERE documentType = 'NC' AND referenceDocumentNo = ?",
@@ -715,6 +716,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending'",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5",
+  "SELECT id, entityType, operation FROM sync_conflicts WHERE status = 'pending'",
   "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100",
   "SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome",
   "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
@@ -3391,6 +3393,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM warranties WHERE id = ?"
   ],
   [
+    "6823e64a1ac0800156b11833ff575cd07ac9d15d759f71f00d60a5f9f17a1726",
+    "SELECT 1 AS found FROM accounting_entries WHERE id = ? LIMIT 1"
+  ],
+  [
     "90ca954a9febd2d81d7a73ecfef56f93ba114d5421d827e9583a919c7538f18d",
     "SELECT 1 AS ok"
   ],
@@ -3837,6 +3843,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "a446576f662ca1a898bf08ea15d902dee6f59cd51c6a8bf9489af753f59be6bf",
     "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5"
+  ],
+  [
+    "fb07e36183e757ef757de789738a182a253b17fb10acf5fe405fa743813190a8",
+    "SELECT id, entityType, operation FROM sync_conflicts WHERE status = 'pending'"
   ],
   [
     "c8235665d1c2ef00849d4d1bc120f5f9b3f39f126a47cdb580d8a51b6c677fb5",

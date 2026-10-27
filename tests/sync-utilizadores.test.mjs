@@ -434,6 +434,33 @@ test('carga ilegível fica retida após avançar o cursor e recupera com a chave
     }
 });
 
+test('ilegível antiga de um dispositivo que já cifra com o código actual sai sozinha da lista («Sincronizado»)', async () => {
+    server.ops = [];
+    server.rosters.clear();
+    const source = useDevice({ electronAPI: desktopApi });
+    source.run(`INSERT INTO users (id, name, email, password, role, createdAt)
+        VALUES ('antigo', 'Antigo', 'antigo@empresa.ao', 'hash', 'admin', '2026-01-01')`);
+    const old = await desktopApi(source).syncUsersPayload({ apiKey: 'TG-ZZZZ-YYYY', tenantId: TENANT, deviceId: 'pc-antigo', knownIds: [] });
+    server.ops.push({ seq: ++server.seq, tenant_hash: sha256(TENANT), operation_id: old.id, device_id: 'pc-antigo', payload: old.payload });
+    useDevice({ electronAPI: desktopApi });
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    try {
+        assert.equal((await cloud.syncCloudNow()).skipped, 1);
+        assert.equal(cloud.getLastCloudSyncStatus().state, 'attention', 'enquanto o dispositivo só enviou com a chave antiga, fica «Verificar»');
+        // O mesmo computador passou a usar o código actual: as alterações novas dele lêem-se aqui.
+        source.run(`UPDATE users SET name = 'Antigo Actualizado' WHERE id = 'antigo'`);
+        const current = await desktopApi(source).syncUsersPayload({ apiKey: SERVER_CODE, tenantId: TENANT, deviceId: 'pc-antigo', knownIds: [] });
+        server.ops.push({ seq: ++server.seq, tenant_hash: sha256(TENANT), operation_id: current.id, device_id: 'pc-antigo', payload: current.payload });
+        assert.equal((await cloud.syncCloudNow()).success, true);
+        const status = cloud.getLastCloudSyncStatus();
+        assert.equal(status.skipped, 0, 'a ilegível antiga foi arquivada neste dispositivo');
+        assert.ok(!status.issues.some(issue => issue.kind === 'unreadable'));
+        assert.notEqual(status.state, 'attention');
+    } finally {
+        cloud.stopCloudSync();
+    }
+});
+
 test('servidor aceita um lote grande (100 alterações + utilizadores + resto da transacção) em vez de bloquear o dispositivo', async () => {
     server.ops = [];
     const operations = Array.from({ length: 150 }, (_, index) => ({ id: nodeCrypto.randomUUID(), deviceId: 'pc-lote', payload: `cifrado-${index}` }));
