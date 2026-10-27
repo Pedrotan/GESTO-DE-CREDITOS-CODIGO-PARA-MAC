@@ -70,7 +70,7 @@ const printPdfWithIframe = (pdfUrl: string, onError?: () => void) => {
  * visualizador de PDF do Chromium numa janela escondida saía todo preto em algumas impressoras (o fundo escuro
  * do visualizador); as imagens saem iguais ao documento em qualquer impressora, térmicas incluídas (203 ppp).
  */
-export const rasterizePdfForPrint = async (pdfBytes: Uint8Array, dpi = 203) => {
+export const rasterizePdfForPrint = async (pdfBytes: Uint8Array, dpi = 203, mime: 'image/png' | 'image/jpeg' = 'image/png') => {
   const pdfjs = await import('pdfjs-dist');
   const worker = await import('pdfjs-dist/build/pdf.worker.mjs?url');
   pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
@@ -90,7 +90,7 @@ export const rasterizePdfForPrint = async (pdfBytes: Uint8Array, dpi = 203) => {
       context.fillStyle = '#ffffff';
       context.fillRect(0, 0, canvas.width, canvas.height);
       await page.render({ canvasContext: context, viewport, background: '#ffffff' } as any).promise;
-      pages.push({ dataUrl: canvas.toDataURL('image/png'), widthMm: (base.width * 25.4) / 72, heightMm: (base.height * 25.4) / 72 });
+      pages.push({ dataUrl: mime === 'image/jpeg' ? canvas.toDataURL('image/jpeg', 0.85) : canvas.toDataURL('image/png'), widthMm: (base.width * 25.4) / 72, heightMm: (base.height * 25.4) / 72 });
       page.cleanup();
     }
   } finally {

@@ -79,6 +79,10 @@ import { CreditForm } from '@/componentes/forms/CreditForm';
 import { CREDIT_DIALOG_CONTENT_CLASS, CREDIT_DIALOG_HEADER_CLASS } from '@/componentes/forms/credit-dialog-styles';
 import { Client, Credit } from '@/tipos/credito';
 import { generateClientInfoSheetPDF, generateClientProfilePDF } from '@/bibliotecas/pdf';
+import { generateClientProfilePDFWithDocuments } from '@/bibliotecas/pdf-anexos-cliente';
+import { buildClientRows } from '@/bibliotecas/relatorio-clientes';
+import { RelatoriosClientes } from '@/componentes/clientes/RelatoriosClientes';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { ServicoEmail } from '@/servicos/ServicoEmail';
 
 import { useToast } from "@/componentes/ui/use-toast";
@@ -326,6 +330,10 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
         exportToExcel(linhas, `clientes-bi-expirado-${luandaTodayKey()}`);
     };
 
+    // Linhas dos relatórios (estado, BI, créditos em curso e em atraso, valor em dívida) de toda a carteira.
+    const reportRows = useMemo(() => buildClientRows(categoryClients, credits, luandaTodayKey(), parametrosBI.diasAviso),
+        [categoryClients, credits, parametrosBI.diasAviso]);
+
     const totalPages = Math.max(1, Math.ceil(filteredClients.length / itemsPerPage));
     const paginatedClients = useMemo(() => {
         const startIndex = (currentPage - 1) * itemsPerPage;
@@ -349,22 +357,22 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
         setIsDialogOpen(true);
     };
 
-    const confirmDownload = () => {
-        if (clientForDownload) {
-            const clientCredits = credits.filter(c => c.clientId === clientForDownload.id);
-            const creditIds = clientCredits.map(c => c.id);
-            const clientPayments = payments.filter(p => creditIds.includes(p.creditId));
-
-            generateClientProfilePDF(
-                clientForDownload,
-                clientCredits,
-                clientPayments,
-                companySettings,
-                user?.name,
-                { includeInterest }
-            );
+    const [isGeneratingProfile, setIsGeneratingProfile] = useState(false);
+    // Ficha com os documentos anexados do cliente visíveis no fim (imagens e páginas dos PDF).
+    const confirmDownload = async () => {
+        if (!clientForDownload) return;
+        const clientCredits = credits.filter(c => c.clientId === clientForDownload.id);
+        const creditIds = clientCredits.map(c => c.id);
+        const clientPayments = payments.filter(p => creditIds.includes(p.creditId));
+        setIsGeneratingProfile(true);
+        try {
+            await generateClientProfilePDFWithDocuments(clientForDownload, clientCredits, clientPayments, companySettings, user?.name, { includeInterest });
             setIsDownloadOptionsOpen(false);
             setClientForDownload(undefined);
+        } catch (error) {
+            toast({ title: 'Não foi possível gerar a ficha', description: error instanceof Error ? error.message : 'Tente de novo.', variant: 'destructive' });
+        } finally {
+            setIsGeneratingProfile(false);
         }
     };
 
@@ -680,53 +688,61 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
 
     return (
         <MainLayout title="Clientes" subtitle="Gestão de clientes e limites de crédito">
-            <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="relative w-full sm:w-96">
-                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <Input
-                        placeholder="Pesquisar por nome ou NIF..."
-                        value={searchTerm}
-                        onChange={(e) => setSearchTerm(e.target.value)}
-                        className="pl-10"
-                    />
+            {/* Barra de pesquisa, filtros e acções: tudo alinhado numa só faixa, com o mesmo estilo. */}
+            <div className="mb-6 flex flex-col gap-3 rounded-2xl border border-border/70 bg-card p-3 shadow-sm xl:flex-row xl:items-center">
+                <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center">
+                    <div className="relative w-full sm:max-w-sm">
+                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                            placeholder="Pesquisar por nome ou NIF..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="h-10 rounded-xl border-border/70 bg-background pl-10 shadow-none"
+                        />
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 sm:flex">
+                        <Select value={tableStatus} onValueChange={(value) => setTableStatus(value as typeof tableStatus)}>
+                            <SelectTrigger aria-label="Filtrar por estado" className={`h-10 rounded-xl border-border/70 font-medium sm:w-52 ${tableStatus !== 'all' ? 'border-primary/60 bg-primary/5 text-primary' : 'bg-background'}`}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos os estados</SelectItem>
+                                {(Object.keys(CLIENT_STATUS_LABELS) as ClientDisplayStatus[]).map(key => <SelectItem key={key} value={key}>{CLIENT_STATUS_LABELS[key]}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                        <Select value={biFilter} onValueChange={(value) => setBiFilter(value as typeof biFilter)}>
+                            <SelectTrigger aria-label="Filtrar pela validade do BI" className={`h-10 rounded-xl border-border/70 font-medium sm:w-52 ${biFilter !== 'all' ? 'border-primary/60 bg-primary/5 text-primary' : 'bg-background'}`}>
+                                <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Validade do BI: todos</SelectItem>
+                                <SelectItem value="contactar">Expirado ou a expirar</SelectItem>
+                                {(['valido', 'a_expirar', 'expirado', 'sem_data'] as EstadoBI[]).map(key => <SelectItem key={key} value={key}>{ROTULO_ESTADO_BI[key]}</SelectItem>)}
+                            </SelectContent>
+                        </Select>
+                    </div>
                 </div>
-                <select
-                    aria-label="Filtrar por estado"
-                    value={tableStatus}
-                    onChange={(e) => setTableStatus(e.target.value as typeof tableStatus)}
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm sm:w-56"
-                >
-                    <option value="all">Todos os estados</option>
-                    {(Object.keys(CLIENT_STATUS_LABELS) as ClientDisplayStatus[]).map(key => <option key={key} value={key}>{CLIENT_STATUS_LABELS[key]}</option>)}
-                </select>
-                <select
-                    aria-label="Filtrar pela validade do BI"
-                    value={biFilter}
-                    onChange={(e) => setBiFilter(e.target.value as typeof biFilter)}
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm sm:w-48"
-                >
-                    <option value="all">Validade do BI: todos</option>
-                    <option value="contactar">Expirado ou a expirar</option>
-                    {(['valido', 'a_expirar', 'expirado', 'sem_data'] as EstadoBI[]).map(key => <option key={key} value={key}>{ROTULO_ESTADO_BI[key]}</option>)}
-                </select>
-                <div className="flex flex-wrap gap-2">
-                    <Button variant="outline" className="gap-2" onClick={handleDownloadTemplate}>
+                <div className="flex flex-wrap items-center gap-2 xl:justify-end">
+                    <RelatoriosClientes rows={reportRows} categoryLabel={labels.singular === 'Cliente' ? 'Clientes' : labels.plural.replace(/^./, c => c.toUpperCase())}
+                        settings={companySettings} user={user ? { id: user.id, name: user.name } : null} onExportBIContacts={exportarBIParaContactar} />
+                    <Button variant="outline" className="h-10 gap-2 rounded-xl border-border/70 bg-card font-semibold shadow-sm hover:bg-muted" onClick={handleDownloadTemplate}>
                         <Download className="h-4 w-4" />
                         Modelo
                     </Button>
                     <div className="relative">
-                        <Button variant="outline" className="gap-2 pointer-events-none">
+                        <Button variant="outline" className="pointer-events-none h-10 gap-2 rounded-xl border-border/70 bg-card font-semibold shadow-sm">
                             <Upload className="h-4 w-4" />
                             Importar
                         </Button>
                         <Input
                             type="file"
                             accept=".xlsx, .xls"
-                            className="absolute inset-0 opacity-0 cursor-pointer"
+                            aria-label="Importar clientes de um ficheiro Excel"
+                            className="absolute inset-0 cursor-pointer opacity-0"
                             onChange={handleImportExcel}
                         />
                     </div>
-                    <Button className="gap-2" onClick={handleAddNew}>
+                    <Button className="h-10 gap-2 rounded-xl font-semibold shadow-md" onClick={handleAddNew}>
                         <Plus className="h-4 w-4" />
                         {labels.novo}
                     </Button>
@@ -1293,7 +1309,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     </div>
                     <DialogFooter>
                         <Button variant="outline" onClick={() => setIsDownloadOptionsOpen(false)}>Cancelar</Button>
-                        <Button onClick={confirmDownload}>Gerar PDF</Button>
+                        <Button onClick={() => void confirmDownload()} disabled={isGeneratingProfile}>{isGeneratingProfile ? 'A juntar os anexos…' : 'Gerar PDF'}</Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
