@@ -33,6 +33,25 @@ const send = (res, status, body) => {
   res.json(body);
 };
 
+/**
+ * Alterações gravadas com outra forma do identificador da mesma empresa: passam para o histórico da empresa registada,
+ * com números novos (para os outros dispositivos as receberem) e com o bloqueio das duas.
+ */
+const adoptStream = async (sql, fromHash, toHash) => {
+  const [pending] = await sql(`SELECT 1 AS found FROM tango_sync_operations WHERE tenant_hash = $1 LIMIT 1`, [fromHash]);
+  if (!pending) return;
+  await sql(
+    `${tenantLockCte('$1')}
+     INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload, created_at)
+     SELECT $1, o.operation_id, o.device_id, o.payload, o.created_at FROM tenant_lock, tango_sync_operations o
+     WHERE o.tenant_hash = $2 ORDER BY o.seq
+     ON CONFLICT (tenant_hash, operation_id) DO NOTHING`, [toHash, fromHash]);
+  await sql(
+    `${tenantLockCte('$1')}
+     DELETE FROM tango_sync_operations USING tenant_lock WHERE tango_sync_operations.tenant_hash = $1`, [fromHash]);
+  console.warn(`[sync] Histórico ${fromHash.slice(0, 12)} juntado ao da empresa registada ${toHash.slice(0, 12)}.`);
+};
+
 /** Abre o canal de avisos de uma empresa, com a mesma autenticação da sincronização (código ou sessão da web). */
 const openEvents = async (req, res, databaseUrl) => {
   const query = req.query || Object.fromEntries(new URL(String(req.url || ''), 'http://local').searchParams);
@@ -43,16 +62,18 @@ const openEvents = async (req, res, databaseUrl) => {
   }
   const client = neon(databaseUrl);
   const sql = (text, params) => client.query(text, params);
+  let canonicalHash = sha256(tenantId);
   try {
     if (!await enforceDistributedRateLimit(sql, req, res, { limit: 30, windowMs: 60_000, scope: 'sync-events' })) return;
     const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const auth = await authorizeTenant(sql, tenantId, req.headers['x-sync-passkey'] || bearer, req);
     if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code, message: auth.message });
+    canonicalHash = auth.tenantHash || sha256(tenantId);
   } catch (error) {
     console.error('[sync][events]', error);
     return send(res, 500, { success: false, message: 'O servidor não conseguiu validar o acesso.' });
   }
-  return openSyncEvents(req, res, sha256(tenantId), deviceId);
+  return openSyncEvents(req, res, canonicalHash, deviceId);
 };
 
 export default async function handler(req, res) {
@@ -81,7 +102,7 @@ export default async function handler(req, res) {
   if (!tenantId || tenantId.length > 200 || !deviceId || deviceId.length > 100) {
     return send(res, 400, { success: false, message: 'Identificação da sincronização inválida.' });
   }
-  const tenantHash = sha256(tenantId);
+  let tenantHash = sha256(tenantId);
   const client = neon(databaseUrl);
   const sql = (text, params) => client.query(text, params);
   try {
@@ -96,6 +117,10 @@ export default async function handler(req, res) {
   try {
     const auth = await authorizeTenant(sql, tenantId, providedKey, req);
     if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code, message: auth.message });
+    // Histórico da empresa registada (não do texto enviado): um NIF noutro formato não abre uma «empresa» à parte.
+    const sentHash = tenantHash;
+    tenantHash = auth.tenantHash || tenantHash;
+    if (sentHash !== tenantHash) await adoptStream(sql, sentHash, tenantHash);
     if (!await enforceDistributedRateLimit(sql, req, res, {
       limit: 600, windowMs: 60_000, scope: 'sync-tenant', subject: tenantId, dimension: 'subject'
     })) return;

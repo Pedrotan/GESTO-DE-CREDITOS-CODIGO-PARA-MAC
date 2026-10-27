@@ -439,6 +439,9 @@ const noteTombstones = (statements: Array<{ sql: string; params?: unknown[] }>) 
     const kept = Object.entries(tombstones).filter(([, at]) => now - at < TOMBSTONE_MAX_AGE_MS).sort((a, b) => a[1] - b[1]).slice(-TOMBSTONES_MAX);
     localStorage.setItem(scopedStorageKey(TOMBSTONES_KEY), JSON.stringify(Object.fromEntries(kept)));
 };
+/** O registo foi apagado (aqui ou noutro dispositivo) nos últimos 90 dias? */
+export const isTombstoned = (table: string, rowId: string) => Boolean(readTombstones()[`${table}${rowId}`]);
+
 /** Tira das alterações recebidas as cópias de registos apagados e regista as eliminações que chegaram. */
 const applyTombstones = (groups: RemoteGroup[]): RemoteGroup[] => {
     noteTombstones(groups.flatMap(group => group.operations).flatMap(operation => {
@@ -731,6 +734,7 @@ const applyGroups = async (groups: RemoteGroup[]): Promise<ApplyResult> => {
             sqlById: SYNC_SQL_BY_ID,
             tableColumns: localTableColumns,
             retainedForRow: (table, rowId) => sqlite.all<{ id: string; operation: string }>(RETAINED_FOR_ROW_SQL, [table, rowId, JSON.stringify(rowId)]),
+            rowExists: async (table, rowId) => (await sqlite.all(`SELECT 1 AS found FROM ${quoteIdentifier(table)} WHERE id = ? LIMIT 1`, [rowId])).length > 0,
             transaction: statements => sqlite.transaction(statements as SqlTransactionStatement[]),
         });
     } finally {

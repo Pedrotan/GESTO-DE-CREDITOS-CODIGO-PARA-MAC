@@ -60,7 +60,7 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
     if (req) await registerAuthFailure(sql, req, { scope: 'tenant_key', subject: trusted ? '' : tenantId, type: 'tenant_key_failed', title: 'Chave de sincronização de empresa errada', details });
     return result;
   };
-  const rows = await sql('SELECT key_hash, status, expires_at, access_code FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
+  const rows = await sql('SELECT key_hash, status, expires_at, access_code, tenant_hash FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
   // Chave global de administração: apenas a configurada no servidor, nunca um valor fixo no código.
   // Uma chave global que já foi exposta é ignorada (como se não estivesse configurada).
   const configuredGlobal = String(process.env.TANGO_SYNC_SECRET || '').trim();
@@ -74,7 +74,7 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
         VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
         ON CONFLICT (tenant_id) DO UPDATE SET last_sync_at = NOW()
       `, [tenantId, sha256(tenantId), `Empresa ${tenantId}`, sha256(providedKey)]);
-      return { ok: true };
+      return { ok: true, tenantHash: sha256(tenantId) };
     }
     return fail({ ok: false, status: 403, message: 'Empresa não registada para sincronização.' }, `Tentativa de sincronizar a empresa ${tenantId}, que não está registada.`);
   }
@@ -108,5 +108,7 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
     await clearAuthFailures(sql, { scope: 'tenant_key', subject: tenantId });
     await rememberTrustedClient(sql, req, tenantId);
   }
-  return { ok: true };
+  // Identificação canónica da empresa (a registada no Tango Master): todos os dispositivos da mesma empresa partilham
+  // o mesmo histórico, mesmo que enviem o NIF noutro formato (maiúsculas, por exemplo).
+  return { ok: true, tenantHash: tenant.tenant_hash || sha256(tenantId) };
 };

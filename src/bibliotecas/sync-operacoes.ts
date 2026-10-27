@@ -227,6 +227,26 @@ export type RemoteDeps = {
     tableColumns: (table: string) => Promise<Set<string>>;
     /** Alterações retidas candidatas para um registo (RETAINED_FOR_ROW_SQL). Sem isto a autocura só cria o que falta. */
     retainedForRow?: (table: string, rowId: string) => Promise<Array<{ id: string; operation: string }>>;
+    /** O registo existe aqui? (para reconhecer uma transacção que já foi aplicada e voltou a chegar) */
+    rowExists?: (table: string, rowId: string) => Promise<boolean>;
+};
+
+/**
+ * A transacção já foi aplicada aqui? Basta que uma das suas inserções simples (não «OR IGNORE»/«OR REPLACE») exista
+ * com o mesmo identificador: a transacção é tudo ou nada, por isso, se essa linha existe, as outras partes também
+ * foram gravadas. Acontece quando o histórico volta a chegar (navegador reconstruído, reprocessamento, repetição).
+ */
+export const groupAlreadyApplied = async (group: RemoteGroup, deps: RemoteDeps) => {
+    if (!deps.rowExists) return false;
+    for (const operation of group.operations) {
+        if (operation.kind !== 'statement' || !operation.statementId) continue;
+        const sql = deps.sqlById.get(operation.statementId);
+        if (!sql || !/^\s*INSERT\s+INTO\b/iu.test(normalizeSqlText(sql))) continue;
+        const table = mutationTable(sql);
+        const rowId = table ? statementRowId(sql, operation.params || []) : null;
+        if (table && rowId && isSyncableTable(table) && await deps.rowExists(table, rowId)) return true;
+    }
+    return false;
 };
 
 export const buildRemoteStatements = async (
@@ -330,6 +350,15 @@ export const applyRemoteGroups = async (
             // nunca um conflito para alguém rever. A próxima cópia ou a alteração original tratam do registo.
             // Excepção: uma cópia de uma versão mais recente fica retida como as outras alterações dessa versão.
             if (group.operations.every(operation => operation.heal) && !isOtherVersionReason(reason)) continue;
+            // Transacção que já tinha sido aplicada aqui e voltou a chegar: não é conflito (e resolve os antigos).
+            if (!isOtherVersionReason(reason) && await groupAlreadyApplied(group, deps).catch(() => false)) {
+                applied += group.operations.length;
+                if (group.resolvesConflictIds?.length) {
+                    const now = new Date().toISOString();
+                    await deps.transaction(group.resolvesConflictIds.map(id => ({ sql: CONFLICT_RESOLVE_SQL, params: ['Já estava aplicado neste dispositivo.', now, id] })));
+                }
+                continue;
+            }
             conflicts += group.operations.length;
             // Conflitos já existentes (reprocessamento) continuam pendentes; os novos são registados.
             if (!group.resolvesConflictIds?.length) {

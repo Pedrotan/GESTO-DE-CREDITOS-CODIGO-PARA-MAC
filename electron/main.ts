@@ -800,7 +800,9 @@ const MAX_SQL_LENGTH = 2e5;
 const MAX_SQL_STATEMENTS = 100;
 const MAX_TRANSACTION_STATEMENTS = 1e3;
 const MAX_PARAM_COUNT = 500;
-const MAX_STRING_PARAM_LENGTH = 1e6;
+// Texto de um parâmetro SQL: os clientes guardam documentos anexados (BI, comprovativos) em base64 e a
+// sincronização traz alterações até 12 MB; com 1 MB a ligação de um computador novo parava.
+const MAX_STRING_PARAM_LENGTH = 16e6;
 const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
 const FORBIDDEN_SQL_PATTERN = /\b(ATTACH|DETACH|LOAD_EXTENSION)\b|\bPRAGMA\s+(key|rekey|hexkey|textkey|cipher|cipher_|legacy)\b/i;
 const READ_KEYWORDS = /* @__PURE__ */ new Set(["SELECT", "WITH", "PRAGMA"]);
@@ -3669,6 +3671,10 @@ app.whenReady().then(async () => {
         return columnsCache.get(table)!;
       },
       retainedForRow: async (table, rowId) => ((await runQuery("query", RETAINED_FOR_ROW_SQL, [table, rowId, JSON.stringify(rowId)])) || []) as Array<{ id: string; operation: string }>,
+      rowExists: async (table, rowId) => {
+        if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return false;
+        return Boolean(await runQuery("get", `SELECT 1 AS found FROM "${table}" WHERE id = ? LIMIT 1`, [rowId]));
+      },
       transaction: async (statements) => runTransaction(validateDbTransaction(statements))
     });
     if (result.applied) { sealAfterWrite("remote"); sealAuditAfterWrite(); }

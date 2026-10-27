@@ -80,7 +80,9 @@ const MAX_SQL_LENGTH = 200_000;
 const MAX_SQL_STATEMENTS = 100;
 const MAX_TRANSACTION_STATEMENTS = 1_000;
 const MAX_PARAM_COUNT = 500;
-const MAX_STRING_PARAM_LENGTH = 1_000_000;
+// Texto de um parâmetro SQL: os clientes guardam documentos anexados (BI, comprovativos) em base64 e a
+// sincronização traz alterações até 12 MB; com 1 MB a ligação de um computador novo parava.
+const MAX_STRING_PARAM_LENGTH = 16_000_000;
 const FORBIDDEN_SQL_PATTERN = /\b(ATTACH|DETACH|LOAD_EXTENSION)\b|\bPRAGMA\s+(key|rekey|hexkey|textkey|cipher|cipher_|legacy)\b/i;
 const READ_KEYWORDS = new Set(['SELECT', 'WITH', 'PRAGMA']);
 const WRITE_KEYWORDS = new Set(['INSERT', 'UPDATE', 'DELETE', 'REPLACE', 'CREATE', 'ALTER', 'DROP', 'VACUUM', 'REINDEX', 'ANALYZE', 'PRAGMA']);

@@ -34,6 +34,8 @@ export type ContractRow = {
     id: string;
     number: string;
     startKey: string;
+    /** Data de celebração do contrato (para os períodos e relatórios). */
+    signedKey: string;
     endKey: string;
     clientId: string;
     clientName: string;
@@ -114,6 +116,7 @@ export function buildContractRows(input: {
         const client = clients.get(contract.clientId);
         const state = stateOf(contract, row);
         const startKey = luandaDateKey(contract.startDate || contract.createdAt);
+        const signedKey = luandaDateKey(contract.createdAt || contract.startDate);
         const endKey = luandaDateKey(contract.endDate || row?.credit.dueDate);
         const amountMinor = row ? row.grantedMinor : toMinor(contract.value);
         const settled = state === 'liquidado' || state === 'terminado';
@@ -126,7 +129,7 @@ export function buildContractRows(input: {
         return {
             contract, portfolio: row, id: contract.id,
             number: input.numbers.get(contract.id) || contract.id,
-            startKey, endKey,
+            startKey, signedKey, endKey,
             clientId: contract.clientId, clientName: contract.clientName || row?.clientName || '—',
             nif: client?.nif || contract.clientNif || '', phone: client?.phone || '',
             product: row?.product || '—', managerId: row?.managerId || '', managerName: row?.managerName || '—',

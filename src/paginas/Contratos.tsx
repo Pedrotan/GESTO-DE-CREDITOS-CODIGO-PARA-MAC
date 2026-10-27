@@ -108,7 +108,9 @@ const statusConfig: Record<string, { label: string; variant: BadgeVariant }> = {
 
 type EditorState = { open: boolean; title: string; clauses: string; dirty: boolean; edited: boolean };
 
-const contractDate = (contract: any) => contract.startDate || contract.createdAt;
+// Data de celebração (quando o contrato foi feito, na aprovação). A data de início do crédito pode ser anterior (ex.:
+// um mês antes da 1.ª prestação) e punha um contrato aprovado em Outubro no mês de Setembro.
+const contractDate = (contract: any) => contract.createdAt || contract.startDate;
 
 export default function Contracts() {
     const { contracts, companySettings, clients, credits, deletedCredits, updateCompanySettings, addDocumentToClient, deleteDocumentFromClient, updateContract, deleteCredit, refreshData } = useData();

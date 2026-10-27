@@ -5,7 +5,13 @@ import { db } from '@/bibliotecas/bd';
 import { toDateKey } from '@/bibliotecas/periodos';
 import { latestCollectionEvents } from '@/bibliotecas/cobranca-operacional';
 import { ServicoCobrancaOperacional } from '@/servicos/ServicoCobrancaOperacional';
+import { isTombstoned } from '@/servicos/ServicoSincronizacaoCloud';
+import { fnv1a } from '@/bibliotecas/integridade-sync';
 let running=false;
+// Um lembrete por pessoa e por dia, em todos os dispositivos: o identificador usa o email (o mesmo em todo o lado,
+// mesmo que o utilizador tenha IDs diferentes) e não volta a ser criado depois de visto ou apagado.
+const reminderId=(email:string,userId:string,day:string)=>'collection-reminder:'+(email?fnv1a(email.trim().toLowerCase()).toString(16):userId)+':'+day;
+const CREATED_KEY='tango_collection_reminder_created';
 export function LembretesCobranca() {
     const {user}=useAuth(),{credits,isDataLoading,addNotification}=useData();
     useEffect(()=>{
@@ -14,8 +20,10 @@ export function LembretesCobranca() {
         const check=async()=>{
             if(running || stopped)return;running=true;
             try{
-                const day=toDateKey(new Date()),id='collection-reminder:'+user.id+':'+day;
-                if(await db.get('SELECT id FROM notifications WHERE id = ?',[id]))return;
+                const day=toDateKey(new Date()),id=reminderId(String(user.email||''),user.id,day);
+                let created='';try{created=localStorage.getItem(CREATED_KEY)||'';}catch{/* sem armazenamento */}
+                if(created===id || isTombstoned('notifications',id))return;
+                if(await db.get('SELECT id FROM notifications WHERE id = ?',[id])){try{localStorage.setItem(CREATED_KEY,id);}catch{/* sem armazenamento */}return;}
                 const assignments=latestCollectionEvents(await ServicoCobrancaOperacional.list(),'assignment');
                 const allowed=new Set(credits.filter(c=>!c.deletedAt && !['pending_approval','rejected','cancelled','paid'].includes(c.status) &&
                     (user.role!=='manager' || (assignments.get(c.id)?.agentId || c.requestedBy || c.usuario_id)===user.id)).map(c=>c.id));
@@ -25,6 +33,7 @@ export function LembretesCobranca() {
                     const remaining=Number(i.principalMinor)+Number(i.interestMinor)+Number(i.lateInterestMinor || 0)-Number(i.paidPrincipalMinor || 0)-Number(i.paidInterestMinor || 0)-Number(i.paidLateInterestMinor || 0);
                     return allowed.has(i.creditId) && [3,-1].includes(delta) && remaining>0;
                 });
+                if(candidates.length && !stopped){try{localStorage.setItem(CREATED_KEY,id);}catch{/* sem armazenamento */}}
                 if(candidates.length && !stopped)await addNotification({id,userId:user.id,title:'Lembretes de cobrança preparados',message:candidates.length+' prestações a vencer em 3 dias ou no primeiro dia de atraso. Consulte Cobrança e gestores em Contabilidade para preparar os contactos.',type:'warning',source:'system',read:false,timestamp:new Date()});
             }catch(error){console.warn('[Cobrança] Não foi possível preparar os lembretes internos.',error instanceof Error?error.message:'Erro de leitura');}
             finally{running=false;}

@@ -11,7 +11,9 @@ type TransactionStatement = {
 const MAX_SQL_LENGTH = 200_000;
 const MAX_TRANSACTION_STATEMENTS = 1_000;
 const MAX_PARAM_COUNT = 500;
-const MAX_STRING_PARAM_LENGTH = 1_000_000;
+// Texto de um parâmetro SQL: os clientes guardam documentos anexados (BI, comprovativos) em base64 e a
+// sincronização traz alterações até 12 MB; com 1 MB a ligação de um computador novo parava.
+const MAX_STRING_PARAM_LENGTH = 16_000_000;
 const MAX_BASE64_IMAGE_LENGTH = 15 * 1024 * 1024;
 const MAX_TEXT_PAYLOAD_LENGTH = 2 * 1024 * 1024;
 

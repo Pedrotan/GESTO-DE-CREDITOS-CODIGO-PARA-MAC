@@ -53,7 +53,7 @@ export function RelatoriosContratos({ open, onOpenChange, rows, settings, user }
     const range = useMemo(() => periodRange(period), [period]);
     const selected = useMemo(() => {
         const keys = rangeKeys(range);
-        return rows.filter(row => inKeyRange(row.startKey, keys) && matchesReportState(row, state)
+        return rows.filter(row => inKeyRange(row.signedKey, keys) && matchesReportState(row, state)
             && (clientId === ALL || row.clientId === clientId) && (product === ALL || row.product === product)
             && (managerId === ALL || row.managerId === managerId));
     }, [rows, range, state, clientId, product, managerId]);
@@ -95,7 +95,7 @@ export function RelatoriosContratos({ open, onOpenChange, rows, settings, user }
 
                 <div className="space-y-4">
                     <div className="space-y-1.5">
-                        <Label>Período (data de início do contrato)</Label>
+                        <Label>Período (data de celebração do contrato)</Label>
                         <SeletorPeriodo value={period} onChange={setPeriod} kinds={['month', 'quarter', 'year', 'custom']} />
                     </div>
                     <div className="grid gap-3 sm:grid-cols-2">

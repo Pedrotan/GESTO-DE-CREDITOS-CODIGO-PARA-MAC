@@ -26,10 +26,19 @@ globalThis.__neonQuery = async (text, params = []) => {
     if (/^\s*(CREATE|ALTER)/i.test(text)) return [];
     if (/api_rate_limits/.test(text)) return [{ request_count: 1, reset_epoch: Math.floor(Date.now() / 1000) + 60 }];
     if (/security_lockouts|security_events/.test(text)) return [];
-    if (/SELECT key_hash, status, expires_at, access_code FROM tango_tenants/.test(text)) {
+    if (/SELECT key_hash, status, expires_at, access_code(, tenant_hash)? FROM tango_tenants/.test(text)) {
+        // A empresa registada guarda o hash do NIF tal como foi registado (em maiúsculas).
         return String(params[0]).toUpperCase() === TENANT
-            ? [{ key_hash: sha256('TGABCDEFGH'), status: 'active', expires_at: null, access_code: SERVER_CODE }]
+            ? [{ key_hash: sha256('TGABCDEFGH'), status: 'active', expires_at: null, access_code: SERVER_CODE, tenant_hash: sha256(TENANT) }]
             : [];
+    }
+    if (/SELECT 1 AS found FROM tango_sync_operations WHERE tenant_hash = \$1 LIMIT 1/.test(text)) {
+        return server.ops.some(op => op.tenant_hash === params[0]) ? [{ found: 1 }] : [];
+    }
+    if (/INSERT INTO tango_sync_operations \(tenant_hash, operation_id, device_id, payload, created_at\)/.test(text)) {
+        const moved = server.ops.filter(op => op.tenant_hash === params[1]).sort((a, b) => a.seq - b.seq);
+        for (const op of moved) if (!server.ops.some(o => o.tenant_hash === params[0] && o.operation_id === op.operation_id)) server.ops.push({ ...op, seq: ++server.seq, tenant_hash: params[0] });
+        return [];
     }
     if (/^\s*UPDATE tango_tenants/i.test(text)) return [];
     if (/INSERT INTO tango_sync_operations/.test(text)) {
