@@ -7,7 +7,7 @@ import { Label } from '@/componentes/ui/label';
 import { Textarea } from '@/componentes/ui/textarea';
 import { useData } from '@/contextos/ContextoDados';
 import { scopedStorageKey } from '@/bibliotecas/contas';
-import { CLOUD_SYNC_BOOTSTRAP_KEY, deriveWebSyncKeys, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
+import { CLOUD_SYNC_BOOTSTRAP_KEY, HEAL_SNAPSHOT_KEY, deriveWebSyncKeys, startCloudSync, stopCloudSync, syncCloudNow } from '@/servicos/ServicoSincronizacaoCloud';
 import { checkCompanyStatus, isCompanyActiveLocally, requestCompanyEmailVerification, storeWebMultiTenant } from '@/servicos/ServicoIdentidadeEmpresa';
 import { getKnownCloudServers } from '@/servicos/ServicoLigacaoNuvem';
 import { isPublicWebBuild } from '@/bibliotecas/ambiente';
@@ -250,6 +250,8 @@ export const LigacaoEmpresaWeb = () => {
                 syncConfig = { url: effectiveSyncUrl, apiKey: verifiedPasskey, tenantId: verifiedTenantId, extraKeys: [cleanCode] };
             }
             localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
+            // Navegador novo: só recebe; não reenvia como autocura a cópia que acabou de receber.
+            localStorage.setItem(scopedStorageKey(HEAL_SNAPSHOT_KEY), 'true');
             // Layout conforme a empresa foi configurada (multi-empresa ou não).
             storeWebMultiTenant(data.multiTenant);
 

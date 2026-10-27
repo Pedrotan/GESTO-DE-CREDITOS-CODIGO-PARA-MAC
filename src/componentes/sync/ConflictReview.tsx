@@ -115,8 +115,8 @@ export function ConflictReview({ actorId, actorName, canManage }: { actorId?: st
 
     return <Card className="card-elevated border-none shadow-lg">
         <CardHeader><div className="flex flex-wrap items-start justify-between gap-4">
-            <div><CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-500" />Conflitos de Sincronização</CardTitle>
-                <CardDescription className="mt-2">Consulte e arquive alterações que precisam de revisão. Arquivar retira da fila sem aplicar a alteração; conserva o registo e permite restaurá-lo.</CardDescription></div>
+            <div><CardTitle className="flex items-center gap-2"><AlertTriangle className="h-5 w-5 text-amber-500" />Correcções da Sincronização</CardTitle>
+                <CardDescription className="mt-2">Consulta técnica. O sistema reaplica estas alterações sozinho e cada dispositivo envia a cópia completa dos registos que alterou (autocura), que corrige e fecha o que está aqui. Não é preciso fazer nada; arquivar retira da lista sem aplicar e permite restaurar.</CardDescription></div>
             <div className="flex flex-wrap items-center gap-2">
                 <Button variant="outline" size="sm" disabled={busy || loading} onClick={() => void refresh()}><RefreshCw className={`mr-2 h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Atualizar</Button>
                 {canManage && <label className="flex items-center gap-2 rounded-md border px-2 text-sm"><Download className="h-4 w-4" /><select aria-label="Baixar relatório completo" className="h-9 max-w-52 bg-background text-sm" disabled={exporting || loading} value="" onChange={event => void downloadReport(event.target.value)}>

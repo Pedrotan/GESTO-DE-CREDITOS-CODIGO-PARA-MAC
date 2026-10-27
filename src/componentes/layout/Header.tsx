@@ -83,8 +83,8 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   const cloudStatusLabel = cloudStatus.state === 'synced' ? 'Sincronizado'
     : cloudStatus.state === 'error' ? (pendingLabel || 'Sem sincronizar')
       : cloudStatus.state === 'syncing' ? 'A sincronizar'
-        : cloudStatus.conflicts ? `${cloudStatus.conflicts} conflito${cloudStatus.conflicts === 1 ? '' : 's'}`
-          : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
+        // Alterações retidas não aparecem aqui: o sistema reaplica-as ou corrige-as sozinho (autocura).
+        : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
   const lastSyncText = cloudStatus.at ? ` Última tentativa: ${new Date(cloudStatus.at).toLocaleTimeString('pt-AO')}.` : '';
   const syncIndicatorTitle = serverInfo?.isRunning ? 'Servidor da rede local activo'
     : dbAdapterMode === 'remote' ? 'Ligado a um servidor da rede local'

@@ -726,6 +726,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, status FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, status, daysOverdue, clientName FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue')",
   "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, status, resolutionNote, operation FROM sync_conflicts WHERE status = 'pending' OR resolutionNote = ?",
   "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp",
   "SELECT id, timestamp, userId, userName, action, entity, details, metadata FROM audit_logs WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp DESC LIMIT 50000",
   "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs",
@@ -921,6 +922,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
   "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
+  "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)",
   "UPDATE sync_conflicts SET status = 'pending', resolutionNote = NULL, resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'rejected' AND resolutionNote LIKE '[ARQUIVADO] %'",
   "UPDATE sync_conflicts SET status = 'rejected', resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE sync_conflicts SET status = ?, resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
@@ -3856,6 +3858,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
   ],
   [
+    "1c070ea182f6e8f25ef18a12ae4e5a24e81371775203534f0f39d885cfd5fee6",
+    "SELECT id, status, resolutionNote, operation FROM sync_conflicts WHERE status = 'pending' OR resolutionNote = ?"
+  ],
+  [
     "1c6cd7487d8c304c871361e6c8caf23a6cf43f6eca836c431a34caafd22bdb0a",
     "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp"
   ],
@@ -4634,6 +4640,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6ab67be9e4abff9f62321f06e31923459f9ad9eab5998d473946c8903d9ba820",
     "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'"
+  ],
+  [
+    "ef6551e3ab5d9c6c6713ea398c1c1fb2f3c3e1c24d15c78dd7b7b256e81d767d",
+    "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)"
   ],
   [
     "d8cbfaf1464662df9dfc78f3270a83832ab0ea264725dffb847f2855cf12f4df",

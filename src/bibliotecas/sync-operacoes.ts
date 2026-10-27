@@ -20,6 +20,11 @@ export type SyncOperation = {
     tenantId: string;
     entityId?: string;
     bootstrap?: boolean;
+    /**
+     * Autocura: cópia completa do registo tal como está no dispositivo de origem. Cria o registo se faltar e
+     * substitui-o só quando é mais recente; se não puder ser aplicada, é ignorada (nunca vira conflito).
+     */
+    heal?: boolean;
     /** Operações da mesma transacção local partilham txId e são aplicadas juntas (tudo ou nada). */
     txId?: string;
     txSize?: number;
@@ -80,6 +85,46 @@ export const UNKNOWN_COMMAND_REASON = 'Comando remoto desconhecido nesta versão
 export const CONFLICT_INSERT_SQL = `INSERT OR IGNORE INTO sync_conflicts (id, entityType, entityId, operation, status, createdAt)
                           VALUES (?, ?, ?, ?, 'pending', ?)`;
 export const CONFLICT_RESOLVE_SQL = `UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'`;
+export const HEAL_NOTE = 'Corrigido automaticamente com a cópia mais recente do registo.';
+// Conflitos sobre o registo que a cópia acabou de corrigir (incluindo os de comandos que esta versão não conhece).
+export const HEAL_RESOLVE_SQL = `UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)`;
+// Coluna que diz qual cópia de um registo é a mais recente. Sem nenhuma (ex.: lançamentos contabilísticos, que
+// nunca mudam), a cópia só cria o registo que falta.
+const FRESHNESS_COLUMNS = ['updatedAt', 'version'];
+
+const splitTopLevel = (text: string) => {
+    const parts: string[] = [];
+    let depth = 0, quote = '', current = '';
+    for (const char of text) {
+        if (quote) { if (char === quote) quote = ''; }
+        else if (char === "'" || char === '"') quote = char;
+        else if (char === '(') depth += 1;
+        else if (char === ')') depth -= 1;
+        else if (char === ',' && depth === 0) { parts.push(current); current = ''; continue; }
+        current += char;
+    }
+    parts.push(current);
+    return parts.map(part => part.trim());
+};
+
+/** Identificador (`id`) do registo que um INSERT/UPDATE/DELETE altera, quando o comando o indica. */
+export const statementRowId = (sql: string, params: unknown[]): string | null => {
+    const normalized = normalizeSqlText(sql);
+    const value = (index: number) => (index >= 0 && params[index] !== undefined && params[index] !== null ? String(params[index]) : null);
+    const insert = normalized.match(/^(?:INSERT|REPLACE)(?:\s+OR\s+\w+)?\s+INTO\s+\S+\s*\(([^)]*)\)\s*VALUES\s*\((.*)\)$/isu);
+    if (insert) {
+        const columns = splitTopLevel(insert[1]).map(column => column.replace(/^["'`[]|["'`\]]$/gu, ''));
+        const values = splitTopLevel(insert[2]);
+        const index = columns.indexOf('id');
+        if (index < 0 || values[index] !== '?') return null;
+        return value(values.slice(0, index).filter(item => item.includes('?')).reduce((total, item) => total + (item.match(/\?/gu) || []).length, 0));
+    }
+    const where = normalized.search(/\bWHERE\b/iu);
+    if (where < 0) return null;
+    const match = /(?:^|[\s(.])id\s*=\s*\?/iu.exec(normalized.slice(where));
+    if (!match) return null;
+    return value((normalized.slice(0, where + match.index + match[0].length - 1).match(/\?/gu) || []).length);
+};
 
 export const operationTable = (operation: SyncOperation, sqlById: Map<string, string>) => {
     if (operation.kind === 'snapshot') return operation.table?.toLowerCase() || null;
@@ -134,10 +179,21 @@ export const buildRemoteStatements = async (
             if (!IDENTIFIER.test(table) || !isSyncableTable(table) || columns.length === 0) throw new Error('Snapshot remoto inválido.');
             const allowed = await deps.tableColumns(table);
             if (!columns.every(column => IDENTIFIER.test(column) && allowed.has(column))) throw new Error('Snapshot remoto com colunas desconhecidas.');
+            const values = `(${columns.map(quoteIdentifier).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`;
+            const freshness = operation.heal && columns.includes('id') ? FRESHNESS_COLUMNS.find(column => columns.includes(column)) : undefined;
+            const updates = columns.filter(column => column !== 'id');
             statements.push({
-                sql: `INSERT OR IGNORE INTO ${quoteIdentifier(table)} (${columns.map(quoteIdentifier).join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+                // Cópia de autocura: cria o que falta e só substitui um registo mais antigo do que ela.
+                sql: freshness && updates.length
+                    ? `INSERT INTO ${quoteIdentifier(table)} ${values} ON CONFLICT(id) DO UPDATE SET ${updates.map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ')}`
+                        + ` WHERE excluded.${quoteIdentifier(freshness)} > COALESCE(${quoteIdentifier(table)}.${quoteIdentifier(freshness)}, ${freshness === 'version' ? '-1' : "''"})`
+                    : `INSERT OR IGNORE INTO ${quoteIdentifier(table)} ${values}`,
                 params: operation.params || [],
             });
+            const rowId = operation.heal ? operation.params?.[columns.indexOf('id')] : undefined;
+            if (rowId !== undefined && rowId !== null && rowId !== '') {
+                statements.push({ sql: HEAL_RESOLVE_SQL, params: [HEAL_NOTE, new Date().toISOString(), table, String(rowId), JSON.stringify(String(rowId))] });
+            }
         } else {
             throw new Error('Tipo de operação remota desconhecido.');
         }
@@ -197,6 +253,9 @@ export const applyRemoteGroups = async (
                 }
                 continue;
             }
+            // Cópia de autocura que não se aplica aqui (ex.: cadeia contabilística noutra ordem): é só uma ajuda,
+            // nunca um conflito para alguém rever. A próxima cópia ou a alteração original tratam do registo.
+            if (group.operations.every(operation => operation.heal)) continue;
             conflicts += group.operations.length;
             // Conflitos já existentes (reprocessamento) continuam pendentes; os novos são registados.
             if (!group.resolvesConflictIds?.length) {

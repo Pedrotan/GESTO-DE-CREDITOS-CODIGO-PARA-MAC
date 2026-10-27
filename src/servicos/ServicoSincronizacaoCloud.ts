@@ -20,6 +20,9 @@ import {
     isSyncableTable,
     mutationTable,
     normalizeSqlText,
+    statementRowId,
+    CONFLICT_RESOLVE_SQL,
+    HEAL_NOTE,
     type ApplyResult,
     type RemoteGroup,
     type SyncOperation,
@@ -66,6 +69,15 @@ const CURSOR_KEY = 'cloud_sync_cursor_v1';
 export const CLOUD_SYNC_BOOTSTRAP_KEY = 'cloud_sync_bootstrap_v3';
 // Reparação bidireccional: também a web reenvia os registos locais que possam não ter entrado no histórico.
 const REPAIR_SNAPSHOT_KEY = 'cloud_sync_repair_snapshot_v4';
+// Autocura: cada dispositivo envia uma vez a cópia completa de todos os registos (quem a recebe cria o que lhe falta
+// e substitui o que tem mais antigo) e, depois, a cópia de cada registo que alterar. Assim uma alteração que não se
+// consegue aplicar noutro dispositivo (comando de outra versão, registo alterado nos dois lados) acaba corrigida
+// sozinha, sem ninguém ter de resolver conflitos.
+export const HEAL_SNAPSHOT_KEY = 'cloud_sync_heal_snapshot_v1';
+const HEAL_JOURNAL_KEY = 'cloud_sync_heal_journal_v1';
+// Espera um pouco depois da alteração: a operação original chega primeiro e a cópia só confirma o estado final.
+const HEAL_DELAY_MS = 60_000;
+const HEAL_JOURNAL_MAX = 5000;
 // Última lista de utilizadores enviada por este computador (só se reenvia quando muda).
 // v2: reenvia uma vez, marcada como lista completa, para o servidor a guardar à parte para a versão web.
 const USERS_DIGEST_KEY = 'cloud_sync_users_digest_v2';
@@ -262,6 +274,82 @@ const toStatementCommand = (sql: string, params: unknown[], expectChanges?: numb
     return null;
 };
 
+type HealJournal = Record<string, number>;
+const readHealJournal = (): HealJournal => {
+    try { return JSON.parse(localStorage.getItem(scopedStorageKey(HEAL_JOURNAL_KEY)) || '{}') || {}; } catch { return {}; }
+};
+const writeHealJournal = (journal: HealJournal) => {
+    const entries = Object.entries(journal).sort((a, b) => a[1] - b[1]).slice(-HEAL_JOURNAL_MAX);
+    localStorage.setItem(scopedStorageKey(HEAL_JOURNAL_KEY), JSON.stringify(Object.fromEntries(entries)));
+};
+/** Regista os registos alterados aqui: daqui a um minuto segue a cópia completa de cada um (autocura). */
+const noteHealRows = (statements: Array<{ sql: string; params?: unknown[] }>) => {
+    const journal = readHealJournal();
+    const now = Date.now();
+    let changed = false;
+    for (const statement of statements) {
+        const table = mutationTable(statement.sql);
+        const rowId = table && isSyncableTable(table) ? statementRowId(statement.sql, statement.params || []) : null;
+        if (!table || !rowId) continue;
+        const key = `${table}\u0001${rowId}`;
+        if (!(key in journal)) { journal[key] = now; changed = true; }
+    }
+    if (changed) writeHealJournal(journal);
+};
+
+const snapshotOperation = (table: string, row: Record<string, unknown>, order: number, bootstrap: boolean): SyncOperation | null => {
+    const columns = Object.keys(row);
+    if (!columns.length) return null;
+    const params = columns.map(column => row[column] ?? null);
+    if (JSON.stringify(params).length > MAX_SNAPSHOT_ROW_CHARS) return null;
+    return {
+        id: crypto.randomUUID(), deviceId: getDeviceId(), kind: 'snapshot', table, columns, params, commandVersion: 1,
+        tenantId: activeConfig?.tenantId || '', entityId: String(row.id || ''),
+        createdAt: new Date(Date.now() + order).toISOString(), bootstrap, heal: true,
+    };
+};
+
+/** Cópias dos registos alterados aqui há mais de um minuto (estado actual de cada um). */
+const createJournalHealOperations = async () => {
+    const journal = readHealJournal();
+    const due = Object.entries(journal).filter(([, at]) => at <= Date.now() - HEAL_DELAY_MS);
+    if (!due.length) return;
+    const operations: SyncOperation[] = [];
+    let order = 0;
+    for (const [key] of due) {
+        const [table, rowId] = key.split('\u0001');
+        delete journal[key];
+        if (!/^[a-z_][a-z0-9_]*$/iu.test(table) || !isSyncableTable(table) || !(await localTableColumns(table)).has('id')) continue;
+        const row = (await sqlite.all<Record<string, unknown>>(`SELECT * FROM ${quoteIdentifier(table)} WHERE id = ?`, [rowId]))[0];
+        const operation = row ? snapshotOperation(table, row, order++, false) : null;
+        if (operation) operations.push(operation);
+    }
+    await putOperations(operations);
+    writeHealJournal(journal);
+};
+
+/**
+ * Conflitos de uma transacção em que a cópia de autocura corrigiu uma das partes: as outras partes (do mesmo
+ * crédito, pagamento…) também chegaram na cópia completa do dispositivo de origem, por isso ficam resolvidas.
+ */
+const resolveHealedTransactions = async () => {
+    const rows = await sqlite.all<{ id: string; status: string; resolutionNote: string | null; operation: string }>(
+        `SELECT id, status, resolutionNote, operation FROM sync_conflicts WHERE status = 'pending' OR resolutionNote = ?`, [HEAL_NOTE]);
+    const healedTx = new Set<string>();
+    const pendingByTx = new Map<string, string[]>();
+    for (const row of rows) {
+        let txId: string | undefined;
+        try { txId = JSON.parse(row.operation)?.txId; } catch { continue; }
+        if (!txId) continue;
+        if (row.status === 'accepted') healedTx.add(txId);
+        else pendingByTx.set(txId, [...(pendingByTx.get(txId) || []), row.id]);
+    }
+    const now = new Date().toISOString();
+    const statements = [...pendingByTx].filter(([txId]) => healedTx.has(txId))
+        .flatMap(([, ids]) => ids.map(id => ({ sql: CONFLICT_RESOLVE_SQL, params: [HEAL_NOTE, now, id] })));
+    if (statements.length) await sqlite.transaction(statements as SqlTransactionStatement[]);
+};
+
 const syncIsActive = () => !applyingRemote
     && !!activeConfig
     && isCloudSyncUrl(activeConfig.url);
@@ -274,6 +362,7 @@ export const enqueueSyncOperation = async (sql: string, params: unknown[] = []) 
         return;
     }
     await putOperations([{ id: crypto.randomUUID(), deviceId: getDeviceId(), ...command, createdAt: new Date().toISOString() }]);
+    noteHealRows([{ sql, params }]);
     window.dispatchEvent(new CustomEvent('tango-local-db-write'));
     void emitPending();
 };
@@ -290,6 +379,7 @@ export const enqueueSyncTransaction = async (statements: SqlTransactionStatement
         })
         .filter((command): command is StatementCommand => Boolean(command));
     if (!commands.length) return;
+    noteHealRows(statements);
 
     const deviceId = getDeviceId();
     const txId = crypto.randomUUID();
@@ -413,9 +503,9 @@ const BOOTSTRAP_FILE_TABLES: Record<string, number> = { payment_proofs: 5, credi
 const MAX_SNAPSHOT_ROW_CHARS = 1_400_000;
 const createBootstrapOperations = async () => {
     if (localStorage.getItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY)) === 'true'
-        && localStorage.getItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY)) === 'true') return;
+        && localStorage.getItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY)) === 'true'
+        && localStorage.getItem(scopedStorageKey(HEAL_SNAPSHOT_KEY)) === 'true') return;
     const tables = await sqlite.all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name");
-    const deviceId = getDeviceId();
     const operations: SyncOperation[] = [];
     let order = 0;
     let oversized = 0;
@@ -426,23 +516,10 @@ const createBootstrapOperations = async () => {
         for (let offset = 0; ; offset += pageSize) {
             const rows = await sqlite.all<Record<string, unknown>>(`SELECT * FROM ${quoteIdentifier(name)} LIMIT ${pageSize} OFFSET ${offset}`);
             for (const row of rows) {
-                const columns = Object.keys(row);
-                if (!columns.length) continue;
-                const params = columns.map(column => row[column] ?? null);
-                if (JSON.stringify(params).length > MAX_SNAPSHOT_ROW_CHARS) { oversized += 1; continue; }
-                operations.push({
-                    id: crypto.randomUUID(),
-                    deviceId,
-                    kind: 'snapshot',
-                    table: name,
-                    columns,
-                    params,
-                    commandVersion: 1,
-                    tenantId: activeConfig?.tenantId || '',
-                    entityId: String(row.id || ''),
-                    createdAt: new Date(Date.now() + order++).toISOString(),
-                    bootstrap: true
-                });
+                if (!Object.keys(row).length) continue;
+                const operation = snapshotOperation(name, row, order++, true);
+                if (!operation) { oversized += 1; continue; }
+                operations.push(operation);
                 if (operations.length >= 250) await putOperations(operations.splice(0));
             }
             if (rows.length < pageSize) break;
@@ -453,6 +530,7 @@ const createBootstrapOperations = async () => {
     if (oversized) console.warn(`[CloudSync] ${oversized} registos maiores do que o limite de envio ficaram só neste dispositivo.`);
     localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
     localStorage.setItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY), 'true');
+    localStorage.setItem(scopedStorageKey(HEAL_SNAPSHOT_KEY), 'true');
 };
 
 const tableColumnsCache = new Map<string, Set<string>>();
@@ -764,6 +842,7 @@ export const rebuildBrowserReplica = async () => {
     // Este navegador não volta a enviar a fotografia completa: os dados vêm todos da nuvem.
     localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
     localStorage.setItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY), 'true');
+    localStorage.setItem(scopedStorageKey(HEAL_SNAPSHOT_KEY), 'true');
     localStorage.removeItem(scopedStorageKey(USERS_STATE_KEY));
     localStorage.removeItem(scopedStorageKey(USERS_ROSTER_AT_KEY));
     localStorage.setItem(REBUILD_REPLICA_FLAG, new Date().toISOString());
@@ -828,6 +907,7 @@ export const syncCloudNow = async () => {
                 }
             }
             await createBootstrapOperations();
+            await createJournalHealOperations().catch(error => console.warn('[CloudSync] Autocura:', error));
             const key = await writeKeyFor(config);
             const readKeys = await readKeysFor(config);
             let cursor = Number(localStorage.getItem(scopedStorageKey(CURSOR_KEY)) || '0');
@@ -958,6 +1038,7 @@ export const syncCloudNow = async () => {
 
             // Dependências podem ter chegado numa página posterior (cliente antes de crédito, por exemplo).
             totalPulled += await reprocessRetainedOperations();
+            await resolveHealedTransactions().catch(error => console.warn('[CloudSync] Autocura de transacções:', error));
             // Primeiro recebe o perfil existente. Só depois completa os campos ainda não partilhados:
             // uma instalação nova/vazia nunca substitui a identidade que já está na nuvem.
             let identityError: string | undefined;
@@ -999,9 +1080,10 @@ export const syncCloudNow = async () => {
             const conflicts = Number((await sqlite.all<{ total: number }>("SELECT COUNT(*) AS total FROM sync_conflicts WHERE status = 'pending'"))[0]?.total || 0);
             // Operações antigas ilegíveis (cifradas com um Código de Acesso anterior) ficam guardadas para recuperação,
             // mas não impedem a sincronização: não deixam o estado "pendente" para sempre nem alarmam o cabeçalho.
-            const incomplete = pending > 0 || waiting > 0 || hasMoreRemote || conflicts > 0 || Boolean(identityError);
-            const message = identityError || (conflicts ? `${conflicts} alterações aguardam resolução de conflitos.`
-                : incomplete ? 'Ainda existem alterações por enviar ou receber.'
+            // Alterações retidas (conflitos) não deixam o estado «por sincronizar»: são reaplicadas ou corrigidas pela
+            // autocura sozinhas, e só o Super Administrador as vê nas Definições.
+            const incomplete = pending > 0 || waiting > 0 || hasMoreRemote || Boolean(identityError);
+            const message = identityError || (incomplete ? 'Ainda existem alterações por enviar ou receber.'
                     : totalSkipped ? `${totalSkipped} operações antigas, cifradas com um Código de Acesso anterior, continuam guardadas para recuperação.` : undefined);
             emitStatus({ state: incomplete ? 'pending' : 'synced', message, pending: pending + waiting, pushed: totalPushed, pulled: totalPulled, conflicts, skipped: totalSkipped, usersSent, usersRoster: lastUsersRoster, at: new Date().toISOString() });
             if (hasMoreRemote || pending) scheduleSync(1000);
@@ -1080,6 +1162,7 @@ export const prepareCloudReceiver = async (config: { tenantId: string; apiKey: s
     localStorage.setItem(scopedStorageKey(KEY_FINGERPRINT_KEY), bytesToBase64(digest).slice(0, 24));
     localStorage.setItem(scopedStorageKey(CLOUD_SYNC_BOOTSTRAP_KEY), 'true');
     localStorage.setItem(scopedStorageKey(REPAIR_SNAPSHOT_KEY), 'true');
+    localStorage.setItem(scopedStorageKey(HEAL_SNAPSHOT_KEY), 'true');
     localStorage.setItem(scopedStorageKey(CURSOR_KEY), '0');
     localStorage.removeItem(scopedStorageKey(USERS_DIGEST_KEY));
 };

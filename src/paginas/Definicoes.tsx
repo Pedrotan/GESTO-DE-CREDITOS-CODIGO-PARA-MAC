@@ -3325,12 +3325,13 @@ export default function Settings() {
                             )}
                         </CardFooter>
                     </Card>
-                    <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
                 </TabsContent>
 
-                {/* Conflitos de Sincronização */}
+                {/* Correcções da sincronização: consulta técnica, só para o Super Administrador */}
                 <TabsContent value="conflicts" className="mt-6 space-y-6">
-                    <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
+                    {user?.role === 'super_admin'
+                        ? <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
+                        : <p className="rounded-xl border bg-muted/40 p-4 text-sm text-muted-foreground">A sincronização corrige sozinha as alterações retidas. Esta consulta técnica é reservada ao Super Administrador.</p>}
                 </TabsContent>
 
                 {/* Assinaturas */}
