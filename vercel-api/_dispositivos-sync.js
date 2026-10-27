@@ -38,6 +38,35 @@ export const ensureSyncDevicesTable = async (sql) => {
       PRIMARY KEY (tenant_hash, device_id)
     )
   `);
+  // Utilizadores com outro ID noutro dispositivo e a impressão (hash do email, ID) de cada utilizador deste.
+  await sql(`ALTER TABLE tango_sync_devices ADD COLUMN IF NOT EXISTS user_clashes INTEGER`);
+  await sql(`ALTER TABLE tango_sync_devices ADD COLUMN IF NOT EXISTS users_fingerprint JSONB`);
+};
+
+/** [hash do email, ID] de cada utilizador: só hashes curtos e IDs aleatórios (nunca emails nem nomes). */
+const fingerprint = (value) => {
+  if (!Array.isArray(value)) return null;
+  const rows = value.slice(0, 500)
+    .filter(item => Array.isArray(item) && /^[0-9a-f]{8,64}$/u.test(String(item[0])) && /^[\w.:-]{1,100}$/u.test(String(item[1])))
+    .map(item => [String(item[0]), String(item[1])]);
+  return rows;
+};
+
+/**
+ * O mesmo utilizador (mesmo hash de email) com IDs diferentes entre os dispositivos da empresa: cada caso diz que ID
+ * está em que dispositivos. É o que parte o chat (mensagens para um ID não aparecem a quem entra com o outro).
+ */
+export const userIdDivergences = (devices) => {
+  const byUser = new Map();
+  for (const device of devices) {
+    for (const [hash, id] of device.usersFingerprint || []) {
+      if (!byUser.has(hash)) byUser.set(hash, new Map());
+      const ids = byUser.get(hash);
+      ids.set(id, [...(ids.get(id) || []), device.deviceId]);
+    }
+  }
+  return [...byUser].filter(([, ids]) => ids.size > 1)
+    .map(([userHash, ids]) => ({ userHash, ids: [...ids].map(([id, deviceIds]) => ({ id, deviceIds })) }));
 };
 
 /** Valores do diagnóstico enviados pelo dispositivo, validados e limitados. */
@@ -53,6 +82,8 @@ export const normalizeDiagnostics = (input, serverNow = Date.now()) => {
     unreadable: count(diagnostics.unreadable),
     conflicts: count(diagnostics.conflicts),
     otherVersion: count(diagnostics.otherVersion),
+    userClashes: count(diagnostics.userClashes),
+    users: fingerprint(diagnostics.users),
     // Recusas por tamanho que o dispositivo recebeu desde o último diagnóstico (inclui as de um proxy).
     rejected413: count(diagnostics.rejected413) ?? 0,
     lastError: text(diagnostics.lastError, 300),
@@ -74,9 +105,10 @@ export const recordSyncDevice = async (sql, { tenantHash, deviceId, userAgent, d
     await ensureSyncDevicesTable(sql);
     await sql(
       `INSERT INTO tango_sync_devices AS d (tenant_hash, device_id, platform, app_version, user_agent, last_seen_at, last_sync_at, last_cursor,
-          pending, oversized, waiting, unreadable, conflicts, other_version, rejected_413, last_413_at, last_error, last_error_at, clock_skew_ms)
+          pending, oversized, waiting, unreadable, conflicts, other_version, rejected_413, last_413_at, last_error, last_error_at, clock_skew_ms,
+          user_clashes, users_fingerprint)
        VALUES ($1, $2, $3, $4, $5, NOW(), CASE WHEN $6::boolean THEN NOW() END, $7, $8, $9, $10, $11, $12, $13, $14,
-          CASE WHEN $14 > 0 THEN NOW() END, $15, CASE WHEN $15::text IS NOT NULL THEN NOW() END, $16)
+          CASE WHEN $14 > 0 THEN NOW() END, $15, CASE WHEN $15::text IS NOT NULL THEN NOW() END, $16, $17, $18::jsonb)
        ON CONFLICT (tenant_hash, device_id) DO UPDATE SET
           platform = COALESCE(EXCLUDED.platform, d.platform),
           app_version = COALESCE(EXCLUDED.app_version, d.app_version),
@@ -94,9 +126,12 @@ export const recordSyncDevice = async (sql, { tenantHash, deviceId, userAgent, d
           last_413_at = COALESCE(EXCLUDED.last_413_at, d.last_413_at),
           last_error = CASE WHEN EXCLUDED.last_sync_at IS NOT NULL AND EXCLUDED.last_error IS NULL THEN NULL ELSE COALESCE(EXCLUDED.last_error, d.last_error) END,
           last_error_at = CASE WHEN EXCLUDED.last_sync_at IS NOT NULL AND EXCLUDED.last_error IS NULL THEN d.last_error_at ELSE COALESCE(EXCLUDED.last_error_at, d.last_error_at) END,
-          clock_skew_ms = COALESCE(EXCLUDED.clock_skew_ms, d.clock_skew_ms)`,
+          clock_skew_ms = COALESCE(EXCLUDED.clock_skew_ms, d.clock_skew_ms),
+          user_clashes = COALESCE(EXCLUDED.user_clashes, d.user_clashes),
+          users_fingerprint = COALESCE(EXCLUDED.users_fingerprint, d.users_fingerprint)`,
       [tenantHash, String(deviceId).slice(0, 100), d.platform, d.appVersion, text(userAgent, 200), Boolean(outcome.synced),
-        outcome.cursor ?? null, d.pending, d.oversized, d.waiting, d.unreadable, d.conflicts, d.otherVersion, rejected, error, d.clockSkewMs]
+        outcome.cursor ?? null, d.pending, d.oversized, d.waiting, d.unreadable, d.conflicts, d.otherVersion, rejected, error, d.clockSkewMs,
+        d.userClashes, d.users ? JSON.stringify(d.users) : null]
     );
   } catch (cause) {
     console.warn('[sync][dispositivos] Diagnóstico não registado:', cause?.message || cause);
@@ -113,5 +148,8 @@ export const listSyncDevices = async (sql, tenantHash) => {
     pending: row.pending, oversized: row.oversized, waiting: row.waiting, unreadable: row.unreadable, conflicts: row.conflicts, otherVersion: row.other_version,
     rejected413: Number(row.rejected_413 || 0), last413At: row.last_413_at, lastError: row.last_error, lastErrorAt: row.last_error_at,
     clockSkewMs: row.clock_skew_ms === null ? null : Number(row.clock_skew_ms),
+    userClashes: row.user_clashes ?? null,
+    usersFingerprint: Array.isArray(row.users_fingerprint) ? row.users_fingerprint
+      : typeof row.users_fingerprint === 'string' ? JSON.parse(row.users_fingerprint) : [],
   }));
 };

@@ -7,7 +7,7 @@ import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
 import { changeLicensePlan, importLegacyKeys, legacyKeyStatuses, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, setLicenseModules, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
 import { createMasterSession, isValidMasterSession, revokeMasterSession } from './_sessao-master.js';
-import { listSyncDevices } from './_dispositivos-sync.js';
+import { listSyncDevices, userIdDivergences } from './_dispositivos-sync.js';
 import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
 
 const KEY_TOOLS = { generate: generateLicenseKey, parse: parseLicenseKey, hash: licenseKeyHash, prefix: licenseKeyPrefix };
@@ -272,7 +272,12 @@ export default async function handler(req, res) {
     if (action === 'sync-devices') {
       const [tenant] = await sql(`SELECT tenant_hash, name FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)`, [String(body.tenantId || '')]);
       if (!tenant) return send(res, 404, { success: false, message: 'Empresa não encontrada.' });
-      return send(res, 200, { success: true, tenantName: tenant.name, serverTime: new Date().toISOString(), devices: await listSyncDevices(sql, tenant.tenant_hash) });
+      const devices = await listSyncDevices(sql, tenant.tenant_hash);
+      return send(res, 200, {
+        success: true, tenantName: tenant.name, serverTime: new Date().toISOString(),
+        devices: devices.map(({ usersFingerprint, ...device }) => ({ ...device, users: usersFingerprint.length })),
+        userIdDivergences: userIdDivergences(devices),
+      });
     }
 
     if (action === 'list-requests') {

@@ -535,3 +535,35 @@ test('PC envia o diagnóstico (versão, contagens, hora) na primeira volta de ca
     assert.ok(['pending', 'conflicts', 'unreadable', 'otherVersion'].every(key => typeof diagnostics[key] === 'number'));
     assert.ok(!JSON.stringify(diagnostics).includes('clients'), 'sem dados da empresa');
 });
+
+test('mesma pessoa criada em dois dispositivos com IDs diferentes: o choque fica registado e o ícone pede verificação', async () => {
+    server.ops = [];
+    server.rosters.clear();
+    const hash = bcrypt.hashSync(PASSWORD, 10);
+    // Computador: o Osvaldo com o ID do computador.
+    useDevice({ electronAPI: desktopApi }).run('INSERT INTO users (id, name, email, password, role, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+        ['osvaldo-pc', 'Osvaldo', 'osvaldo@empresa.ao', hash, 'admin', '2026-10-01']);
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    assert.equal((await cloud.syncCloudNow()).success, true);
+    cloud.stopCloudSync();
+
+    // Navegador: o mesmo Osvaldo criado aqui em separado, com outro ID.
+    const web = useDevice();
+    web.run('INSERT INTO users (id, name, email, password, role, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+        ['osvaldo-web', 'Osvaldo', 'osvaldo@empresa.ao', hash, 'admin', '2026-10-02']);
+    const seen = [];
+    const status = await withFetch(previous => async (url, init) => { seen.push(JSON.parse(init.body)); return previous(url, init); }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try { await cloud.syncCloudNow(); await cloud.syncCloudNow(); return cloud.getLastCloudSyncStatus(); } finally { cloud.stopCloudSync(); }
+    });
+    const clashes = await cloud.getUserIdClashes();
+    assert.deepEqual(clashes.map(clash => [clash.email, clash.localId, clash.remoteId]), [['osvaldo@empresa.ao', 'osvaldo-web', 'osvaldo-pc']]);
+    assert.equal((await sqliteFor(web).all("SELECT id FROM users WHERE email = 'osvaldo@empresa.ao'")).length, 1, 'não se sobrepõe nem duplica');
+    assert.equal(status.state, 'attention');
+    assert.ok(status.issues.some(issue => issue.kind === 'userClashes'));
+    // O diagnóstico leva o número e as impressões (hash do email + ID), nunca o email.
+    const diagnostics = seen.at(-1).diagnostics;
+    assert.equal(diagnostics.userClashes, 1);
+    assert.ok(diagnostics.users.some(([, id]) => id === 'osvaldo-web'));
+    assert.ok(!JSON.stringify(diagnostics.users).includes('osvaldo@'));
+});

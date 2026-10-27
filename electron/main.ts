@@ -3740,9 +3740,12 @@ app.whenReady().then(async () => {
     const allowed = new Set(await sharedUserColumns());
     // A marca de conta principal nunca chega da web, e a própria conta principal só se altera neste computador.
     const columns = incomingColumns.filter(name => allowed.has(name) && name !== "isOwner");
-    if (!["id", "name", "email", "password", "role"].every(name => columns.includes(name))) return { applied: 0, deleted: 0 };
+    if (!["id", "name", "email", "password", "role"].every(name => columns.includes(name))) return { applied: 0, deleted: 0, clashes: [] };
     const at = (row: unknown[], name: string) => row[incomingColumns.indexOf(name)];
     const statements: Array<{ sql: string; params: unknown[] }> = [];
+    // Mesmo email com outro ID neste computador (a mesma pessoa criada em separado em dois sítios): não se sobrepõe,
+    // mas fica registado para o diagnóstico e para a unificação — antes era esquecido e o chat deixava de bater certo.
+    const clashes: Array<{ email: string; name: string; localId: string; remoteId: string }> = [];
     let applied = 0;
     for (const row of incomingRows) {
       if (!Array.isArray(row)) continue;
@@ -3755,7 +3758,10 @@ app.whenReady().then(async () => {
       if (isPrimaryOwner(localOwner)) continue;
       // Email já usado por outro utilizador deste computador: não se sobrepõe.
       const sameEmail: any = await runQuery("get", "SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1", [email, id]);
-      if (sameEmail) continue;
+      if (sameEmail) {
+        clashes.push({ email, name: String(at(row, "name") || email).slice(0, 120), localId: String(sameEmail.id), remoteId: id });
+        continue;
+      }
       const values = columns.map(name => {
         const value = at(row, name);
         return value === undefined ? null : value !== null && typeof value === "object" ? JSON.stringify(value) : value;
@@ -3778,7 +3784,7 @@ app.whenReady().then(async () => {
       statements.push({ sql: "DELETE FROM users WHERE id = ?", params: [id] });
       removed += 1;
     }
-    if (!statements.length) return { applied: 0, deleted: 0 };
+    if (!statements.length) return { applied: 0, deleted: 0, clashes };
     try {
       await runTransaction(validateDbTransaction(statements));
     } catch (error: any) {
@@ -3797,7 +3803,7 @@ app.whenReady().then(async () => {
     }
     await writeAuthAudit(currentUser, "users_synced_from_web",
       `Sincronização de utilizadores da versão web: ${applied} criado(s)/actualizado(s), ${removed} removido(s).`);
-    return { applied, deleted: removed };
+    return { applied, deleted: removed, clashes };
   });
   ipcMain.handle("db-import", async (event, payload) => {
     assertTrustedIpcSender(event);

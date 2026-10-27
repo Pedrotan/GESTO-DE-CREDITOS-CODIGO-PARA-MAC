@@ -5,7 +5,7 @@ import { Button } from '@/componentes/ui/button';
 import { Popover, PopoverContent, PopoverTrigger } from '@/componentes/ui/popover';
 import { sqlite } from '@/bibliotecas/adaptador-sqlite';
 import { conflictReason, entityLabel, type SyncConflict } from '@/bibliotecas/sync-conflitos';
-import { reprocessRetainedOperations, syncCloudNow, type CloudSyncStatus } from '@/servicos/ServicoSincronizacaoCloud';
+import { getUserIdClashes, reprocessRetainedOperations, syncCloudNow, type CloudSyncStatus, type UserIdClash } from '@/servicos/ServicoSincronizacaoCloud';
 
 const STATE_TITLE: Record<CloudSyncStatus['state'], string> = {
     synced: 'Sincronizado', pending: 'A sincronizar', syncing: 'A sincronizar', attention: 'Verificar', error: 'Sincronização com erro', idle: 'A verificar ligação',
@@ -20,12 +20,14 @@ export function PainelSincronizacao({ status, canSeeAll, children }: { status: C
     const [open, setOpen] = useState(false);
     const [busy, setBusy] = useState(false);
     const [recent, setRecent] = useState<SyncConflict[]>([]);
+    const [clashes, setClashes] = useState<UserIdClash[]>([]);
 
     const loadRecent = useCallback(async () => {
         const rows = await sqlite.all<SyncConflict>(
             `SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5`,
         ).catch(() => [] as SyncConflict[]);
         setRecent(rows);
+        setClashes(await getUserIdClashes().catch(() => []));
     }, []);
     useEffect(() => { if (open) void loadRecent(); }, [open, status.at, loadRecent]);
 
@@ -68,6 +70,17 @@ export function PainelSincronizacao({ status, canSeeAll, children }: { status: C
                             <p className="mt-0.5 text-[11px] text-muted-foreground">{issue.detail}</p>
                         </div>
                     ))}
+                    {clashes.length > 0 && (
+                        <div className="space-y-1.5">
+                            <p className="text-[11px] font-bold uppercase text-muted-foreground">Mesma pessoa, outro ID noutro computador</p>
+                            {clashes.map(clash => (
+                                <div key={clash.email} className="rounded-md border p-2">
+                                    <p className="text-xs font-semibold">{clash.name} <span className="font-normal text-muted-foreground">({clash.email})</span></p>
+                                    <p className="font-mono text-[10px] text-muted-foreground">aqui {clash.localId.slice(0, 13)}… · noutro {clash.remoteId.slice(0, 13)}…</p>
+                                </div>
+                            ))}
+                        </div>
+                    )}
                     {recent.length > 0 && (
                         <div className="space-y-1.5">
                             <p className="text-[11px] font-bold uppercase text-muted-foreground">Conflitos mais recentes</p>

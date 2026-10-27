@@ -702,6 +702,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC",
   "SELECT id, deletedBy FROM clients WHERE deletedAt IS NOT NULL",
   "SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, email FROM users",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5",
   "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100",
@@ -3761,6 +3762,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "cd9c8e924c552da45d883f5e02f6f267e3f7130b5d55661f8d77a75ce5bc1218",
     "SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
+  ],
+  [
+    "819ed510af1f56599a14cabd16e1bf7bf020dd6f6cdb4fa19241c068bc233016",
+    "SELECT id, email FROM users"
   ],
   [
     "a968fbb38a8a55fceb9493e0a6a0bf3f4ff3d80b2c499e350eb816df04055421",

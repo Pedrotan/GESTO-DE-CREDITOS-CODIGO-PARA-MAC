@@ -15,13 +15,15 @@ export type SyncCounts = {
     conflicts: number;
     /** Alterações recebidas retidas por serem de outra versão do sistema. */
     otherVersion: number;
+    /** Utilizadores com o mesmo email e outro ID noutro dispositivo (criados em separado). */
+    userClashes?: number;
     /** O servidor ainda tem mais para entregar. */
     hasMoreRemote?: boolean;
     /** Falha a publicar a identidade da empresa. */
     identityError?: string;
 };
 
-export type SyncIssueKind = 'conflicts' | 'otherVersion' | 'unreadable' | 'oversized' | 'identity' | 'pending' | 'waiting';
+export type SyncIssueKind = 'conflicts' | 'otherVersion' | 'unreadable' | 'oversized' | 'userClashes' | 'identity' | 'pending' | 'waiting';
 export type SyncIssue = { kind: SyncIssueKind; count: number; title: string; detail: string; attention: boolean };
 
 const plural = (count: number, one: string, many: string) => `${count} ${count === 1 ? one : many}`;
@@ -47,6 +49,11 @@ export const syncIssues = (counts: SyncCounts): SyncIssue[] => {
         kind: 'oversized', count: counts.oversized, attention: true,
         title: plural(counts.oversized, 'alteração grande demais', 'alterações grandes demais'),
         detail: 'Deste dispositivo, maiores do que o servidor aceita (ex.: documentos muito pesados). Estão guardadas aqui, sem se perderem.',
+    });
+    if (counts.userClashes) issues.push({
+        kind: 'userClashes', count: counts.userClashes, attention: true,
+        title: plural(counts.userClashes, 'utilizador com outro ID noutro computador', 'utilizadores com outro ID noutro computador'),
+        detail: 'A mesma pessoa foi criada em separado em dois dispositivos. As mensagens do chat e o histórico de um não aparecem no outro até os unificar.',
     });
     if (counts.identityError) issues.push({ kind: 'identity', count: 1, attention: true, title: 'Identidade da empresa por sincronizar', detail: counts.identityError });
     if (counts.pending > 0) issues.push({

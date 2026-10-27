@@ -8,7 +8,10 @@ export type SyncDevice = {
     firstSeenAt: string; lastSeenAt: string; lastSyncAt: string | null; lastCursor: number | null;
     pending: number | null; oversized: number | null; waiting: number | null; unreadable: number | null; conflicts: number | null; otherVersion: number | null;
     rejected413: number; last413At: string | null; lastError: string | null; lastErrorAt: string | null; clockSkewMs: number | null;
+    userClashes: number | null; users: number;
 };
+/** O mesmo utilizador (hash do email) com IDs diferentes entre dispositivos. */
+export type UserIdDivergence = { userHash: string; ids: Array<{ id: string; deviceIds: string[] }> };
 
 const when = (value: string | null) => (value ? new Date(value).toLocaleString('pt-AO') : '—');
 const ago = (value: string | null, now: number) => {
@@ -42,9 +45,10 @@ const compareVersions = (a: string, b: string) => {
 export function DispositivosSync({ tenant, onClose, load }: {
     tenant: { tenantId: string; name: string } | null;
     onClose: () => void;
-    load: (tenantId: string) => Promise<{ devices: SyncDevice[]; serverTime: string }>;
+    load: (tenantId: string) => Promise<{ devices: SyncDevice[]; serverTime: string; userIdDivergences?: UserIdDivergence[] }>;
 }) {
     const [devices, setDevices] = useState<SyncDevice[]>([]);
+    const [divergences, setDivergences] = useState<UserIdDivergence[]>([]);
     const [serverTime, setServerTime] = useState(Date.now());
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState('');
@@ -55,6 +59,7 @@ export function DispositivosSync({ tenant, onClose, load }: {
         try {
             const data = await load(tenant.tenantId);
             setDevices(data.devices || []);
+            setDivergences(data.userIdDivergences || []);
             setServerTime(Date.parse(data.serverTime) || Date.now());
         } catch (cause) {
             setError(cause instanceof Error ? cause.message : 'Não foi possível ler os dispositivos.');
@@ -90,7 +95,7 @@ export function DispositivosSync({ tenant, onClose, load }: {
                     <div className="overflow-x-auto rounded-xl border">
                         <table className="w-full text-xs">
                             <thead className="bg-muted/60 text-left">
-                                <tr>{['Dispositivo', 'Versão', 'Última sincronização', 'Cursor', 'Por enviar', 'Grandes demais', 'Conflitos', 'Outra versão', 'Ilegíveis', 'Recusas 413', 'Relógio', 'Último erro'].map(head => <th key={head} className="whitespace-nowrap px-2 py-2 font-bold">{head}</th>)}</tr>
+                                <tr>{['Dispositivo', 'Versão', 'Última sincronização', 'Cursor', 'Por enviar', 'Grandes demais', 'Conflitos', 'Outra versão', 'Ilegíveis', 'IDs diferentes', 'Recusas 413', 'Relógio', 'Último erro'].map(head => <th key={head} className="whitespace-nowrap px-2 py-2 font-bold">{head}</th>)}</tr>
                             </thead>
                             <tbody>
                                 {devices.map(device => {
@@ -112,6 +117,7 @@ export function DispositivosSync({ tenant, onClose, load }: {
                                             <td className={`px-2 py-2 ${device.conflicts ? bad : ''}`}>{device.conflicts ?? '—'}</td>
                                             <td className={`px-2 py-2 ${device.otherVersion ? bad : ''}`}>{device.otherVersion ?? '—'}</td>
                                             <td className={`px-2 py-2 ${device.unreadable ? bad : ''}`}>{device.unreadable ?? '—'}</td>
+                                            <td className={`px-2 py-2 ${device.userClashes ? bad : ''}`} title={`${device.users} utilizador(es) neste dispositivo`}>{device.userClashes ?? '—'}</td>
                                             <td className={`px-2 py-2 ${device.rejected413 ? bad : ''}`} title={device.last413At ? `Última: ${when(device.last413At)}` : undefined}>{device.rejected413}</td>
                                             <td className={`whitespace-nowrap px-2 py-2 ${clockOff ? bad : ''}`}>{skew(device.clockSkewMs)}</td>
                                             <td className="max-w-[16rem] px-2 py-2 text-[11px]">{device.lastError ? <><p>{device.lastError}</p><p className="text-muted-foreground">{when(device.lastErrorAt)}</p></> : '—'}</td>
@@ -120,6 +126,28 @@ export function DispositivosSync({ tenant, onClose, load }: {
                                 })}
                             </tbody>
                         </table>
+                    </div>
+                )}
+                {divergences.length > 0 && (
+                    <div className="space-y-2 rounded-xl border border-red-200 bg-red-50/60 p-3 dark:border-red-900 dark:bg-red-950/20">
+                        <p className="text-sm font-bold text-red-700 dark:text-red-300">{divergences.length} utilizador(es) com IDs diferentes entre dispositivos</p>
+                        <p className="text-xs text-muted-foreground">
+                            A mesma pessoa (mesmo email) foi criada em separado. As mensagens do chat e o histórico de um ID não aparecem a quem entra com o outro.
+                            O nome aparece no ícone de sincronização de cada um destes dispositivos (aqui só se vê o hash do email).
+                        </p>
+                        {divergences.map(item => (
+                            <div key={item.userHash} className="rounded-lg border bg-background p-2 text-xs">
+                                <p className="font-mono font-semibold">Utilizador #{item.userHash.slice(0, 10)}</p>
+                                {item.ids.map(entry => (
+                                    <p key={entry.id} className="mt-0.5">
+                                        ID <span className="font-mono">{entry.id.slice(0, 13)}…</span> em {entry.deviceIds.map(deviceId => {
+                                            const device = devices.find(candidate => candidate.deviceId === deviceId);
+                                            return `${device?.platform === 'desktop' ? 'Computador' : device?.platform === 'web' ? 'Navegador' : 'Dispositivo'} ${deviceId.slice(0, 8)}`;
+                                        }).join(', ')}
+                                    </p>
+                                ))}
+                            </div>
+                        ))}
                     </div>
                 )}
                 <p className="text-[11px] text-muted-foreground">

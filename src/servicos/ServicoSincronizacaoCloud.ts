@@ -108,8 +108,9 @@ const syncDiagnostics = async (lastError?: string) => {
         appVersion: APP_VERSION,
         ...(counts ? {
             pending: counts.pending, oversized: counts.oversized, waiting: counts.waiting, unreadable: counts.unreadable,
-            conflicts: counts.conflicts, otherVersion: counts.otherVersion,
+            conflicts: counts.conflicts, otherVersion: counts.otherVersion, userClashes: counts.userClashes,
         } : {}),
+        users: activeConfig ? await usersFingerprint(activeConfig.tenantId).catch(() => []) : [],
         rejected413: rejected413SinceReport,
         lastError,
         clientTime: Date.now(),
@@ -647,9 +648,50 @@ const saveUsersState = async () => {
  * Lista de utilizadores vinda de outro dispositivo da empresa: cria/actualiza e remove os indicados, mantendo
  * o 2FA e os bloqueios locais. No computador quem valida e grava é o processo principal (senhas protegidas).
  */
+// ── Mesmo utilizador com IDs diferentes ──────────────────────────────────────────────────────────────────────
+// A mesma pessoa (mesmo email) criada em separado em dois dispositivos fica com dois IDs. A lista recebida não se
+// sobrepõe à local, e por isso as mensagens do chat e o histórico de um ID não aparecem a quem entra com o outro.
+// Cada choque fica registado aqui (para o ícone, o diagnóstico e a unificação) em vez de ser esquecido.
+const USER_CLASHES_KEY = 'cloud_sync_user_clashes_v1';
+export type UserIdClash = { email: string; name: string; localId: string; remoteId: string; at: string };
+const readUserClashes = (): Record<string, UserIdClash> => {
+    try { return JSON.parse(localStorage.getItem(scopedStorageKey(USER_CLASHES_KEY)) || '{}') || {}; } catch { return {}; }
+};
+const recordUserClashes = (found: Array<Omit<UserIdClash, 'at'>>, resolvedEmails: string[] = []) => {
+    const current = readUserClashes();
+    for (const email of resolvedEmails) delete current[email];
+    for (const clash of found) current[clash.email] = { ...clash, at: new Date().toISOString() };
+    localStorage.setItem(scopedStorageKey(USER_CLASHES_KEY), JSON.stringify(current));
+};
+/** Choques ainda reais: o email continua aqui com um ID diferente do que os outros dispositivos usam. */
+export const getUserIdClashes = async (): Promise<UserIdClash[]> => {
+    const clashes = Object.values(readUserClashes());
+    if (!clashes.length) return [];
+    const users = await sqlite.all<{ id: string; email: string }>('SELECT id, email FROM users').catch(() => [] as Array<{ id: string; email: string }>);
+    const byEmail = new Map(users.map(user => [String(user.email || '').trim().toLowerCase(), String(user.id)]));
+    return clashes.filter(clash => byEmail.has(clash.email) && byEmail.get(clash.email) !== clash.remoteId);
+};
+
+/**
+ * Impressão digital de cada utilizador deste dispositivo: hash do email (com a empresa) e o ID. O servidor compara
+ * entre dispositivos sem ver emails nem nomes, e o Tango Master mostra quem tem IDs diferentes.
+ */
+const usersFingerprint = async (tenantId: string) => {
+    const users = await sqlite.all<{ id: string; email: string }>('SELECT id, email FROM users').catch(() => [] as Array<{ id: string; email: string }>);
+    const rows: Array<[string, string]> = [];
+    for (const user of users.slice(0, 500)) {
+        const email = String(user.email || '').trim().toLowerCase();
+        if (!email || !user.id) continue;
+        const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${tenantId}:${email}`)));
+        rows.push([Array.from(digest.slice(0, 12), byte => byte.toString(16).padStart(2, '0')).join(''), String(user.id)]);
+    }
+    return rows;
+};
+
 const applyUserRoster = async (roster: UsersRoster) => {
     if (window.electronAPI?.syncUsersApply) {
         const result = await window.electronAPI.syncUsersApply({ columns: roster.columns, rows: roster.rows, deleted: roster.deleted || [] });
+        if (result.clashes?.length) recordUserClashes(result.clashes);
         return result.applied + result.deleted;
     }
     const local = new Set(await sharedUserColumns());
@@ -669,6 +711,8 @@ const applyUserRoster = async (roster: UsersRoster) => {
     const hasSentBefore = Object.keys(sentState).length > 0;
     const localNow = hasSentBefore ? (await readLocalUsers()).fingerprints : {};
     const appliedIds: string[] = [];
+    const clashes: Array<Omit<UserIdClash, 'at'>> = [];
+    const resolvedEmails: string[] = [];
     for (const row of roster.rows || []) {
         if (!Array.isArray(row)) continue;
         const value = (column: string) => row[incoming.indexOf(column)] ?? null;
@@ -679,7 +723,11 @@ const applyUserRoster = async (roster: UsersRoster) => {
         if (!id || !email || !value('password') || !value('role')) continue;
         // Email já usado por outro utilizador deste navegador: não se sobrepõe.
         const clash = await sqlite.all<{ id: string }>('SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1', [email, id]);
-        if (clash.length) continue;
+        if (clash.length) {
+            clashes.push({ email, name: String(value('name') || email).slice(0, 120), localId: String(clash[0].id), remoteId: id });
+            continue;
+        }
+        resolvedEmails.push(email);
         // Nome de utilizador já usado por outro: entra sem ele (o login também aceita o email).
         const username = columns.includes('username') && value('username')
             ? String(value('username')) : null;
@@ -698,6 +746,7 @@ const applyUserRoster = async (roster: UsersRoster) => {
         appliedIds.push(id);
     }
     for (const id of roster.deleted || []) statements.push({ sql: 'DELETE FROM users WHERE id = ?', params: [String(id)] });
+    recordUserClashes(clashes, resolvedEmails);
     if (!statements.length) return 0;
     let applied = 0;
     applyingRemote = true;
@@ -939,7 +988,8 @@ const collectSyncCounts = async (extra: Partial<SyncCounts> = {}): Promise<SyncC
     const otherVersion = rows.filter(row => {
         try { return isOtherVersionReason(JSON.parse(row.operation)?.reason); } catch { return false; }
     }).length;
-    return { pending: queue.length - oversized, oversized, waiting, unreadable, conflicts: rows.length - otherVersion, otherVersion, ...extra };
+    const userClashes = (await getUserIdClashes().catch(() => [])).length;
+    return { pending: queue.length - oversized, oversized, waiting, unreadable, conflicts: rows.length - otherVersion, otherVersion, userClashes, ...extra };
 };
 
 /** Alterações locais ainda por enviar para a nuvem. */
