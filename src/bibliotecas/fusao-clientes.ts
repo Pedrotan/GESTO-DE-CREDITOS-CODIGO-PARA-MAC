@@ -16,19 +16,22 @@ export type ClienteParaFusao = {
     id: string; name?: string | null; nif?: string | null; createdAt?: string | null; deletedAt?: string | null; deletedBy?: string | null;
 };
 
-/** Tabelas que apontam para o cliente e o comando (fixo) que muda o cliente de uma linha. */
+/**
+ * Tabelas que apontam para o cliente e o comando (fixo) que muda o cliente de uma linha. As aprovações de crédito não
+ * entram: são o registo de uma decisão (guardam o nome do cliente) e no computador só o aprovador as pode gravar — o
+ * processo principal recusava a transacção inteira como «acção sem permissão» e os repetidos ficavam na lista.
+ */
 export const TABELAS_REFERENCIA = {
     credits: 'UPDATE credits SET clientId = ? WHERE id = ?',
     contracts: 'UPDATE contracts SET clientId = ? WHERE id = ?',
     warranties: 'UPDATE warranties SET clientId = ? WHERE id = ?',
     legal_cases: 'UPDATE legal_cases SET clientId = ? WHERE id = ?',
     collection_messages: 'UPDATE collection_messages SET clientId = ? WHERE id = ?',
-    credit_approvals: 'UPDATE credit_approvals SET clientId = ? WHERE id = ?',
     simulations: 'UPDATE simulations SET clientId = ? WHERE id = ?',
 } as const;
 export type TabelaReferencia = keyof typeof TABELAS_REFERENCIA;
 /** Tabelas que também guardam o nome do cliente (permitem devolver as linhas de uma fusão errada ao dono). */
-export const TABELAS_COM_NOME: readonly TabelaReferencia[] = ['credits', 'contracts', 'collection_messages', 'credit_approvals', 'simulations'];
+export const TABELAS_COM_NOME: readonly TabelaReferencia[] = ['credits', 'contracts', 'collection_messages', 'simulations'];
 
 export type ReferenciaCliente = { table: TabelaReferencia; id: string; clientId: string; clientName?: string | null };
 export type ComandoFusao = { sql: string; params: unknown[] };

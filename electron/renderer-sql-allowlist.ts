@@ -289,6 +289,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM notifications",
   "DELETE FROM notifications WHERE id = ?",
   "DELETE FROM notifications WHERE source = ?",
+  "DELETE FROM notifications WHERE title LIKE 'Alerta de segurança: Tentativa de acção sem permissão%' AND message LIKE '%A decisão exige o responsável autenticado e diferente do solicitante%' AND timestamp >= '2026-10-28'",
   "DELETE FROM payment_gateways",
   "DELETE FROM payment_gateways WHERE id = ?",
   "DELETE FROM payment_references",
@@ -610,6 +611,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?",
   "SELECT COUNT(*) AS n FROM users",
   "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?",
+  "SELECT COUNT(*) AS total FROM notifications WHERE title LIKE 'Alerta de segurança: Tentativa de acção sem permissão%' AND message LIKE '%A decisão exige o responsável autenticado e diferente do solicitante%' AND timestamp >= '2026-10-28'",
   "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?",
   "SELECT COUNT(*) AS total FROM rh_funcionario",
   "SELECT COUNT(*) AS total FROM users",
@@ -695,7 +697,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, clientId, NULL AS clientName FROM warranties",
   "SELECT id, clientId, clientName FROM collection_messages",
   "SELECT id, clientId, clientName FROM contracts",
-  "SELECT id, clientId, clientName FROM credit_approvals",
   "SELECT id, clientId, clientName FROM credits",
   "SELECT id, clientId, clientName FROM simulations",
   "SELECT id, clientId, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL",
@@ -831,7 +832,6 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE contracts SET status = 'active' WHERE id = ? AND status = 'paid'",
   "UPDATE contracts SET status = 'paid' WHERE id = ? AND status <> 'paid'",
   "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?",
-  "UPDATE credit_approvals SET clientId = ? WHERE id = ?",
   "UPDATE credit_documents SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL",
   "UPDATE credit_import_batches SET rowsCount = ?, totalMinor = ? WHERE id = ?",
   "UPDATE credit_import_batches SET status = 'cancelled', cancelledAt = ?, cancelledBy = ?, cancelReason = ? WHERE id = ? AND status = 'active'",
@@ -2137,6 +2137,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DELETE FROM notifications WHERE source = ?"
   ],
   [
+    "21dcee58d5ce595576a4135f881e2ad40d1bd9c23f286d96da1655b8dce972dd",
+    "DELETE FROM notifications WHERE title LIKE 'Alerta de segurança: Tentativa de acção sem permissão%' AND message LIKE '%A decisão exige o responsável autenticado e diferente do solicitante%' AND timestamp >= '2026-10-28'"
+  ],
+  [
     "7ffc6efd4b85eb2587a25605a0519132ff1062af2074c1eb20d7571792c707fd",
     "DELETE FROM payment_gateways"
   ],
@@ -3421,6 +3425,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?"
   ],
   [
+    "d85e56fee0c80e266645ff915be4b358df59d0dc3e8f842abc25302e36608f4a",
+    "SELECT COUNT(*) AS total FROM notifications WHERE title LIKE 'Alerta de segurança: Tentativa de acção sem permissão%' AND message LIKE '%A decisão exige o responsável autenticado e diferente do solicitante%' AND timestamp >= '2026-10-28'"
+  ],
+  [
     "c8ddff8281e56ce8629e49973eb25d32b0dc191dbe28998bb0b98dd69958c5c5",
     "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?"
   ],
@@ -3759,10 +3767,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "0c0e058ea529801a27880053b460a58e22a6eef545c3b963ccb14f3ca6ff862f",
     "SELECT id, clientId, clientName FROM contracts"
-  ],
-  [
-    "a2b1bb8850d78e9d316ca624e8b9d17884f4bbdaaed8c4d6ecd2a7043e07a48b",
-    "SELECT id, clientId, clientName FROM credit_approvals"
   ],
   [
     "84e4d4993174c13982a947d70dc15e7b756ca5f740bf911d7926dd1fc9f667ba",
@@ -4303,10 +4307,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "58c1c1f8743ce642d03079eb7e79e9d85185e6475fadd749d0c23778dc717cac",
     "UPDATE contracts SET status = 'terminated' WHERE id = ? OR title LIKE ?"
-  ],
-  [
-    "bc70593ff4f818b19289e1c9178a389a97bcedf81f082e34232c4c6875c0fdd4",
-    "UPDATE credit_approvals SET clientId = ? WHERE id = ?"
   ],
   [
     "8aad810ee85a2d79fcbb22a23e2bbf03a7cd6cede00098829920fd3d50529b77",

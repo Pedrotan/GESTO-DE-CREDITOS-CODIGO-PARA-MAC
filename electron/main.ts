@@ -16,6 +16,7 @@ import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
 import { SYNC_SQL_BY_ID } from './sync-sql';
 import { applyRemoteGroups, RETAINED_FOR_ROW_SQL, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
+import { executarManutencaoSync } from '../src/bibliotecas/manutencao-sync';
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
@@ -3679,6 +3680,23 @@ app.whenReady().then(async () => {
     });
     if (result.applied) { sealAfterWrite("remote"); sealAuditAfterWrite(); }
     if (result.applied || result.conflicts) broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    return result;
+  });
+  // Manutenção depois da sincronização (manutencao-sync.ts): calculada só a partir desta base, sem SQL vindo do
+  // ecrã — como as operações da nuvem, não depende das permissões de quem tem a sessão aberta (no canal db-transaction
+  // cada recusa era registada como «acção sem permissão»).
+  ipcMain.handle("sync-maintenance", async (event) => {
+    assertTrustedIpcSender(event);
+    if (!hasCloudLinkGrant(event)) userAuth.assertAuthenticated(event.sender.id);
+    if (financialSchemaBootstrapOpen) throw new Error("A base de dados ainda está a ser preparada.");
+    const result = await executarManutencaoSync({
+      all: async (sql, params = []) => ((await runQuery("query", sql, params)) || []) as any[],
+      transaction: async (statements) => runTransaction(validateDbTransaction(statements)),
+      sqlById: SYNC_SQL_BY_ID,
+    }, { limparAlertasFalsos: true });
+    if (result.reactivados || result.restaurados || result.fundidos || result.religados || result.resolvidos || result.alertasLimpos) {
+      broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    }
     return result;
   });
   // Colunas de utilizador partilhadas entre dispositivos: sem 2FA, bloqueios, presença nem fotografia (ficheiro local).

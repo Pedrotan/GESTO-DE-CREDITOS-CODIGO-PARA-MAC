@@ -33,7 +33,7 @@ import {
 import { reportUsageIfDue } from '@/servicos/ServicoRelatorioUso';
 import { syncHealth, syncIssues, type SyncCounts, type SyncIssue } from '@/bibliotecas/estado-sincronizacao';
 import { conflictArchiveStatements, type SyncConflict } from '@/bibliotecas/sync-conflitos';
-import { clientesEnvolvidos, planoReconciliacaoClientes, type ClienteParaFusao, type ReferenciaCliente, type TabelaReferencia } from '@/bibliotecas/fusao-clientes';
+import { executarManutencaoSync, type ResultadoManutencao } from '@/bibliotecas/manutencao-sync';
 import { balanceMismatches, CREDIT_BALANCE_CHECK_SQL, type BalanceMismatch, type CreditBalanceRow } from '@/bibliotecas/saldos-derivados';
 import { bucketOf, tableDigest, type IntegrityReport, type TableDigest } from '@/bibliotecas/integridade-sync';
 
@@ -1119,50 +1119,31 @@ export const reprocessRetainedOperations = async (force = false): Promise<number
     }
 };
 
-// Clientes repetidos entre dispositivos (ver fusao-clientes.ts): corre na primeira sincronização de cada sessão e
-// sempre que chega algo novo. Só neste dispositivo — todos fazem o mesmo a partir dos mesmos dados.
-const REFERENCIAS_CLIENTE: Record<TabelaReferencia, string> = {
-    credits: 'SELECT id, clientId, clientName FROM credits',
-    contracts: 'SELECT id, clientId, clientName FROM contracts',
-    warranties: 'SELECT id, clientId, NULL AS clientName FROM warranties',
-    legal_cases: 'SELECT id, clientId, NULL AS clientName FROM legal_cases',
-    collection_messages: 'SELECT id, clientId, clientName FROM collection_messages',
-    credit_approvals: 'SELECT id, clientId, clientName FROM credit_approvals',
-    simulations: 'SELECT id, clientId, clientName FROM simulations',
-};
-// Alterações de clientes retidas (e arquivadas) por NIF ou telefone repetido, quando a base ainda os recusava.
-const RETIDO_POR_NIF = /UNIQUE constraint failed: clients\.(nif|phone)/iu;
-let clientsReconciled = false;
-export const reconcileClients = async (): Promise<{ restaurados: number; fundidos: number; religados: number; reactivados: number }> => {
-    let reactivados = 0;
-    const archived = await sqlite.all<{ id: string; operation: string }>(`SELECT id, operation FROM sync_conflicts WHERE status = 'archived' AND entityType = 'clients'`);
-    const revive = archived.filter(row => {
-        try { return RETIDO_POR_NIF.test(String(JSON.parse(row.operation)?.reason || '')); } catch { return false; }
-    });
-    if (revive.length) {
-        await sqlite.transaction(revive.map(row => ({ sql: `UPDATE sync_conflicts SET status = 'pending', resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'archived'`, params: [row.id] })));
-        reactivados = revive.length;
+// Manutenção depois da sincronização (manutencao-sync.ts): clientes repetidos, alterações de clientes arquivadas por
+// NIF/telefone repetido e conflitos sem efeito. Corre na primeira sincronização de cada sessão e sempre que chega algo
+// novo. No computador corre no processo principal (não depende das permissões de quem tem a sessão aberta, por isso
+// nunca é uma «acção sem permissão»); na versão web corre aqui. Se falhar, só volta a tentar passada uma hora.
+let maintenanceDone = false;
+let maintenanceFailedAt = 0;
+const MAINTENANCE_RETRY_MS = 60 * 60_000;
+export const runSyncMaintenance = async (): Promise<ResultadoManutencao & { erros: string[] }> => {
+    const result = window.electronAPI?.syncMaintenance
+        ? await window.electronAPI.syncMaintenance()
+        : await executarManutencaoSync({
+            all: (sql, params) => sqlite.all(sql, params as unknown[]),
+            transaction: statements => sqlite.transaction(statements as SqlTransactionStatement[]),
+            sqlById: SYNC_SQL_BY_ID,
+            tombstoned: (table, id) => Boolean(readTombstones()[`${table}\u0001${id}`]),
+        });
+    if (result.reactivados) {
         reprocessDirty = true;
         await reprocessRetainedOperations();
     }
-    const clientes = await sqlite.all<ClienteParaFusao>('SELECT id, name, nif, createdAt, deletedAt, deletedBy FROM clients');
-    const ids = clientesEnvolvidos(clientes);
-    if (!ids.size) return { restaurados: 0, fundidos: 0, religados: 0, reactivados };
-    const lista = [...ids];
-    const marcas = lista.map(() => '?').join(', ');
-    const referencias: ReferenciaCliente[] = [];
-    for (const [table, sql] of Object.entries(REFERENCIAS_CLIENTE) as Array<[TabelaReferencia, string]>) {
-        try {
-            const rows = await sqlite.all<{ id: string; clientId: string; clientName?: string | null }>(`${sql} WHERE clientId IN (${marcas})`, lista);
-            referencias.push(...rows.map(row => ({ table, id: String(row.id), clientId: String(row.clientId), clientName: row.clientName })));
-        } catch { /* tabela ou coluna ainda inexistente nesta base */ }
+    if (result.restaurados || result.fundidos || result.religados || result.resolvidos || result.alertasLimpos) {
+        console.log(`[CloudSync] Manutenção: ${result.fundidos} cliente(s) fundido(s), ${result.restaurados} reposto(s), ${result.religados} registo(s) religado(s), ${result.resolvidos} conflito(s) sem efeito resolvido(s), ${result.alertasLimpos} alerta(s) falso(s) apagado(s).`);
     }
-    const plano = planoReconciliacaoClientes(clientes, referencias);
-    for (let start = 0; start < plano.statements.length; start += 200) {
-        await sqlite.transaction(plano.statements.slice(start, start + 200) as SqlTransactionStatement[]);
-    }
-    if (plano.statements.length) console.log(`[CloudSync] Clientes: ${plano.restaurados} reposto(s), ${plano.fundidos} fundido(s) (mesmo NIF e nome), ${plano.religados} registo(s) religado(s).`);
-    return { restaurados: plano.restaurados, fundidos: plano.fundidos, religados: plano.religados, reactivados };
+    if (result.erros.length) console.warn('[CloudSync] Manutenção:', result.erros.join(' · '));
+    return result;
 };
 
 // Alterações ilegíveis que nunca o vão ser: cifradas por um dispositivo com um código que ele próprio já trocou (este
@@ -1188,42 +1169,6 @@ export const archiveStaleUnreadable = async (cursor: number) => {
     await deleteOperations(stale.map(item => item.id), UNREADABLE_STORE);
     console.info(`[CloudSync] ${stale.length} alteração(ões) ilegível(is) antiga(s) arquivada(s): cifradas com um Código de Acesso anterior.`);
     return stale.length;
-};
-
-// Conflitos que já não têm efeito e se resolvem sozinhos: a alteração condicionada de um cliente apagado
-// definitivamente, e um lançamento contabilístico que já existe aqui com o mesmo identificador (o mesmo movimento
-// recebido outra vez, por outra cadeia).
-export const resolveMootConflicts = async () => {
-    const rows = await sqlite.all<{ id: string; entityType: string; operation: string }>(`SELECT id, entityType, operation FROM sync_conflicts WHERE status = 'pending'`);
-    if (!rows.length) return 0;
-    const tombstones = readTombstones();
-    const now = new Date().toISOString();
-    const statements: SqlTransactionStatement[] = [];
-    for (const row of rows) {
-        let operation: (SyncOperation & { reason?: string }) | null = null;
-        try { operation = JSON.parse(row.operation); } catch { continue; }
-        if (!operation) continue;
-        const reason = String(operation.reason || '');
-        const params = Array.isArray(operation.params) ? operation.params : [];
-        if (/esperadas \d+ altera/iu.test(reason) && params.some(param => tombstones[`clients\u0001${String(param)}`])) {
-            statements.push({ sql: CONFLICT_RESOLVE_SQL, params: ['O cliente foi apagado definitivamente; a alteração já não se aplica.', now, row.id] });
-            continue;
-        }
-        if (row.entityType === 'accounting_entries' && /Cadeia contabil/iu.test(reason)) {
-            const columns = operation.columns || [];
-            const entryId = operation.kind === 'snapshot'
-                ? params[columns.indexOf('id')]
-                : statementRowId(SYNC_SQL_BY_ID.get(String(operation.statementId || '')) || '', params);
-            if (entryId && (await sqlite.all('SELECT 1 AS found FROM accounting_entries WHERE id = ? LIMIT 1', [String(entryId)])).length) {
-                statements.push({ sql: CONFLICT_RESOLVE_SQL, params: ['O lançamento já existe neste dispositivo (o mesmo movimento recebido outra vez).', now, row.id] });
-            }
-        }
-    }
-    if (statements.length) {
-        await sqlite.transaction(statements);
-        console.info(`[CloudSync] ${statements.length} conflito(s) sem efeito resolvido(s) automaticamente.`);
-    }
-    return statements.length;
 };
 
 const emitStatus = (detail: CloudSyncStatus) => {
@@ -1567,16 +1512,17 @@ export const syncCloudNow = async () => {
             // Dependências podem ter chegado numa página posterior (cliente antes de crédito, por exemplo).
             totalPulled += await reprocessRetainedOperations();
             await resolveHealedTransactions().catch(error => console.warn('[CloudSync] Autocura de transacções:', error));
-            if (totalPulled || !clientsReconciled) {
+            if ((totalPulled || !maintenanceDone) && Date.now() - maintenanceFailedAt > MAINTENANCE_RETRY_MS) {
                 try {
-                    const outcome = await reconcileClients();
-                    clientsReconciled = true;
-                    if (outcome.restaurados || outcome.fundidos || outcome.religados || outcome.reactivados) totalPulled += 1;
+                    const outcome = await runSyncMaintenance();
+                    maintenanceDone = true;
+                    if (outcome.erros.length) maintenanceFailedAt = Date.now();
+                    if (outcome.restaurados || outcome.fundidos || outcome.religados || outcome.reactivados || outcome.resolvidos) totalPulled += 1;
                 } catch (error) {
-                    console.warn('[CloudSync] Reconciliação de clientes:', error);
+                    maintenanceFailedAt = Date.now();
+                    console.warn('[CloudSync] Manutenção:', error);
                 }
             }
-            await resolveMootConflicts().catch(error => console.warn('[CloudSync] Conflitos sem efeito:', error));
             if (!hasMoreRemote) await archiveStaleUnreadable(cursor).catch(error => console.warn('[CloudSync] Alterações ilegíveis antigas:', error));
             // Primeiro recebe o perfil existente. Só depois completa os campos ainda não partilhados:
             // uma instalação nova/vazia nunca substitui a identidade que já está na nuvem.
