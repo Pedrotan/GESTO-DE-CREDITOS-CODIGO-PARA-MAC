@@ -2202,11 +2202,15 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         await ServicoMensagem.send(msg);
         setMessages(prev => [...prev, msg]);
 
+        // Resumo para a notificação: o texto, ou o que foi anexado quando a mensagem não tem texto.
+        const preview = m.content.trim()
+            || (m.clientCard ? `Ficha de cliente: ${m.clientCard.name}` : '')
+            || (m.attachments?.length ? `${m.attachments.length === 1 ? m.attachments[0].name : `${m.attachments.length} ficheiros`}` : '');
         await addNotification({
             id: crypto.randomUUID(),
             userId: m.receiverId,
             title: `Nova mensagem de ${m.senderName}`,
-            message: m.content.length > 120 ? `${m.content.slice(0, 117)}...` : m.content,
+            message: preview.length > 120 ? `${preview.slice(0, 117)}...` : preview,
             type: 'info',
             source: 'chat',
             read: false,

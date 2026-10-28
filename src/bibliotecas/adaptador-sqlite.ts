@@ -1230,6 +1230,9 @@ const createTables = async () => {
     await safeAddColumn("users", "mustChangePassword", "INTEGER DEFAULT 0");
     await safeAddColumn("users", "status", "TEXT DEFAULT 'active'");
     await safeAddColumn("users", "lastSeen", "TEXT");
+    // Chat: ficheiros enviados e ficha de cliente partilhada (JSON).
+    await safeAddColumn("internal_messages", "attachments", "TEXT");
+    await safeAddColumn("internal_messages", "clientCard", "TEXT");
     await safeAddColumn("users", "permissions", "TEXT");
     await safeAddColumn("users", "username", "TEXT");
     await safeAddColumn("users", "failedAttempts", "INTEGER DEFAULT 0");

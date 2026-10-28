@@ -374,6 +374,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO hub_collection_clients (clientId, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(clientId) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
   "INSERT INTO hub_collection_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
   "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)",
+  "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read, attachments, clientCard) VALUES (?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO ledger_lines (id, transactionId, account, side, component, amountMinor) VALUES (?,?,?,?,?,?)",
   "INSERT INTO ledger_transactions (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor, totalCreditMinor, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -2475,6 +2476,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "354403cb3fbc65e11a3acb6f2ed18990fe20472096e214c9192ca4884b2e5c20",
     "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)"
+  ],
+  [
+    "bc6b7358eacb723e7484da411a39cce8605da25501b1f61fce98ead043159997",
+    "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read, attachments, clientCard) VALUES (?,?,?,?,?,?,?,?,?,?)"
   ],
   [
     "23b0bff90f55fe2d4527976c545c0a2660f776eb381c1600fca2c33a46caa541",

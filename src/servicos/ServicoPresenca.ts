@@ -12,6 +12,8 @@ type Snapshot = { tenantId: string; entries: Map<string, PresenceEntry>; receive
 let snapshot: Snapshot = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let currentUser: string | null = null;
+// Última vez que cada utilizador apareceu online nesta sessão (para «visto há 5 min» depois de sair).
+const lastSeenByKey = new Map<string, string>();
 const listeners = new Set<() => void>();
 const notify = () => listeners.forEach(listener => listener());
 
@@ -20,6 +22,7 @@ const beat = async () => {
     try {
         const result = await sendPresence(currentUser, true);
         if (!result) return;
+        for (const entry of result.online) if (entry.lastSeen) lastSeenByKey.set(entry.userKey, entry.lastSeen);
         snapshot = { tenantId: result.tenantId, entries: new Map(result.online.map(entry => [entry.userKey, entry])), receivedAt: Date.now() };
         notify();
     } catch (error) {
@@ -28,6 +31,10 @@ const beat = async () => {
 };
 
 const onVisible = () => { if (typeof document !== 'undefined' && document.visibilityState === 'visible') void beat(); };
+// Janela ou separador fechado (ou programa terminado) sem terminar sessão: avisa já o servidor, em vez de continuar
+// «online» até o sinal expirar (150 s). Ao voltar (página restaurada) o sinal recomeça.
+const onPageHide = () => { if (currentUser) void sendPresence(currentUser, false).catch(() => undefined); };
+const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) void beat(); };
 
 export const ServicoPresenca = {
     /** Começa a enviar o sinal deste utilizador (idempotente). */
@@ -38,12 +45,20 @@ export const ServicoPresenca = {
         void beat();
         timer = setInterval(() => void beat(), INTERVAL_MS);
         if (typeof document !== 'undefined') document.addEventListener('visibilitychange', onVisible);
+        if (typeof window !== 'undefined') {
+            window.addEventListener('pagehide', onPageHide);
+            window.addEventListener('pageshow', onPageShow);
+        }
     },
     /** Pára o sinal; com `announce`, avisa o servidor (fim de sessão: deixa de aparecer logo). */
     stop(announce = true) {
         if (timer) clearInterval(timer);
         timer = null;
         if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', onVisible);
+        if (typeof window !== 'undefined') {
+            window.removeEventListener('pagehide', onPageHide);
+            window.removeEventListener('pageshow', onPageShow);
+        }
         const leaving = currentUser;
         currentUser = null;
         if (announce && leaving) void sendPresence(leaving, false).catch(() => undefined);
@@ -58,11 +73,14 @@ export const ServicoPresenca = {
         if (!snapshot) return null;
         const result = new Map<string, RemotePresence>();
         for (const id of userIds) {
-            const entry = snapshot.entries.get(await presenceUserKey(snapshot.tenantId, id));
+            const key = await presenceUserKey(snapshot.tenantId, id);
+            const entry = snapshot.entries.get(key);
             result.set(id, entry
                 ? { online: true, lastSeen: entry.lastSeen, devices: entry.devices, platforms: entry.platforms }
-                : { online: false, lastSeen: null, devices: 0, platforms: [] });
+                : { online: false, lastSeen: lastSeenByKey.get(key) || null, devices: 0, platforms: [] });
         }
         return result;
     },
+    /** Há dados de presença da nuvem (sem eles não se sabe quem está ligado noutros dispositivos). */
+    available: () => Boolean(snapshot),
 };

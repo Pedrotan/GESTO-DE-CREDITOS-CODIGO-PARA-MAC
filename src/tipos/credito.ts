@@ -330,6 +330,30 @@ export interface UserLimit {
   updatedAt: Date;
 }
 
+/** Ficheiro enviado no chat (guardado na própria mensagem, em base64). */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  dataUrl: string;
+}
+
+/** Ficha resumida de um cliente partilhada no chat (fotografia do momento em que foi enviada). */
+export interface ChatClientCard {
+  id: string;
+  name: string;
+  nif?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  creditLimit?: number;
+  usedCredit?: number;
+  availableCredit?: number;
+  status?: string;
+  riskLevel?: string;
+}
+
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -339,6 +363,8 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   read: boolean;
+  attachments?: ChatAttachment[];
+  clientCard?: ChatClientCard | null;
 }
 
 export interface Simulation {
