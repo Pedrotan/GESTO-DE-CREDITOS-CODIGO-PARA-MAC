@@ -23,6 +23,8 @@ export type SimulatorForm = {
     months: number;
     startDate: string;
     dueDay: number;
+    /** Mês da 1.ª prestação (AAAA-MM); vazio = o mês seguinte à data de início. */
+    firstDueMonth?: string;
     graceMonths: number;
     graceType: GraceType;
     rateType: RateType;
@@ -103,6 +105,7 @@ export function buildInput(form: SimulatorForm, config: SimulatorConfig, annualR
         system: form.system,
         startDate: `${form.startDate}T12:00:00`,
         dueDay: form.dueDay,
+        firstDueMonth: form.firstDueMonth || undefined,
         graceMonths: form.graceMonths,
         graceType: form.graceType,
         openingFee: form.openingFee,

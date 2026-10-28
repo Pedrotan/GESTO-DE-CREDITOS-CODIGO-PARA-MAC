@@ -15,6 +15,8 @@ type ScheduleInput = {
     method: AmortizationMethod;
     annualRatePercent?: number;
     flatInterestMinor?: number;
+    /** Datas de vencimento já calculadas (as da simulação: dia escolhido, dias úteis, 1.ª prestação adiada). */
+    dueDates?: string[];
 };
 
 const assertIntegerMoney = (value: number, label: string) => {
@@ -42,6 +44,11 @@ export function buildInstallmentSchedule(input: ScheduleInput): InstallmentSched
     }
     const startDate = new Date(input.startDate);
     if (Number.isNaN(startDate.getTime())) throw new Error('Data inicial inválida.');
+    const dueDates = input.dueDates?.length ? input.dueDates.map(value => new Date(value)) : null;
+    if (dueDates && (dueDates.length !== input.installments || dueDates.some(date => Number.isNaN(date.getTime()))
+        || dueDates.some((date, index) => date.getTime() <= (index ? dueDates[index - 1] : startDate).getTime()))) {
+        throw new Error('As datas de vencimento das prestações não são válidas.');
+    }
 
     let principalParts: number[] = [];
     let interestParts: number[] = [];
@@ -81,7 +88,7 @@ export function buildInstallmentSchedule(input: ScheduleInput): InstallmentSched
         const interestMinor = interestParts[index];
         return {
             number: index + 1,
-            dueDate: addUtcMonths(startDate, index + 1).toISOString(),
+            dueDate: (dueDates ? dueDates[index] : addUtcMonths(startDate, index + 1)).toISOString(),
             principalMinor,
             interestMinor,
             totalMinor: principalMinor + interestMinor

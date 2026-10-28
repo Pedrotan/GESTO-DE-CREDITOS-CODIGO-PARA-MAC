@@ -458,7 +458,7 @@ export class ServicoFinanceiro {
         return (await this.liquidBalancesMinor()).total;
     }
 
-    private static async persistCredit(credit: Credit, limitStatements: Array<{ sql: string; params: unknown[]; expectChanges?: number }>): Promise<Credit> {
+    private static async persistCredit({ scheduleDueDates, ...credit }: Credit, limitStatements: Array<{ sql: string; params: unknown[]; expectChanges?: number }>): Promise<Credit> {
         const principalMinor = toMinorUnits(credit.principalAmount, 'Capital do crédito');
         if (principalMinor <= 0) throw new Error('O capital do crédito deve ser superior a zero.');
         const schedule = buildInstallmentSchedule({
@@ -467,7 +467,8 @@ export class ServicoFinanceiro {
             startDate: credit.startDate,
             method: credit.amortizationMethod || 'FLAT',
             annualRatePercent: credit.interestRate,
-            flatInterestMinor: toMinorUnits(Math.max(0, credit.accruedInterest || 0))
+            flatInterestMinor: toMinorUnits(Math.max(0, credit.accruedInterest || 0)),
+            dueDates: scheduleDueDates
         });
         const interestMinor = schedule.reduce((sum, item) => sum + item.interestMinor, 0);
         const normalizedCredit: Credit = {

@@ -151,3 +151,14 @@ test('limites do produto, configuração e formatação em Kz', () => {
     assert.equal(config.stampDuty.upToOneYear, 0.5);
     assert.equal(normalizeSimulatorConfig({ effortLimit: 40, stampDuty: { interest: 0.3 } }).stampDuty.interest, 0.3);
 });
+
+test('1.ª prestação num mês escolhido: crédito de Outubro a pagar de Janeiro a Outubro, sem saltar meses', () => {
+    const input = { principal: 886_600, months: 10, annualRate: 0, termRate: 100, system: 'flat', startDate: '2026-10-15T12:00:00', dueDay: 28, firstDueMonth: '2027-01' };
+    const result = simulateCredit(input);
+    // 28/02/2027 e 28/03/2027 são domingos: passam para o dia útil seguinte, mas continuam a ser as prestações de Fevereiro e Março.
+    assert.deepEqual(result.rows.map(row => row.dueDate), ['2027-01-28', '2027-03-01', '2027-03-29', '2027-04-28', '2027-05-28', '2027-06-28', '2027-07-28', '2027-08-30', '2027-09-28', '2027-10-28']);
+    const automatic = simulateCredit({ ...input, firstDueMonth: undefined });
+    assert.equal(automatic.firstDueDate, '2026-11-30', 'sem escolha: o mês seguinte ao desembolso (28/11 é sábado)');
+    assert.equal(result.totalPayments, automatic.totalPayments, 'o juro do prazo não muda');
+    assert.ok(result.taeg < automatic.taeg, 'os meses sem prestação baixam a TAEG');
+});

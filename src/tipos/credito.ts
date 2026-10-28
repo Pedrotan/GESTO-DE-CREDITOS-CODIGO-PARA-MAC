@@ -148,6 +148,8 @@ export interface Credit {
   originalState?: string;
   usuario_id?: string;
   targetMonthId?: string;
+  /** Só ao criar: datas de vencimento da simulação (dia escolhido, dias úteis, 1.ª prestação adiada). Não é gravado. */
+  scheduleDueDates?: string[];
   supplierId?: string;
   supplierProfitRate?: number;
   /** Total de capital acrescentado por reforços. */
