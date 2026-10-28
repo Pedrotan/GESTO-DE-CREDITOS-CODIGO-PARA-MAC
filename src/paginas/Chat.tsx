@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useMemo, type ClipboardEvent, type DragEvent, type KeyboardEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
@@ -17,6 +17,7 @@ import {
 import { cn, formatDateSafe } from '@/bibliotecas/utils';
 import { formatCurrency } from '@/bibliotecas/formatters';
 import { ServicoPresenca, type RemotePresence } from '@/servicos/ServicoPresenca';
+import { lojaAvisos } from '@/bibliotecas/avisos-mensagens';
 import {
     CHAT_ACCEPT, CHAT_MAX_MESSAGE_BYTES, estadoPresenca, fichaCliente, lerAnexo, problemaFicheiro, resumoMensagem, rotuloDia, tamanhoLegivel,
 } from '@/bibliotecas/chat-interno';
@@ -70,8 +71,9 @@ export default function Chat() {
     const { messages, sendMessage, markMessageAsRead, deleteMessage, clearMessages, clients } = useData();
     const { toast } = useToast();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
 
-    const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
+    const [selectedUserId, setSelectedUserId] = useState<string | null>(() => searchParams.get('com'));
     const [searchTerm, setSearchTerm] = useState('');
     const [texto, setTexto] = useState('');
     const [anexos, setAnexos] = useState<ChatAttachment[]>([]);
@@ -87,6 +89,14 @@ export default function Chat() {
     const fimRef = useRef<HTMLDivElement>(null);
     const ficheiroRef = useRef<HTMLInputElement>(null);
     const textoRef = useRef<HTMLTextAreaElement>(null);
+
+    // Vindo de um aviso de mensagem («?com=<utilizador>»): abre essa conversa.
+    useEffect(() => { const com = searchParams.get('com'); if (com) setSelectedUserId(com); }, [searchParams]);
+    // A conversa aberta não gera avisos (as mensagens dela ficam logo lidas).
+    useEffect(() => {
+        lojaAvisos.definirConversaAberta(selectedUserId);
+        return () => lojaAvisos.definirConversaAberta(null);
+    }, [selectedUserId]);
 
     // Presença real: o servidor diz quem enviou sinal nos últimos 150 s (em qualquer computador ou navegador).
     useEffect(() => {
@@ -174,6 +184,8 @@ export default function Chat() {
         if (!selectedUser || !currentUser || aEnviar) return;
         const conteudo = texto.trim();
         if (!conteudo && !anexos.length && !ficha) return;
+        // Autorização (uma vez) para os avisos do sistema quando chegar resposta com a janela fora de vista.
+        if (typeof Notification !== 'undefined' && Notification.permission === 'default') void Notification.requestPermission().catch(() => undefined);
         setAEnviar(true);
         try {
             await sendMessage({

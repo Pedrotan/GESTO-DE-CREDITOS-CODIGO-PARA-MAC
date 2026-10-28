@@ -16,6 +16,7 @@ import { MonitorSeguranca } from '@/componentes/seguranca/MonitorSeguranca';
 import { EnvioRelatoriosAgendados } from '@/componentes/pagamentos/EnvioRelatoriosAgendados';
 import { cn } from '@/bibliotecas/utils';
 import { discardDraftsOnRouteChange } from '@/ganchos/usar-rascunho-formulario';
+import { AvisosMensagens } from '@/componentes/chat/AvisosMensagens';
 
 interface MainLayoutProps {
   children: ReactNode;
@@ -83,6 +84,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
         <AvisoLicencaNuvem />
         <BannerCongelamento />
         <MonitorSeguranca />
+        <AvisosMensagens />
         <EnvioRelatoriosAgendados />
         <VerificacaoContabilisticaDiaria />
         <LembretesCobranca />

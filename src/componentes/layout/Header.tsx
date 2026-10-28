@@ -29,6 +29,7 @@ import {
 import { ProfileModal } from '@/componentes/modals/ProfileModal';
 import { ModulesModal } from '@/componentes/modals/ModulesModal';
 import { ActivityModal } from '@/componentes/modals/ActivityModal';
+import { resumoMensagem } from '@/bibliotecas/chat-interno';
 
 interface HeaderProps {
   title: string;
@@ -46,6 +47,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
     payments,
     markNotificationAsRead,
     markMessageAsRead,
+    messages,
     deleteNotification,
     markAllAsRead,
     clearNotifications,
@@ -211,7 +213,21 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   const unreadCount = notifications.filter(n => !n.read && n.source !== 'chat').length;
   // Get chat notifications specifically for the current user
   const chatNotifications = notifications.filter(n => n.source === 'chat' && n.userId === user?.id);
-  const unreadChatCount = chatNotifications.filter(n => !n.read).length;
+  // Mensagens por ler (as próprias mensagens, não as notificações): uma linha por pessoa, a mais recente primeiro.
+  const unreadChatMessages = messages.filter(m => m.receiverId === user?.id && m.senderId !== user?.id && !m.read);
+  const unreadChatCount = unreadChatMessages.length;
+  const chatConversations = [...unreadChatMessages
+    .reduce((porPessoa, message) => {
+      const actual = porPessoa.get(message.senderId);
+      porPessoa.set(message.senderId, {
+        senderId: message.senderId, senderName: message.senderName,
+        last: !actual || new Date(message.timestamp) >= new Date(actual.last.timestamp) ? message : actual.last,
+        count: (actual?.count || 0) + 1,
+      });
+      return porPessoa;
+    }, new Map<string, { senderId: string; senderName: string; last: (typeof messages)[number]; count: number }>())
+    .values()]
+    .sort((a, b) => new Date(b.last.timestamp).getTime() - new Date(a.last.timestamp).getTime());
 
   // Data/hora actual exibida no cabeçalho, tal como no cabeçalho dos documentos
   const [now, setNow] = useState(new Date());
@@ -612,38 +628,31 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
               </h3>
               {unreadChatCount > 0 && <Badge variant="primary" className="text-[10px]">{unreadChatCount} novas</Badge>}
             </div>
-            <div className="max-h-[300px] overflow-y-auto">
-              {chatNotifications.filter(n => !n.read).length === 0 ? (
+            <div className="max-h-[320px] overflow-y-auto">
+              {chatConversations.length === 0 ? (
                 <div className="p-8 text-center text-xs text-muted-foreground">Sem novas mensagens</div>
               ) : (
-                chatNotifications.filter(n => !n.read).slice(0, 5).map(msg => (
-                  <div
-                    key={msg.id}
-                    className="p-3 border-b hover:bg-muted/50 cursor-pointer transition-colors bg-primary/5 border-l-2 border-l-primary group relative"
+                chatConversations.slice(0, 6).map(conversa => (
+                  <button
+                    key={conversa.senderId}
+                    type="button"
+                    onClick={() => navigate(`/chat?com=${encodeURIComponent(conversa.senderId)}`)}
+                    className="flex w-full items-center gap-3 border-b border-l-2 border-l-primary bg-primary/5 p-3 text-left transition-colors hover:bg-muted/50"
                   >
-                    <div
-                      className="flex-1"
-                      onClick={async () => {
-                        await markNotificationAsRead(msg.id);
-                        navigate('/chat');
-                      }}
-                    >
-                      <div className="flex justify-between items-start mb-1 pr-6">
-                        <span className="font-bold text-xs truncate">{msg.title}</span>
-                        <span className="text-[9px] text-muted-foreground whitespace-nowrap">{formatDateTime(msg.timestamp)}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground line-clamp-2">{msg.message}</p>
-                    </div>
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await deleteNotification(msg.id);
-                      }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-muted-foreground hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                      {conversa.senderName.split(/\s+/).filter(Boolean).slice(0, 2).map(parte => parte[0]).join('').toUpperCase()}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-xs font-bold">{conversa.senderName}</span>
+                        <span className="shrink-0 text-[9px] text-muted-foreground">{formatDateTime(conversa.last.timestamp)}</span>
+                      </span>
+                      <span className="line-clamp-2 text-xs text-muted-foreground">{resumoMensagem(conversa.last)}</span>
+                    </span>
+                    {conversa.count > 1 && (
+                      <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[10px] font-bold text-white">{conversa.count}</span>
+                    )}
+                  </button>
                 ))
               )}
             </div>
@@ -652,8 +661,8 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                 variant="ghost"
                 className="flex-1 rounded-none h-10 text-[10px] font-bold text-muted-foreground hover:bg-muted"
                 onClick={async () => {
-                  const chatIds = chatNotifications.filter(n => !n.read).map(n => n.id);
-                  for (const id of chatIds) await markNotificationAsRead(id);
+                  for (const message of unreadChatMessages) await markMessageAsRead(message.id);
+                  for (const notification of chatNotifications.filter(n => !n.read)) await markNotificationAsRead(notification.id);
                 }}
               >
                 Lidas
