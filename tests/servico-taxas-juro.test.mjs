@@ -62,7 +62,7 @@ test('sem registo devolve a tabela padrão; guardar persiste ordenado e o SQL é
     const ServicoTaxasJuro = await loadService();
     const { statements, RENDERER_SQL_ALLOWLIST } = await createDatabase();
 
-    assert.equal((await ServicoTaxasJuro.load()).length, 6);
+    assert.equal((await ServicoTaxasJuro.load()).length, 8);
     await ServicoTaxasJuro.save(tiers, 'Admin');
     assert.deepEqual((await ServicoTaxasJuro.load()).map(t => t.id), ['a', 'b']);
     // Tem de estar na allowlist para o Electron aceitar e a nuvem replicar a operação.
