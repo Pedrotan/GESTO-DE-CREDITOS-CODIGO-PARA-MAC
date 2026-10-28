@@ -48,6 +48,7 @@ import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { formatAuditTimestamp, toAuditEvent, type AuditEvent } from '@/bibliotecas/auditoria-analise';
 import { generateUsersPermissionsMatrixPDF } from '@/bibliotecas/matriz-permissoes-pdf';
 import { hasFullAuthority, isPrimaryOwner } from '@/bibliotecas/conta-principal';
+import { maisRecentePrimeiro } from '@/bibliotecas/ordenacao';
 
 interface PasswordResetRequest {
     id: string;
@@ -271,7 +272,7 @@ export default function Utilizadores() {
 
     // Filtragem geral da lista de utilizadores
     const filteredUsersList = useMemo(() => {
-        return (users || []).filter(u => {
+        return maisRecentePrimeiro(users || [], u => u?.createdAt).filter(u => {
             if (!u) return false;
 
             // Filtro por privilégio do utilizador atual

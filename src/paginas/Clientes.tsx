@@ -95,6 +95,7 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { exportToExcel } from '@/bibliotecas/ExcelHelper';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
 import { SeloBI } from '@/componentes/rh/comum-rh';
+import { maisRecentePrimeiro } from '@/bibliotecas/ordenacao';
 
 type BadgeVariant = 'default' | 'primary' | 'secondary' | 'destructive' | 'success' | 'warning' | 'info' | 'outline';
 
@@ -298,8 +299,9 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
         return contagem;
     }, [situacaoBI]);
 
+    // O cliente registado por último aparece primeiro.
     const filteredClients = useMemo(() => {
-        return categoryClients.filter(
+        return maisRecentePrimeiro(categoryClients, client => client.createdAt).filter(
             (client) =>
                 ((client.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
                     (client.nif || '').includes(searchTerm)) &&

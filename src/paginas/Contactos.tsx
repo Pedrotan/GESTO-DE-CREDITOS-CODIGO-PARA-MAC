@@ -18,6 +18,7 @@ import { cn } from '@/bibliotecas/utils';
 import { applyBranding, getCompanySettings, BRAND_ORANGE, BRAND_CHARCOAL, resolveBrandPrimary } from '@/bibliotecas/pdf';
 import { format } from 'date-fns';
 import { ServicoAlcadas } from '@/servicos/ServicoAlcadas';
+import { porMaisRecente } from '@/bibliotecas/ordenacao';
 
 type CategoriaFiltro = 'TODOS' | 'COMUM' | 'APOSENTADO' | 'ESTRANGEIRO';
 
@@ -128,7 +129,7 @@ export default function Contactos() {
                     (c.address || '').toLowerCase().includes(q)
                 );
             })
-            .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+            .sort(porMaisRecente(c => c.createdAt));
     }, [clients, procura, categoriaFiltro]);
 
     const totalFiltrados = lista.length;

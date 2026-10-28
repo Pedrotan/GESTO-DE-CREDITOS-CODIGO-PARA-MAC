@@ -20,6 +20,7 @@ import {
 } from '@/servicos/ServicoFiscal';
 import { ErrosAgt, EstadoAgtBadge, ListaProblemas, Vazio, Aviso } from './comum';
 import { ContextoFiscal, ESTADOS_AGT, TIPOS_DOC, aposFechar, dataPt, dataHoraPt, exportarCsv } from './apoio';
+import { porMaisRecente } from '@/bibliotecas/ordenacao';
 
 const kz = (m: number) => m / 100;
 const erroTexto = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -43,7 +44,8 @@ export default function DocumentosFiscais({ ctx, documentos, porFacturar, client
     return documentos.filter(d =>
       (estado === 'todos' || (estado === 'por_enviar' ? ['pendente', 'erro_envio'].includes(d.agtStatus) : estado === 'em_curso' ? ['enviado', 'em_validacao'].includes(d.agtStatus) : d.agtStatus === estado)) &&
       (tipo === 'todos' || d.documentType === tipo) &&
-      (!q || d.documentNo.toLowerCase().includes(q) || d.customerName.toLowerCase().includes(q) || d.customerTaxId.toLowerCase().includes(q)));
+      (!q || d.documentNo.toLowerCase().includes(q) || d.customerName.toLowerCase().includes(q) || d.customerTaxId.toLowerCase().includes(q)))
+      .sort(porMaisRecente(d => d.systemEntryDate || d.documentDate));
   }, [documentos, pesquisa, estado, tipo]);
   useEffect(() => setPagina(1), [pesquisa, estado, tipo]);
   const POR_PAGINA = 25;

@@ -95,6 +95,7 @@ import { RequerAtencao } from '@/componentes/contratos/RequerAtencao';
 import { TabelaContratos } from '@/componentes/contratos/TabelaContratos';
 import { DetalheContrato } from '@/componentes/contratos/DetalheContrato';
 import { RelatoriosContratos } from '@/componentes/contratos/RelatoriosContratos';
+import { instante } from '@/bibliotecas/ordenacao';
 
 type BadgeVariant = 'default' | 'primary' | 'secondary' | 'destructive' | 'success' | 'warning' | 'info' | 'outline';
 
@@ -224,7 +225,8 @@ export default function Contracts() {
     const filteredRows = useMemo(() => periodRows.filter(row => matchesContractFilters(row, filters)), [periodRows, filters]);
     const counts = useMemo(() => quickCounts(filteredRows, soonDays), [filteredRows, soonDays]);
     const tableRows = useMemo(() => filteredRows.filter(row => matchesQuick(row, quick, soonDays))
-        .sort((a, b) => b.startKey.localeCompare(a.startKey) || b.number.localeCompare(a.number)), [filteredRows, quick, soonDays]);
+        // O contrato registado por último aparece primeiro (pela data de registo; em empate, o número maior).
+        .sort((a, b) => instante(b.contract.createdAt || b.contract.startDate) - instante(a.contract.createdAt || a.contract.startDate) || b.number.localeCompare(a.number)), [filteredRows, quick, soonDays]);
     const kpis = useMemo(() => contractKpis(periodRows, data.installments, data.today, soonDays), [periodRows, data.installments, data.today, soonDays]);
     // «Requer atenção» olha para toda a carteira em vigor (um atraso de um contrato antigo não pode ficar escondido pelo período).
     const attention = useMemo(() => attentionItems(data.rows, soonDays), [data.rows, soonDays]);
@@ -252,7 +254,9 @@ export default function Contracts() {
             if (row.nextDueKey && (!group.nextDue || row.nextDueKey < group.nextDue)) group.nextDue = row.nextDueKey;
             group.contracts.push(row.contract);
         });
-        return Object.values(groups).sort((a, b) => a.clientName.localeCompare(b.clientName));
+        // Primeiro o cliente com o contrato registado mais recentemente.
+        const latest = (group: (typeof groups)[string]) => Math.max(...group.contracts.map(contract => instante(contract.createdAt || contract.startDate)));
+        return Object.values(groups).sort((a, b) => latest(b) - latest(a) || a.clientName.localeCompare(b.clientName));
     }, [tableRows]);
 
     const reminderText = (row: ContractRow, kind: 'overdue' | 'due_soon' | 'contract') => {
