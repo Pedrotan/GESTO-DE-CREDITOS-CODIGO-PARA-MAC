@@ -57,6 +57,43 @@ export const masterTenantsRequest = async (baseUrl: string, secret: string, body
     return withSecret();
 };
 
+/**
+ * Pedido ao centro de actualizações (/api/updates/admin) com a mesma sessão do painel. Esta rota só aceita
+ * sessões: a chave mestra é usada apenas para abrir a sessão em /api/tenants.
+ */
+export const masterUpdatesApi = async (action: string, payload: Record<string, unknown> = {}, timeoutMs = 60_000) => {
+    // O centro de actualizações só existe na VPS: um endereço antigo da Vercel passa para o servidor oficial.
+    const saved = (localStorage.getItem(URL_KEY) || '').trim();
+    const base = secureCloudUrl((!saved || saved.includes('vercel.app') ? DEFAULT_URL : saved).replace(/\/+$/, ''));
+    const secret = (localStorage.getItem(SECRET_KEY) || '').trim();
+    if (!secret) throw new Error('Configure a Chave Mestra em Empresas para ligar o Master ao servidor.');
+    const key = `${base}\u0000${secret}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        let session = sessions.get(key);
+        if (!session || session.expiresAt <= Date.now()) {
+            // A chave mestra só viaja aqui, para abrir a sessão (mesma sessão dos outros ecrãs do painel).
+            const secretHeaders: Record<string, string> = /^[\x20-\x7e]*$/.test(secret) ? { Authorization: `Bearer ${secret}` } : {};
+            const opened = await postTenants(base, secretHeaders, { action: 'session', masterSecret: secret }, timeoutMs);
+            if (!opened.response.ok || !opened.data.success) throw new Error(opened.data.message || `O servidor recusou a sessão (${opened.response.status}).`);
+            if (!opened.data.sessionToken) throw new Error(`O servidor ${base} não abre sessões do painel: confirme o endereço do servidor em Empresas Cloud.`);
+            session = { token: String(opened.data.sessionToken), expiresAt: (Date.parse(opened.data.sessionExpiresAt) || Date.now() + 3_600_000) - 60_000 };
+            sessions.set(key, session);
+        }
+        const response = await fetch(`${base}/api/updates/admin`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'x-master-session': session.token },
+            body: JSON.stringify({ action, ...payload }),
+            signal: AbortSignal.timeout(timeoutMs),
+        });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401 && data.code === 'SESSION_INVALID' && attempt === 0) { sessions.delete(key); continue; }
+        if (response.status === 404 && !data.message) throw new Error('Este servidor ainda não tem o centro de actualizações: publique a versão nova do servidor.');
+        if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
+        return data;
+    }
+    throw new Error('A sessão do painel expirou. Autentique-se novamente.');
+};
+
 export const masterCloudApi = async (action: string, payload: Record<string, unknown> = {}) => {
     const base = ((localStorage.getItem(URL_KEY) || DEFAULT_URL).trim() || DEFAULT_URL).replace(/\/+$/, '');
     const secret = (localStorage.getItem(SECRET_KEY) || '').trim();

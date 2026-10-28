@@ -43,7 +43,7 @@ const waitLabel = (hours: number) => (hours < 1 ? 'menos de 1 h' : hours < 48 ? 
 
 export default function Approvals() {
     const { user } = useAuth();
-    const { credits, clients, approveCredit, rejectCredit, companySettings } = useData();
+    const { credits, clients, deletedCredits, deletedClients, approveCredit, rejectCredit, companySettings } = useData();
     const [history, setHistory] = useState<CreditApprovalRecord[]>([]);
     const [period, setPeriod] = useState<PeriodSelection>(() => defaultPeriod(new Date(), 'month'));
     const [statusFilter, setStatusFilter] = useState<'all' | RowStatus>('all');
@@ -85,7 +85,10 @@ export default function Approvals() {
                 status: 'pending', requestedBy: credit.requestedBy, requestedAt: credit.requestedAt || credit.createdAt, credit,
             }));
         const recorded = new Set(history.map(item => item.creditId));
-        const decided: ApprovalRow[] = history.map(item => ({
+        // Decisões de créditos (ou clientes) eliminados ficam no histórico guardado, mas saem da lista e dos totais.
+        const removedCredits = new Set((deletedCredits || []).map(credit => credit.id));
+        const removedClients = new Set((deletedClients || []).map(client => client.id));
+        const decided: ApprovalRow[] = history.filter(item => !removedCredits.has(item.creditId) && !removedClients.has(item.clientId)).map(item => ({
             key: item.id, creditId: item.creditId, clientId: item.clientId, clientName: item.clientName, amount: item.principalAmount,
             rate: item.interestRate, installments: item.installments, status: item.decision, requestedBy: item.requestedBy,
             requestedAt: item.requestedAt, decidedBy: item.decidedBy, decidedAt: item.decidedAt, reason: item.reason,
@@ -100,7 +103,7 @@ export default function Approvals() {
                 decidedBy: credit.approvedBy, decidedAt: null, reason: credit.approvalNotes, credit, legacy: true,
             }));
         return [...pending, ...decided, ...legacy];
-    }, [credits, history]);
+    }, [credits, history, deletedCredits, deletedClients]);
 
     const range = useMemo(() => periodRange(period), [period]);
     // Pendentes contam pela data do pedido; decisões pela data da decisão.

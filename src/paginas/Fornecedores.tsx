@@ -52,6 +52,7 @@ import {
 import { toast } from '@/ganchos/usar-toast';
 import { generateSupplierReportPDF } from '@/bibliotecas/pdf';
 import { formatCurrency } from '@/bibliotecas/formatters';
+import { maisRecentePrimeiro } from '@/bibliotecas/ordenacao';
 
 export default function Fornecedores() {
   const { user } = useAuth();
@@ -300,7 +301,7 @@ export default function Fornecedores() {
 
   // Filtered Suppliers List
   const filteredSuppliers = useMemo(() => {
-    return suppliers.filter(sup => {
+    return maisRecentePrimeiro(suppliers, sup => sup.createdAt).filter(sup => {
       const s = searchTerm.toLowerCase();
       return (
         sup.name.toLowerCase().includes(s) ||

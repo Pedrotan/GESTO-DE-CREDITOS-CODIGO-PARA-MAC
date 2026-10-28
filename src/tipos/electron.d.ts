@@ -31,8 +31,9 @@ export interface ElectronAPI {
     dbExec: (sql: string) => Promise<{ success: boolean } | void>;
     dbTransaction: (statements: Array<{ sql: string; params?: any[]; type?: 'execute' | 'exec'; expectChanges?: number }>) => Promise<any[]>;
     syncApplyRemote?: (groups: import('@/bibliotecas/sync-operacoes').RemoteGroup[]) => Promise<import('@/bibliotecas/sync-operacoes').ApplyResult>;
+    syncMaintenance?: () => Promise<import('@/bibliotecas/manutencao-sync').ResultadoManutencao & { erros: string[] }>;
     syncUsersPayload?: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null; knownIds?: string[] }) => Promise<{ digest: string; id: string | null; payload: string | null; ids: string[] }>;
-    syncUsersApply?: (roster: { columns: string[]; rows: unknown[][]; deleted?: string[] }) => Promise<{ applied: number; deleted: number }>;
+    syncUsersApply?: (roster: { columns: string[]; rows: unknown[][]; deleted?: string[] }) => Promise<{ applied: number; deleted: number; clashes?: Array<{ email: string; name: string; localId: string; remoteId: string }> }>;
     cloudLinkBegin?: (input: { nif: string; accessCode: string; urls: string[] }) => Promise<{ url: string; tenantId: string; companyName: string; syncPasskey: string; multiTenant: boolean | null }>;
     cloudLinkEnd?: () => Promise<{ success: boolean }>;
     dbLoad: () => Promise<Uint8Array | null>;
@@ -115,9 +116,24 @@ export interface ElectronAPI {
     cloudLicenseActivate: (payload: { key: string; serverUrl?: string; legacyMachineId?: string }) => Promise<
         { success: true; status: import('../bibliotecas/licenca-nuvem-cliente').CloudLicenseStatus } | { success: false; code: string; message: string }>;
     onCloudLicenseChanged: (callback: (status: import('../bibliotecas/licenca-nuvem-cliente').CloudLicenseStatus) => void) => () => void;
+    /** Actualizações do Tango ERP (ausente no Tango Master e em versões antigas do preload). */
+    updates?: {
+        getStatus: () => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        check: () => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        download: () => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        install: () => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        defer: (hours: number) => Promise<import('../bibliotecas/actualizacoes').UpdateStatus>;
+        onStatus: (callback: (status: import('../bibliotecas/actualizacoes').UpdateStatus) => void) => () => void;
+    };
     readLicenseKeys: () => Promise<{ success: boolean; publicKey?: string; hasPrivateKey?: boolean; error?: string }>;
     generateLicenseKeypair: () => Promise<{ success: boolean; publicKey: string; hasPrivateKey: boolean }>;
     signLicensePayload: (payload: string) => Promise<{ success: boolean; payload: string; signature: string }>;
+    // Facturação Electrónica AGT (as chaves ficam no processo principal)
+    agtEstado: () => Promise<import('../bibliotecas/fiscal/ponte-agt').EstadoPonte>;
+    agtImportarChave: (payload: { tipo: 'contribuinte' | 'saft'; pem: string; nif?: string }) => Promise<{ success: boolean; bits?: number; impressao?: string }>;
+    agtAssinarDocumento: (payload: Record<string, unknown>) => Promise<{ success: boolean; jws: string }>;
+    agtHashSaft: (mensagens: string[]) => Promise<{ success: boolean; hashes: string[] }>;
+    agtChamar: (payload: { ambiente: string; servico: string; corpo: Record<string, unknown> }) => Promise<import('../bibliotecas/fiscal/ponte-agt').RespostaAgt>;
 }
 
 declare global {

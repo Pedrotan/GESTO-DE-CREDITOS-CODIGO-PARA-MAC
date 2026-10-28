@@ -63,7 +63,7 @@ import { ServicoFornecedor } from '@/servicos/ServicoFornecedor';
 import { ServicoTarefaCalendario } from '@/servicos/ServicoTarefaCalendario';
 import { ServicoTaxasJuro } from '@/servicos/ServicoTaxasJuro';
 import { SHARED_SETTING_KEYS, ServicoDefinicoesPartilhadas } from '@/servicos/ServicoDefinicoesPartilhadas';
-import { hideFromAccounting, isRemovedFromAccounting, loadDataRemovalState } from '@/bibliotecas/eliminacao-dados';
+import { hideFromAccounting, loadDataRemovalState } from '@/bibliotecas/eliminacao-dados';
 
 /** Onde eliminar os dados (modal de eliminação): créditos e contratos, contabilidade e apagar já sem lixeira. */
 export type DataRemovalOptions = { withCredits?: boolean; accounting?: boolean; purge?: boolean };
@@ -410,10 +410,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const nextLimitState = calculateClientLimitState(client, sourceCredits, sourcePayments);
         if (!limitsChanged(client, nextLimitState)) return;
 
-        const targetUserId = activeContextUserId || user?.id || authUser?.id || client.usuario_id;
-        const updatedClient = { ...client, ...nextLimitState, usuario_id: targetUserId };
-        await ServicoCliente.update(client.id, updatedClient);
-        setClients(prev => prev.map(c => c.id === client.id ? { ...c, ...nextLimitState, usuario_id: targetUserId } : c));
+        // Valores calculados: só neste dispositivo (os outros calculam os seus a partir dos mesmos créditos).
+        await ServicoCliente.updateDerived(client.id, nextLimitState);
+        setClients(prev => prev.map(c => c.id === client.id ? { ...c, ...nextLimitState } : c));
         const statusText = automaticStatusChangeText(client.name, client.status, nextLimitState.status);
         if (statusText) {
             await ServicoAuditoria.addLog('update', 'client', statusText, user?.id || authUser?.id, user?.name || authUser?.name || 'Sistema',
@@ -575,8 +574,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     const filteredSuppliers = React.useMemo(() => filterByUser(suppliers), [suppliers, filterByUser]);
     const filteredSimulations = React.useMemo(() => filterByUser(simulations), [simulations, filterByUser]);
     const filteredLogs = React.useMemo(() => filterByUser(logs), [logs, filterByUser]);
-    // Lançamentos de clientes ou contratos eliminados com «Contabilidade» marcada (ou apagados definitivamente) não aparecem.
-    const filteredAccountingEntries = React.useMemo(() => filterByUser(accountingEntries).filter(entry => !isRemovedFromAccounting(entry)),
+    // Todos os lançamentos contam (os de créditos eliminados são anulados por estorno no razão, nunca escondidos).
+    const filteredAccountingEntries = React.useMemo(() => filterByUser(accountingEntries),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         [accountingEntries, filterByUser, removalVersion]);
     const filteredNotifications = React.useMemo(() => {
@@ -815,18 +814,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                     creditScore: CreditEntity.calculateScore(creditsByClient[c.id] || [])
                 }));
 
+                // Recalculado ao carregar: grava só aqui e sem auditoria (o registo da mudança é feito por quem a causou,
+                // ao registar o crédito ou o pagamento). Sincronizar estes totais pôs os dispositivos a regravar sem fim.
                 normalizedClients
                     .filter(c => limitsChanged((loadedClients || []).find(original => original.id === c.id) || c, c))
                     .forEach(c => {
-                        ServicoCliente.update(c.id, c).catch(err =>
-                            console.warn("[ContextoDados] Falha ao persistir limite recalculado:", err)
+                        ServicoCliente.updateDerived(c.id, c).catch(err =>
+                            console.warn("[ContextoDados] Falha ao guardar limite recalculado:", err)
                         );
-                        const before = (loadedClients || []).find(original => original.id === c.id)?.status;
-                        const statusText = automaticStatusChangeText(c.name, before, c.status);
-                        if (statusText) {
-                            void ServicoAuditoria.addLog('update', 'client', statusText, authUser?.id, authUser?.name || 'Sistema',
-                                { status: before }, { status: c.status }, { clientId: c.id, automatic: true }).catch(() => undefined);
-                        }
                     });
 
                 setClients(normalizedClients);
@@ -1309,6 +1304,12 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                 throw new Error(`Já existe um cliente registado com o NIF "${nif}" (${duplicateNif.name}). Por favor, utilize um NIF diferente.`);
             }
         }
+        // O telefone também não se repete no registo (a base aceita-o para receber clientes de outros dispositivos).
+        const phone = (client.phone || '').trim();
+        const duplicatePhone = phone ? clients.find(c => (c.phone || '').trim() === phone) : undefined;
+        if (duplicatePhone) {
+            throw new Error(`Já existe um cliente registado com o telefone "${phone}" (${duplicatePhone.name}). Por favor, utilize outro telefone.`);
+        }
 
         const targetUserId = activeContextUserId || actor?.id || authUser?.id;
         const clientWithUser = withCalculatedClientLimit({ ...client, usuario_id: targetUserId }, credits, payments);
@@ -1337,6 +1338,13 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             const duplicateNif = clients.find(c => c.id !== id && c.nif === newNif);
             if (duplicateNif) {
                 throw new Error(`Já existe um cliente registado com o NIF "${newNif}" (${duplicateNif.name}). Por favor, utilize um NIF diferente.`);
+            }
+        }
+        const newPhone = (updates.phone || '').trim();
+        if (newPhone && newPhone !== (current.phone || '').trim()) {
+            const duplicatePhone = clients.find(c => c.id !== id && (c.phone || '').trim() === newPhone);
+            if (duplicatePhone) {
+                throw new Error(`Já existe um cliente registado com o telefone "${newPhone}" (${duplicatePhone.name}). Por favor, utilize outro telefone.`);
             }
         }
 
@@ -1396,6 +1404,15 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         await addLog('delete', 'client', `Removeu documento do cliente: ${client.name}`, user?.id, user?.name, client, { ...client, documents: updatedDocuments }, { documentId: docId });
     };
 
+    /** Estorno no razão dos créditos eliminados; uma falha (ex.: contabilidade congelada) fica para a Auditoria regularizar. */
+    const reverseRemovedCreditsSafely = async (creditIds: string[], user: { id: string; name: string }) => {
+        try {
+            await ServicoFinanceiro.reverseRemovedCredits(user, creditIds);
+        } catch (error) {
+            console.warn('[ContextoDados] Estorno do desembolso adiado para a Auditoria:', error);
+        }
+    };
+
     const deleteClient = async (id: string, user?: { id: string; name: string }, options: DataRemovalOptions = {}) => {
         const client = clients.find(c => c.id === id);
         if (!user) {
@@ -1412,6 +1429,8 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const clientCredits = withCredits ? credits.filter(c => c.clientId === id) : [];
         if (options.accounting) await hideFromAccounting({ clients: [id], credits: clientCredits.map(c => c.id) }, user.id);
         if (options.purge) await ServicoCliente.hardDelete(id, user.id);
+        // O dinheiro desembolsado para os créditos eliminados volta à conta de origem no razão (estorno).
+        if (clientCredits.length) await reverseRemovedCreditsSafely(clientCredits.map(c => c.id), user);
         if (clientCredits.length) {
             const creditIds = new Set(clientCredits.map(c => c.id));
             setCredits(prev => prev.filter(c => c.clientId !== id));
@@ -1439,6 +1458,11 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const restoreClient = async (id: string, user?: { id: string; name: string }) => {
         const client = deletedClients.find(c => c.id === id);
+        const actor = user || (authUser ? { id: authUser.id, name: authUser.name } : { id: 'system', name: 'Sistema' });
+        // Antes de restaurar: o desembolso estornado volta a sair de Caixa e Bancos (recusa se não houver saldo).
+        // Só os créditos que voltam com o cliente (eliminados ao mesmo tempo, como em ServicoCliente.restore).
+        const sameRemoval = (value?: Date | string) => Boolean(value && client?.deletedAt && new Date(value).getTime() === new Date(client.deletedAt).getTime());
+        for (const credit of deletedCredits.filter(item => item.clientId === id && sameRemoval(item.deletedAt))) await ServicoFinanceiro.restoreRemovedCreditLedger(credit.id, actor);
         await ServicoCliente.restore(id);
         void refreshData();
         if (client) {
@@ -1679,6 +1703,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
             await ServicoFinanceiro.deleteCredit(id, user.id);
             if (options.accounting) await hideFromAccounting({ credits: [id] }, user.id);
             if (options.purge) await ServicoFinanceiro.hardDeleteCredit(id, user.id);
+            await reverseRemovedCreditsSafely([id], user);
             setContracts(prev => prev.filter(contract => contract.id !== id));
             if (options.accounting || options.purge) void refreshData();
             const deletedCredit = { ...credit!, deletedAt: new Date(), deletedBy: user.id } as Credit;
@@ -1718,6 +1743,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
 
     const restoreCredit = async (id: string, user?: { id: string; name: string }) => {
         const credit = deletedCredits.find(c => c.id === id);
+        await ServicoFinanceiro.restoreRemovedCreditLedger(id, user || (authUser ? { id: authUser.id, name: authUser.name } : { id: 'system', name: 'Sistema' }));
         await ServicoFinanceiro.restoreCredit(id);
         void refreshData();
         if (credit) {
@@ -2176,11 +2202,15 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         await ServicoMensagem.send(msg);
         setMessages(prev => [...prev, msg]);
 
+        // Resumo para a notificação: o texto, ou o que foi anexado quando a mensagem não tem texto.
+        const preview = m.content.trim()
+            || (m.clientCard ? `Ficha de cliente: ${m.clientCard.name}` : '')
+            || (m.attachments?.length ? `${m.attachments.length === 1 ? m.attachments[0].name : `${m.attachments.length} ficheiros`}` : '');
         await addNotification({
             id: crypto.randomUUID(),
             userId: m.receiverId,
             title: `Nova mensagem de ${m.senderName}`,
-            message: m.content.length > 120 ? `${m.content.slice(0, 117)}...` : m.content,
+            message: preview.length > 120 ? `${preview.slice(0, 117)}...` : preview,
             type: 'info',
             source: 'chat',
             read: false,

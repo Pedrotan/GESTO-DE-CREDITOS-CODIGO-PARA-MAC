@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { LegalCaseForm } from '@/componentes/forms/LegalCaseForm';
 import { LegalCase } from '@/tipos/contencioso';
 import { ServicoContencioso } from '@/servicos/ServicoContencioso';
+import { porMaisRecente } from '@/bibliotecas/ordenacao';
 import {
     legalCandidates, legalCaseMetrics, nextLegalStage, appendTimelineEntry, parseTimeline, daysBetween,
     eligibleCollateralValue, LEGAL_STAGES, LEGAL_STALE_DAYS, LEGAL_NON_RECOVERY_OUTCOMES,
@@ -102,10 +103,7 @@ export default function Contencioso() {
                 const name = clientsById.get(c.clientId)?.name || '';
                 return [name, c.creditId, c.id, c.lastAction].some(v => String(v || '').toLowerCase().includes(term));
             })
-            .sort((a, b) =>
-                (a.stage === 'closed' ? 1 : 0) - (b.stage === 'closed' ? 1 : 0) ||
-                PRIORITY_META[a.priority].rank - PRIORITY_META[b.priority].rank ||
-                Number(b.debtAmount) - Number(a.debtAmount));
+            .sort(porMaisRecente(c => c.createdAt));
     }, [legalCases, searchTerm, stageFilter, priorityFilter, clientsById]);
 
     // ------------------------------------------------------------- acções

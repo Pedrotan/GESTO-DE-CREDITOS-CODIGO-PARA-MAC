@@ -1640,8 +1640,10 @@ export const buildClientProfileDoc = (
         autoTable(doc, {
             startY: currentY,
             margin: { left: 20, right: 20 },
-            head: [['Título do Documento', 'Tipo de Registo', 'Data de Upload']],
-            body: client.documents.map((d: any) => [
+            // O documento em si vem a seguir à ficha (anexo com o mesmo número), quando descarregada com os anexos.
+            head: [['Anexo', 'Título do Documento', 'Tipo de Registo', 'Data de Upload']],
+            body: client.documents.map((d: any, index: number) => [
+                `Anexo ${index + 1}`,
                 d.title || 'Documento',
                 (d.type || 'Ficheiro').toUpperCase(),
                 d.createdAt ? formatDate(d.createdAt) : '—'

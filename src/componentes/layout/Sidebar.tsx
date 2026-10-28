@@ -88,6 +88,8 @@ interface MenuItem {
   hideWhenSingular?: boolean;
   /** Submenu só para administradores. */
   adminOnly?: boolean;
+  /** Só o Super Administrador (consulta técnica). */
+  superAdminOnly?: boolean;
   /** Submenus. O item pai deixa de navegar e passa a abrir/fechar a lista. */
   children?: MenuItem[];
   /** Módulo activado pela licença (funcionalidade do plano no Tango Master Gen). */
@@ -179,7 +181,7 @@ const menuItems: MenuItem[] = [
       { icon: Megaphone, label: 'Marketing', path: '/definicoes?tab=marketing' },
       { icon: Mail, label: 'Email (SMTP)', path: '/definicoes?tab=email' },
       { icon: Cloud, label: 'Sincronização & Nuvem', path: '/definicoes?tab=cloud' },
-      { icon: AlertTriangle, label: 'Conflitos de Sincronização', path: '/definicoes?tab=conflicts' },
+      { icon: AlertTriangle, label: 'Correcções da Sincronização', path: '/definicoes?tab=conflicts', superAdminOnly: true },
       { icon: DatabaseBackup, label: 'Backup', path: '/definicoes?tab=backup' },
       { icon: RefreshCw, label: 'Backup Automático', path: '/definicoes?tab=auto-backup' },
       { icon: PenTool, label: 'Assinaturas', path: '/definicoes?tab=signatures' },
@@ -262,6 +264,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
     (item.children || []).filter(child => {
       if (child.hideWhenSingular && isSingular && user?.role !== 'super_admin' && !isPrimaryOwner(user)) return false;
       if (child.adminOnly && user?.role !== 'admin' && user?.role !== 'super_admin') return false;
+      if (child.superAdminOnly && user?.role !== 'super_admin') return false;
       if (!isAllowed(child)) return false;
       return true;
     }), [isAllowed, isSingular, user]);

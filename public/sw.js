@@ -32,6 +32,8 @@ self.addEventListener('fetch', event => {
   if (url.pathname.startsWith('/api/')) return;
   // Eventos em tempo real (SSE) nunca passam pela cache: uma resposta HTML guardada partia a ligação.
   if (url.pathname === '/events' || (request.headers.get('accept') || '').includes('text/event-stream')) return;
+  // Versão publicada: lida sempre da rede (em cache, o aviso de versão nova nunca apareceria).
+  if (url.pathname === '/version.json') return;
   // Pedidos parciais (Range) não podem ser guardados.
   if (request.headers.has('range')) return;
 

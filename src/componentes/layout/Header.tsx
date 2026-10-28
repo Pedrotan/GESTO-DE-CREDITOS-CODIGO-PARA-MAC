@@ -12,6 +12,7 @@ import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Badge } from '@/componentes/ui/badge';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { PainelSincronizacao } from '@/componentes/sync/PainelSincronizacao';
 import { useData } from '@/contextos/ContextoDados';
 import { formatCurrency, formatDateTime } from '@/bibliotecas/formatters';
 import { cn, getFileUrl } from '@/bibliotecas/utils';
@@ -28,6 +29,7 @@ import {
 import { ProfileModal } from '@/componentes/modals/ProfileModal';
 import { ModulesModal } from '@/componentes/modals/ModulesModal';
 import { ActivityModal } from '@/componentes/modals/ActivityModal';
+import { resumoMensagem } from '@/bibliotecas/chat-interno';
 
 interface HeaderProps {
   title: string;
@@ -45,6 +47,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
     payments,
     markNotificationAsRead,
     markMessageAsRead,
+    messages,
     deleteNotification,
     markAllAsRead,
     clearNotifications,
@@ -80,10 +83,12 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   const multiTenantAllowed = licenseAllowsFeature(licenseInfo, 'multi_empresa');
   const cloudLinked = Boolean(companySettings?.syncEnabled && isCloudSyncUrl(companySettings?.syncUrl));
   const pendingLabel = cloudStatus.pending ? `${cloudStatus.pending} pendente${cloudStatus.pending === 1 ? '' : 's'}` : '';
+  // «Verificar»: há conflitos, alterações retidas, ilegíveis ou grandes demais (a lista abre ao clicar no ícone).
+  const attentionCount = (cloudStatus.issues || []).filter(issue => issue.attention).reduce((total, issue) => total + issue.count, 0);
   const cloudStatusLabel = cloudStatus.state === 'synced' ? 'Sincronizado'
     : cloudStatus.state === 'error' ? (pendingLabel || 'Sem sincronizar')
-      : cloudStatus.state === 'syncing' ? 'A sincronizar'
-        : cloudStatus.conflicts ? `${cloudStatus.conflicts} conflito${cloudStatus.conflicts === 1 ? '' : 's'}`
+      : cloudStatus.state === 'syncing' ? (cloudStatus.progress !== undefined ? `A receber ${cloudStatus.progress}%` : 'A sincronizar')
+        : cloudStatus.state === 'attention' ? `Verificar${attentionCount ? ` (${attentionCount})` : ''}`
           : pendingLabel || (cloudStatus.state === 'pending' ? 'Por sincronizar' : 'A verificar ligação');
   const lastSyncText = cloudStatus.at ? ` Última tentativa: ${new Date(cloudStatus.at).toLocaleTimeString('pt-AO')}.` : '';
   const syncIndicatorTitle = serverInfo?.isRunning ? 'Servidor da rede local activo'
@@ -92,6 +97,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
         ? cloudStatus.state === 'error'
           ? `Sincronização com a versão web falhou: ${cloudStatus.message || 'erro'}. Vai tentar de novo automaticamente.${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
           : cloudStatus.state === 'synced' ? `Sincronizado com a versão web.${cloudStatus.message ? ` ${cloudStatus.message}` : ''}${lastSyncText}`
+          : cloudStatus.state === 'attention' ? `Verificar: ${cloudStatus.message || 'há alterações retidas'}. Clique para ver a lista.${lastSyncText}`
             : `${cloudStatus.message || 'A sincronizar com a versão web.'}${pendingLabel ? ` ${pendingLabel} por enviar.` : ''}${lastSyncText}`
         : window.electronAPI ? 'Modo Local: clique para ligar este computador à versão web' : 'Modo Local';
   const canOpenCloudLink = Boolean(window.electronAPI) && !serverInfo?.isRunning && dbAdapterMode !== 'remote' && !cloudLinked;
@@ -207,7 +213,21 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
   const unreadCount = notifications.filter(n => !n.read && n.source !== 'chat').length;
   // Get chat notifications specifically for the current user
   const chatNotifications = notifications.filter(n => n.source === 'chat' && n.userId === user?.id);
-  const unreadChatCount = chatNotifications.filter(n => !n.read).length;
+  // Mensagens por ler (as próprias mensagens, não as notificações): uma linha por pessoa, a mais recente primeiro.
+  const unreadChatMessages = messages.filter(m => m.receiverId === user?.id && m.senderId !== user?.id && !m.read);
+  const unreadChatCount = unreadChatMessages.length;
+  const chatConversations = [...unreadChatMessages
+    .reduce((porPessoa, message) => {
+      const actual = porPessoa.get(message.senderId);
+      porPessoa.set(message.senderId, {
+        senderId: message.senderId, senderName: message.senderName,
+        last: !actual || new Date(message.timestamp) >= new Date(actual.last.timestamp) ? message : actual.last,
+        count: (actual?.count || 0) + 1,
+      });
+      return porPessoa;
+    }, new Map<string, { senderId: string; senderName: string; last: (typeof messages)[number]; count: number }>())
+    .values()]
+    .sort((a, b) => new Date(b.last.timestamp).getTime() - new Date(a.last.timestamp).getTime());
 
   // Data/hora actual exibida no cabeçalho, tal como no cabeçalho dos documentos
   const [now, setNow] = useState(new Date());
@@ -509,16 +529,17 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
           {/* Indicador de Intranet (só com licença que permite a rede local) */}
           <IndicadorIntranet />
 
-          {/* Indicador de Sincronização */}
+          {/* Indicador de Sincronização (ligado à nuvem: abre o estado real e a lista do que precisa de atenção) */}
+          {(() => { const cloudPanel = cloudLinked && !serverInfo?.isRunning && dbAdapterMode !== 'remote'; const indicator = (
           <div
-            role={canOpenCloudLink ? 'button' : undefined}
-            tabIndex={canOpenCloudLink ? 0 : undefined}
+            role={canOpenCloudLink || cloudPanel ? 'button' : undefined}
+            tabIndex={canOpenCloudLink || cloudPanel ? 0 : undefined}
             title={syncIndicatorTitle}
             onClick={canOpenCloudLink ? () => window.dispatchEvent(new Event(OPEN_CLOUD_LINK_EVENT)) : undefined}
             onKeyDown={canOpenCloudLink ? (event) => { if (event.key === 'Enter') window.dispatchEvent(new Event(OPEN_CLOUD_LINK_EVENT)); } : undefined}
             className={cn(
             "flex flex-col items-center gap-1 rounded-xl border-2 px-2 py-2 transition-all duration-300 min-[1800px]:px-3",
-            canOpenCloudLink && "cursor-pointer",
+            (canOpenCloudLink || cloudPanel) && "cursor-pointer",
             serverInfo?.isRunning
               ? "bg-blue-50 border-blue-300 text-blue-700 dark:bg-blue-950/30 dark:border-blue-800 dark:text-blue-400"
               : dbAdapterMode === 'remote'
@@ -526,6 +547,8 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                 : cloudLinked
                   ? cloudStatus.state === 'error'
                     ? "bg-red-50 border-red-300 text-red-700 dark:bg-red-950/30 dark:border-red-800 dark:text-red-400"
+                    : cloudStatus.state === 'attention'
+                      ? "bg-orange-50 border-orange-400 text-orange-700 dark:bg-orange-950/30 dark:border-orange-700 dark:text-orange-300"
                     : cloudStatus.state === 'synced'
                       ? "bg-emerald-50 border-emerald-300 text-emerald-700 dark:bg-emerald-950/30 dark:border-emerald-800 dark:text-emerald-400"
                       : "bg-amber-50 border-amber-300 text-amber-700 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-400"
@@ -548,6 +571,7 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
             ) : cloudLinked ? (
               <>
                 {cloudStatus.state === 'error' ? <CloudOff className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />
+                  : cloudStatus.state === 'attention' ? <AlertCircle className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />
                   : cloudStatus.state === 'syncing' ? <RefreshCw className="h-5 w-5 animate-spin min-[1800px]:h-6 min-[1800px]:w-6" />
                     : <Cloud className="h-5 w-5 min-[1800px]:h-6 min-[1800px]:w-6" />}
                 <span className="hidden whitespace-nowrap text-[10px] font-bold uppercase min-[1800px]:inline">
@@ -562,7 +586,10 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                 </span>
               </>
             )}
-          </div>
+          </div>);
+          return cloudPanel
+            ? <PainelSincronizacao status={cloudStatus} canSeeAll={user?.role === 'super_admin'} actor={user ? { id: user.id, name: user.name } : null}>{indicator}</PainelSincronizacao>
+            : indicator; })()}
         </div>
 
         {/* Theme Toggle */}
@@ -601,38 +628,31 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
               </h3>
               {unreadChatCount > 0 && <Badge variant="primary" className="text-[10px]">{unreadChatCount} novas</Badge>}
             </div>
-            <div className="max-h-[300px] overflow-y-auto">
-              {chatNotifications.filter(n => !n.read).length === 0 ? (
+            <div className="max-h-[320px] overflow-y-auto">
+              {chatConversations.length === 0 ? (
                 <div className="p-8 text-center text-xs text-muted-foreground">Sem novas mensagens</div>
               ) : (
-                chatNotifications.filter(n => !n.read).slice(0, 5).map(msg => (
-                  <div
-                    key={msg.id}
-                    className="p-3 border-b hover:bg-muted/50 cursor-pointer transition-colors bg-primary/5 border-l-2 border-l-primary group relative"
+                chatConversations.slice(0, 6).map(conversa => (
+                  <button
+                    key={conversa.senderId}
+                    type="button"
+                    onClick={() => navigate(`/chat?com=${encodeURIComponent(conversa.senderId)}`)}
+                    className="flex w-full items-center gap-3 border-b border-l-2 border-l-primary bg-primary/5 p-3 text-left transition-colors hover:bg-muted/50"
                   >
-                    <div
-                      className="flex-1"
-                      onClick={async () => {
-                        await markNotificationAsRead(msg.id);
-                        navigate('/chat');
-                      }}
-                    >
-                      <div className="flex justify-between items-start mb-1 pr-6">
-                        <span className="font-bold text-xs truncate">{msg.title}</span>
-                        <span className="text-[9px] text-muted-foreground whitespace-nowrap">{formatDateTime(msg.timestamp)}</span>
-                      </div>
-                      <p className="text-xs text-muted-foreground line-clamp-2">{msg.message}</p>
-                    </div>
-                    <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        await deleteNotification(msg.id);
-                      }}
-                      className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-muted-foreground hover:text-danger opacity-0 group-hover:opacity-100 transition-opacity"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  </div>
+                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-bold text-primary">
+                      {conversa.senderName.split(/\s+/).filter(Boolean).slice(0, 2).map(parte => parte[0]).join('').toUpperCase()}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-baseline justify-between gap-2">
+                        <span className="truncate text-xs font-bold">{conversa.senderName}</span>
+                        <span className="shrink-0 text-[9px] text-muted-foreground">{formatDateTime(conversa.last.timestamp)}</span>
+                      </span>
+                      <span className="line-clamp-2 text-xs text-muted-foreground">{resumoMensagem(conversa.last)}</span>
+                    </span>
+                    {conversa.count > 1 && (
+                      <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-emerald-500 px-1.5 text-[10px] font-bold text-white">{conversa.count}</span>
+                    )}
+                  </button>
                 ))
               )}
             </div>
@@ -641,8 +661,8 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
                 variant="ghost"
                 className="flex-1 rounded-none h-10 text-[10px] font-bold text-muted-foreground hover:bg-muted"
                 onClick={async () => {
-                  const chatIds = chatNotifications.filter(n => !n.read).map(n => n.id);
-                  for (const id of chatIds) await markNotificationAsRead(id);
+                  for (const message of unreadChatMessages) await markMessageAsRead(message.id);
+                  for (const notification of chatNotifications.filter(n => !n.read)) await markNotificationAsRead(notification.id);
                 }}
               >
                 Lidas

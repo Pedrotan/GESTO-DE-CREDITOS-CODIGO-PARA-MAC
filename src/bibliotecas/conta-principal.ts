@@ -137,6 +137,11 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
     const unblockOnly = columns.length > 0 && columns.every(column => ['status', 'failedattempts', 'blockedat'].includes(column))
         && String(updatedUserValue(input.sql, input.params, 'status')) === 'active';
     if (targetIsOwner && !selfUpdate && unblockOnly && hasFullAuthority(input.actor)) return { error: null, changesPrivileges: true };
+    // Atribuir novo nível: um Super Administrador muda o perfil (e as permissões do perfil) de outro Super
+    // Administrador. A conta marcada como principal (dona da instalação) continua intocável por outros.
+    const levelChangeOnly = columns.length > 0 && columns.every(column => ['role', 'permissions'].includes(column));
+    const markedOwner = input.target?.isOwner === true || input.target?.isOwner === 1 || input.target?.isOwner === '1';
+    if (targetIsOwner && !selfUpdate && levelChangeOnly && !markedOwner && hasFullAuthority(input.actor)) return { error: null, changesPrivileges: true };
     if (targetIsOwner && !selfUpdate) {
         return { error: 'O Super Administrador principal só pode ser alterado por ele próprio.', changesPrivileges: privileged.length > 0 };
     }

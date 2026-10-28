@@ -35,13 +35,12 @@ import {
     X,
     Printer,
     FileCheck2,
-    FileX2,
-    BadgeCheck,
     PencilLine,
     RotateCcw,
     Braces,
     PanelLeftClose,
     Users,
+    BarChart3,
 } from 'lucide-react';
 import {
     Dialog,
@@ -83,6 +82,20 @@ import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { SeletorPeriodo } from '@/componentes/comum/SeletorPeriodo';
 import { defaultPeriod, isInPeriod, periodRange, type PeriodSelection } from '@/bibliotecas/periodos';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
+import { useNavigate } from 'react-router-dom';
+import { openWhatsApp } from '@/bibliotecas/whatsapp';
+import { renderReportExcel, renderReportPdf } from '@/bibliotecas/relatorios-pagamentos';
+import {
+    CONTRACT_STATES, EMPTY_CONTRACT_FILTERS, QUICK_FILTERS, attentionItems, buildContractsReport, contractKpis, kz,
+    matchesContractFilters, matchesQuick, quickCounts, type AttentionItem, type ContractFilters, type ContractRow, type QuickFilter,
+} from '@/bibliotecas/contratos-analise';
+import { useContratos } from '@/componentes/contratos/useContratos';
+import { IndicadoresContratos } from '@/componentes/contratos/IndicadoresContratos';
+import { RequerAtencao } from '@/componentes/contratos/RequerAtencao';
+import { TabelaContratos } from '@/componentes/contratos/TabelaContratos';
+import { DetalheContrato } from '@/componentes/contratos/DetalheContrato';
+import { RelatoriosContratos } from '@/componentes/contratos/RelatoriosContratos';
+import { instante } from '@/bibliotecas/ordenacao';
 
 type BadgeVariant = 'default' | 'primary' | 'secondary' | 'destructive' | 'success' | 'warning' | 'info' | 'outline';
 
@@ -94,11 +107,11 @@ const statusConfig: Record<string, { label: string; variant: BadgeVariant }> = {
     paid: { label: 'Encerrado por pagamento total', variant: 'success' },
 };
 
-type StatusFilter = 'all' | 'active' | 'paid' | 'closed';
-
 type EditorState = { open: boolean; title: string; clauses: string; dirty: boolean; edited: boolean };
 
-const contractDate = (contract: any) => contract.startDate || contract.createdAt;
+// Data de celebração (quando o contrato foi feito, na aprovação). A data de início do crédito pode ser anterior (ex.:
+// um mês antes da 1.ª prestação) e punha um contrato aprovado em Outubro no mês de Setembro.
+const contractDate = (contract: any) => contract.createdAt || contract.startDate;
 
 export default function Contracts() {
     const { contracts, companySettings, clients, credits, deletedCredits, updateCompanySettings, addDocumentToClient, deleteDocumentFromClient, updateContract, deleteCredit, refreshData } = useData();
@@ -135,9 +148,15 @@ export default function Contracts() {
             throw error;
         }
     };
-    const [searchTerm, setSearchTerm] = useState('');
+    const [filters, setFilters] = useState<ContractFilters>(EMPTY_CONTRACT_FILTERS);
     const [period, setPeriod] = useState<PeriodSelection>(() => defaultPeriod(new Date(), 'month'));
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+    const [quick, setQuick] = useState<QuickFilter>('todos');
+    const [soonDays, setSoonDays] = useState(() => { try { return Number(localStorage.getItem('contratos:dias-aviso')) || 7; } catch { return 7; } });
+    const [detailId, setDetailId] = useState<string | null>(null);
+    const [reportsOpen, setReportsOpen] = useState(false);
+    const navigate = useNavigate();
+    const data = useContratos(contracts, numbers);
+    useEffect(() => { try { localStorage.setItem('contratos:dias-aviso', String(soonDays)); } catch { /* preferência local */ } }, [soonDays]);
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [selectedContract, setSelectedContract] = useState<any>(null);
     const [prefillContractData, setPrefillContractData] = useState<any>(null);
@@ -197,50 +216,74 @@ export default function Contracts() {
 
     // Contratos do período seleccionado (os cartões e as tabelas usam sempre o mesmo período).
     const range = useMemo(() => periodRange(period), [period]);
-    const periodContracts = useMemo(() => contracts.filter(contract => isInPeriod(contractDate(contract), range)), [contracts, range]);
     const monthsWithContracts = useMemo(() => new Set(contracts
         .filter(contract => new Date(contractDate(contract)).getFullYear() === period.year)
         .map(contract => new Date(contractDate(contract)).getMonth())), [contracts, period.year]);
 
-    const matchesStatus = useCallback((contract: any, filter: StatusFilter) => {
-        const key = getContractStatusKey(contract);
-        if (filter === 'all') return true;
-        if (filter === 'closed') return key === 'terminated' || key === 'expired';
-        return key === filter;
-    }, [getContractStatusKey]);
-
-    const periodTotals = useMemo(() => {
-        const sum = (filter: StatusFilter) => {
-            const list = periodContracts.filter(contract => matchesStatus(contract, filter));
-            return { count: list.length, value: list.reduce((total, contract) => total + (Number(contract.value) || 0), 0) };
-        };
-        return { all: sum('all'), active: sum('active'), paid: sum('paid'), closed: sum('closed') };
-    }, [periodContracts, matchesStatus]);
-
-    const visibleContracts = useMemo(() => {
-        const query = searchTerm.trim().toLowerCase();
-        return periodContracts.filter(contract => {
-            if (!matchesStatus(contract, statusFilter)) return false;
-            if (!query) return true;
-            const client = clientById.get(contract.clientId);
-            return [contract.clientName, contract.id, numbers.get(contract.id), contract.title, client?.nif, client?.phone]
-                .filter(Boolean).join(' ').toLowerCase().includes(query);
-        });
-    }, [periodContracts, statusFilter, searchTerm, clientById, matchesStatus, numbers]);
+    // Linhas com os valores do plano de prestações: período → filtros (pesquisa, produto, gestor, risco) → filtro rápido.
+    const periodRows = useMemo(() => data.rows.filter(row => isInPeriod(contractDate(row.contract), range)), [data.rows, range]);
+    const filteredRows = useMemo(() => periodRows.filter(row => matchesContractFilters(row, filters)), [periodRows, filters]);
+    const counts = useMemo(() => quickCounts(filteredRows, soonDays), [filteredRows, soonDays]);
+    const tableRows = useMemo(() => filteredRows.filter(row => matchesQuick(row, quick, soonDays))
+        // O contrato registado por último aparece primeiro (pela data de registo; em empate, o número maior).
+        .sort((a, b) => instante(b.contract.createdAt || b.contract.startDate) - instante(a.contract.createdAt || a.contract.startDate) || b.number.localeCompare(a.number)), [filteredRows, quick, soonDays]);
+    const kpis = useMemo(() => contractKpis(periodRows, data.installments, data.today, soonDays), [periodRows, data.installments, data.today, soonDays]);
+    // «Requer atenção» olha para toda a carteira em vigor (um atraso de um contrato antigo não pode ficar escondido pelo período).
+    const attention = useMemo(() => attentionItems(data.rows, soonDays), [data.rows, soonDays]);
+    const detailRow = useMemo(() => data.rows.find(row => row.id === detailId) || null, [data.rows, detailId]);
+    const filterOptions = useMemo(() => ({
+        products: [...new Set(data.rows.map(row => row.product).filter(item => item && item !== '—'))].sort(),
+        managers: [...new Map(data.rows.filter(row => row.managerId).map(row => [row.managerId, row.managerName])).entries()].sort((a, b) => a[1].localeCompare(b[1])),
+    }), [data.rows]);
+    const hasFilters = quick !== 'todos' || Object.values(filters).some(Boolean);
+    const clearFilters = () => { setQuick('todos'); setFilters(EMPTY_CONTRACT_FILTERS); };
+    const setFilter = (changes: Partial<ContractFilters>) => setFilters(previous => ({ ...previous, ...changes }));
 
     // Agrupar contratos (já filtrados) por cliente
     const groupedContracts = useMemo(() => {
-        const groups: Record<string, { clientName: string; clientId: string; total: number; active: number; value: number; contracts: any[] }> = {};
-        visibleContracts.forEach(contract => {
-            const key = contract.clientId || contract.clientName;
-            if (!groups[key]) groups[key] = { clientName: contract.clientName, clientId: contract.clientId, total: 0, active: 0, value: 0, contracts: [] };
-            groups[key].total++;
-            groups[key].value += Number(contract.value) || 0;
-            if (getContractStatusKey(contract) === 'active') groups[key].active++;
-            groups[key].contracts.push(contract);
+        const groups: Record<string, { clientName: string; clientId: string; total: number; active: number; value: number; outstanding: number; overdue: number; nextDue: string | null; contracts: any[] }> = {};
+        tableRows.forEach(row => {
+            const key = row.clientId || row.clientName;
+            if (!groups[key]) groups[key] = { clientName: row.clientName, clientId: row.clientId, total: 0, active: 0, value: 0, outstanding: 0, overdue: 0, nextDue: null, contracts: [] };
+            const group = groups[key];
+            group.total++;
+            group.value += row.amountMinor;
+            group.outstanding += row.outstandingMinor;
+            group.overdue += row.overdueMinor;
+            if (row.state === 'em_dia' || row.state === 'atraso') group.active++;
+            if (row.nextDueKey && (!group.nextDue || row.nextDueKey < group.nextDue)) group.nextDue = row.nextDueKey;
+            group.contracts.push(row.contract);
         });
-        return Object.values(groups).sort((a, b) => a.clientName.localeCompare(b.clientName));
-    }, [visibleContracts, getContractStatusKey]);
+        // Primeiro o cliente com o contrato registado mais recentemente.
+        const latest = (group: (typeof groups)[string]) => Math.max(...group.contracts.map(contract => instante(contract.createdAt || contract.startDate)));
+        return Object.values(groups).sort((a, b) => latest(b) - latest(a) || a.clientName.localeCompare(b.clientName));
+    }, [tableRows]);
+
+    const reminderText = (row: ContractRow, kind: 'overdue' | 'due_soon' | 'contract') => {
+        const company = companySettings.name || 'a nossa empresa';
+        if (kind === 'overdue') return `Olá ${row.clientName}, o contrato ${row.number} com ${company} tem ${kz(row.overdueMinor)} em atraso há ${row.daysOverdue} dia(s). Por favor regularize o pagamento ou contacte-nos.`;
+        if (kind === 'due_soon') return `Olá ${row.clientName}, lembramos que a próxima prestação do contrato ${row.number}, no valor de ${kz(row.nextDueMinor)}, vence a ${formatDate(row.nextDueKey)}.`;
+        return `Olá ${row.clientName}, segue a informação do seu contrato ${row.number} com ${company}: montante ${kz(row.amountMinor)}, saldo em dívida ${kz(row.outstandingMinor)}.`;
+    };
+    const sendWhatsApp = (row: ContractRow, kind: 'overdue' | 'due_soon' | 'contract') => {
+        if (!row.phone) { toast({ title: 'Sem telefone', description: `O cliente ${row.clientName} não tem telefone registado.`, variant: 'destructive' }); return; }
+        openWhatsApp(row.phone, reminderText(row, kind));
+    };
+    const handleAttention = (item: AttentionItem) => {
+        if (item.kind === 'overdue' || item.kind === 'due_soon') sendWhatsApp(item.row, item.kind);
+        else if (item.kind === 'missing_contract') setDetailId(item.row.id);
+        else navigate(`/clientes?search=${encodeURIComponent(item.row.nif || item.row.clientName)}`);
+    };
+    const exportRows = async (rows: ContractRow[], format: 'pdf' | 'xlsx', label: string) => {
+        try {
+            const def = buildContractsReport(rows, { periodLabel: range.label, filters: [label], title: 'Lista de Contratos', fileBase: 'lista-contratos' });
+            const file = format === 'pdf' ? renderReportPdf(def, companySettings, user?.name || 'Sistema', 'save') : renderReportExcel(def, companySettings, user?.name || 'Sistema', 'save');
+            if (user) await ServicoAuditoria.addLog('export', 'report', `Lista de contratos (${format.toUpperCase()}) · ${rows.length} contrato(s)`, user.id, user.name,
+                null, null, { report: 'lista-contratos', format, periodo: range.label, filtro: label, fileName: file.fileName }).catch(() => undefined);
+        } catch (error) {
+            toast({ title: 'Não foi possível exportar', description: error instanceof Error ? error.message : String(error), variant: 'destructive' });
+        }
+    };
 
     const handleRenew = (contract: any) => {
         setAlertConfig({
@@ -548,54 +591,53 @@ export default function Contracts() {
         );
     };
 
-    const cards = [
-        { key: 'all' as const, css: 'card-kpi-sky', icon: FileText, overline: `Contratos de ${range.label}`, title: 'Total de Contratos', totals: periodTotals.all },
-        { key: 'active' as const, css: 'card-kpi-mint', icon: FileCheck2, overline: 'Em vigor', title: 'Contratos Activos', totals: periodTotals.active },
-        { key: 'paid' as const, css: 'card-kpi-purple', icon: BadgeCheck, overline: 'Liquidados', title: 'Encerrados por Pagamento', totals: periodTotals.paid },
-        { key: 'closed' as const, css: 'card-kpi-coral', icon: FileX2, overline: 'Sem efeito', title: 'Terminados / Expirados', totals: periodTotals.closed },
-    ];
-
     return (
         <MainLayout title="Contratos" subtitle="Gestão de contratos e documentos">
-            {/* Período: o mesmo seletor da página de Créditos (dia, semana, mês, semestre, ano, personalizado) */}
-            <div className="mb-4">
-                <SeletorPeriodo value={period} onChange={setPeriod} monthsWithData={monthsWithContracts} />
+            {/* Cabeçalho: caminho e acções da página */}
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                    <p className="text-xs font-semibold text-muted-foreground">Gestão de crédito / Contratos</p>
+                    <p className="text-xs text-muted-foreground">{data.loading ? 'A calcular saldos e atrasos a partir do plano de prestações…' : `Saldos e atrasos calculados a partir do plano de prestações · ${data.rows.length} contrato(s) na carteira`}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                    <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm" className="gap-2"><Download className="h-4 w-4" /> Exportar lista</Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                            <DropdownMenuItem className="gap-2" onClick={() => void exportRows(tableRows, 'pdf', 'Lista filtrada')}><FileText className="h-4 w-4" /> PDF ({tableRows.length})</DropdownMenuItem>
+                            <DropdownMenuItem className="gap-2" onClick={() => void exportRows(tableRows, 'xlsx', 'Lista filtrada')}><FileCheck2 className="h-4 w-4" /> Excel ({tableRows.length})</DropdownMenuItem>
+                        </DropdownMenuContent>
+                    </DropdownMenu>
+                    <Button size="sm" className="gap-2 bg-indigo-600 text-white hover:bg-indigo-700" onClick={() => setReportsOpen(true)}>
+                        <BarChart3 className="h-4 w-4" /> Relatórios
+                    </Button>
+                </div>
             </div>
 
-            {/* Cartões do período (clicáveis: filtram as tabelas) */}
-            <div className="mb-6 grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4">
-                {cards.map(card => {
-                    const Icon = card.icon;
-                    const active = statusFilter === card.key && card.key !== 'all';
-                    return (
-                        <button
-                            key={card.key}
-                            type="button"
-                            onClick={() => setStatusFilter(statusFilter === card.key ? 'all' : card.key)}
-                            aria-pressed={active}
-                            title={card.key === 'all' ? 'Mostrar todos os contratos do período' : `Mostrar só: ${card.title.toLowerCase()}`}
-                            className={`${card.css} cursor-pointer text-left transition-transform hover:scale-[1.02] active:scale-[0.99] ${active ? 'ring-4 ring-primary/60 ring-offset-2 ring-offset-background' : ''}`}
-                        >
-                            <div className="flex items-center gap-3 min-w-0">
-                                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-black/10 dark:bg-white/10 text-slate-950 dark:text-white shrink-0">
-                                    <Icon className="h-5 w-5" />
-                                </div>
-                                <div className="min-w-0">
-                                    <p className="text-[11px] font-bold text-slate-900/70 dark:text-slate-400 uppercase tracking-wider truncate">{card.overline}</p>
-                                    <p className="text-sm sm:text-base font-bold text-slate-950 dark:text-white truncate tracking-tight">{card.title}</p>
-                                </div>
-                            </div>
-                            <div className="my-2 flex items-baseline gap-2 min-w-0">
-                                <p className="font-display text-3xl font-black tracking-tight text-slate-950 dark:text-white">{card.totals.count}</p>
-                                <p className="text-xs font-semibold text-slate-900/70 dark:text-slate-400">{card.totals.count === 1 ? 'contrato' : 'contratos'}</p>
-                            </div>
-                            <p className="text-xs font-semibold text-slate-900/75 dark:text-slate-400 truncate" title={formatCurrency(card.totals.value)}>
-                                {active ? 'A filtrar as tabelas · clique para limpar' : `Valor: ${formatCurrency(card.totals.value)}`}
-                            </p>
-                        </button>
-                    );
-                })}
+            {/* Período: o mesmo seletor da página de Créditos (dia, semana, mês, trimestre, semestre, ano, personalizado) */}
+            <div className="mb-4">
+                <SeletorPeriodo value={period} onChange={setPeriod} kinds={['day', 'week', 'month', 'quarter', 'semester', 'year', 'custom', 'all']} monthsWithData={monthsWithContracts} />
             </div>
+
+            {/* Indicadores do período (clicáveis: filtram a tabela) */}
+            <IndicadoresContratos kpis={kpis} periodLabel={range.label} soonDays={soonDays} active={quick} onSelect={setQuick} />
+
+            <RequerAtencao items={attention} soonDays={soonDays} onSoonDaysChange={setSoonDays} onAction={handleAttention} onOpen={item => setDetailId(item.row.id)} />
+
+            <RelatoriosContratos open={reportsOpen} onOpenChange={setReportsOpen} rows={data.rows} settings={companySettings} user={user} />
+            <DetalheContrato
+                row={detailRow}
+                installments={data.installments}
+                documents={data.documents}
+                today={data.today}
+                actor={user ? { id: user.id, name: user.name, role: String(user.role) } : null}
+                onClose={() => setDetailId(null)}
+                onPreview={row => handleViewContract(row.contract)}
+                onDownload={row => generateContractPDF(contractPdfData(row.contract), companySettings, [], 'save', user?.name)}
+                onWhatsApp={row => sendWhatsApp(row, 'contract')}
+                onChanged={data.reload}
+            />
 
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
                 <DialogContent className={CREDIT_DIALOG_CONTENT_CLASS}>
@@ -794,11 +836,11 @@ export default function Contracts() {
                 </DialogContent>
             </Dialog>
 
-            <Tabs defaultValue="list" className="w-full">
-                <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between mb-4">
+            <Tabs defaultValue="all" className="w-full">
+                <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between mb-3">
                     <TabsList>
-                        <TabsTrigger value="list">Por Cliente</TabsTrigger>
                         <TabsTrigger value="all">Todos os Contratos</TabsTrigger>
+                        <TabsTrigger value="list">Por Cliente</TabsTrigger>
                         <TabsTrigger value="models">Modelos e Cláusulas</TabsTrigger>
                     </TabsList>
 
@@ -806,50 +848,97 @@ export default function Contracts() {
                         <div className="relative w-full sm:w-80">
                             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                             <Input
-                                placeholder="Pesquisar por nome, NIF, telefone ou n.º do contrato..."
-                                value={searchTerm}
-                                onChange={(e) => setSearchTerm(e.target.value)}
+                                placeholder="Pesquisar por cliente, NIF/BI, telefone ou n.º do contrato..."
+                                value={filters.search}
+                                onChange={(e) => setFilter({ search: e.target.value })}
                                 className="pl-10 h-9"
                             />
                         </div>
-                        <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)}>
-                            <SelectTrigger className="h-9 w-52"><SelectValue /></SelectTrigger>
+                        {filterOptions.products.length > 0 && (
+                            <Select value={filters.product || 'all'} onValueChange={(value) => setFilter({ product: value === 'all' ? '' : value })}>
+                                <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Todos os produtos</SelectItem>
+                                    {filterOptions.products.map(item => <SelectItem key={item} value={item}>{item}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        )}
+                        {filterOptions.managers.length > 0 && (
+                            <Select value={filters.managerId || 'all'} onValueChange={(value) => setFilter({ managerId: value === 'all' ? '' : value })}>
+                                <SelectTrigger className="h-9 w-44"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Todos os gestores</SelectItem>
+                                    {filterOptions.managers.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                        )}
+                        <Select value={filters.risk || 'all'} onValueChange={(value) => setFilter({ risk: value === 'all' ? '' : value })}>
+                            <SelectTrigger className="h-9 w-36"><SelectValue /></SelectTrigger>
                             <SelectContent>
-                                <SelectItem value="all">Todos os estados</SelectItem>
-                                <SelectItem value="active">Activos</SelectItem>
-                                <SelectItem value="paid">Encerrados por pagamento</SelectItem>
-                                <SelectItem value="closed">Terminados / Expirados</SelectItem>
+                                <SelectItem value="all">Todo o risco</SelectItem>
+                                <SelectItem value="A">Risco A</SelectItem>
+                                <SelectItem value="B">Risco B</SelectItem>
+                                <SelectItem value="C">Risco C</SelectItem>
                             </SelectContent>
                         </Select>
-                        {(statusFilter !== 'all' || searchTerm) && (
-                            <Button variant="ghost" size="sm" onClick={() => { setStatusFilter('all'); setSearchTerm(''); }}>
+                        {hasFilters && (
+                            <Button variant="ghost" size="sm" onClick={clearFilters}>
                                 <X className="mr-1 h-4 w-4" /> Limpar filtros
                             </Button>
                         )}
                     </div>
                 </div>
 
+                {/* Filtros rápidos com contagem (dentro do período e dos filtros acima) */}
+                <div className="mb-3 flex flex-wrap gap-1.5" role="group" aria-label="Filtros rápidos">
+                    {QUICK_FILTERS.map(item => (
+                        <button
+                            key={item.id}
+                            type="button"
+                            aria-pressed={quick === item.id}
+                            onClick={() => setQuick(quick === item.id && item.id !== 'todos' ? 'todos' : item.id)}
+                            className={`rounded-full border px-3 py-1 text-xs font-semibold transition-colors ${quick === item.id ? 'border-indigo-600 bg-indigo-600 text-white' : 'bg-background hover:bg-muted'}`}
+                        >
+                            {item.id === 'vence7' ? `Vence em ${soonDays} dias` : item.label} <span className="ml-1 opacity-75">{counts[item.id]}</span>
+                        </button>
+                    ))}
+                    {quick === 'vigor' && <span className="rounded-full border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-semibold text-white">Em vigor <span className="ml-1 opacity-75">{tableRows.length}</span></span>}
+                </div>
+
                 <p className="mb-3 flex items-center gap-2 text-xs text-muted-foreground">
                     <Users className="h-3.5 w-3.5" />
-                    {groupedContracts.length} {groupedContracts.length === 1 ? 'cliente' : 'clientes'} · {visibleContracts.length} {visibleContracts.length === 1 ? 'contrato' : 'contratos'} em {range.label}
+                    {groupedContracts.length} {groupedContracts.length === 1 ? 'cliente' : 'clientes'} · {tableRows.length} {tableRows.length === 1 ? 'contrato' : 'contratos'} em {range.label}
                 </p>
 
+                <TabsContent value="all" className="mt-0">
+                    <TabelaContratos
+                        rows={tableRows}
+                        onOpen={row => setDetailId(row.id)}
+                        renderActions={row => contractActions(row.contract)}
+                        onClearFilters={clearFilters}
+                        hasFilters={hasFilters}
+                        onExport={(rows, format) => void exportRows(rows, format, `Selecção de ${rows.length} contrato(s)`)}
+                    />
+                </TabsContent>
+
                 <TabsContent value="list" className="mt-0">
-                    <div className="card-elevated overflow-hidden">
+                    <div className="card-elevated overflow-x-auto">
                         <Table>
                             <TableHeader>
                                 <TableRow className="bg-muted/50">
                                     <TableHead>Cliente</TableHead>
-                                    <TableHead className="text-center">Contratos</TableHead>
-                                    <TableHead className="text-center">Activos</TableHead>
-                                    <TableHead className="text-right">Valor em contratos</TableHead>
+                                    <TableHead className="text-center">Contratos · em vigor</TableHead>
+                                    <TableHead className="text-right">Valor contratado</TableHead>
+                                    <TableHead className="text-right">Saldo em dívida</TableHead>
+                                    <TableHead>Próximo vencimento</TableHead>
+                                    <TableHead>Estado</TableHead>
                                     <TableHead className="text-right">Acção</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
                                 {groupedContracts.length === 0 ? (
                                     <TableRow>
-                                        <TableCell colSpan={5} className="text-center py-10 text-muted-foreground italic">
+                                        <TableCell colSpan={7} className="text-center py-10 text-muted-foreground italic">
                                             Nenhum contrato em {range.label} com estes filtros.
                                         </TableCell>
                                     </TableRow>
@@ -864,14 +953,22 @@ export default function Contracts() {
                                                 <p className="font-bold text-foreground text-base">{group.clientName}</p>
                                                 <p className="text-[10px] text-muted-foreground uppercase font-black tracking-widest">{clientById.get(group.clientId)?.nif || group.clientId}</p>
                                             </TableCell>
-                                            <TableCell className="text-center">
+                                            <TableCell className="text-center whitespace-nowrap">
                                                 <Badge variant="secondary" className="font-bold">{group.total}</Badge>
-                                            </TableCell>
-                                            <TableCell className="text-center">
+                                                <span className="mx-1 text-muted-foreground">·</span>
                                                 <Badge variant="success" className="font-bold">{group.active}</Badge>
                                             </TableCell>
-                                            <TableCell className="text-right">
-                                                <span className="font-black text-indigo-600 dark:text-indigo-400">{formatCurrency(group.value)}</span>
+                                            <TableCell className="text-right whitespace-nowrap">
+                                                <span className="font-black text-indigo-600 dark:text-indigo-400">{kz(group.value)}</span>
+                                            </TableCell>
+                                            <TableCell className="text-right whitespace-nowrap font-semibold">{kz(group.outstanding)}</TableCell>
+                                            <TableCell className="whitespace-nowrap text-xs">{group.nextDue ? formatDate(group.nextDue) : '—'}</TableCell>
+                                            <TableCell>
+                                                {group.overdue > 0
+                                                    ? <span className={`rounded-md border px-2 py-0.5 text-[11px] font-bold ${CONTRACT_STATES.atraso.badge}`}>Em atraso · {kz(group.overdue)}</span>
+                                                    : group.active > 0
+                                                        ? <span className={`rounded-md border px-2 py-0.5 text-[11px] font-bold ${CONTRACT_STATES.em_dia.badge}`}>Em dia</span>
+                                                        : <span className="text-xs text-muted-foreground">Sem contratos em vigor</span>}
                                             </TableCell>
                                             <TableCell className="text-right">
                                                 <Button
@@ -889,50 +986,6 @@ export default function Contracts() {
                                             </TableCell>
                                         </TableRow>
                                     ))
-                                )}
-                            </TableBody>
-                        </Table>
-                    </div>
-                </TabsContent>
-
-                <TabsContent value="all" className="mt-0">
-                    <div className="card-elevated overflow-hidden">
-                        <Table>
-                            <TableHeader>
-                                <TableRow className="bg-muted/50">
-                                    <TableHead>Data</TableHead>
-                                    <TableHead>Cliente</TableHead>
-                                    <TableHead>Contrato</TableHead>
-                                    <TableHead className="text-right">Valor</TableHead>
-                                    <TableHead>Vigência</TableHead>
-                                    <TableHead>Estado</TableHead>
-                                    <TableHead className="text-right">Acção</TableHead>
-                                </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                                {visibleContracts.length === 0 ? (
-                                    <TableRow>
-                                        <TableCell colSpan={7} className="text-center py-10 text-muted-foreground italic">
-                                            Nenhum contrato em {range.label} com estes filtros.
-                                        </TableCell>
-                                    </TableRow>
-                                ) : (
-                                    [...visibleContracts]
-                                        .sort((a, b) => new Date(contractDate(b)).getTime() - new Date(contractDate(a)).getTime())
-                                        .map(contract => (
-                                            <TableRow key={contract.id}>
-                                                <TableCell className="whitespace-nowrap text-xs">{formatDate(contractDate(contract))}</TableCell>
-                                                <TableCell>
-                                                    <p className="font-semibold">{contract.clientName}</p>
-                                                    <p className="text-[10px] text-muted-foreground">{clientById.get(contract.clientId)?.nif || '—'}</p>
-                                                </TableCell>
-                                                <TableCell className="whitespace-nowrap font-mono text-xs font-bold" title={contract.id}>{numberOf(contract)}</TableCell>
-                                                <TableCell className="text-right font-semibold whitespace-nowrap">{formatCurrency(contract.value)}</TableCell>
-                                                <TableCell className="whitespace-nowrap text-xs">{formatDate(contract.startDate)} - {formatDate(contract.endDate)}</TableCell>
-                                                <TableCell>{statusBadge(contract)}</TableCell>
-                                                <TableCell className="text-right">{contractActions(contract)}</TableCell>
-                                            </TableRow>
-                                        ))
                                 )}
                             </TableBody>
                         </Table>

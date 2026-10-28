@@ -2,14 +2,29 @@ import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { authorizeTenant, sha256 } from './_autorizacao-empresa.js';
+import { recordSyncDevice } from './_dispositivos-sync.js';
+import { notifySyncChange, openSyncEvents } from './_avisos-sync.js';
+import { syncIntegrity } from './_integridade-sync.js';
+import { tenantLockCte } from './_bloqueio-empresa.js';
 
-const MAX_OPERATIONS = 100;
-const MAX_PAYLOAD_LENGTH = 2_000_000;
+// Alterações por pedido. Os clientes enviam lotes de até 100, mais a lista de utilizadores e o resto de uma transacção
+// que não pode ser partida: com o limite antigo de 100 esse lote era recusado sempre e o dispositivo deixava de
+// sincronizar (nem enviava nem recebia). O tamanho do pedido continua limitado pelo servidor (8 MB).
+const MAX_OPERATIONS = 2000;
+// Uma alteração cifrada. Clientes com documentos anexados (BI, comprovativos em base64) passavam os 2 MB antigos:
+// a alteração era recusada e, como a fila não avança sem ela, o dispositivo deixava de enviar tudo o resto.
+const MAX_PAYLOAD_LENGTH = 12_000_000;
 const PULL_LIMIT = 500;
 // Bytes por resposta: em ligações lentas uma página de 500 operações com ficheiros não chegava a tempo.
 const DEFAULT_PULL_BYTES = 3_000_000;
 const MIN_PULL_BYTES = 200_000;
 const MAX_PULL_BYTES = 8_000_000;
+
+/** Regista no servidor cada envio recusado (sem dados da empresa): data, dispositivo, alterações e tamanho. */
+const logRejected = (req, tenantId, deviceId, count, reason) => {
+  const bytes = req.rawBody?.length ?? Buffer.byteLength(JSON.stringify(req.body || {}));
+  console.warn(`[sync] Envio recusado (${reason}): empresa ${tenantId ? sha256(tenantId).slice(0, 12) : '?'}, dispositivo ${String(deviceId || '?').slice(0, 40)}, ${count} alteração(ões), ${bytes} bytes.`);
+};
 
 const send = (res, status, body) => {
   res.status(status).setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -18,14 +33,63 @@ const send = (res, status, body) => {
   res.json(body);
 };
 
+/**
+ * Alterações gravadas com outra forma do identificador da mesma empresa: passam para o histórico da empresa registada,
+ * com números novos (para os outros dispositivos as receberem) e com o bloqueio das duas.
+ */
+const adoptStream = async (sql, fromHash, toHash) => {
+  const [pending] = await sql(`SELECT 1 AS found FROM tango_sync_operations WHERE tenant_hash = $1 LIMIT 1`, [fromHash]);
+  if (!pending) return;
+  await sql(
+    `${tenantLockCte('$1')}
+     INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload, created_at)
+     SELECT $1, o.operation_id, o.device_id, o.payload, o.created_at FROM tenant_lock, tango_sync_operations o
+     WHERE o.tenant_hash = $2 ORDER BY o.seq
+     ON CONFLICT (tenant_hash, operation_id) DO NOTHING`, [toHash, fromHash]);
+  await sql(
+    `${tenantLockCte('$1')}
+     DELETE FROM tango_sync_operations USING tenant_lock WHERE tango_sync_operations.tenant_hash = $1`, [fromHash]);
+  console.warn(`[sync] Histórico ${fromHash.slice(0, 12)} juntado ao da empresa registada ${toHash.slice(0, 12)}.`);
+};
+
+/** Abre o canal de avisos de uma empresa, com a mesma autenticação da sincronização (código ou sessão da web). */
+const openEvents = async (req, res, databaseUrl) => {
+  const query = req.query || Object.fromEntries(new URL(String(req.url || ''), 'http://local').searchParams);
+  const tenantId = String(query.tenantId || '').trim();
+  const deviceId = String(query.deviceId || '').trim();
+  if (!tenantId || tenantId.length > 200 || !deviceId || deviceId.length > 100) {
+    return send(res, 400, { success: false, message: 'Identificação do canal de avisos inválida.' });
+  }
+  const client = neon(databaseUrl);
+  const sql = (text, params) => client.query(text, params);
+  let canonicalHash = sha256(tenantId);
+  try {
+    if (!await enforceDistributedRateLimit(sql, req, res, { limit: 30, windowMs: 60_000, scope: 'sync-events' })) return;
+    const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const auth = await authorizeTenant(sql, tenantId, req.headers['x-sync-passkey'] || bearer, req);
+    if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code, message: auth.message });
+    canonicalHash = auth.tenantHash || sha256(tenantId);
+  } catch (error) {
+    console.error('[sync][events]', error);
+    return send(res, 500, { success: false, message: 'O servidor não conseguiu validar o acesso.' });
+  }
+  return openSyncEvents(req, res, canonicalHash, deviceId);
+};
+
 export default async function handler(req, res) {
   if (!applyCors(req, res)) {
     await recordRejectedOrigin(req);
     return send(res, 403, { success: false, message: 'Origem não autorizada.' });
   }
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
-  if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
   const databaseUrl = process.env.DATABASE_URL;
+  // GET /api/sync/events: canal de avisos em tempo real (só «há novidades»; os dados vêm pelo POST /api/sync).
+  if (/^\/api\/sync\/events(?:[/?]|$)/u.test(String(req.url || ''))) {
+    if (req.method !== 'GET') return send(res, 405, { success: false, message: 'Método não permitido.' });
+    if (!databaseUrl) return send(res, 503, { success: false, message: 'Sincronização cloud ainda não configurada no servidor.' });
+    return openEvents(req, res, databaseUrl);
+  }
+  if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Método não permitido.' });
   if (!databaseUrl) {
     return send(res, 503, { success: false, message: 'Sincronização cloud ainda não configurada no servidor.' });
   }
@@ -38,11 +102,7 @@ export default async function handler(req, res) {
   if (!tenantId || tenantId.length > 200 || !deviceId || deviceId.length > 100) {
     return send(res, 400, { success: false, message: 'Identificação da sincronização inválida.' });
   }
-  if (operations.length > MAX_OPERATIONS) {
-    return send(res, 413, { success: false, message: 'Foram enviadas demasiadas alterações de uma só vez.' });
-  }
-
-  const tenantHash = sha256(tenantId);
+  let tenantHash = sha256(tenantId);
   const client = neon(databaseUrl);
   const sql = (text, params) => client.query(text, params);
   try {
@@ -57,9 +117,20 @@ export default async function handler(req, res) {
   try {
     const auth = await authorizeTenant(sql, tenantId, providedKey, req);
     if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code, message: auth.message });
+    // Histórico da empresa registada (não do texto enviado): um NIF noutro formato não abre uma «empresa» à parte.
+    const sentHash = tenantHash;
+    tenantHash = auth.tenantHash || tenantHash;
+    if (sentHash !== tenantHash) await adoptStream(sql, sentHash, tenantHash);
     if (!await enforceDistributedRateLimit(sql, req, res, {
       limit: 600, windowMs: 60_000, scope: 'sync-tenant', subject: tenantId, dimension: 'subject'
     })) return;
+    // Depois de confirmada a empresa: a recusa fica também no diagnóstico deste dispositivo.
+    if (operations.length > MAX_OPERATIONS) {
+      logRejected(req, tenantId, deviceId, operations.length, 'demasiadas alterações');
+      await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics,
+        outcome: { rejected413: true, error: `Envio recusado: ${operations.length} alterações (máximo ${MAX_OPERATIONS}).` } });
+      return send(res, 413, { success: false, code: 'TOO_MANY_OPERATIONS', message: 'Foram enviadas demasiadas alterações de uma só vez.' });
+    }
     // O executável da empresa informa se foi configurado como multi-empresa (a web mostra o mesmo layout).
     if (typeof body.companyProfile?.multiTenant === 'boolean') {
       await sql(`UPDATE tango_tenants SET multi_tenant = $2 WHERE UPPER(tenant_id) = UPPER($1) AND multi_tenant IS DISTINCT FROM $2`,
@@ -97,24 +168,37 @@ export default async function handler(req, res) {
 
     const validatedOperations = [];
     let roster = null;
+    // Alterações maiores do que o limite: o dispositivo põe-nas de parte (sem as perder) e envia as restantes.
+    const tooLarge = operations.filter(operation => String(operation?.payload || '').length > MAX_PAYLOAD_LENGTH).map(operation => String(operation?.id || ''));
+    if (tooLarge.length) {
+      logRejected(req, tenantId, deviceId, operations.length, `${tooLarge.length} alteração(ões) acima de ${MAX_PAYLOAD_LENGTH} caracteres`);
+      await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics,
+        outcome: { rejected413: true, error: `Envio recusado: ${tooLarge.length} alteração(ões) grande(s) demais.` } });
+      return send(res, 413, { success: false, code: 'OPERATION_TOO_LARGE', operationIds: tooLarge, maxPayloadLength: MAX_PAYLOAD_LENGTH, message: 'Há alterações demasiado grandes para enviar.' });
+    }
     for (const operation of operations) {
       const id = String(operation?.id || '');
       const sourceDevice = String(operation?.deviceId || deviceId);
       const payload = String(operation?.payload || '');
-      if (!/^[0-9a-f-]{20,80}$/i.test(id) || sourceDevice.length > 100 || !payload || payload.length > MAX_PAYLOAD_LENGTH) {
+      if (!/^[0-9a-f-]{20,80}$/i.test(id) || sourceDevice.length > 100 || !payload) {
+        logRejected(req, tenantId, deviceId, operations.length, 'alteração inválida');
         return send(res, 400, { success: false, message: 'Alteração de sincronização inválida.' });
       }
       validatedOperations.push({ operation_id: id, device_id: sourceDevice, payload });
       if (operation?.kind === 'users') roster = { id, device: sourceDevice, payload };
     }
     if (validatedOperations.length) {
+      // Bloqueio por empresa (ver _bloqueio-empresa.js): um número visível garante que os anteriores também estão.
       await sql(
-        `INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload)
+        `${tenantLockCte('$1')}
+         INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload)
          SELECT $1, item.operation_id, item.device_id, item.payload
-         FROM jsonb_to_recordset($2::jsonb) AS item(operation_id TEXT, device_id TEXT, payload TEXT)
+         FROM tenant_lock, jsonb_to_recordset($2::jsonb) AS item(operation_id TEXT, device_id TEXT, payload TEXT)
          ON CONFLICT (tenant_hash, operation_id) DO NOTHING`,
         [tenantHash, JSON.stringify(validatedOperations)]
       );
+      // Tempo real: os outros dispositivos ligados da empresa vão buscar já o que chegou.
+      notifySyncChange(tenantHash, deviceId);
     }
     if (roster) {
       await sql(
@@ -143,6 +227,7 @@ export default async function handler(req, res) {
 
     // pull: false só envia (e pede a lista de utilizadores), sem receber alterações: resposta rápida para o login.
     if (body.pull === false) {
+      await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics, outcome: { synced: true, cursor } });
       return send(res, 200, { success: true, cursor, hasMore: false, operations: [], ...(usersRoster !== undefined ? { usersRoster } : {}) });
     }
 
@@ -184,23 +269,41 @@ export default async function handler(req, res) {
     const nextCursor = page.length ? Number(page[page.length - 1].seq) : cursor;
 
     // O histórico completo é o que permite a um dispositivo novo receber todos os dados da empresa.
-    // Só se apaga quando a retenção é configurada explicitamente na Vercel.
+    // Só se apaga quando a retenção é configurada explicitamente (TANGO_SYNC_RETENTION_DAYS, mínimo 365 dias), e só
+    // o desta empresa, com o mesmo bloqueio das gravações.
     const retentionDays = Number(process.env.TANGO_SYNC_RETENTION_DAYS || 0);
     if (retentionDays > 0 && Math.random() < 0.01) {
-      await sql(`DELETE FROM tango_sync_operations WHERE created_at < NOW() - ($1 * INTERVAL '1 day')`, [Math.max(365, retentionDays)]);
+      await sql(
+        `${tenantLockCte('$1')}
+         DELETE FROM tango_sync_operations USING tenant_lock
+         WHERE tango_sync_operations.tenant_hash = $1 AND tango_sync_operations.created_at < NOW() - ($2 * INTERVAL '1 day')`,
+        [tenantHash, Math.max(365, retentionDays)]
+      );
     }
 
+    await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics, outcome: { synced: true, cursor: nextCursor } });
+    // Integridade: só na volta com diagnóstico (a primeira de cada sincronização).
+    const integrity = body.diagnostics ? await syncIntegrity(sql, tenantHash, deviceId, body.diagnostics.integrity) : undefined;
+    // Com mais por receber, a última posição do histórico: o dispositivo mostra a percentagem já recebida.
+    const latestSeq = hasMore
+      ? Number((await sql('SELECT MAX(seq) AS latest FROM tango_sync_operations WHERE tenant_hash = $1', [tenantHash]))[0]?.latest || nextCursor)
+      : nextCursor;
     return send(res, 200, {
       success: true,
       cursor: nextCursor,
       hasMore,
+      latestSeq,
+      ...(integrity ? { integrity } : {}),
       ...(usersRoster !== undefined ? { usersRoster } : {}),
       operations: page
         .filter(row => row.device_id !== deviceId)
-        .map(row => ({ id: row.operation_id, deviceId: row.device_id, payload: row.payload }))
+        // seq: a ordem real das alterações (decidida aqui, não pelo relógio dos PCs), usada pela autocura.
+        .map(row => ({ id: row.operation_id, deviceId: row.device_id, payload: row.payload, seq: Number(row.seq) }))
     });
   } catch (error) {
     console.error('[sync]', error);
+    await recordSyncDevice(sql, { tenantHash, deviceId, userAgent: req.headers['user-agent'], diagnostics: body.diagnostics,
+      outcome: { error: `Erro do servidor: ${error?.message || 'falha ao sincronizar'}` } });
     return send(res, 500, { success: false, message: 'O servidor não conseguiu sincronizar os dados.' });
   }
 }

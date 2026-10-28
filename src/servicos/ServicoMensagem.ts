@@ -1,5 +1,10 @@
 import { RepositorioMensagem } from '@/repositorios/RepositorioMensagem';
-import { ChatMessage } from '@/tipos/credito';
+import { ChatAttachment, ChatClientCard, ChatMessage } from '@/tipos/credito';
+
+const json = <T>(value: unknown): T | undefined => {
+    if (typeof value !== 'string' || !value) return undefined;
+    try { return JSON.parse(value) as T; } catch { return undefined; }
+};
 
 export class ServicoMensagem {
     static async getAll(): Promise<ChatMessage[]> {
@@ -7,7 +12,9 @@ export class ServicoMensagem {
         return rows.map(m => ({
             ...m,
             read: m.read === 1,
-            timestamp: new Date(m.timestamp)
+            timestamp: new Date(m.timestamp),
+            attachments: json<ChatAttachment[]>(m.attachments) || [],
+            clientCard: json<ChatClientCard>(m.clientCard) || null,
         }));
     }
 

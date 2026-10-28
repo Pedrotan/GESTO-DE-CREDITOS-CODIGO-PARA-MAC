@@ -1,4 +1,5 @@
 import { BankLogo } from '@/componentes/BankLogo';
+import { PreferenciasCliente } from '@/componentes/cobranca/PreferenciasCliente';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { estadoBI, validadeSugerida, validarDatasBI } from '@/bibliotecas/rh/bi-validade';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
@@ -72,6 +73,8 @@ import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { needsSpouse, spouseFieldsToSave } from '@/bibliotecas/conjuge';
+import { CAMPOS_MORADA, campoConjuge, validarNaturalidadeMorada, type CampoMorada } from '@/bibliotecas/morada-cliente';
+import { MUNICIPIOS_POR_PROVINCIA, PROVINCIAS_DPA, municipioDPA, municipiosDaProvincia, provinciaDPA, semAcentos } from '@/bibliotecas/dpa-angola';
 import { cn } from '@/bibliotecas/utils';
 import { formatAngolanPhone } from '@/bibliotecas/formatters';
 import { analisarTelefoneAngola, telefoneOpcionalValido } from '@/bibliotecas/operadoras-telefone';
@@ -93,6 +96,12 @@ const clientSchema = z.object({
         .refine(value => analisarTelefoneAngola(value).valido, value => ({ message: analisarTelefoneAngola(value).mensagem })),
     email: z.string().email('Email inválido').or(z.literal('')).optional(),
     address: z.string().optional(),
+    // Naturalidade e morada administrativa (obrigatórias, validadas ao gravar).
+    birthPlace: z.string().optional(),
+    province: z.string().optional(),
+    municipality: z.string().optional(),
+    neighborhood: z.string().optional(),
+    zone: z.string().optional(),
     birthDate: z.string().optional(),
     age: z.coerce.number().min(0).optional(),
     issueDate: z.string().optional(),
@@ -109,6 +118,11 @@ const clientSchema = z.object({
     spouseBirthDate: z.string().optional(),
     spouseOccupation: z.string().optional(),
     spouseIncome: z.coerce.number().min(0).optional(),
+    spouseBirthPlace: z.string().optional(),
+    spouseProvince: z.string().optional(),
+    spouseMunicipality: z.string().optional(),
+    spouseNeighborhood: z.string().optional(),
+    spouseZone: z.string().optional(),
     spouseDataRefused: z.boolean().optional(),
     // --- Campos exclusivos da carteira de Aposentados ---
     workInstitution: z.string().optional(),
@@ -135,6 +149,10 @@ const clientSchema = z.object({
     status: z.enum(['active', 'blocked', 'inactive']),
     riskLevel: z.enum(['low', 'medium', 'high']),
     receiveMethod: z.enum(['transfer', 'cash']),
+}).superRefine((data, ctx) => {
+    // Naturalidade e morada obrigatórias (cliente e, com dados fornecidos, cônjuge), assinaladas junto com os outros erros.
+    const emFalta = validarNaturalidadeMorada(data, { particular: data.clientType !== 'EMPRESA', conjuge: needsSpouse(data.maritalStatus) && !data.spouseDataRefused });
+    for (const [campo, message] of emFalta) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [campo], message });
 });
 
 type ClientFormValues = z.infer<typeof clientSchema>;
@@ -229,6 +247,79 @@ function isPdfDocument(doc: ClientDocument): boolean {
     return doc.type === 'pdf' || doc.data?.startsWith('data:application/pdf');
 }
 
+/** Opções da lista de escolha (pesquisa também sem acentos); um valor antigo fora da lista continua visível. */
+const opcoesDPA = (nomes: string[], actual: string, subLabel?: (nome: string) => string) => {
+    const opcoes = nomes.map(nome => ({ value: nome, label: nome, keywords: semAcentos(nome), subLabel: subLabel?.(nome) }));
+    return actual && !nomes.includes(actual)
+        ? [{ value: actual, label: actual, keywords: semAcentos(actual), subLabel: 'Valor antigo, fora da nova DPA', className: 'text-amber-700' }, ...opcoes]
+        : opcoes;
+};
+
+/** Naturalidade, província, município, bairro e zona (do cliente ou, com `conjuge`, do cônjuge). */
+function CamposNaturalidadeMorada({ form, conjuge = false, semNaturalidade = false }: { form: any; conjuge?: boolean; semNaturalidade?: boolean }) {
+    const nome = (key: CampoMorada) => (conjuge ? campoConjuge(key) : key);
+    const provincia = String(form.watch(nome('province')) || '');
+    const municipios = municipiosDaProvincia(provincia);
+    const escolherProvincia = (valor: string) => {
+        form.setValue(nome('province'), valor, { shouldDirty: true, shouldValidate: true });
+        // O município só fica se pertencer à província escolhida.
+        const municipio = municipioDPA(valor, form.getValues(nome('municipality')));
+        if (municipio !== form.getValues(nome('municipality'))) form.setValue(nome('municipality'), municipio, { shouldDirty: true });
+    };
+    const classeCampo = "h-10 rounded-xl border-slate-200 bg-white text-sm";
+    return (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            {CAMPOS_MORADA.filter(campo => !(semNaturalidade && campo.key === 'birthPlace')).map(campo => (
+                <FormField
+                    key={campo.key}
+                    control={form.control}
+                    name={nome(campo.key) as any}
+                    render={({ field }) => {
+                        const valor = String(field.value || '');
+                        return (
+                            <FormItem>
+                                <FormLabel className="text-xs font-bold text-slate-700">
+                                    {campo.label}{conjuge ? ' do Cônjuge' : ''}<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
+                                </FormLabel>
+                                {campo.key === 'province' ? (
+                                    <SearchableSelect
+                                        options={opcoesDPA(PROVINCIAS_DPA, provinciaDPA(valor) || valor, nomeProvincia => `${MUNICIPIOS_POR_PROVINCIA[nomeProvincia].length} municípios`)}
+                                        value={provinciaDPA(valor) || valor}
+                                        onValueChange={escolherProvincia}
+                                        placeholder={campo.placeholder}
+                                        searchPlaceholder="Pesquisar província…"
+                                        emptyMessage="Nenhuma província encontrada."
+                                        className={classeCampo}
+                                        contentClassName="min-w-[260px]"
+                                    />
+                                ) : campo.key === 'municipality' ? (
+                                    <SearchableSelect
+                                        options={opcoesDPA(municipios, municipioDPA(provincia, valor) || valor)}
+                                        value={municipioDPA(provincia, valor) || valor}
+                                        onValueChange={field.onChange}
+                                        disabled={!municipios.length}
+                                        placeholder={municipios.length ? campo.placeholder : 'Escolha primeiro a província'}
+                                        searchPlaceholder="Pesquisar município…"
+                                        emptyMessage="Nenhum município encontrado nesta província."
+                                        className={classeCampo}
+                                        contentClassName="min-w-[260px]"
+                                    />
+                                ) : (
+                                    <FormControl>
+                                        <Input {...field} value={valor} placeholder={campo.placeholder}
+                                            className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                    </FormControl>
+                                )}
+                                <FormMessage />
+                            </FormItem>
+                        );
+                    }}
+                />
+            ))}
+        </div>
+    );
+}
+
 export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Guardar', category = 'COMUM' }: ClientFormProps) {
     const parametrosBI = useParametrosBI();
     const { user: authUser } = useAuth();
@@ -288,6 +379,16 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 phone: initialData.phone || '',
                 email: initialData.email || '',
                 address: initialData.address || '',
+                birthPlace: initialData.birthPlace || '',
+                province: initialData.province || '',
+                municipality: initialData.municipality || '',
+                neighborhood: initialData.neighborhood || '',
+                zone: initialData.zone || '',
+                spouseBirthPlace: initialData.spouseBirthPlace || '',
+                spouseProvince: initialData.spouseProvince || '',
+                spouseMunicipality: initialData.spouseMunicipality || '',
+                spouseNeighborhood: initialData.spouseNeighborhood || '',
+                spouseZone: initialData.spouseZone || '',
                 birthDate: initialData.birthDate || '',
                 age: initialData.age ?? (initialData.birthDate ? calcularIdade(initialData.birthDate) : 0),
                 issueDate: initialData.issueDate || '',
@@ -331,6 +432,16 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 phone: '',
                 email: '',
                 address: '',
+                birthPlace: '',
+                province: '',
+                municipality: '',
+                neighborhood: '',
+                zone: '',
+                spouseBirthPlace: '',
+                spouseProvince: '',
+                spouseMunicipality: '',
+                spouseNeighborhood: '',
+                spouseZone: '',
                 birthDate: '',
                 age: 0,
                 issueDate: '',
@@ -477,6 +588,9 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 if (addressVal) {
                     form.setValue('address', addressVal, { shouldValidate: true, shouldDirty: true, shouldTouch: true });
                 }
+                // Província de emissão do BI como sugestão (só se ainda estiver vazia; o operador confirma ou corrige).
+                const provinciaBI = clientType === 'PARTICULAR' ? provinciaDPA(inferirProvinciaDoBI(nifValue)) : '';
+                if (provinciaBI && !form.getValues('province')) form.setValue('province', provinciaBI, { shouldDirty: true });
 
                 setIsNameAutoFilled(true);
 
@@ -684,6 +798,14 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 return;
             }
         }
+        // Naturalidade e morada (província, município, bairro, zona): obrigatórias para o cliente e, quando os dados do
+        // cônjuge são fornecidos, também para o cônjuge.
+        const emFalta = validarNaturalidadeMorada(data, { particular: clientType === 'PARTICULAR', conjuge: needsSpouse(data.maritalStatus) && !data.spouseDataRefused });
+        if (emFalta.length) {
+            for (const [campo, mensagem] of emFalta) form.setError(campo as any, { type: 'manual', message: mensagem });
+            setGenericAlert({ isOpen: true, title: 'Dados de morada em falta', description: emFalta.map(([, mensagem]) => mensagem).join(' '), type: 'warning' });
+            return;
+        }
         clearDraft();
         onSubmit({
             ...data,
@@ -716,6 +838,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
         <Form {...form}>
             <form onSubmit={form.handleSubmit(handleFormSubmit)} className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50/50">
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 min-h-0">
+                    {initialData?.id && <PreferenciasCliente clientId={initialData.id} />}
                     
                     {/* ========================================================================= */}
                     {/* SEÇÃO 1: DADOS PESSOAIS E IDENTIFICAÇÃO */}
@@ -1440,6 +1563,10 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                         </FormItem>
                                                     )}
                                                 />
+                                                <div className="col-span-full">
+                                                    <p className="mb-2 text-xs font-bold text-slate-700">Naturalidade e morada do cônjuge</p>
+                                                    <CamposNaturalidadeMorada form={form} conjuge />
+                                                </div>
                                     </div>
                                 )}
 
@@ -1698,6 +1825,9 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                     )}
                                 />
                             </div>
+
+                            {/* Linha 5: Naturalidade e morada administrativa (obrigatórias) */}
+                            <CamposNaturalidadeMorada form={form} semNaturalidade={form.watch('clientType') === 'EMPRESA'} />
 
                             {/* Linha 5: Morada e Residência */}
                             <FormField

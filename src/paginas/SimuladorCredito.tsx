@@ -328,6 +328,8 @@ export function SimuladorCredito() {
                 id: creditId, clientId: client.id, clientName: client.name, principalAmount: form.principal, currentBalance: form.principal,
                 interestRate: flat ? form.termRate : Math.round(annualRate * 10000) / 10000, lateInterestRate: client.lateInterestRate || 1, installments: form.months, paidInstallments: 0,
                 startDate: start, dueDate: due, status: 'pending_approval', requestedBy: user?.name || 'Sistema', requestedAt: new Date(),
+                // As prestações ficam com as datas mostradas na simulação.
+                scheduleDueDates: result.rows.length === form.months ? result.rows.map(row => `${row.dueDate}T00:00:00.000Z`) : undefined,
                 daysOverdue: 0, accruedInterest: result.totalInterest, lateInterest: 0, totalDue: form.principal + result.totalInterest,
                 amortizationMethod: flat ? 'FLAT' : form.system === 'sac' ? 'SAC' : 'PRICE', creditNumber: ownCredits.length + 1, createdAt: new Date(),
                 targetMonthId: form.startDate.slice(0, 7),

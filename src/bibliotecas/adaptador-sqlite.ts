@@ -15,6 +15,14 @@ const IDB_NAME = IS_DEV ? 'TangoGestaoCreditosERP_DevDB' : 'TangoGestaoCreditosE
 const IDB_STORE = 'sqlite_store';
 const IDB_KEY = 'main_db';
 
+/**
+ * Cópia de segurança da base deste navegador, feita antes de «Receber tudo de novo da nuvem». Se a recepção não
+ * trouxer os dados (ex.: alterações que nunca chegaram à nuvem), a cópia anterior pode ser reposta.
+ */
+const IDB_BACKUP_NAME = `${IDB_NAME}_CopiaAnterior`;
+export const REPLICA_BACKUP_AT_KEY = 'tango_replica_backup_at_v1';
+export const RESTORE_REPLICA_FLAG = 'tango_restore_replica_v1';
+
 const deleteIdb = (name: string) => new Promise<void>(resolve => {
     const request = indexedDB.deleteDatabase(name);
     request.onsuccess = () => resolve();
@@ -29,9 +37,9 @@ export type SqlTransactionStatement = {
     expectChanges?: number;
 };
 
-const loadFromIDB = (): Promise<Uint8Array | null> => {
+const loadFromIDB = (name = IDB_NAME): Promise<Uint8Array | null> => {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = (e: any) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
@@ -56,9 +64,9 @@ const loadFromIDB = (): Promise<Uint8Array | null> => {
     });
 };
 
-const saveToIDB = (data: Uint8Array): Promise<void> => {
+const saveToIDB = (data: Uint8Array, name = IDB_NAME): Promise<void> => {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = (e: any) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
@@ -106,8 +114,19 @@ const initDB = async (): Promise<Database> => {
         }
         // 2. Verificar IndexedDB
         else {
-            if (localStorage.getItem(REBUILD_REPLICA_FLAG)) {
+            if (localStorage.getItem(RESTORE_REPLICA_FLAG)) {
+                // Repor a cópia anterior à reconstrução (os dados mais recentes da nuvem voltam a chegar por cima).
+                localStorage.removeItem(RESTORE_REPLICA_FLAG);
+                const backup = await loadFromIDB(IDB_BACKUP_NAME).catch(() => null);
+                if (backup) await saveToIDB(backup);
+            } else if (localStorage.getItem(REBUILD_REPLICA_FLAG)) {
                 localStorage.removeItem(REBUILD_REPLICA_FLAG);
+                // Nunca se apaga sem guardar: a cópia actual fica como «cópia anterior» (a última reconstrução).
+                const current = await loadFromIDB().catch(() => null);
+                if (current) {
+                    await saveToIDB(current, IDB_BACKUP_NAME);
+                    localStorage.setItem(REPLICA_BACKUP_AT_KEY, new Date().toISOString());
+                }
                 await deleteIdb(IDB_NAME);
                 await deleteIdb('TangoCloudSyncQueue');
             }
@@ -382,7 +401,17 @@ const createTables = async () => {
             spouseConsentAt TEXT,
             spouseConsentBy TEXT,
             legalRepresentative TEXT,
-            legalRepRole TEXT
+            legalRepRole TEXT,
+            birthPlace TEXT,
+            province TEXT,
+            municipality TEXT,
+            neighborhood TEXT,
+            zone TEXT,
+            spouseBirthPlace TEXT,
+            spouseProvince TEXT,
+            spouseMunicipality TEXT,
+            spouseNeighborhood TEXT,
+            spouseZone TEXT
         );
 
         CREATE TABLE IF NOT EXISTS credits (
@@ -689,10 +718,12 @@ const createTables = async () => {
         CREATE INDEX IF NOT EXISTS idx_payments_credit_date ON payments(creditId, paymentDate);
         CREATE INDEX IF NOT EXISTS idx_audit_user_timestamp ON audit_logs(userId, timestamp);
 
-        -- Índices Parciais para Unicidade com Soft Delete
+        -- NIF e telefone: o registo de clientes recusa repetidos; a base aceita-os para que nenhum cliente vindo de
+        -- outro dispositivo fique de fora (ver fusao-clientes.ts).
         DROP INDEX IF EXISTS idx_clients_nif_active;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO';
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL;
+        DROP INDEX IF EXISTS idx_clients_phone_active;
+        CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif);
+        CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
 
         CREATE TABLE IF NOT EXISTS message_templates (
             id TEXT PRIMARY KEY,
@@ -1199,6 +1230,9 @@ const createTables = async () => {
     await safeAddColumn("users", "mustChangePassword", "INTEGER DEFAULT 0");
     await safeAddColumn("users", "status", "TEXT DEFAULT 'active'");
     await safeAddColumn("users", "lastSeen", "TEXT");
+    // Chat: ficheiros enviados e ficha de cliente partilhada (JSON).
+    await safeAddColumn("internal_messages", "attachments", "TEXT");
+    await safeAddColumn("internal_messages", "clientCard", "TEXT");
     await safeAddColumn("users", "permissions", "TEXT");
     await safeAddColumn("users", "username", "TEXT");
     await safeAddColumn("users", "failedAttempts", "INTEGER DEFAULT 0");
@@ -1230,9 +1264,11 @@ const createTables = async () => {
     await safeAddColumn("clients", "restoredAt", "TEXT");
     await safeAddColumn("clients", "originalState", "TEXT");
     
+    // Sem unicidade na base (o registo de clientes verifica): um cliente vindo de outro dispositivo nunca fica de fora.
     await executeSql("DROP INDEX IF EXISTS idx_clients_nif_active");
-    await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'");
-    await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL");
+    await executeSql("DROP INDEX IF EXISTS idx_clients_phone_active");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif)");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone)");
 
     try {
         await executeSql("UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'");
@@ -1410,6 +1446,17 @@ const createTables = async () => {
     await safeAddColumn("clients", "spouseConsentBy", "TEXT");
     await safeAddColumn("clients", "legalRepresentative", "TEXT");
     await safeAddColumn("clients", "legalRepRole", "TEXT");
+    // Naturalidade e morada (província, município, bairro, zona) do cliente e do cônjuge.
+    await safeAddColumn("clients", "birthPlace", "TEXT");
+    await safeAddColumn("clients", "province", "TEXT");
+    await safeAddColumn("clients", "municipality", "TEXT");
+    await safeAddColumn("clients", "neighborhood", "TEXT");
+    await safeAddColumn("clients", "zone", "TEXT");
+    await safeAddColumn("clients", "spouseBirthPlace", "TEXT");
+    await safeAddColumn("clients", "spouseProvince", "TEXT");
+    await safeAddColumn("clients", "spouseMunicipality", "TEXT");
+    await safeAddColumn("clients", "spouseNeighborhood", "TEXT");
+    await safeAddColumn("clients", "spouseZone", "TEXT");
 
     const multiTenancyTables = ["clients", "credits", "payments", "contracts", "warranties", "legal_cases", "payment_references", "accounting_entries"];
     for (const table of multiTenancyTables) {

@@ -16,6 +16,7 @@ import { ServicoContabilidadeGeral, type AuditRunRecord } from '@/servicos/Servi
 import { ServicoDivergencias, type DivergenceDecision, type DivergenceState } from '@/servicos/ServicoDivergencias';
 import { ServicoIntegridadeContabilistica } from '@/servicos/ServicoIntegridadeContabilistica';
 import { ServicoCadeiaAuditoria } from '@/servicos/ServicoCadeiaAuditoria';
+import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
 import { cn } from '@/bibliotecas/utils';
 import { AvisoErro, BotoesExportar, Indicador, SeccaoCabecalho } from './comum';
 import { isAdminRole, money } from './formato';
@@ -147,6 +148,10 @@ export function AuditoriaExecucao({ data, pedido, onPedidoTratado }: { data: Con
     const admin = isAdminRole(user?.role);
     const loadDecisions = async () => setDecisions(await ServicoDivergencias.list().catch(() => []));
     useEffect(() => { void loadDecisions(); }, []);
+    // Créditos eliminados cujo desembolso ainda está no razão (eliminados antes do estorno automático).
+    const [removedPending, setRemovedPending] = useState<Awaited<ReturnType<typeof ServicoFinanceiro.removedCreditsPendingReversal>>>([]);
+    useEffect(() => { void ServicoFinanceiro.removedCreditsPendingReversal().then(setRemovedPending).catch(() => setRemovedPending([])); }, [data.loadedAt]);
+    const removedPrincipal = removedPending.reduce((sum, item) => sum + item.principalMinor, 0);
 
     const run = async (kind: AuditKind) => {
         if (!user) return;
@@ -226,6 +231,27 @@ export function AuditoriaExecucao({ data, pedido, onPedidoTratado }: { data: Con
                 <ApontamentosAgrupados findings={findings} decisions={decisions} canDecide={admin}
                     onDecided={async () => { await loadDecisions(); await data.reload(); }} />
             </div>
+
+            {removedPending.length > 0 && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-amber-950 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-100">
+                    <p className="flex items-center gap-2 font-bold"><Banknote className="h-4 w-4" /> Dinheiro de créditos eliminados ainda na carteira</p>
+                    <p className="mt-1 text-xs">
+                        {removedPending.length} {removedPending.length === 1 ? 'crédito eliminado continua' : 'créditos eliminados continuam'} no razão com {money(removedPrincipal)} de capital em dívida
+                        ({removedPending.map(item => item.clientName).join(', ')}). Enquanto não forem estornados, esse valor não conta em Caixa e Bancos e a carteira
+                        do razão não bate com os contratos. O estorno devolve o capital à conta de onde saiu e anula os juros por receber; fica no diário.
+                    </p>
+                    {admin && (
+                        <Button size="sm" className="mt-3 gap-2" disabled={!!busy}
+                            onClick={() => void tool('removed', async () => {
+                                const result = await ServicoFinanceiro.reverseRemovedCredits({ id: user!.id, name: user!.name });
+                                setRemovedPending(await ServicoFinanceiro.removedCreditsPendingReversal().catch(() => []));
+                                return `${result.entries} estorno(s) lançado(s): ${money(result.returnedMinor)} voltaram a Caixa e Bancos.`;
+                            })}>
+                            {busy === 'removed' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Banknote className="h-4 w-4" />} Estornar e devolver {money(removedPrincipal)} a Caixa e Bancos
+                        </Button>
+                    )}
+                </div>
+            )}
 
             {admin && (
                 <div className="rounded-xl border bg-card p-4">

@@ -119,6 +119,10 @@ export const LOCKOUT_POLICIES = {
   master: { maxFailures: 5, windowMs: 15 * 60_000, blockMs: 60 * 60_000 },
   ip: { maxFailures: 10, windowMs: 15 * 60_000, blockMs: 30 * 60_000 },
   subject: { maxFailures: 8, windowMs: 15 * 60_000, blockMs: 15 * 60_000 },
+  // Cliente de confiança (IP que já entrou nesta empresa): contador próprio, por empresa e IP, e largo. Um computador
+  // ainda com o código antigo ou um navegador sem sessão não bloqueia o IP do escritório inteiro (todos saem pelo
+  // mesmo IP) nem os outros dispositivos da empresa.
+  trusted: { maxFailures: 100, windowMs: 15 * 60_000, blockMs: 15 * 60_000 },
 };
 
 /** Próximo estado de um contador de falhas (puro, para testes). */
@@ -137,15 +141,19 @@ export const nextLockoutState = (row, now, policy) => {
 };
 
 const lockKey = (scope, kind, value) => sha256(`${scope}:${kind}:${String(value).toUpperCase()}`);
+const trustedLockKey = (scope, subject, req) => lockKey(scope, 'trusted', `${subject}@${clientIp(req)}`);
 
 /**
  * Segundos de bloqueio restantes para este IP (e assunto, se indicado); 0 quando livre.
- * `trusted`: cliente que já se autenticou para este assunto (ver isTrustedClient) — o bloqueio do assunto não
- * se lhe aplica, só o do seu IP. Assim um atacante que bloqueia um NIF não tira o acesso à própria empresa.
+ * `trusted`: cliente que já se autenticou para este assunto (ver isTrustedClient) — nem o bloqueio do assunto nem o
+ * do IP se lhe aplicam, só o seu contador próprio (LOCKOUT_POLICIES.trusted). Assim um atacante que bloqueia um NIF
+ * não tira o acesso à própria empresa, e um dispositivo mal configurado no escritório não bloqueia os outros.
  */
 export const lockoutRemaining = async (sql, req, { scope, subject = '', trusted = false }) => {
   await ensureSecurityTables(sql);
-  const keys = [lockKey(scope, 'ip', clientIp(req)), ...(subject && !trusted ? [lockKey(scope, 'subject', subject)] : [])];
+  const keys = trusted && subject
+    ? [trustedLockKey(scope, subject, req)]
+    : [lockKey(scope, 'ip', clientIp(req)), ...(subject ? [lockKey(scope, 'subject', subject)] : [])];
   const rows = await sql('SELECT EXTRACT(EPOCH FROM (locked_until - NOW()))::int AS remaining FROM security_lockouts WHERE key_hash = ANY($1) AND locked_until > NOW()', [keys]);
   return rows.reduce((max, row) => Math.max(max, Number(row.remaining) || 0), 0);
 };
@@ -161,19 +169,22 @@ const bump = async (sql, key, policy) => {
 
 /**
  * Regista uma falha de autenticação: conta por IP e por assunto (ex.: NIF), bloqueia quando a política
- * é atingida e gera o alerta correspondente.
+ * é atingida e gera o alerta correspondente. `trustedSubject`: falha de um cliente de confiança desse assunto —
+ * conta só no contador próprio dele (empresa + IP), nunca no do IP nem no do assunto.
  */
-export const registerAuthFailure = async (sql, req, { scope, subject = '', type, title, details, ipPolicy = LOCKOUT_POLICIES.ip, subjectPolicy = LOCKOUT_POLICIES.subject }) => {
+export const registerAuthFailure = async (sql, req, { scope, subject = '', trustedSubject = '', type, title, details, ipPolicy = LOCKOUT_POLICIES.ip, subjectPolicy = LOCKOUT_POLICIES.subject }) => {
   try {
     await ensureSecurityTables(sql);
-    const byIp = await bump(sql, lockKey(scope, 'ip', clientIp(req)), ipPolicy);
-    const bySubject = subject ? await bump(sql, lockKey(scope, 'subject', subject), subjectPolicy) : null;
+    const byIp = trustedSubject
+      ? await bump(sql, trustedLockKey(scope, trustedSubject, req), LOCKOUT_POLICIES.trusted)
+      : await bump(sql, lockKey(scope, 'ip', clientIp(req)), ipPolicy);
+    const bySubject = subject && !trustedSubject ? await bump(sql, lockKey(scope, 'subject', subject), subjectPolicy) : null;
     const locked = byIp.justLocked || bySubject?.justLocked;
     await recordSecurityEvent(req, {
       type: locked ? `${type}_locked` : type,
       severity: locked ? 'critical' : byIp.failures >= 3 || (bySubject?.failures || 0) >= 3 ? 'high' : 'medium',
       title: locked ? `${title} — acesso bloqueado temporariamente` : title,
-      details: `${details} Falhas: ${byIp.failures} deste IP${bySubject ? `, ${bySubject.failures} para este identificador` : ''}.`,
+      details: `${details} Falhas: ${byIp.failures} deste IP${trustedSubject ? ' (de confiança para esta empresa)' : ''}${bySubject ? `, ${bySubject.failures} para este identificador` : ''}.`,
       subject,
     }, sql);
     return { locked: !!locked };

@@ -12,6 +12,10 @@ export const COLLECTION_SCHEMA_SQL = [
         CHECK(kind NOT IN ('promise_kept','promise_broken') OR relatedId IS NOT NULL)
     )`,
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_promise_decision ON collection_events(relatedId) WHERE kind IN ('promise_kept','promise_broken')",
+    `CREATE TRIGGER IF NOT EXISTS trg_collection_one_pending_promise BEFORE INSERT ON collection_events
+        WHEN NEW.kind = 'promise' AND EXISTS (SELECT 1 FROM collection_events p WHERE p.creditId = NEW.creditId AND p.kind = 'promise'
+        AND NOT EXISTS (SELECT 1 FROM collection_events d WHERE d.relatedId = p.id AND d.kind IN ('promise_kept','promise_broken')))
+        BEGIN SELECT RAISE(ABORT, 'Este crédito já tem uma promessa em aberto'); END`,
     `CREATE INDEX IF NOT EXISTS idx_collection_credit ON collection_events(creditId, createdAt)`,
     `CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events
         BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável'); END`,

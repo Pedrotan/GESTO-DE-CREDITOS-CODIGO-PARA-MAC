@@ -12,9 +12,9 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      // Em ecrãs estreitos os separadores deslizam na horizontal em vez de saírem do ecrã; "safe center"
-      // centra quando cabem e alinha à esquerda quando não cabem (o primeiro nunca fica cortado).
-      "inline-flex h-10 max-w-full items-center [justify-content:safe_center] overflow-x-auto overscroll-x-contain rounded-md bg-muted p-1 text-muted-foreground [scrollbar-width:thin]",
+      // Menu de separadores: começa à esquerda da página, num cartão próprio; em ecrãs estreitos desliza na
+      // horizontal em vez de sair do ecrã (o primeiro separador nunca fica cortado).
+      "inline-flex h-auto min-h-11 max-w-full items-center justify-start gap-1 overflow-x-auto overscroll-x-contain rounded-xl border border-border/70 bg-card p-1 text-muted-foreground shadow-sm [scrollbar-width:thin]",
       className,
     )}
     {...props}
@@ -29,7 +29,8 @@ const TabsTrigger = React.forwardRef<
   <TabsPrimitive.Trigger
     ref={ref}
     className={cn(
-      "inline-flex items-center justify-center whitespace-nowrap rounded-sm px-3 py-1.5 text-sm font-medium ring-offset-background transition-all data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
+      // Separador activo na cor principal do sistema; os restantes realçam ao passar o rato.
+      "inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg px-3.5 py-2 text-sm font-semibold ring-offset-background transition-all duration-200 hover:bg-muted hover:text-foreground data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-md data-[state=active]:hover:bg-primary [&_svg]:h-4 [&_svg]:w-4 [&_svg]:shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50",
       className,
     )}
     {...props}

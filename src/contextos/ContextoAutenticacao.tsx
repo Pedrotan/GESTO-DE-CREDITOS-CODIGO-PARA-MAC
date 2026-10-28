@@ -4,6 +4,8 @@ import { User, Role, AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
 import { db } from '@/bibliotecas/bd';
 import { usersListSqlFromColumns } from '@/bibliotecas/sql-utilizadores';
 import bcrypt from 'bcryptjs';
+import { republishSignedInUser } from '@/servicos/ServicoSincronizacaoCloud';
+import { ServicoPresenca } from '@/servicos/ServicoPresenca';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { hasFullAuthority } from '@/bibliotecas/conta-principal';
@@ -295,6 +297,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
      */
     const logout = useCallback(async () => {
         const leaving = user;
+        ServicoPresenca.stop(true);
         const background = (async () => {
             await pendingLogout.current?.catch(() => undefined);
             if (leaving) {
@@ -750,6 +753,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             setUser(userWithLogin);
             sessionStorage.setItem('user', JSON.stringify(userWithLogin));
+            republishSignedInUser(String(foundUser.id));
             void reloadUsers();
 
             // Log de auditoria para login bem-sucedido
@@ -1193,6 +1197,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // Atualização imediata e periódica a cada 30 segundos
         updateActivity();
         const interval = setInterval(updateActivity, 30 * 1000);
+        // Presença em todos os dispositivos da empresa (via nuvem): os outros veem este utilizador online.
+        ServicoPresenca.start(user.id);
 
         // Atualizar também quando o operador interage ou a janela recupera o foco
         const onFocus = () => {

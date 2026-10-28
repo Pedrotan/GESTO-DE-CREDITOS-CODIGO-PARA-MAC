@@ -49,6 +49,8 @@ export type SimulationInput = {
     startDate: Date | string;
     /** Dia de vencimento das prestações (1 a 28). */
     dueDay: number;
+    /** Mês da 1.ª prestação (AAAA-MM). Vazio: o mês seguinte ao desembolso. */
+    firstDueMonth?: string;
     graceMonths?: number;
     graceType?: GraceType;
     openingFee?: { mode: FeeMode; value: number };
@@ -155,6 +157,17 @@ export function dueDateFor(startDate: Date | string, dueDay: number, number: num
     return nextBusinessDay(nominal, extraHolidays, useNationalHolidays);
 }
 
+/**
+ * Meses entre o desembolso e o mês escolhido para a 1.ª prestação, além do mês habitual (0 quando não há escolha,
+ * 2 para um crédito de Outubro que começa a pagar em Janeiro). Negativo quando o mês escolhido é o do desembolso.
+ */
+export function firstDueDelay(startDate: Date | string, firstDueMonth?: string): number {
+    const match = /^(\d{4})-(\d{2})$/.exec(firstDueMonth || '');
+    const start = new Date(startDate);
+    if (!match || Number.isNaN(start.getTime())) return 0;
+    return (Number(match[1]) - start.getFullYear()) * 12 + (Number(match[2]) - 1 - start.getMonth()) - 1;
+}
+
 /** Taxa interna de rentabilidade mensal dos fluxos (fluxo 0 = montante recebido, positivo). */
 export function monthlyIrr(flows: number[]): number | null {
     if (flows.length < 2 || flows[0] <= 0 || !flows.slice(1).some(flow => flow < 0)) return null;
@@ -219,8 +232,9 @@ export function simulateCredit(input: SimulationInput): SimulationResult {
 
     const rows: ScheduleRow[] = [];
     let balance = financedMinor;
+    const delay = firstDueDelay(input.startDate, input.firstDueMonth);
     const pushRow = (number: number, values: Omit<ScheduleRow, 'number' | 'dueDate'>) => {
-        rows.push({ number, dueDate: keyOf(dueDateFor(input.startDate, input.dueDay, number, extra, national)), ...values });
+        rows.push({ number, dueDate: keyOf(dueDateFor(input.startDate, input.dueDay, number + delay, extra, national)), ...values });
     };
 
     // Carência
@@ -291,7 +305,8 @@ export function simulateCredit(input: SimulationInput): SimulationResult {
     // MTIC: capital pedido + juros + comissões + impostos + seguros (os juros incluem os da carência capitalizada).
     const mticMinor = principalMinor + totalInterestMinor + totalCommissionsMinor + totalTaxesMinor + totalInsuranceMinor;
 
-    const irr = monthlyIrr([fromMinor(netReceivedMinor), ...rows.map(row => -row.payment)]);
+    // Os meses sem prestação antes da primeira contam para a TAEG (o dinheiro fica mais tempo com o cliente).
+    const irr = monthlyIrr([fromMinor(netReceivedMinor), ...Array(Math.max(0, delay)).fill(0), ...rows.map(row => -row.payment)]);
     const taeg = irr === null ? null : (Math.pow(1 + irr, 12) - 1) * 100;
     const firstFull = rows.find(row => !row.grace) || rows[0];
 

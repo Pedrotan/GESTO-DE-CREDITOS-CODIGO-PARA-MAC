@@ -1,0 +1,48 @@
+.tango-skeleton {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  gap: 28px;
+  padding: 28px;
+  overflow: hidden;
+  background: #f8fafc;
+  color: #475569;
+  font: 14px system-ui, sans-serif;
+}
+.tango-skeleton-block {
+  display: block;
+  flex-shrink: 0;
+  border-radius: 10px;
+  background: #e2e8f0;
+  animation: tangoSkeletonPulse 1.8s ease-in-out infinite;
+}
+.tango-skeleton-sidebar { width: 208px; padding: 12px; }
+.tango-skeleton-brand { height: 44px; margin-bottom: 40px; }
+.tango-skeleton-nav { height: 34px; margin-bottom: 16px; }
+.tango-skeleton-main { flex: 1; min-width: 0; max-width: 1400px; margin: 0 auto; }
+.tango-skeleton-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 40px; }
+.tango-skeleton-heading { width: 42%; height: 30px; }
+.tango-skeleton-avatar { width: 40px; height: 40px; border-radius: 50%; }
+.tango-skeleton-caption { width: 60%; height: 14px; margin-bottom: 28px; }
+.tango-skeleton-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 18px; margin-bottom: 28px; }
+.tango-skeleton-card, .tango-skeleton-table { padding: 22px; border: 1px solid #e2e8f0; border-radius: 16px; background: #fff; }
+.tango-skeleton-card .tango-skeleton-block:first-child { width: 65%; height: 14px; margin-bottom: 22px; }
+.tango-skeleton-card .tango-skeleton-block:last-child { width: 85%; height: 28px; }
+.tango-skeleton-row { height: 24px; margin-bottom: 22px; }
+.tango-skeleton-row:last-child { margin-bottom: 0; }
+.tango-skeleton-message { margin: 22px 0 0; line-height: 1.6; }
+@keyframes tangoSkeletonPulse { 50% { opacity: .45; } }
+@media (max-width: 1000px) {
+  .tango-skeleton-sidebar { display: none; }
+  .tango-skeleton-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .tango-skeleton { padding: 18px; }
+  .tango-skeleton-cards { gap: 12px; }
+  .tango-skeleton-card { padding: 16px; }
+}
+.dark .tango-skeleton { background: #020617; color: #cbd5e1; }
+.dark .tango-skeleton-block { background: #1e293b; }
+.dark .tango-skeleton-card, .dark .tango-skeleton-table { background: #0f172a; border-color: #1e293b; }
+@media (prefers-reduced-motion: reduce) { .tango-skeleton-block { animation: none; } }

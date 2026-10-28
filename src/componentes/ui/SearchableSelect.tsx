@@ -35,6 +35,8 @@ interface SearchableSelectProps {
     searchPlaceholder?: string;
     emptyMessage?: string;
     className?: string;
+    /** Classes extra da lista aberta (por exemplo, largura mínima quando o campo é estreito). */
+    contentClassName?: string;
     disabled?: boolean;
 }
 
@@ -46,6 +48,7 @@ export function SearchableSelect({
     searchPlaceholder = "Pesquisar...",
     emptyMessage = "Nenhum resultado encontrado.",
     className,
+    contentClassName,
     disabled = false,
 }: SearchableSelectProps) {
     const [open, setOpen] = React.useState(false);
@@ -62,13 +65,13 @@ export function SearchableSelect({
                     className={cn("w-full justify-between font-normal h-11", className)}
                     disabled={disabled}
                 >
-                    <span className={cn("truncate", selectedOption?.className)}>
+                    <span className={cn("truncate", selectedOption ? selectedOption.className : "text-muted-foreground")}>
                         {selectedOption ? selectedOption.label : placeholder}
                     </span>
                     <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                 </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+            <PopoverContent className={cn("w-[--radix-popover-trigger-width] p-0", contentClassName)} align="start">
                 <Command className="w-full">
                     <CommandInput placeholder={searchPlaceholder} className="h-9" />
                     <CommandList>

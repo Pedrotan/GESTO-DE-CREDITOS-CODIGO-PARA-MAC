@@ -55,6 +55,12 @@ export interface Client {
   // Dados do cônjuge. Em Angola, casados em comunhão de bens respondem
   // solidariamente pela dívida, por isso a identificação do cônjuge é
   // recolhida junto com a do titular.
+  /** Naturalidade e morada administrativa (obrigatórias no cadastro). */
+  birthPlace?: string;
+  province?: string;
+  municipality?: string;
+  neighborhood?: string;
+  zone?: string;
   spouseName?: string;
   spouseBi?: string;
   spouseNif?: string;
@@ -64,6 +70,11 @@ export interface Client {
   /** Profissão / entidade empregadora do cônjuge. */
   spouseOccupation?: string;
   spouseIncome?: number;
+  spouseBirthPlace?: string;
+  spouseProvince?: string;
+  spouseMunicipality?: string;
+  spouseNeighborhood?: string;
+  spouseZone?: string;
   /** O cliente recusou fornecer os dados do cônjuge («Ignorar»): quando e por quem foi registado. */
   spouseDataRefused?: boolean;
   spouseDataRefusedAt?: string;
@@ -137,6 +148,8 @@ export interface Credit {
   originalState?: string;
   usuario_id?: string;
   targetMonthId?: string;
+  /** Só ao criar: datas de vencimento da simulação (dia escolhido, dias úteis, 1.ª prestação adiada). Não é gravado. */
+  scheduleDueDates?: string[];
   supplierId?: string;
   supplierProfitRate?: number;
   /** Total de capital acrescentado por reforços. */
@@ -319,6 +332,30 @@ export interface UserLimit {
   updatedAt: Date;
 }
 
+/** Ficheiro enviado no chat (guardado na própria mensagem, em base64). */
+export interface ChatAttachment {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  dataUrl: string;
+}
+
+/** Ficha resumida de um cliente partilhada no chat (fotografia do momento em que foi enviada). */
+export interface ChatClientCard {
+  id: string;
+  name: string;
+  nif?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  creditLimit?: number;
+  usedCredit?: number;
+  availableCredit?: number;
+  status?: string;
+  riskLevel?: string;
+}
+
 export interface ChatMessage {
   id: string;
   senderId: string;
@@ -328,6 +365,8 @@ export interface ChatMessage {
   content: string;
   timestamp: Date;
   read: boolean;
+  attachments?: ChatAttachment[];
+  clientCard?: ChatClientCard | null;
 }
 
 export interface Simulation {

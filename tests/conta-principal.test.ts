@@ -81,3 +81,16 @@ test('permissões efectivas: qualquer Super Administrador tem tudo; os outros pe
     assert.equal(ServicoControloAcesso.temPermissao(gestor as any, 'approve_loans'), false);
     assert.equal(ServicoControloAcesso.temPermissao(gestor as any, 'manage_settings'), false);
 });
+
+test('atribuir novo nível: um Super Administrador muda o perfil de outro, mas não o da conta marcada como principal', () => {
+    const sql = 'UPDATE users SET role = ?, permissions = ? WHERE id = ?';
+    const superActor = { id: 'super2', isOwner: 0, role: 'super_admin', permissions: '[]' };
+    const otherSuperRow = { id: 'super3', isOwner: 0, role: 'super_admin' };
+    assert.equal(checkUserMutation({ kind: 'update', sql, params: ['admin', '["view_credits"]', 'super3'], actor: superActor, target: otherSuperRow }).error, null);
+    assert.match(checkUserMutation({ kind: 'update', sql, params: ['admin', '[]', 'dono'], actor: superActor, target: ownerRow }).error!, /só pode ser alterado por ele próprio/);
+    // Só perfil e permissões: outras colunas continuam protegidas; e um gestor não muda o nível de um Super Administrador.
+    assert.ok(checkUserMutation({ kind: 'update', sql: 'UPDATE users SET role = ?, email = ? WHERE id = ?', params: ['admin', 'x@y', 'super3'], actor: superActor, target: otherSuperRow }).error);
+    assert.ok(checkUserMutation({ kind: 'update', sql, params: ['admin', '[]', 'super3'], actor: { id: 'g', isOwner: 0, role: 'manager', permissions: '[]' }, target: otherSuperRow }).error);
+    // O próprio não muda o seu nível.
+    assert.ok(checkUserMutation({ kind: 'update', sql, params: ['admin', '[]', 'super2'], actor: superActor, target: { id: 'super2', isOwner: 0, role: 'super_admin' } }).error);
+});

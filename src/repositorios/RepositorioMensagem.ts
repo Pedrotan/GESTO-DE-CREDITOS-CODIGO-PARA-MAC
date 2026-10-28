@@ -7,12 +7,19 @@ export class RepositorioMensagem extends RepositorioBase {
     }
 
     static async insert(msg: ChatMessage): Promise<void> {
-        const sql = `INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)`;
         const params = [
             msg.id, msg.senderId, msg.senderName, msg.receiverId, msg.receiverName,
             msg.content, msg.timestamp.toISOString(), msg.read ? 1 : 0
         ];
-        await this.execute(sql, params);
+        // Só texto: o comando de sempre (os computadores ainda com a versão anterior continuam a recebê-las).
+        if (!msg.attachments?.length && !msg.clientCard) {
+            await this.execute(`INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)`, params);
+            return;
+        }
+        await this.execute(
+            `INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read, attachments, clientCard) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+            [...params, msg.attachments?.length ? JSON.stringify(msg.attachments) : null, msg.clientCard ? JSON.stringify(msg.clientCard) : null]
+        );
     }
 
     static async markAsRead(id: string): Promise<void> {

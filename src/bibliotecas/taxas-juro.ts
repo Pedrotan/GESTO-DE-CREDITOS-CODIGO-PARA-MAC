@@ -15,7 +15,16 @@ export const DEFAULT_INTEREST_TIERS: InterestTier[] = [
     { id: '4-5m', minMonths: 4, maxMonths: 5, rate: 70 },
     { id: '6-8m', minMonths: 6, maxMonths: 8, rate: 80 },
     { id: '9-10m', minMonths: 9, maxMonths: 10, rate: 100 },
+    { id: '11m', minMonths: 11, maxMonths: 11, rate: 110 },
+    { id: '12m', minMonths: 12, maxMonths: 12, rate: 120 },
 ];
+
+// Tabela padrão até Outubro de 2026 (1 a 10 meses). Uma tabela guardada igual a esta recebe os prazos de 11 e 12
+// meses; as tabelas alteradas pela empresa ficam como estão.
+const PREVIOUS_DEFAULT_TIERS = DEFAULT_INTEREST_TIERS.slice(0, 6);
+const isPreviousDefault = (tiers: InterestTier[]) => tiers.length === PREVIOUS_DEFAULT_TIERS.length
+    && tiers.every((tier, index) => tier.minMonths === PREVIOUS_DEFAULT_TIERS[index].minMonths
+        && tier.maxMonths === PREVIOUS_DEFAULT_TIERS[index].maxMonths && tier.rate === PREVIOUS_DEFAULT_TIERS[index].rate);
 
 export const MAX_INTEREST_TIERS = 12;
 
@@ -70,7 +79,8 @@ export const normalizeInterestTiers = (value: unknown): InterestTier[] => {
         };
     });
     if (validateInterestTiers(tiers)) return DEFAULT_INTEREST_TIERS;
-    return tiers.sort((a, b) => a.minMonths - b.minMonths);
+    tiers.sort((a, b) => a.minMonths - b.minMonths);
+    return isPreviousDefault(tiers) ? [...tiers, ...DEFAULT_INTEREST_TIERS.slice(6).map(tier => ({ ...tier }))] : tiers;
 };
 
 /** Escalão que cobre o prazo; prazos acima do último escalão usam o último. */

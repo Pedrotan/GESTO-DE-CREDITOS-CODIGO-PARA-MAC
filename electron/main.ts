@@ -1,4 +1,3 @@
-/// <reference path="./electron-env.d.ts" />
 /// <reference types="node" />
 
 import { EMPTY_USAGE, canApproveAtLevel, diffPolicies, evaluateOperation, needsSecondApproval, parsePolicy, policyFromRows, requiredLevelFor } from '../src/bibliotecas/alcadas';
@@ -15,8 +14,9 @@ import * as url from 'url';
 import * as nodemailer from 'nodemailer';
 import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
-import { RENDERER_SQL_BY_ID } from './renderer-sql-allowlist';
-import { applyRemoteGroups, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
+import { SYNC_SQL_BY_ID } from './sync-sql';
+import { applyRemoteGroups, RETAINED_FOR_ROW_SQL, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
+import { executarManutencaoSync } from '../src/bibliotecas/manutencao-sync';
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
@@ -30,6 +30,9 @@ import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-toke
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import { assertIntranetLicense } from './intranet-license';
+import { isInstallingUpdate, startUpdater } from './actualizador';
+// @ts-ignore — módulo JS partilhado com a API da VPS (vercel-api/agt.js)
+import { assinarDocumento as agtAssinarDocumento, chamarAgt, descreverChave as agtDescreverChave, hashSaft as agtHashSaft, lerChavePrivada as agtLerChave, AGT_CAMPOS_ASSINATURA } from '../vercel-api/_agt-nucleo.js';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
 installStructuredConsole('tango-electron-main');
@@ -798,7 +801,9 @@ const MAX_SQL_LENGTH = 2e5;
 const MAX_SQL_STATEMENTS = 100;
 const MAX_TRANSACTION_STATEMENTS = 1e3;
 const MAX_PARAM_COUNT = 500;
-const MAX_STRING_PARAM_LENGTH = 1e6;
+// Texto de um parâmetro SQL: os clientes guardam documentos anexados (BI, comprovativos) em base64 e a
+// sincronização traz alterações até 12 MB; com 1 MB a ligação de um computador novo parava.
+const MAX_STRING_PARAM_LENGTH = 16e6;
 const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
 const FORBIDDEN_SQL_PATTERN = /\b(ATTACH|DETACH|LOAD_EXTENSION)\b|\bPRAGMA\s+(key|rekey|hexkey|textkey|cipher|cipher_|legacy)\b/i;
 const READ_KEYWORDS = /* @__PURE__ */ new Set(["SELECT", "WITH", "PRAGMA"]);
@@ -1034,6 +1039,11 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   closed_months: "manage_fiscal",
   accounting_cash_sessions: "manage_payments",
   collection_events: "manage_credits",
+  legal_cases: "manage_legal",
+  hub_collection_settings: "manage_payments",
+  hub_collection_clients: "manage_clients",
+  hub_collection_campaigns: "manage_payments",
+  hub_collection_events: "manage_payments",
   accounting_bank_imports: "manage_fiscal",
   accounting_receipts: "manage_fiscal",
   audit_log_chain: "manage_fiscal",
@@ -1066,7 +1076,13 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_recibo_linha: "hr_payroll",
   rh_rubrica_pontual: "hr_payroll",
   // rh_alerta fica sem permissão própria: os alertas são derivados e a tarefa diária corre para qualquer utilizador autenticado.
-  rh_plano_ferias: "hr_manage"
+  rh_plano_ferias: "hr_manage",
+  // Facturação electrónica AGT e SAF-T
+  fiscal_settings: "manage_fiscal",
+  fiscal_series: "manage_fiscal",
+  fiscal_documents: "manage_fiscal",
+  fiscal_agt_requests: "manage_fiscal",
+  fiscal_saft_exports: "manage_fiscal"
 };
 // Processamento salarial: calcular exige hr_payroll; aprovar, pagar e fechar exigem hr_payroll_approve e o
 // utilizador autenticado como responsável (1.º parâmetro); aprovar o que o próprio calculou e reabrir um
@@ -1141,7 +1157,8 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if(statement.params?.[3]!==actor.id) throw new Error('O extrato deve ser importado pelo utilizador autenticado.');
     }
     if (table === 'collection_events') {
-      const actor = assertUserPermission(event, 'manage_credits');
+      const actor = assertUserPermission(event);
+      if (!hasPermission(actor, 'manage_credits') && !hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para registar cobranças.');
       if (statement.params?.[10] !== actor.id) throw new Error('O responsável pelo registo de cobrança deve ser o utilizador autenticado.');
       if (['assignment','target'].includes(String(statement.params?.[2])) && !['admin','super_admin'].includes(String(actor.role)))
         throw new Error('Atribuições e metas exigem um administrador.');
@@ -1160,6 +1177,17 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if (statement.params?.[statement.params.length - 2] !== actor.id) throw new Error("O pedido tem de ser feito pelo utilizador autenticado.");
       continue;
     }
+    if (table.startsWith('hub_collection_')) {
+      const actor = assertUserPermission(event);
+      if (table === 'hub_collection_clients' || (table === 'hub_collection_events' && statement.params?.[3] === 'consent')) {
+        if (!hasPermission(actor, 'manage_clients') && !hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para preferências de contacto.');
+      } else if (!hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para o Hub de Cobrança.');
+      if (['hub_collection_settings', 'hub_collection_campaigns'].includes(table) && !['admin', 'super_admin'].includes(String(actor.role))) throw new Error('Régua e campanhas exigem um administrador.');
+      const actorId = table === 'hub_collection_events' ? statement.params?.[9] : statement.params?.[3];
+      if (actorId !== actor.id) throw new Error('O registo deve identificar o utilizador autenticado.');
+      continue;
+    }
+    if (table === 'collection_events') continue;
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
   }
 };
@@ -1760,6 +1788,71 @@ function registerCloudLicenseHandlers() {
     }, 10 * 60_000);
     try { cloudLicenseStatusNow(); } catch (error) { console.warn("[Licença]", (error as Error)?.message); }
   }
+}
+// ─── Facturação Electrónica AGT ─────────────────────────────────────────────────────────────────────────────
+// As chaves privadas (contribuinte e hash SAF-T) ficam cifradas pelo cofre do sistema operativo (safeStorage),
+// por conta de empresa, e nunca passam para o renderer. O renderer só pede assinaturas de documentos com os
+// campos da especificação, hashes SAF-T e chamadas aos 7 serviços da AGT (o jwsSignature é feito aqui).
+function registerAgtHandlers(accountDir: () => string) {
+  const agtDir = () => path.join(accountDir(), "agt");
+  const keyFile = (tipo: "contribuinte" | "saft") => path.join(agtDir(), `${tipo}.bin`);
+  const readKey = (tipo: "contribuinte" | "saft") => {
+    const file = keyFile(tipo);
+    if (!fs.existsSync(file)) return null;
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("Armazenamento seguro indisponível neste computador.");
+    return agtLerChave(safeStorage.decryptString(fs.readFileSync(file)), tipo === "saft" ? 1024 : 2048);
+  };
+  const readNif = () => {
+    try { return String(JSON.parse(fs.readFileSync(path.join(agtDir(), "contribuinte.json"), "utf8")).nif || ""); }
+    catch { return ""; }
+  };
+  const describe = (tipo: "contribuinte" | "saft") => {
+    try { const key = readKey(tipo); return key ? agtDescreverChave(key) : { carregada: false }; }
+    catch (error: any) { return { carregada: false, erro: error?.message || String(error) }; }
+  };
+  ipcMain.handle("agt-estado", async (event) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    return { success: true, nif: readNif(), contribuinte: describe("contribuinte"), saft: describe("saft") };
+  });
+  ipcMain.handle("agt-importar-chave", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    const actor = assertUserPermission(event, "manage_fiscal");
+    if (!["admin", "super_admin"].includes(String(actor.role))) throw new Error("Só administradores podem importar chaves da AGT.");
+    const tipo = payload?.tipo === "saft" ? "saft" : payload?.tipo === "contribuinte" ? "contribuinte" : null;
+    if (!tipo || typeof payload?.pem !== "string" || payload.pem.length > 20_000) throw new Error("Chave inválida.");
+    if (tipo === "contribuinte" && !/^\d{10}$/.test(String(payload?.nif || ""))) throw new Error("Indique o NIF (10 dígitos) a que a chave pertence.");
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("Armazenamento seguro indisponível neste computador.");
+    const key = agtLerChave(payload.pem, tipo === "saft" ? 1024 : 2048);
+    fs.mkdirSync(agtDir(), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(keyFile(tipo), safeStorage.encryptString(key.export({ type: "pkcs8", format: "pem" }).toString()), { mode: 0o600 });
+    if (tipo === "contribuinte") fs.writeFileSync(path.join(agtDir(), "contribuinte.json"), JSON.stringify({ nif: String(payload.nif) }), { mode: 0o600 });
+    return { success: true, ...agtDescreverChave(key) };
+  });
+  ipcMain.handle("agt-assinar-documento", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    const key = readKey("contribuinte");
+    if (!key) throw new Error("A chave do contribuinte ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    return { success: true, jws: agtAssinarDocumento(payload, readNif(), key) };
+  });
+  ipcMain.handle("agt-hash-saft", async (event, mensagens) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    const key = readKey("saft");
+    if (!key) throw new Error("A chave do hash SAF-T ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    if (!Array.isArray(mensagens) || mensagens.length > 500) throw new Error("Pedido de hash inválido.");
+    return { success: true, hashes: mensagens.map((m: unknown) => agtHashSaft(m, key)) };
+  });
+  ipcMain.handle("agt-chamar", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    if (!payload || !(payload.servico in AGT_CAMPOS_ASSINATURA)) throw new Error("Serviço AGT desconhecido.");
+    const key = readKey("contribuinte");
+    if (!key) throw new Error("A chave do contribuinte ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    const resultado = await chamarAgt({ ambiente: payload.ambiente, servico: payload.servico, corpo: payload.corpo, nif: readNif(), chave: key });
+    return { success: true, ...resultado };
+  });
 }
 function registerMainHandlers() {
   const assertMasterSession = (event: Electron.IpcMainInvokeEvent) => {
@@ -2512,6 +2605,7 @@ app.whenReady().then(async () => {
   ipcMain.on("is-packaged", (event) => {
     event.returnValue = app.isPackaged;
   });
+  registerAgtHandlers(() => getAccountBaseDir(activeAccount.id));
   ipcMain.handle("accounts-list", async (event) => {
     assertTrustedIpcSender(event);
     return getPublicAccounts();
@@ -3568,7 +3662,7 @@ app.whenReady().then(async () => {
     if (!Array.isArray(groups) || groups.length > 500) throw new TypeError("Lote de sincronização inválido.");
     const columnsCache = new Map<string, Set<string>>();
     const result = await applyRemoteGroups(groups as RemoteGroup[], {
-      sqlById: RENDERER_SQL_BY_ID,
+      sqlById: SYNC_SQL_BY_ID,
       tableColumns: async (table) => {
         if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return new Set();
         if (!columnsCache.has(table)) {
@@ -3577,10 +3671,32 @@ app.whenReady().then(async () => {
         }
         return columnsCache.get(table)!;
       },
+      retainedForRow: async (table, rowId) => ((await runQuery("query", RETAINED_FOR_ROW_SQL, [table, rowId, JSON.stringify(rowId)])) || []) as Array<{ id: string; operation: string }>,
+      rowExists: async (table, rowId) => {
+        if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return false;
+        return Boolean(await runQuery("get", `SELECT 1 AS found FROM "${table}" WHERE id = ? LIMIT 1`, [rowId]));
+      },
       transaction: async (statements) => runTransaction(validateDbTransaction(statements))
     });
     if (result.applied) { sealAfterWrite("remote"); sealAuditAfterWrite(); }
     if (result.applied || result.conflicts) broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    return result;
+  });
+  // Manutenção depois da sincronização (manutencao-sync.ts): calculada só a partir desta base, sem SQL vindo do
+  // ecrã — como as operações da nuvem, não depende das permissões de quem tem a sessão aberta (no canal db-transaction
+  // cada recusa era registada como «acção sem permissão»).
+  ipcMain.handle("sync-maintenance", async (event) => {
+    assertTrustedIpcSender(event);
+    if (!hasCloudLinkGrant(event)) userAuth.assertAuthenticated(event.sender.id);
+    if (financialSchemaBootstrapOpen) throw new Error("A base de dados ainda está a ser preparada.");
+    const result = await executarManutencaoSync({
+      all: async (sql, params = []) => ((await runQuery("query", sql, params)) || []) as any[],
+      transaction: async (statements) => runTransaction(validateDbTransaction(statements)),
+      sqlById: SYNC_SQL_BY_ID,
+    }, { limparAlertasFalsos: true });
+    if (result.reactivados || result.restaurados || result.fundidos || result.religados || result.resolvidos || result.alertasLimpos) {
+      broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    }
     return result;
   });
   // Colunas de utilizador partilhadas entre dispositivos: sem 2FA, bloqueios, presença nem fotografia (ficheiro local).
@@ -3649,9 +3765,12 @@ app.whenReady().then(async () => {
     const allowed = new Set(await sharedUserColumns());
     // A marca de conta principal nunca chega da web, e a própria conta principal só se altera neste computador.
     const columns = incomingColumns.filter(name => allowed.has(name) && name !== "isOwner");
-    if (!["id", "name", "email", "password", "role"].every(name => columns.includes(name))) return { applied: 0, deleted: 0 };
+    if (!["id", "name", "email", "password", "role"].every(name => columns.includes(name))) return { applied: 0, deleted: 0, clashes: [] };
     const at = (row: unknown[], name: string) => row[incomingColumns.indexOf(name)];
     const statements: Array<{ sql: string; params: unknown[] }> = [];
+    // Mesmo email com outro ID neste computador (a mesma pessoa criada em separado em dois sítios): não se sobrepõe,
+    // mas fica registado para o diagnóstico e para a unificação — antes era esquecido e o chat deixava de bater certo.
+    const clashes: Array<{ email: string; name: string; localId: string; remoteId: string }> = [];
     let applied = 0;
     for (const row of incomingRows) {
       if (!Array.isArray(row)) continue;
@@ -3664,7 +3783,10 @@ app.whenReady().then(async () => {
       if (isPrimaryOwner(localOwner)) continue;
       // Email já usado por outro utilizador deste computador: não se sobrepõe.
       const sameEmail: any = await runQuery("get", "SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1", [email, id]);
-      if (sameEmail) continue;
+      if (sameEmail) {
+        clashes.push({ email, name: String(at(row, "name") || email).slice(0, 120), localId: String(sameEmail.id), remoteId: id });
+        continue;
+      }
       const values = columns.map(name => {
         const value = at(row, name);
         return value === undefined ? null : value !== null && typeof value === "object" ? JSON.stringify(value) : value;
@@ -3687,7 +3809,7 @@ app.whenReady().then(async () => {
       statements.push({ sql: "DELETE FROM users WHERE id = ?", params: [id] });
       removed += 1;
     }
-    if (!statements.length) return { applied: 0, deleted: 0 };
+    if (!statements.length) return { applied: 0, deleted: 0, clashes };
     try {
       await runTransaction(validateDbTransaction(statements));
     } catch (error: any) {
@@ -3706,7 +3828,7 @@ app.whenReady().then(async () => {
     }
     await writeAuthAudit(currentUser, "users_synced_from_web",
       `Sincronização de utilizadores da versão web: ${applied} criado(s)/actualizado(s), ${removed} removido(s).`);
-    return { applied, deleted: removed };
+    return { applied, deleted: removed, clashes };
   });
   ipcMain.handle("db-import", async (event, payload) => {
     assertTrustedIpcSender(event);
@@ -4617,6 +4739,17 @@ app.whenReady().then(async () => {
     }, msUntil2AM);
   }
   scheduleBackup();
+  // Actualizações do Tango ERP (o Tango Master é distribuído à parte). Antes de reiniciar para instalar,
+  // a base de dados é copiada; se a cópia falhar, a instalação não avança.
+  if (!isTangoMaster) startUpdater({
+    serverUrl: () => readCloudLicense()?.serverUrl || DEFAULT_LICENSE_SERVER,
+    licenseToken: () => readCloudLicense()?.token || null,
+    assertTrustedSender: assertTrustedIpcSender,
+    prepareForInstall: async () => {
+      const result: any = await backupDatabase();
+      if (result && result.success === false) throw new Error(result.error || "a cópia de segurança falhou");
+    },
+  });
   ipcMain.handle("backup-database", async (event) => {
     assertTrustedIpcSender(event);
     const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
@@ -4683,6 +4816,8 @@ app.whenReady().then(async () => {
     }
   });
   app.on("before-quit", async (event) => {
+    // A instalar uma actualização: a cópia de segurança já foi feita e o instalador espera que a aplicação feche.
+    if (isInstallingUpdate()) return;
     event.preventDefault();
     await backupDatabase();
     app.exit(0);
