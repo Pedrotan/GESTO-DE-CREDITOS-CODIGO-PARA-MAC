@@ -35,7 +35,7 @@ const parse = <T,>(value: unknown, fallback: T): T => { try { return value ? JSO
 export class ServicoCarteira {
     /** Tudo o que a carteira precisa além do que já está no contexto (créditos, pagamentos, clientes, razão). */
     static async loadContext() {
-        const [installments, writeoffs, legal, escalations, promises, simulations, restructurings] = await Promise.all([
+        const [installments, writeoffs, legal, escalations, promises, simulations, restructurings, moraAdjustments] = await Promise.all([
             db.all<InstallmentRow>(`SELECT id, creditId, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor,
                 paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt FROM credit_installments`).catch(() => []),
             db.all<{ creditId: string }>('SELECT creditId FROM credit_writeoffs').catch(() => []),
@@ -44,6 +44,7 @@ export class ServicoCarteira {
             db.all<any>(`SELECT * FROM collection_events WHERE kind IN ('promise','promise_kept','promise_broken') ORDER BY createdAt`).catch(() => []),
             db.all<{ convertedCreditId: string; productId: string }>(`SELECT convertedCreditId, productId FROM simulations WHERE convertedCreditId IS NOT NULL AND productId IS NOT NULL`).catch(() => []),
             db.all<any>('SELECT * FROM credit_restructurings ORDER BY requestedAt DESC').catch(() => []),
+            db.all<{ creditId: string; effectiveDate: string; amountMinor: number }>('SELECT creditId, effectiveDate, amountMinor FROM late_interest_adjustments').catch(() => []),
         ]);
         // Promessas vencidas sem cumprimento registado (ou marcadas como falhadas).
         const decided = new Set(promises.filter(item => item.kind !== 'promise').map(item => item.relatedId));
@@ -59,6 +60,7 @@ export class ServicoCarteira {
             brokenPromises,
             productOf: new Map<string, string>(simulations.map(item => [item.convertedCreditId, item.productId] as [string, string])),
             restructurings: restructurings.map(row => this.mapRestructuring(row)),
+            moraWaivers: moraAdjustments.map(item => ({ creditId: item.creditId, date: item.effectiveDate, amountMinor: Number(item.amountMinor) })),
         };
     }
 

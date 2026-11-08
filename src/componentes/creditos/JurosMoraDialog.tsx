@@ -69,7 +69,7 @@ export function JurosMoraDialog({ credit, open, onOpenChange }: { credit: Credit
                                 {[
                                     { label: 'Valor em atraso', value: money(summary.overdueMinor), tone: summary.overdueMinor > 0 ? 'text-destructive' : '' },
                                     { label: 'Mora acumulada (até hoje)', value: money(summary.accruedMinor), tone: '' },
-                                    { label: 'Mora já cobrada', value: money(summary.paidLateMinor), tone: 'text-emerald-700 dark:text-emerald-400' },
+                                    { label: summary.waivedMinor > 0 ? `Mora já cobrada (${money(summary.waivedMinor)} perdoados ou renegociados)` : 'Mora já cobrada', value: money(summary.paidLateMinor), tone: 'text-emerald-700 dark:text-emerald-400' },
                                     { label: 'Mora em dívida', value: money(summary.owedMinor), tone: summary.owedMinor > 0 ? 'text-destructive' : '' },
                                     { label: 'Mora por cada dia a mais', value: money(summary.dailyMinor), tone: summary.dailyMinor > 0 ? 'text-amber-700 dark:text-amber-400' : '' },
                                 ].map(card => (

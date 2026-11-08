@@ -1,5 +1,6 @@
 import { CLIENT_STATUS_LABELS, clientDisplayStatus, type ClientDisplayStatus } from './estado-cliente.ts';
 import { clienteComBI, estadoBI, ROTULO_ESTADO_BI, type EstadoBI } from './rh/bi-validade.ts';
+import { describeWorkplace } from './local-trabalho.ts';
 import type { Cell, ReportDef, Section } from './relatorios-pagamentos.ts';
 
 // Relatórios da página de Clientes: lista completa (todos os dados, PDF em paisagem ou Excel) e relatório com
@@ -11,6 +12,7 @@ type ClientLike = {
     birthDate?: string; age?: number; expiryDate?: string; birthPlace?: string; province?: string; municipality?: string;
     neighborhood?: string; zone?: string; monthlyIncome?: number; creditLimit?: number; usedCredit?: number; availableCredit?: number;
     defaultInterestRate?: number; riskLevel?: string; createdAt?: unknown; workInstitution?: string;
+    employmentSector?: string; ministry?: string; employerNif?: string; workPosition?: string;
     spouseName?: string; spouseBi?: string; spouseNif?: string; spousePhone?: string; spouseOccupation?: string; spouseIncome?: number;
 };
 type CreditLike = { clientId: string; status: string; deletedAt?: unknown; currentBalance?: number };
@@ -151,7 +153,7 @@ export const buildClientsReport = (rows: ClientReportRow[], options: { title: st
         heading: 'Situação financeira',
         head: ['N.º', 'Nome', 'Instituição / emprego', 'Rendimento', 'Limite', 'Usado', 'Disponível', 'Taxa (%)', 'Risco', 'Créditos em curso', 'Em atraso', 'Em dívida', 'Cadastro'],
         rows: ordered.map(({ client, inProgress, late, outstanding }, index): Cell[] => [
-            n(index), text(client.name), text(client.workInstitution), amount(client.monthlyIncome), amount(client.creditLimit), amount(client.usedCredit),
+            n(index), text(client.name), client.employmentSector ? describeWorkplace(client) : text(client.workInstitution), amount(client.monthlyIncome), amount(client.creditLimit), amount(client.usedCredit),
             amount(client.availableCredit), amount(client.defaultInterestRate), RISK_LABELS[text(client.riskLevel)] || '—', inProgress, late, outstanding, showDate(client.createdAt),
         ]),
         money: [3, 4, 5, 6, 11],

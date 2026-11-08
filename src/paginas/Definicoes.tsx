@@ -1014,18 +1014,11 @@ export default function Settings() {
     };
 
     const handleBackupExport = async () => {
-        if (!(window as any).electronAPI?.backupDatabase) {
-            setAlertConfig({
-                isOpen: true,
-                title: "Erro de Versão",
-                description: "Ambiente não suporta exportação.",
-                type: "error"
-            });
-            return;
-        }
-
         try {
-            const result = await (window as any).electronAPI.backupDatabase();
+            // Na web o ficheiro é descarregado pelo navegador; conta como backup para todos os dispositivos.
+            const result = (window as any).electronAPI?.backupDatabase
+                ? await (window as any).electronAPI.backupDatabase()
+                : { success: true, ...await ServicoAutoBackup.downloadWebBackup(`backup_web_${new Date().toISOString().slice(0, 10)}.sqlite`) };
 
             if (!result?.success) {
                 if (result?.canceled) return;

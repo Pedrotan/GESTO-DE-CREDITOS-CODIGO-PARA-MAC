@@ -17,7 +17,7 @@ export class RepositorioCliente extends RepositorioBase {
     }
 
     static async insert(client: Client): Promise<void> {
-        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone, employmentSector, ministry, employerNif, workPosition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         const params = [
             client.id, client.name, client.nif, client.phone, client.email, client.address,
             client.creditLimit, client.usedCredit, client.availableCredit, client.monthlyIncome || 0,
@@ -61,7 +61,11 @@ export class RepositorioCliente extends RepositorioBase {
             client.spouseProvince || null,
             client.spouseMunicipality || null,
             client.spouseNeighborhood || null,
-            client.spouseZone || null
+            client.spouseZone || null,
+            client.employmentSector || null,
+            client.ministry || null,
+            client.employerNif || null,
+            client.workPosition || null
         ];
         await this.execute(sql, params);
     }
@@ -123,7 +127,11 @@ export class RepositorioCliente extends RepositorioBase {
             spouseProvince = COALESCE(?, spouseProvince),
             spouseMunicipality = COALESCE(?, spouseMunicipality),
             spouseNeighborhood = COALESCE(?, spouseNeighborhood),
-            spouseZone = COALESCE(?, spouseZone)
+            spouseZone = COALESCE(?, spouseZone),
+            employmentSector = COALESCE(?, employmentSector),
+            ministry = COALESCE(?, ministry),
+            employerNif = COALESCE(?, employerNif),
+            workPosition = COALESCE(?, workPosition)
             WHERE id = ?`;
         const params = [
             updates.name, updates.nif, updates.phone, updates.email, updates.address,
@@ -168,6 +176,10 @@ export class RepositorioCliente extends RepositorioBase {
             updates.spouseMunicipality ?? null,
             updates.spouseNeighborhood ?? null,
             updates.spouseZone ?? null,
+            updates.employmentSector ?? null,
+            updates.ministry ?? null,
+            updates.employerNif ?? null,
+            updates.workPosition ?? null,
             id
         ];
         await this.execute(sql, params);

@@ -17,7 +17,7 @@ export function RegistarPagamentoCredito({ creditId, onClose, onDone }: { credit
 
 function Assistente({ creditId, onClose, onDone }: { creditId: string; onClose: () => void; onDone?: () => void }) {
     const { user } = useAuth();
-    const { addPayment } = useData() as any;
+    const { addPayment, refreshData } = useData() as any;
     const data = usePagamentos();
     const { toast } = useToast();
     const actor = useMemo(() => ({ ...(user as any), id: user?.id || 'system', name: user?.name || 'Sistema', role: user?.role || 'manager' }), [user]);
@@ -26,6 +26,7 @@ function Assistente({ creditId, onClose, onDone }: { creditId: string; onClose: 
             open onOpenChange={open => { if (!open) onClose(); }} initialCreditId={creditId}
             credits={data.credits} clients={data.clients} rows={data.rows} numbers={data.numbers} actor={actor}
             onRegisterConfirmed={payment => addPayment(payment, { id: actor.id, name: actor.name })}
+            onCreditChanged={() => { data.reload(); void refreshData(); onDone?.(); }}
             onDone={({ payment, pending }) => {
                 toast({ title: pending ? 'Pagamento registado como pendente' : 'Pagamento registado', description: pending ? 'Fica pendente de validação até alguém confirmar a entrada no banco.' : `Recibo emitido para ${payment.clientName}.` });
                 onClose();

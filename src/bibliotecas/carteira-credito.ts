@@ -86,6 +86,8 @@ export type PortfolioContext = {
     /** Produto do Simulador de cada crédito convertido (simulations.convertedCreditId → productId). */
     productOf?: Map<string, string>;
     productNames?: Map<string, string>;
+    /** Mora perdoada ou renegociada: não volta a contar como mora por cobrar. */
+    moraWaivers?: Array<{ creditId: string; date: string; amountMinor: number }>;
     now?: Date;
 };
 
@@ -162,6 +164,7 @@ export function portfolioRow(credit: Credit, context: PortfolioContext, numbers?
             installments: valid.map(item => ({ id: item.id, number: num(item.installmentNumber), dueDate: item.dueDate, principalMinor: num(item.principalMinor), interestMinor: num(item.interestMinor) })),
             payments: payments.map(payment => ({ date: payment.paymentDate, principalMinor: toMinor(payment.allocatedToPrincipal), interestMinor: toMinor(payment.allocatedToInterest), lateMinor: toMinor(payment.allocatedToLateInterest) })),
             dailyRatePercent: num(credit.lateInterestRate), asOf: now,
+            waivers: context.moraWaivers?.filter(item => item.creditId === credit.id),
         });
         // Mora por cobrar: a calculada até hoje ou a já lançada no crédito, a maior (nunca se perde mora lançada).
         const posted = valid.reduce((sum, item) => sum + Math.max(0, num(item.lateInterestMinor) - num(item.paidLateInterestMinor)), 0);

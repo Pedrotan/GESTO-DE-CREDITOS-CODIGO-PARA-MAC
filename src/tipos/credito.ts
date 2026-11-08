@@ -96,6 +96,11 @@ export interface Client {
   workInstitution?: string;
   /** Número de Segurança Social do aposentado. */
   socialSecurityNumber?: string;
+  // Local de trabalho do particular (a instituição fica em workInstitution).
+  employmentSector?: string;
+  ministry?: string;
+  employerNif?: string;
+  workPosition?: string;
   creditScore?: number;
   lastContacted?: Date;
   blocked?: boolean;

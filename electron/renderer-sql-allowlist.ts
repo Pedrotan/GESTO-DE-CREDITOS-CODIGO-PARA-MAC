@@ -52,6 +52,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_request ON fiscal_documents(agtRequestId)",
   "CREATE INDEX IF NOT EXISTS idx_fiscal_series_lookup ON fiscal_series(deviceId, documentType, seriesYear, contingency, status)",
   "CREATE INDEX IF NOT EXISTS idx_hub_events_client ON hub_collection_events(clientId, createdAt)",
+  "CREATE INDEX IF NOT EXISTS idx_late_interest_adjustments_credit ON late_interest_adjustments(creditId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_lines_transaction ON ledger_lines(transactionId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_source ON ledger_transactions(sourceType, sourceId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_timestamp ON ledger_transactions(timestamp)",
@@ -133,6 +134,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS hub_collection_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, creditId TEXT, kind TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, metadata TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS hub_collection_settings (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )",
+  "CREATE TABLE IF NOT EXISTS late_interest_adjustments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('forgive','renegotiate')), amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), agreedMinor INTEGER NOT NULL DEFAULT 0, installments INTEGER NOT NULL DEFAULT 0, effectiveDate TEXT NOT NULL, reason TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS ledger_lines ( id TEXT PRIMARY KEY, transactionId TEXT NOT NULL, account TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('debit', 'credit')), component TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), FOREIGN KEY(transactionId) REFERENCES ledger_transactions(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS ledger_transactions ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, sourceType TEXT NOT NULL, sourceId TEXT NOT NULL, description TEXT, totalDebitMinor INTEGER NOT NULL CHECK(totalDebitMinor > 0), totalCreditMinor INTEGER NOT NULL CHECK(totalCreditMinor > 0), integrityHash TEXT NOT NULL, previousHash TEXT NOT NULL, hashVersion INTEGER NOT NULL DEFAULT 2, usuario_id TEXT, CHECK(totalDebitMinor = totalCreditMinor) )",
   "CREATE TABLE IF NOT EXISTS legal_cases ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT NOT NULL, stage TEXT DEFAULT 'interpellated', priority TEXT DEFAULT 'normal', assignedLawyer TEXT, notes TEXT, history TEXT DEFAULT '[]', lastActionDate TEXT, debtAmount REAL, lastAction TEXT, updatedAt TEXT, closedAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
@@ -236,6 +238,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_fiscal_saft_exports_immutable BEFORE UPDATE ON fiscal_saft_exports BEGIN SELECT RAISE(ABORT, 'Exportações SAF-T são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_hub_events_delete BEFORE DELETE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_hub_events_update BEFORE UPDATE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_delete BEFORE DELETE ON late_interest_adjustments BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_update BEFORE UPDATE ON late_interest_adjustments BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_delete BEFORE DELETE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_update BEFORE UPDATE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_transactions_immutable_delete BEFORE DELETE ON ledger_transactions BEGIN SELECT RAISE(ABORT, 'As transações do ledger são imutáveis')",
@@ -351,7 +355,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO audit_logs (id,timestamp,userId,userName,action,entity,details,metadata) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO calendar_tasks (id, title, description, date, done, createdAt, usuario_id) VALUES (?,?,?,?,?,?,?)",
-  "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone, employmentSector, ministry, employerNif, workPosition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, terms, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_approvals (id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -375,6 +379,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO hub_collection_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
   "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read, attachments, clientCard) VALUES (?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO late_interest_adjustments (id, creditId, kind, amountMinor, agreedMinor, installments, effectiveDate, reason, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO ledger_lines (id, transactionId, account, side, component, amountMinor) VALUES (?,?,?,?,?,?)",
   "INSERT INTO ledger_transactions (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor, totalCreditMinor, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -648,6 +653,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT creditId FROM credit_writeoffs",
   "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status FROM credit_installments WHERE status <> 'cancelled'",
   "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, paidAt FROM credit_installments WHERE status <> 'cancelled'",
+  "SELECT creditId, effectiveDate, amountMinor FROM late_interest_adjustments",
   "SELECT creditId, kind, fileName, uploadedAt FROM credit_documents WHERE deletedAt IS NULL",
   "SELECT creditId, stage FROM legal_cases WHERE deletedAt IS NULL AND stage <> 'closed'",
   "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments",
@@ -661,6 +667,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT day FROM accounting_daily_closes WHERE day = ?",
   "SELECT day, status, brokenSeq, verifiedAt FROM audit_daily_closes ORDER BY day DESC LIMIT 1",
   "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500",
+  "SELECT effectiveDate, amountMinor FROM late_interest_adjustments WHERE creditId = ?",
   "SELECT enableMultiTenant FROM company_settings WHERE id = 1",
   "SELECT entityId FROM limit_escalations WHERE entityType = 'credit' AND status = 'pending'",
   "SELECT estado FROM rh_processamento WHERE ano = ? AND mes = ? AND tipo = 'normal' AND estado <> 'aberto'",
@@ -704,6 +711,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod, productId FROM credits WHERE deletedAt IS NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'",
   "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, clientId, clientName, status, version, dueDate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, deletedBy FROM credits WHERE deletedAt IS NOT NULL",
   "SELECT id, clientId, status FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
@@ -812,7 +820,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE clients SET deletedAt = NULL, deletedBy = NULL WHERE id = ?",
   "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
-  "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone) WHERE id = ?",
+  "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone), employmentSector = COALESCE(?, employmentSector), ministry = COALESCE(?, ministry), employerNif = COALESCE(?, employerNif), workPosition = COALESCE(?, workPosition) WHERE id = ?",
   "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'",
   "UPDATE clients SET usedCredit = ?, availableCredit = ?, status = ? WHERE id = ?",
   "UPDATE collection_messages SET clientId = ? WHERE id = ?",
@@ -853,6 +861,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)",
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
+  "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, installments = installments + ?, dueDate = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL",
@@ -1190,6 +1199,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_hub_events_client ON hub_collection_events(clientId, createdAt)"
   ],
   [
+    "0dd34e4fcaecf2a5a9614d865525f27030acceb440a3788d3e3a11706c667c7e",
+    "CREATE INDEX IF NOT EXISTS idx_late_interest_adjustments_credit ON late_interest_adjustments(creditId)"
+  ],
+  [
     "e59f5a8d8de9b9b8df0159cfd945c9285585c9e3519cfdd35a701df7c254e60c",
     "CREATE INDEX IF NOT EXISTS idx_ledger_lines_transaction ON ledger_lines(transactionId)"
   ],
@@ -1512,6 +1525,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "fb7e45c39f9b488c3e81075c0d0373560da4bb5ca01ca39229616fab92888fb7",
     "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )"
+  ],
+  [
+    "03fcfd7fc3a117ff50528700ed932d13257684fa38240ba307aa299f7b112ee9",
+    "CREATE TABLE IF NOT EXISTS late_interest_adjustments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('forgive','renegotiate')), amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), agreedMinor INTEGER NOT NULL DEFAULT 0, installments INTEGER NOT NULL DEFAULT 0, effectiveDate TEXT NOT NULL, reason TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL )"
   ],
   [
     "a970f16938d5544b7f24caff55b4e0d12fc811c398f26ea85470fc3367b80f91",
@@ -1924,6 +1941,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "7f1fef115e4630c51013bdd114664c52faa782c92d216ee06fe6095bb3ce7458",
     "CREATE TRIGGER IF NOT EXISTS trg_hub_events_update BEFORE UPDATE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')"
+  ],
+  [
+    "cd109345038068c936301d679ad34e9fc5871db12c8a7a1624fa9d90af5011cc",
+    "CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_delete BEFORE DELETE ON late_interest_adjustments BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável')"
+  ],
+  [
+    "35f8b2e21cea34a91eac9c23fd049b9683bc2eccc00b6547e5b4c16d03a69fc1",
+    "CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_update BEFORE UPDATE ON late_interest_adjustments BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável')"
   ],
   [
     "c2c721f2f30495f9ec562c1fe57797d7287d68e3f93f08729552bfdeecd1a1f2",
@@ -2386,8 +2411,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO calendar_tasks (id, title, description, date, done, createdAt, usuario_id) VALUES (?,?,?,?,?,?,?)"
   ],
   [
-    "8bbe3a942ed5b693240bf5160bef83c05ad579aaaf322d2713568a418df85d6a",
-    "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "8a8c3b9c1d062ca8f72c3df72b2fc9f02bf4ffd451766b6ee2cd88a0b069ca3b",
+    "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone, employmentSector, ministry, employerNif, workPosition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "91d2d82b3e73e1db642a1f04e9e04604dfde45206bf6c5e24abb531f3752c4e3",
@@ -2480,6 +2505,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "bc6b7358eacb723e7484da411a39cce8605da25501b1f61fce98ead043159997",
     "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read, attachments, clientCard) VALUES (?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+    "0a9e2f2a2c20a7e8d899b30a8ea93efb19bc8f647dcb58602e924283f3fb3839",
+    "INSERT INTO late_interest_adjustments (id, creditId, kind, amountMinor, agreedMinor, installments, effectiveDate, reason, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "23b0bff90f55fe2d4527976c545c0a2660f776eb381c1600fca2c33a46caa541",
@@ -3574,6 +3603,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, paidAt FROM credit_installments WHERE status <> 'cancelled'"
   ],
   [
+    "80ede2cb3ac0d2e5735e04cf761d3df1392b40b3a96b80342a6671338ec58196",
+    "SELECT creditId, effectiveDate, amountMinor FROM late_interest_adjustments"
+  ],
+  [
     "b76560b7abe676505a018a5fd60d3a872be5cf000f3199b4b219ae9e2fd8cae8",
     "SELECT creditId, kind, fileName, uploadedAt FROM credit_documents WHERE deletedAt IS NULL"
   ],
@@ -3624,6 +3657,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "f40de797fae008ebe5d1c22db3e9a727c84bda052317d39540a86e57fa98dd19",
     "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500"
+  ],
+  [
+    "c3d49e42d45ffc2c167df66af50a8bfae445319cb3c0a6117253bd7c4fd60672",
+    "SELECT effectiveDate, amountMinor FROM late_interest_adjustments WHERE creditId = ?"
   ],
   [
     "955612208855d1e70d25801939d6093432f4766ae3778bb27cd5a97f74d1716a",
@@ -3796,6 +3833,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "68a37b8e9bab8c64d19dc673d86ee67997224e261d646b12e0a13b94806dacc1",
     "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "839bad88dd743df1bb3197359d4ea7be650c14383f0666382698af5fef8b5bae",
+    "SELECT id, clientId, clientName, status, version, dueDate FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
     "40e256e2a8dfeb3b6334c509ea5dd63fbe8965a4035998ec12ca5ccb9dfb6169",
@@ -4230,8 +4271,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL"
   ],
   [
-    "08eca07658a8408b422cdd8dd539d1d21728449f21da5c432109a03fe954915d",
-    "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone) WHERE id = ?"
+    "ac70869867babb1a2270a1e5c712fec78990bb276f02b153155890cab56cb287",
+    "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone), employmentSector = COALESCE(?, employmentSector), ministry = COALESCE(?, ministry), employerNif = COALESCE(?, employerNif), workPosition = COALESCE(?, workPosition) WHERE id = ?"
   ],
   [
     "2f7925dfbdf6d1a23a6e49b58530e1a21aeb956df25dfba73b9630f5833ef9e4",
@@ -4392,6 +4433,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "c844921d1680cc66ae248eb364224f933767329f16738f743a16ce50beffdfee",
     "UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL"
+  ],
+  [
+    "77ea8af1824e5fece6a80968178139716c43bc8e6f6bd88aca0f6fcd78271413",
+    "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, installments = installments + ?, dueDate = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
     "fe1a161f6325e819fde15144917bf75aa8e7538614876bcd4e6b2ab5aa46b31e",

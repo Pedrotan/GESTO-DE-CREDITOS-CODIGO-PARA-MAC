@@ -4,6 +4,7 @@ import autoTable from '@/bibliotecas/pdf-tabela';
 import { CompanySettings } from '@/tipos/base-dados';
 import { Client, Credit } from '@/tipos/credito';
 import { formatCurrency, formatDate, formatDateTime } from './formatters';
+import { describeWorkplace } from './local-trabalho';
 import { contractNumberOf } from './pagamentos-analise';
 import { activityLabel, activityOrigin, entityLabel } from './atividade-utilizador';
 import { AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
@@ -1396,7 +1397,9 @@ export const buildClientProfileDoc = (
 
     // Dados Profissionais / Entidade Empregadora / Representante
     if (client.workInstitution || client.socialSecurityNumber || client.legalRepresentative) {
-        const workInfo = client.workInstitution
+        const workInfo = client.employmentSector
+            ? describeWorkplace(client)
+            : client.workInstitution
             ? `${client.workInstitution}${client.socialSecurityNumber ? ` (INSS: ${client.socialSecurityNumber})` : ''}`
             : (client.legalRepresentative ? `${client.legalRepresentative} (${client.legalRepRole || 'Representante'})` : '—');
         identificationRows.push(['Entidade / Cargo:', workInfo, 'Rendimento Mensal:', client.monthlyIncome ? formatCurrency(client.monthlyIncome, config.currency) : '—']);

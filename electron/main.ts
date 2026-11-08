@@ -1037,6 +1037,7 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   payment_gateways: "manage_settings",
   payment_references: "manage_payments",
   closed_months: "manage_fiscal",
+  late_interest_adjustments: "manage_payments",
   accounting_cash_sessions: "manage_payments",
   collection_events: "manage_credits",
   legal_cases: "manage_legal",

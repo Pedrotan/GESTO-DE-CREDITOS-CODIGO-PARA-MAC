@@ -15,7 +15,9 @@ import { planearAjusteEncargos, type EncargoPrestacao } from '@/bibliotecas/ajus
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
 import { reconcileInstallments } from '@/bibliotecas/conciliacao-prestacoes';
 import { planConsecutiveInstallments, type InstallmentBalance } from '@/bibliotecas/liquidacao-prestacoes';
-import { calculateLateInterest, type LateInterestSummary } from '@/bibliotecas/juros-mora';
+import { buildMoraPlan, calculateLateInterest, type LateInterestSummary, type MoraWaiver } from '@/bibliotecas/juros-mora';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
+import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { actorHasFullAuthority } from '@/servicos/AutoridadeTotal';
 import {
     allocatePaymentByInstallments, allocatePaymentMinor, applyPaymentToBalances, creditBalancesFromRow, revertPaymentFromBalances,
@@ -243,8 +245,10 @@ export class ServicoFinanceiro {
     static readonly PAYABLE_STATUSES = ['active', 'overdue', 'defaulted', 'renegotiated'];
 
     /** Juros de mora de um crédito, por prestação, até `asOf` (sem gravar nada). */
-    static async getLateInterestSummary(creditId: string, asOf: Date = new Date()): Promise<LateInterestSummary> {
+    static async getLateInterestSummary(creditId: string, asOf: Date = new Date(), extraWaivers: MoraWaiver[] = []): Promise<LateInterestSummary> {
         const credit = await db.get<any>('SELECT lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL', [creditId]);
+        const waivers = await db.all<{ effectiveDate: string; amountMinor: number }>(
+            'SELECT effectiveDate, amountMinor FROM late_interest_adjustments WHERE creditId = ?', [creditId]).catch(() => []);
         const installments = await this.getCreditInstallments(creditId);
         const payments = await db.all<any>(`SELECT paymentDate, allocatedToPrincipal, allocatedToPrincipalMinor,
             allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor
@@ -264,7 +268,114 @@ export class ServicoFinanceiro {
             })),
             dailyRatePercent: Number(credit?.lateInterestRate || 0),
             asOf,
+            waivers: [...waivers.map(item => ({ date: item.effectiveDate, amountMinor: Number(item.amountMinor) })), ...extraWaivers],
         });
+    }
+
+    /** Administradores, directores de crédito e quem tiver a permissão própria; o valor fica sujeito à alçada. */
+    static canForgiveLateInterest(actor: Record<string, any> | null | undefined): boolean {
+        return ['admin', 'super_admin', 'credit_director'].includes(String(actor?.role))
+            || ServicoControloAcesso.temPermissao(actor as any, 'pagamentos.perdoar_juros');
+    }
+
+    static canRenegotiateLateInterest(actor: Record<string, any> | null | undefined): boolean {
+        return this.canForgiveLateInterest(actor) || ServicoControloAcesso.temPermissao(actor as any, 'creditos.reestruturar');
+    }
+
+    /**
+     * Perdão ou renegociação dos juros de mora em dívida, numa só transacção com o razão e a auditoria.
+     * Perdoar retira a mora. Renegociar retira-a e acrescenta ao plano prestações só de juros com o valor acordado;
+     * a diferença para a mora em dívida é um perdão. O perdão respeita a permissão e a alçada de quem decide.
+     * A prestação que continuar em atraso volta a gerar mora a partir do dia seguinte.
+     */
+    static async adjustLateInterest(input: {
+        creditId: string; kind: 'forgive' | 'renegotiate'; amountMinor: number; agreedMinor?: number; installments?: number;
+        firstDueKey?: string; reason: string; actor: { id: string; name: string } & Record<string, unknown>;
+    }): Promise<{ id: string; forgivenMinor: number; agreedMinor: number; lateAfterMinor: number; totalDueMinor: number; paidOff: boolean }> {
+        await assertFinancialConnection(input.kind === 'forgive' ? 'perdoar juros de mora' : 'renegociar juros de mora');
+        await this.assertNotFrozen();
+        const reason = input.reason.trim();
+        if (reason.length < 10 || reason.length > 1000) throw new Error('Indique o motivo com pelo menos 10 caracteres.');
+        const amountMinor = Math.round(input.amountMinor);
+        const agreedMinor = input.kind === 'renegotiate' ? Math.round(input.agreedMinor ?? 0) : 0;
+        const forgivenMinor = amountMinor - agreedMinor;
+        if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Indique o valor de mora.');
+        if (agreedMinor < 0 || forgivenMinor < 0) throw new Error('O valor acordado não pode ser maior do que a mora.');
+        if (forgivenMinor > 0 && !this.canForgiveLateInterest(input.actor)) throw new Error('Não tem permissão para perdoar juros de mora.');
+        if (input.kind === 'renegotiate' && !this.canRenegotiateLateInterest(input.actor)) throw new Error('Não tem permissão para renegociar juros de mora.');
+
+        const todayKey = luandaTodayKey();
+        const plan = input.kind === 'renegotiate' ? buildMoraPlan(agreedMinor, input.installments ?? 1, input.firstDueKey || '') : [];
+        if (plan.some(item => item.dueDateKey < todayKey)) throw new Error('A primeira prestação da mora não pode ser anterior a hoje.');
+
+        // A mora até hoje entra primeiro nos saldos, para o valor perdoado ser medido contra a dívida real.
+        const now = new Date();
+        await this.postAccruedLateInterest(input.creditId, now, input.actor);
+        const credit = await db.get<any>('SELECT id, clientId, clientName, status, version, dueDate FROM credits WHERE id = ? AND deletedAt IS NULL', [input.creditId]);
+        if (!credit) throw new Error('Crédito não encontrado.');
+        if (!this.PAYABLE_STATUSES.includes(String(credit.status))) throw new Error('Só créditos em curso têm mora por perdoar ou renegociar.');
+        const balances = await this.loadCreditBalances(input.creditId, Number(credit.version ?? 0));
+        if (amountMinor > balances.lateInterestMinor) throw new Error(`A mora em dívida é de ${formatCurrency(balances.lateInterestMinor / 100)}.`);
+
+        const limitActor = forgivenMinor > 0 ? await ServicoAlcadas.actorOf(input.actor.id) : null;
+        const limitStatements = limitActor ? await ServicoAlcadas.enforce({ actor: limitActor, operationType: 'interest_waiver', amountMinor: forgivenMinor,
+            percent: (forgivenMinor / balances.lateInterestMinor) * 100, entityType: 'credit', entityId: input.creditId }) : [];
+
+        const id = crypto.randomUUID();
+        const timestamp = new Date();
+        const when = timestamp.toISOString();
+        const schedule = await this.getCreditInstallments(input.creditId);
+        const after = await this.getLateInterestSummary(input.creditId, now, [{ date: now, amountMinor }]);
+        const lateChanges = schedule.flatMap(item => {
+            const net = after.installments.find(entry => entry.id === item.id)?.accruedMinor;
+            const target = net === undefined ? item.lateInterestMinor : Math.max(net, item.paidLateInterestMinor);
+            return target === item.lateInterestMinor ? [] : [{ sql: `UPDATE credit_installments SET lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?`,
+                params: [target, item.id, item.version], expectChanges: 1 }];
+        });
+        let number = Math.max(0, ...schedule.map(item => Number(item.installmentNumber)));
+        const planInserts = plan.map(item => {
+            number += 1;
+            return { sql: `INSERT INTO credit_installments
+                (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+                params: [`${input.creditId}:installment:${number}`, input.creditId, number, new Date(`${item.dueDateKey}T12:00:00.000Z`).toISOString(), 0, item.amountMinor], expectChanges: 1 };
+        });
+
+        const lateAfterMinor = balances.lateInterestMinor - amountMinor;
+        const interestAfterMinor = balances.interestMinor + agreedMinor;
+        const totalDueMinor = balances.balanceMinor + interestAfterMinor + lateAfterMinor;
+        const paidOff = totalDueMinor <= 0;
+        const lastDue = [String(credit.dueDate || ''), ...plan.map(item => new Date(`${item.dueDateKey}T12:00:00.000Z`).toISOString())].sort().at(-1) || null;
+        const label = input.kind === 'forgive' ? 'Perdão' : 'Renegociação';
+        const lateEntry = await buildChargeAdjustmentEntry({ id: `late-adjustment:${id}:late`, creditId: input.creditId, clientId: credit.clientId || undefined,
+            component: 'late_interest', deltaMinor: -amountMinor, processedBy: input.actor.name, usuario_id: input.actor.id, justification: `${label} de juros de mora: ${reason}` },
+            await this.previousAccountingHash(), timestamp);
+        const entries: any[] = [lateEntry];
+        if (agreedMinor > 0) entries.push(await buildChargeAdjustmentEntry({ id: `late-adjustment:${id}:interest`, creditId: input.creditId, clientId: credit.clientId || undefined,
+            component: 'interest', deltaMinor: agreedMinor, processedBy: input.actor.name, usuario_id: input.actor.id, justification: `Mora renegociada em ${plan.length} prestação(ões): ${reason}` },
+            lateEntry.integrityHash, timestamp));
+
+        await db.transaction([
+            { sql: `INSERT INTO late_interest_adjustments (id, creditId, kind, amountMinor, agreedMinor, installments, effectiveDate, reason, actorId, actorName, createdAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, input.creditId, input.kind, amountMinor, agreedMinor, plan.length, when, reason, input.actor.id, input.actor.name, when], expectChanges: 1 },
+            { sql: `UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?,
+                    installments = installments + ?, dueDate = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?`,
+                params: [lateAfterMinor / 100, lateAfterMinor, interestAfterMinor / 100, interestAfterMinor, totalDueMinor / 100, totalDueMinor,
+                    plan.length, lastDue, paidOff ? 'paid' : credit.status, paidOff ? when : null, input.creditId, balances.version], expectChanges: 1 },
+            ...lateChanges,
+            ...planInserts,
+            ...entries.flatMap(entry => [this.accountingInsert(entry), ...this.ledgerStatements(entry)]),
+            { sql: `INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata)
+                    VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?)`,
+                params: [crypto.randomUUID(), when, input.actor.id, input.actor.name,
+                    input.kind === 'forgive'
+                        ? `Perdoou ${formatCurrency(amountMinor / 100)} de juros de mora do crédito ${input.creditId} de ${credit.clientName}`
+                        : `Renegociou ${formatCurrency(amountMinor / 100)} de juros de mora do crédito ${input.creditId} de ${credit.clientName}: ${formatCurrency(agreedMinor / 100)} em ${plan.length} prestação(ões)`,
+                    JSON.stringify({ creditId: input.creditId, adjustmentId: id, kind: input.kind, amountMinor, agreedMinor, forgivenMinor, installments: plan.length, reason, justification: reason })] },
+            ...limitStatements,
+        ]);
+        return { id, forgivenMinor, agreedMinor, lateAfterMinor, totalDueMinor, paidOff };
     }
 
     /**

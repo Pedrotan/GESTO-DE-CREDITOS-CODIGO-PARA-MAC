@@ -1447,6 +1447,11 @@ const createTables = async () => {
     await safeAddColumn("clients", "legalRepresentative", "TEXT");
     await safeAddColumn("clients", "legalRepRole", "TEXT");
     // Naturalidade e morada (província, município, bairro, zona) do cliente e do cônjuge.
+    // Local de trabalho do particular: sector, ministério, NIF da empresa e cargo.
+    await safeAddColumn("clients", "employmentSector", "TEXT");
+    await safeAddColumn("clients", "ministry", "TEXT");
+    await safeAddColumn("clients", "employerNif", "TEXT");
+    await safeAddColumn("clients", "workPosition", "TEXT");
     await safeAddColumn("clients", "birthPlace", "TEXT");
     await safeAddColumn("clients", "province", "TEXT");
     await safeAddColumn("clients", "municipality", "TEXT");

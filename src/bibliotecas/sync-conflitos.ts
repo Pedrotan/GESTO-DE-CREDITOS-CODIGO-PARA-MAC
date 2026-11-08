@@ -20,7 +20,7 @@ const ENTITY_LABELS: Record<string, string> = {
     accounting_entry_seals: 'Selos contabilísticos', accounting_receipts: 'Recibos contabilísticos', accounting_requests: 'Pedidos contabilísticos',
     audit_alert_comments: 'Comentários de alertas de auditoria', audit_alerts: 'Alertas de auditoria', audit_daily_closes: 'Fechos diários da auditoria',
     audit_log_chain: 'Cadeia da auditoria', audit_logs: 'Registos de auditoria', calendar_tasks: 'Tarefas do calendário', chat_messages: 'Mensagens do chat',
-    clients: 'Clientes', closed_months: 'Meses fechados', collection_events: 'Acções de cobrança', collection_messages: 'Mensagens de cobrança',
+    clients: 'Clientes', closed_months: 'Meses fechados', collection_events: 'Acções de cobrança', collection_messages: 'Mensagens de cobrança', late_interest_adjustments: 'Perdões e renegociações de mora',
     company_settings: 'Definições da empresa', contracts: 'Contratos', credit_approvals: 'Aprovações de crédito', credit_documents: 'Documentos de crédito',
     credit_import_batches: 'Importações de créditos', credit_import_items: 'Linhas de importação de créditos', credit_installments: 'Prestações',
     credit_manager_transfers: 'Transferências de gestor', credit_reinforcements: 'Reforços de crédito', credit_restructurings: 'Reestruturações de crédito',

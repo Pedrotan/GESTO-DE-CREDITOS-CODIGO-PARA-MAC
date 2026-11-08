@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, Building2, CheckCircle2, CreditCard, FileUp, Hash, Landmark, Loader2, Smartphone } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, Banknote, Building2, CalendarClock, CheckCircle2, CreditCard, FileUp, HandCoins, Hash, Landmark, Loader2, Smartphone } from 'lucide-react';
+import { AjusteMoraDialog, type AjusteMoraKind } from './AjusteMoraDialog';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -13,6 +14,7 @@ import { cn } from '@/bibliotecas/utils';
 import { PAYMENT_METHODS, type PaymentRow } from '@/bibliotecas/pagamentos-analise';
 import { ServicoPagamentos, type Actor, type ImputationPreview, type PaymentDraft } from '@/servicos/ServicoPagamentos';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
+import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
 import type { Credit, Payment, PaymentMethod } from '@/tipos/credito';
 import { RestanteLimite } from '@/componentes/alcadas/RestanteLimite';
 
@@ -36,7 +38,7 @@ async function readProof(file: File): Promise<NonNullable<PaymentDraft['proof']>
     return { fileName: file.name, mimeType: file.type, dataUrl };
 }
 
-export function AssistentePagamento({ open, onOpenChange, credits, clients, rows, numbers, actor, initialCreditId, onRegisterConfirmed, onDone }: {
+export function AssistentePagamento({ open, onOpenChange, credits, clients, rows, numbers, actor, initialCreditId, onRegisterConfirmed, onDone, onCreditChanged }: {
     open: boolean;
     onOpenChange: (open: boolean) => void;
     credits: Credit[];
@@ -48,6 +50,8 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
     /** Regista um pagamento confirmado pelo contexto de dados (saldos, contrato e limites actualizados). */
     onRegisterConfirmed: (payment: Payment) => Promise<void>;
     onDone: (result: { payment: Payment; pending: boolean }) => void;
+    /** A mora foi perdoada ou renegociada: os saldos mudaram. */
+    onCreditChanged?: () => void;
 }) {
     const [step, setStep] = useState(0);
     const [clientId, setClientId] = useState('');
@@ -70,6 +74,11 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
     const identity = useRef({ id: '', key: '' });
     const today = luandaTodayKey();
     const canBackdate = ServicoControloAcesso.temPermissao(actor as any, 'pagamentos.data_retroativa');
+    const canForgive = ServicoFinanceiro.canForgiveLateInterest(actor);
+    const canRenegotiate = ServicoFinanceiro.canRenegotiateLateInterest(actor);
+    const [moraDialog, setMoraDialog] = useState<AjusteMoraKind | null>(null);
+    const [moraNotice, setMoraNotice] = useState('');
+    const [previewVersion, setPreviewVersion] = useState(0);
 
     // O assistente só recomeça quando abre (ou quando pedem outro contrato). Antes recomeçava também sempre que a
     // lista de créditos era recarregada — sincronização com a nuvem, voltar à janela, registo noutro dispositivo — e
@@ -133,7 +142,11 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
                 .finally(() => { if (!cancelled) setLoadingPreview(false); });
         }, 250);
         return () => { cancelled = true; clearTimeout(timer); };
-    }, [open, creditId, valueDateKey, amount]);
+    }, [open, creditId, valueDateKey, amount, previewVersion]);
+
+    // Mora em dívida na data-valor: pode ser paga com este pagamento, perdoada ou renegociada.
+    const moraOwedMinor = (preview?.open || []).reduce((sum, item) => sum + item.lateMinor, 0);
+    useEffect(() => { setMoraNotice(''); }, [creditId, open]);
 
     const draft: PaymentDraft = { creditId, valueDateKey, amount, method, reference, proof };
     const stepErrors = (): string[] => {
@@ -249,6 +262,27 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
                                     </div>
                                 </div>
                             ) : <p className="px-3 py-4 text-sm text-muted-foreground">{loadingPreview ? 'A calcular...' : 'Sem prestações em dívida.'}</p>}
+                        </div>
+                    )}
+                    {moraNotice && <p role="status" className="flex gap-2 rounded-lg bg-emerald-50 p-3 text-sm text-emerald-900 dark:bg-emerald-500/10 dark:text-emerald-200"><CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />{moraNotice}</p>}
+                    {(step === 0 || step === 1) && creditId && moraOwedMinor > 0 && (
+                        <div className="flex flex-col gap-3 rounded-lg border border-red-200 bg-red-50/60 p-3 dark:border-red-500/30 dark:bg-red-500/10 sm:flex-row sm:items-center sm:justify-between">
+                            <p className="text-sm">Juros de mora em dívida: <b className="tabular-nums text-red-600 dark:text-red-400">{kz(moraOwedMinor)}</b></p>
+                            <div className="flex flex-wrap gap-1.5">
+                                <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 bg-background text-xs" onClick={() => { setAmount(moraOwedMinor / 100); if (step === 0 && !mustConfirmContract) setStep(1); }}>
+                                    <Banknote className="h-3.5 w-3.5" /> Pagar mora
+                                </Button>
+                                {canForgive && (
+                                    <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 bg-background text-xs" onClick={() => setMoraDialog('forgive')}>
+                                        <HandCoins className="h-3.5 w-3.5" /> Perdoar mora
+                                    </Button>
+                                )}
+                                {canRenegotiate && (
+                                    <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5 bg-background text-xs" onClick={() => setMoraDialog('renegotiate')}>
+                                        <CalendarClock className="h-3.5 w-3.5" /> Renegociar mora
+                                    </Button>
+                                )}
+                            </div>
                         </div>
                     )}
                     {step === 1 && (
@@ -378,6 +412,19 @@ export function AssistentePagamento({ open, onOpenChange, credits, clients, rows
                         </Button>
                     )}
                 </div>
+                {/* Dentro do conteúdo: os cliques neste diálogo não contam como cliques fora do assistente. */}
+                <AjusteMoraDialog
+                    kind={moraDialog} creditId={creditId} actor={actor}
+                    creditLabel={`${credit?.clientName || ''} · ${numbers.get(creditId) || creditId}`}
+                    onClose={() => setMoraDialog(null)}
+                    onDone={message => {
+                        setMoraDialog(null);
+                        setMoraNotice(message);
+                        setAmount(0);
+                        setPreviewVersion(value => value + 1);
+                        onCreditChanged?.();
+                    }}
+                />
             </DialogContent>
         </Dialog>
     );

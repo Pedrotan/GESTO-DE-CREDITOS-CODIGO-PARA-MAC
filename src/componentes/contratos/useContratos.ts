@@ -46,7 +46,7 @@ export function useContratos(contracts: Contract[], numbers: Map<string, string>
     const installments: C.InstallmentRow[] = useMemo(() => data?.installments || [], [data]);
     const portfolio = useMemo(() => data ? C.buildPortfolio(data.credits, {
         installments: data.installments, payments: data.payments, legalCreditIds: data.legalCreditIds, writtenOffIds: data.writtenOffIds,
-        escalatedIds: data.escalatedIds, clients: clientList, users: users || [], productOf: data.productOf, productNames, deletedCredits: data.deletedCredits,
+        escalatedIds: data.escalatedIds, clients: clientList, users: users || [], productOf: data.productOf, productNames, deletedCredits: data.deletedCredits, moraWaivers: data.moraWaivers,
     }) : [], [data, clientList, users, productNames]);
 
     const rows: ContractRow[] = useMemo(() => buildContractRows({ contracts, portfolio, installments, clients: clientList, numbers, documents, today }),

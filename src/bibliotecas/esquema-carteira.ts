@@ -26,6 +26,17 @@ export const PORTFOLIO_SCHEMA_SQL = [
         id TEXT PRIMARY KEY, creditId TEXT NOT NULL, fromUserId TEXT, toUserId TEXT NOT NULL, toUserName TEXT,
         reason TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL
     )`,
+    // Perdões e renegociações de juros de mora: o recálculo da mora desconta-os, por isso nunca se alteram nem apagam.
+    `CREATE TABLE IF NOT EXISTS late_interest_adjustments (
+        id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('forgive','renegotiate')),
+        amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), agreedMinor INTEGER NOT NULL DEFAULT 0, installments INTEGER NOT NULL DEFAULT 0,
+        effectiveDate TEXT NOT NULL, reason TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_late_interest_adjustments_credit ON late_interest_adjustments(creditId)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_update BEFORE UPDATE ON late_interest_adjustments
+        BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_delete BEFORE DELETE ON late_interest_adjustments
+        BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável'); END`,
     `CREATE INDEX IF NOT EXISTS idx_credit_restructurings_credit ON credit_restructurings(creditId, requestedAt)`,
     `CREATE INDEX IF NOT EXISTS idx_credit_documents_credit ON credit_documents(creditId)`,
     `CREATE TRIGGER IF NOT EXISTS trg_credit_restructurings_delete BEFORE DELETE ON credit_restructurings

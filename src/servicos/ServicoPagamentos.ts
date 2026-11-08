@@ -136,6 +136,8 @@ export class ServicoPagamentos {
                 installments: schedule.map(item => ({ id: item.id, number: Number(item.installmentNumber), dueDate: item.dueDate, principalMinor: item.principalMinor, interestMinor: item.interestMinor })),
                 payments: payments.map(payment => ({ date: payment.paymentDate, principalMinor: Number(payment.allocatedToPrincipalMinor) || 0, interestMinor: Number(payment.allocatedToInterestMinor) || 0, lateMinor: Number(payment.allocatedToLateInterestMinor) || 0 })),
                 dailyRatePercent: Number(row.lateInterestRate), asOf: valueDate,
+                waivers: (await db.all<{ effectiveDate: string; amountMinor: number }>('SELECT effectiveDate, amountMinor FROM late_interest_adjustments WHERE creditId = ?', [creditId]).catch(() => []))
+                    .map(item => ({ date: item.effectiveDate, amountMinor: Number(item.amountMinor) })),
             });
             for (const item of summary.installments) {
                 const target = adjusted.find(candidate => candidate.id === item.id);

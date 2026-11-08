@@ -82,6 +82,7 @@ import { IndicadorOperadora } from '@/componentes/ui/IndicadorOperadora';
 import { detetarGeneroPorNome } from '@/bibliotecas/genero';
 import { calcularIdade, validarBI, inferirProvinciaDoBI, normalizarDataISO } from '@/bibliotecas/formatadores';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
+import { EMPLOYMENT_SECTORS, MINISTRY_SUGGESTIONS, fieldsToClearOnSectorChange, validateWorkplace } from '@/bibliotecas/local-trabalho';
 import { PAISES, nacionalidadeDoPais } from '@/dados/paises';
 import {
     validarPassaporte,
@@ -127,6 +128,11 @@ const clientSchema = z.object({
     // --- Campos exclusivos da carteira de Aposentados ---
     workInstitution: z.string().optional(),
     socialSecurityNumber: z.string().optional(),
+    // --- Local de trabalho do particular: o sector escolhido decide os campos pedidos ---
+    employmentSector: z.string().optional(),
+    ministry: z.string().optional(),
+    employerNif: z.string().optional(),
+    workPosition: z.string().optional(),
     // --- Identificacao do tipo de titular ---
     clientType: z.enum(['PARTICULAR', 'EMPRESA']).optional(),
     // --- Documento de identificação (nacional ou estrangeiro) ---
@@ -153,6 +159,9 @@ const clientSchema = z.object({
     // Naturalidade e morada obrigatórias (cliente e, com dados fornecidos, cônjuge), assinaladas junto com os outros erros.
     const emFalta = validarNaturalidadeMorada(data, { particular: data.clientType !== 'EMPRESA', conjuge: needsSpouse(data.maritalStatus) && !data.spouseDataRefused });
     for (const [campo, message] of emFalta) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [campo], message });
+    if (data.clientType !== 'EMPRESA') {
+        for (const [campo, message] of validateWorkplace(data)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [campo], message });
+    }
 });
 
 type ClientFormValues = z.infer<typeof clientSchema>;
@@ -406,6 +415,10 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 spouseDataRefused: Boolean(initialData.spouseDataRefused),
                 workInstitution: initialData.workInstitution || '',
                 socialSecurityNumber: initialData.socialSecurityNumber || '',
+                employmentSector: initialData.employmentSector || '',
+                ministry: initialData.ministry || '',
+                employerNif: initialData.employerNif || '',
+                workPosition: initialData.workPosition || '',
                 clientType: initialData.clientType || detectClientType(initialData.nif),
                 documentType: category === 'ESTRANGEIRO' ? (initialData.documentType || 'PASSAPORTE') : 'BI',
                 countryCode: initialData.countryCode || '',
@@ -450,6 +463,10 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 maritalStatus: '',
                 workInstitution: '',
                 socialSecurityNumber: '',
+                employmentSector: '',
+                ministry: '',
+                employerNif: '',
+                workPosition: '',
                 creditLimit: 0,
                 monthlyIncome: 0,
                 defaultInterestRate: 0,
@@ -465,6 +482,8 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
      * Troca o tipo de titular e limpa os campos que deixam de fazer sentido,
      * para nao ficarem dados de pessoa singular guardados numa empresa (e vice-versa).
      */
+    const employmentSector = form.watch('employmentSector');
+
     const applyClientType = (next: 'PARTICULAR' | 'EMPRESA') => {
         if (next === clientType) return;
         setClientType(next);
@@ -472,7 +491,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
         const limpar = next === 'EMPRESA'
             ? ['birthDate', 'age', 'gender', 'maritalStatus', 'issueDate', 'expiryDate',
                'spouseName', 'spouseBi', 'spouseNif', 'spousePhone', 'spouseEmail', 'spouseBirthDate', 'spouseOccupation',
-               'workInstitution', 'socialSecurityNumber'] as const
+               'workInstitution', 'socialSecurityNumber', 'employmentSector', 'ministry', 'employerNif', 'workPosition'] as const
             : ['foundationDate', 'legalForm', 'businessSector', 'commercialRegistry', 'legalRepresentative', 'legalRepRole'] as const;
         limpar.forEach((campo) => {
             form.setValue(campo as any, campo === 'age' ? undefined : '', { shouldDirty: true });
@@ -1844,13 +1863,129 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                 language="pt-AO" 
                                                 placeholder="Ex: Rua Direita de Luanda, Bairro Maianga, Município de Luanda..." 
                                                 {...field} 
-                                                className="h-10 rounded-xl border-slate-200 focus-visible:ring-blue-500 text-sm" 
+                                                className="h-10 rounded-xl border-slate-200 focus-visible:ring-blue-500 text-sm"
                                             />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
                                 )}
                             />
+
+                            {/* Local de trabalho (particulares; os aposentados têm os Dados da Reforma): o select muda os campos */}
+                            {clientType === 'PARTICULAR' && !ehAposentado && (
+                                <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-4 md:grid-cols-2">
+                                    <div className="flex items-center gap-1.5 md:col-span-2">
+                                        <Briefcase className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                                        <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">Local de Trabalho</p>
+                                    </div>
+
+                                    <FormField
+                                        control={form.control}
+                                        name="employmentSector"
+                                        render={({ field }) => (
+                                            <FormItem>
+                                                <FormLabel className="text-xs font-bold text-slate-700">Tipo de Instituição</FormLabel>
+                                                <Select
+                                                    value={field.value || ''}
+                                                    onValueChange={(value) => {
+                                                        field.onChange(value);
+                                                        fieldsToClearOnSectorChange(value).forEach((campo) => {
+                                                            form.setValue(campo, '', { shouldDirty: true });
+                                                            form.clearErrors(campo);
+                                                        });
+                                                    }}
+                                                >
+                                                    <FormControl>
+                                                        <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white text-sm" aria-label="Tipo de Instituição">
+                                                            <SelectValue placeholder="Selecione pública ou privada" />
+                                                        </SelectTrigger>
+                                                    </FormControl>
+                                                    <SelectContent>
+                                                        {EMPLOYMENT_SECTORS.map((sector) => (
+                                                            <SelectItem key={sector.value} value={sector.value}>{sector.label}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )}
+                                    />
+
+                                    {employmentSector === 'PUBLICO' && (
+                                        <FormField
+                                            control={form.control}
+                                            name="ministry"
+                                            render={({ field }) => (
+                                                <FormItem>
+                                                    <FormLabel className="text-xs font-bold text-slate-700">Ministério<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span></FormLabel>
+                                                    <FormControl>
+                                                        <Input list="ministerios-angola" placeholder="Ex.: Ministério da Educação" {...field} value={field.value || ''} className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                                    </FormControl>
+                                                    <datalist id="ministerios-angola">
+                                                        {MINISTRY_SUGGESTIONS.map((ministry) => <option key={ministry} value={ministry} />)}
+                                                    </datalist>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                    )}
+
+                                    {employmentSector === 'PRIVADO' && (
+                                        <FormField
+                                            control={form.control}
+                                            name="employerNif"
+                                            render={({ field }) => (
+                                                <FormItem>
+                                                    <FormLabel className="text-xs font-bold text-slate-700">NIF da Empresa</FormLabel>
+                                                    <FormControl>
+                                                        <Input placeholder="Ex.: 5000000000" {...field} value={field.value || ''} className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 font-mono text-sm" />
+                                                    </FormControl>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                    )}
+
+                                    {employmentSector && (
+                                        <>
+                                            <FormField
+                                                control={form.control}
+                                                name="workInstitution"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel className="text-xs font-bold text-slate-700">
+                                                            {employmentSector === 'PUBLICO' ? 'Instituição Onde Trabalha' : 'Empresa Onde Trabalha'}
+                                                            <span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
+                                                        </FormLabel>
+                                                        <FormControl>
+                                                            <Input
+                                                                placeholder={employmentSector === 'PUBLICO' ? 'Ex.: Hospital Josina Machel' : 'Ex.: Nome da empresa'}
+                                                                {...field}
+                                                                value={field.value || ''}
+                                                                className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm"
+                                                            />
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                            <FormField
+                                                control={form.control}
+                                                name="workPosition"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel className="text-xs font-bold text-slate-700">Cargo / Função</FormLabel>
+                                                        <FormControl>
+                                                            <Input placeholder={employmentSector === 'PUBLICO' ? 'Ex.: Técnico Superior' : 'Ex.: Contabilista'} {...field} value={field.value || ''} className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
 
