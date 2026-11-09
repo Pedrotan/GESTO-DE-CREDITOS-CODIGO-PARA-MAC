@@ -23,7 +23,7 @@ type Device = {
 };
 type AuditRow = { id: string; at: string; action: string; version: string | null; details: string; ip: string | null };
 type Company = { tenant_id: string; name: string; status: string; team: boolean; devices: number };
-type Overview = { releases: Release[]; devices: Device[]; teamTenants: Array<{ tenant_id: string }>; companies?: Company[]; audit: AuditRow[]; eventClients: number };
+type Overview = { releases: Release[]; devices: Device[]; teamTenants: Array<{ tenant_id: string }>; companies?: Company[]; pendingVersions?: string[]; audit: AuditRow[]; eventClients: number };
 
 const STATE_LABEL: Record<string, string> = {
     up_to_date: 'Actualizado', available: 'Disponível', downloading: 'A descarregar', downloaded: 'Pronta a instalar', installing: 'A instalar',
@@ -60,6 +60,8 @@ export default function CentroActualizacoes() {
     };
 
     const latest = data?.releases?.[0] ?? null;
+    const pendingVersion = data?.pendingVersions?.[0] ?? null;
+    const noTeamDevices = Boolean(data) && !(data?.devices || []).some(device => device.team || device.tenant_team);
     const companies = useMemo(() => {
         const term = teamTenant.trim().toLowerCase();
         return (data?.companies || []).filter(company => !term || company.name.toLowerCase().includes(term) || company.tenant_id.toLowerCase().includes(term));
@@ -102,6 +104,21 @@ export default function CentroActualizacoes() {
             </div>
             {error && <div className="whitespace-pre-line rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800">{error}</div>}
 
+            {pendingVersion && (
+                <div role="status" className="flex flex-col gap-3 rounded-xl border border-blue-300 bg-blue-50 p-4 text-sm text-blue-900 dark:bg-blue-500/10 dark:text-blue-200 md:flex-row md:items-center md:justify-between">
+                    <p>A versão <b>{pendingVersion}</b> já está na VPS, mas ainda não foi registada. Enquanto não for registada, nenhum computador recebe o aviso para actualizar.</p>
+                    <Button variant="outline" className="shrink-0 gap-2 bg-white dark:bg-slate-900" onClick={() => setForm(previous => ({ ...previous, version: pendingVersion }))}>
+                        <CloudUpload className="h-4 w-4" /> Preparar registo da {pendingVersion}
+                    </Button>
+                </div>
+            )}
+
+            {noTeamDevices && (
+                <div role="status" className="rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:bg-amber-500/10 dark:text-amber-200">
+                    Nenhum computador está na equipa de desenvolvimento: uma versão registada só avisa os computadores depois de ligar «Disponibilizar actualizações para todos». Para testar primeiro, ligue «Equipa» num computador na tabela abaixo.
+                </div>
+            )}
+
             {latest && (
                 <Card className={latest.public ? 'border-emerald-300' : 'border-blue-300'}>
                     <CardContent className="flex flex-col gap-4 p-5 md:flex-row md:items-center md:justify-between">
@@ -122,7 +139,11 @@ export default function CentroActualizacoes() {
                             />
                             <span>
                                 <span className="block font-bold">Disponibilizar actualizações para todos</span>
-                                <span className="block text-xs text-slate-500">{latest.public ? 'Ligado: todas as empresas recebem a versão.' : 'Desligado: só a equipa de desenvolvimento.'}</span>
+                                <span className="block text-xs text-slate-500">
+                                    {latest.status === 'paused'
+                                        ? `Indisponível: a versão ${latest.version} está suspensa. Use «Retomar» na tabela ou registe uma versão nova.`
+                                        : latest.public ? 'Ligado: todas as empresas recebem a versão.' : 'Desligado: só a equipa de desenvolvimento.'}
+                                </span>
                             </span>
                             {busy === `public-${latest.version}` && <Loader2 className="h-4 w-4 animate-spin" />}
                         </label>

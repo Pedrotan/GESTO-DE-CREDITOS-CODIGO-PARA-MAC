@@ -14,6 +14,9 @@ import { UPDATE_DIALOG_ATTR, flushPendingWork, hasOpenEditor, openEditorTitle } 
 
 const WEB_CHECK_MS = 2 * 60_000;
 const OPEN_UPDATE_EVENT = 'tango:abrir-actualizacao';
+// Acima de todas as camadas de ecrã inteiro (entrada na empresa, configuração inicial, subscrição: até 10001). Com o
+// z-50 normal, o aviso abria escondido por trás delas e o Radix bloqueava os cliques no resto da página.
+const UPDATE_DIALOG_LAYER = 'z-[10002]';
 
 const editorBlockMessage = () => {
     const title = openEditorTitle();
@@ -75,7 +78,7 @@ function AvisoDesktop() {
     const size = formatBytes(release.size);
     return (
         <Dialog open={open} onOpenChange={value => { if (!value && state !== 'installing') void later(); }}>
-            <DialogContent {...{ [UPDATE_DIALOG_ATTR]: '' }} className="max-w-lg" onInteractOutside={event => event.preventDefault()}>
+            <DialogContent {...{ [UPDATE_DIALOG_ATTR]: '' }} overlayClassName={UPDATE_DIALOG_LAYER} className={`max-w-lg ${UPDATE_DIALOG_LAYER}`} onInteractOutside={event => event.preventDefault()}>
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2"><Rocket className="h-6 w-6" /> Nova versão {release.version}</DialogTitle>
                     <DialogDescription>
@@ -208,7 +211,7 @@ function AvisoWeb() {
     if (!newVersion) return null;
     return (
         <Dialog open={open} onOpenChange={() => undefined}>
-            <DialogContent {...{ [UPDATE_DIALOG_ATTR]: '' }} className="max-w-md [&>button]:hidden" onInteractOutside={event => event.preventDefault()} onEscapeKeyDown={event => event.preventDefault()}>
+            <DialogContent {...{ [UPDATE_DIALOG_ATTR]: '' }} overlayClassName={UPDATE_DIALOG_LAYER} className={`max-w-md [&>button]:hidden ${UPDATE_DIALOG_LAYER}`} onInteractOutside={event => event.preventDefault()} onEscapeKeyDown={event => event.preventDefault()}>
                 <DialogHeader>
                     <DialogTitle className="flex items-center gap-2"><Rocket className="h-6 w-6" /> Nova versão disponível</DialogTitle>
                     <DialogDescription>

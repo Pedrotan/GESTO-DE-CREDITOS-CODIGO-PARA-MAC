@@ -181,6 +181,30 @@ export const inspectReleaseFiles = async (version, baseDir = updatesDir()) => {
   return found;
 };
 
+/**
+ * Versões copiadas para a pasta da VPS e ainda por registar, da mais recente para a mais antiga. Enquanto não forem
+ * registadas nenhum computador as recebe, e o Tango Master tem de o dizer. Só lê os feeds: a conferência do tamanho
+ * e do SHA-512 continua a ser feita ao registar.
+ */
+export const listUnregisteredVersions = (registered, baseDir = updatesDir()) => {
+  const known = new Set(registered);
+  let folders = [];
+  try { folders = fs.readdirSync(baseDir, { withFileTypes: true }); } catch { return []; }
+  const pending = [];
+  for (const folder of folders) {
+    if (!folder.isDirectory() || !isSemver(folder.name) || known.has(folder.name)) continue;
+    for (const { feedFile } of Object.values(PLATFORMS)) {
+      try {
+        const feedPath = releaseFilePath(folder.name, feedFile, baseDir);
+        if (!feedPath || !fs.existsSync(feedPath)) continue;
+        const feed = parseFeedYaml(fs.readFileSync(feedPath, 'utf8'));
+        if (feed.version === folder.name) { pending.push(folder.name); break; }
+      } catch { /* feed inválido: o registo explica o erro */ }
+    }
+  }
+  return pending.sort((a, b) => compareVersions(b, a));
+};
+
 // --- Base de dados --------------------------------------------------------------------------------------
 
 export const ensureUpdateTables = async (sql) => {

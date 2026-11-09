@@ -6,7 +6,7 @@ import { isValidMasterSession } from './_sessao-master.js';
 import { loadSigningKey, publicKeyInfo, verifyLicenseToken } from './_token-licenca.js';
 import {
   ARCHES, DEVICE_KINDS, DEVICE_STATES, PLATFORMS, buildFeedYaml, compareVersions, ensureUpdateTables, findRelease,
-  inspectReleaseFiles, isDeviceId, isEligible, isSemver, isTeamDevice, listReleases, normalizeTenantId, pickRelease,
+  inspectReleaseFiles, isDeviceId, isEligible, isSemver, isTeamDevice, listReleases, listUnregisteredVersions, normalizeTenantId, pickRelease,
   publicReleaseInfo, recordAck, recordDeviceStatus, registerDevice, releaseFilePath, sanitizeNotes, writeAudit,
 } from './_actualizacoes.js';
 
@@ -112,7 +112,8 @@ const handleAdmin = async (req, res, sql, ip) => {
           (SELECT COUNT(*)::int FROM tango_update_devices d WHERE d.tenant_id = t.tenant_id) AS devices
         FROM tango_tenants t ORDER BY t.name ASC`).catch(() => []),
     ]);
-    return send(res, 200, { success: true, releases, devices, teamTenants, companies, audit: auditRows, eventClients: eventClients.size });
+    const pendingVersions = listUnregisteredVersions(releases.map(release => release.version));
+    return send(res, 200, { success: true, releases, devices, teamTenants, companies, audit: auditRows, eventClients: eventClients.size, pendingVersions });
   }
 
   if (action === 'release-register') {
