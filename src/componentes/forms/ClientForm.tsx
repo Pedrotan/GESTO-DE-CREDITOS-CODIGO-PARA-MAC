@@ -83,6 +83,7 @@ import { detetarGeneroPorNome } from '@/bibliotecas/genero';
 import { calcularIdade, validarBI, inferirProvinciaDoBI, normalizarDataISO } from '@/bibliotecas/formatadores';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
 import { EMPLOYMENT_SECTORS, MINISTRY_SUGGESTIONS, fieldsToClearOnSectorChange, validateWorkplace } from '@/bibliotecas/local-trabalho';
+import { CLIENT_CATEGORIES, type ClientCategory } from '@/bibliotecas/carteira-cliente';
 import { PAISES, nacionalidadeDoPais } from '@/dados/paises';
 import {
     validarPassaporte,
@@ -367,9 +368,10 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
     const { clients: registeredClients, deletedClients: binClients } = useData();
     const [confirmedSameName, setConfirmedSameName] = useState('');
     /** Só a carteira de estrangeiros mostra passaporte, país e nacionalidade. */
-    const ehEstrangeiro = category === 'ESTRANGEIRO';
+    const [carteira, setCarteira] = useState<ClientCategory>(initialData?.clientCategory || category);
+    const ehEstrangeiro = carteira === 'ESTRANGEIRO';
     /** Só a carteira de aposentados mostra a instituição e o nº de segurança social. */
-    const ehAposentado = category === 'APOSENTADO';
+    const ehAposentado = carteira === 'APOSENTADO';
     const [documentType, setDocumentType] = useState<'BI' | 'PASSAPORTE'>(
         ehEstrangeiro ? (initialData?.documentType || 'PASSAPORTE') : 'BI'
     );
@@ -420,7 +422,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 employerNif: initialData.employerNif || '',
                 workPosition: initialData.workPosition || '',
                 clientType: initialData.clientType || detectClientType(initialData.nif),
-                documentType: category === 'ESTRANGEIRO' ? (initialData.documentType || 'PASSAPORTE') : 'BI',
+                documentType: carteira === 'ESTRANGEIRO' ? (initialData.documentType || 'PASSAPORTE') : 'BI',
                 countryCode: initialData.countryCode || '',
                 nationality: initialData.nationality || '',
                 passportFormatValidated: initialData.passportFormatValidated || false,
@@ -830,11 +832,23 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
             ...data,
             // Cônjuge: só para casados/união de facto; a recusa e o consentimento ficam registados.
             ...spouseFieldsToSave(data, initialData, authUser?.name || 'Sistema'),
+            clientCategory: carteira,
             clientType,
             documentType,
             documents,
             bankCoordinates,
         });
+    };
+
+    /** Muda o cliente de lista. Fora da carteira de estrangeiros o documento volta a ser o BI; o número fica para corrigir. */
+    const alterarCarteira = (nova: ClientCategory) => {
+        setCarteira(nova);
+        if (nova !== 'ESTRANGEIRO' && documentType === 'PASSAPORTE') {
+            setDocumentType('BI');
+            form.setValue('documentType', 'BI', { shouldDirty: true });
+            setEstadoPassaporte('vazio');
+            setMsgPassaporte('');
+        }
     };
 
     const handleWhatsAppTest = () => {
@@ -892,6 +906,22 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
 
                         {/* Campos da Seção 1 */}
                         <div className="p-5 md:p-6 space-y-4">
+                            {/* Na edição, permite pôr o cliente na lista certa (os antigos têm a carteira deduzida). */}
+                            {initialData && (
+                                <FormItem className="max-w-xs">
+                                    <FormLabel className="text-xs font-bold text-slate-700">Carteira do Cliente</FormLabel>
+                                    <Select value={carteira} onValueChange={(valor) => alterarCarteira(valor as ClientCategory)}>
+                                        <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white text-sm" aria-label="Carteira do Cliente">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {CLIENT_CATEGORIES.map((item) => (
+                                                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FormItem>
+                            )}
                             {/* Identificação estrangeira: só na carteira de estrangeiros. */}
                             {ehEstrangeiro && (
                                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 items-start">

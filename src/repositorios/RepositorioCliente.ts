@@ -17,7 +17,7 @@ export class RepositorioCliente extends RepositorioBase {
     }
 
     static async insert(client: Client): Promise<void> {
-        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone, employmentSector, ministry, employerNif, workPosition) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone, employmentSector, ministry, employerNif, workPosition, clientCategory, clientType, documentType, countryCode, nationality, passportFormatValidated, foundationDate, legalForm, businessSector, commercialRegistry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         const params = [
             client.id, client.name, client.nif, client.phone, client.email, client.address,
             client.creditLimit, client.usedCredit, client.availableCredit, client.monthlyIncome || 0,
@@ -65,7 +65,17 @@ export class RepositorioCliente extends RepositorioBase {
             client.employmentSector || null,
             client.ministry || null,
             client.employerNif || null,
-            client.workPosition || null
+            client.workPosition || null,
+            client.clientCategory || 'COMUM',
+            client.clientType || null,
+            client.documentType || null,
+            client.countryCode || null,
+            client.nationality || null,
+            client.passportFormatValidated ? 1 : 0,
+            client.foundationDate || null,
+            client.legalForm || null,
+            client.businessSector || null,
+            client.commercialRegistry || null
         ];
         await this.execute(sql, params);
     }
@@ -131,7 +141,17 @@ export class RepositorioCliente extends RepositorioBase {
             employmentSector = COALESCE(?, employmentSector),
             ministry = COALESCE(?, ministry),
             employerNif = COALESCE(?, employerNif),
-            workPosition = COALESCE(?, workPosition)
+            workPosition = COALESCE(?, workPosition),
+            clientCategory = COALESCE(?, clientCategory),
+            clientType = COALESCE(?, clientType),
+            documentType = COALESCE(?, documentType),
+            countryCode = COALESCE(?, countryCode),
+            nationality = COALESCE(?, nationality),
+            passportFormatValidated = COALESCE(?, passportFormatValidated),
+            foundationDate = COALESCE(?, foundationDate),
+            legalForm = COALESCE(?, legalForm),
+            businessSector = COALESCE(?, businessSector),
+            commercialRegistry = COALESCE(?, commercialRegistry)
             WHERE id = ?`;
         const params = [
             updates.name, updates.nif, updates.phone, updates.email, updates.address,
@@ -180,6 +200,16 @@ export class RepositorioCliente extends RepositorioBase {
             updates.ministry ?? null,
             updates.employerNif ?? null,
             updates.workPosition ?? null,
+            updates.clientCategory ?? null,
+            updates.clientType ?? null,
+            updates.documentType ?? null,
+            updates.countryCode ?? null,
+            updates.nationality ?? null,
+            updates.passportFormatValidated === undefined ? null : (updates.passportFormatValidated ? 1 : 0),
+            updates.foundationDate ?? null,
+            updates.legalForm ?? null,
+            updates.businessSector ?? null,
+            updates.commercialRegistry ?? null,
             id
         ];
         await this.execute(sql, params);

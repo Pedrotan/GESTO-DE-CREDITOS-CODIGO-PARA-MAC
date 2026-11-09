@@ -28,6 +28,7 @@ async function loadModules() {
                 export { ServicoCarteira } from '@/servicos/ServicoCarteira';
                 export { ServicoPagamentos } from '@/servicos/ServicoPagamentos';
                 export { RepositorioCliente } from '@/repositorios/RepositorioCliente';
+                export { ServicoCliente } from '@/servicos/ServicoCliente';
                 export { ServicoContabilidadeGeral } from '@/servicos/ServicoContabilidadeGeral';
                 export { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
                 export { auditSqlHash } from '@/bibliotecas/cadeia-auditoria';
@@ -569,5 +570,57 @@ test('Cliente · o local de trabalho grava e, ao mudar de sector, o campo anteri
         assert.deepEqual(read(), { employmentSector: 'PUBLICO', ministry: 'Ministério da Saúde', employerNif: null, workInstitution: 'Hospital', workPosition: 'Enfermeira' });
         await M.RepositorioCliente.update('c-trab', { employmentSector: 'PRIVADO', ministry: '', employerNif: '5000000000', workInstitution: 'Empresa' });
         assert.deepEqual(read(), { employmentSector: 'PRIVADO', ministry: '', employerNif: '5000000000', workInstitution: 'Empresa', workPosition: 'Enfermeira' });
+    } finally { database.close(); }
+});
+
+test('Cliente · a carteira sobrevive a gravar e recarregar, e as listas ficam separadas', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const base = { phone: '', email: '', address: '', creditLimit: 0, usedCredit: 0, availableCredit: 0, defaultInterestRate: 0, lateInterestRate: 0, toleranceDays: 0, status: 'active', riskLevel: 'low', documents: [], bankCoordinates: [], receiveMethod: 'cash', createdAt: new Date(), usuario_id: ADMIN.id };
+        await M.ServicoCliente.add({ ...base, id: 'n-comum', name: 'Comum', nif: '000000001LA000', clientCategory: 'COMUM' });
+        await M.ServicoCliente.add({ ...base, id: 'n-apos', name: 'Aposentado', nif: '000000002LA000', clientCategory: 'APOSENTADO' });
+        await M.ServicoCliente.add({ ...base, id: 'n-estr', name: 'Estrangeiro', nif: 'N1234567', clientCategory: 'ESTRANGEIRO', documentType: 'PASSAPORTE', countryCode: 'PT', nationality: 'Portuguesa', passportFormatValidated: true });
+        const list = async category => (await M.ServicoCliente.getAll()).filter(c => c.id.startsWith('n-') && c.clientCategory === category).map(c => c.id);
+        assert.deepEqual(await list('COMUM'), ['n-comum']);
+        assert.deepEqual(await list('APOSENTADO'), ['n-apos']);
+        assert.deepEqual(await list('ESTRANGEIRO'), ['n-estr']);
+        const foreign = (await M.ServicoCliente.getAll()).find(c => c.id === 'n-estr');
+        assert.deepEqual({ doc: foreign.documentType, country: foreign.countryCode, nationality: foreign.nationality, ok: foreign.passportFormatValidated }, { doc: 'PASSAPORTE', country: 'PT', nationality: 'Portuguesa', ok: true });
+        // Mudar de lista na edição, e uma edição sem carteira não a apaga.
+        await M.ServicoCliente.update('n-comum', { clientCategory: 'APOSENTADO' });
+        await M.ServicoCliente.update('n-comum', { name: 'Comum Editado' });
+        assert.deepEqual((await list('APOSENTADO')).sort(), ['n-apos', 'n-comum']);
+        // Cliente antigo, sem carteira na base: é deduzida, e sair da dedução fica gravado.
+        database.prepare(`INSERT INTO clients (id, name, nif, socialSecurityNumber, riskLevel, status, createdAt) VALUES ('n-antigo', 'Antigo', '000000003LA000', '999', 'low', 'active', ?)`).run(new Date().toISOString());
+        assert.ok((await list('APOSENTADO')).includes('n-antigo'));
+        await M.ServicoCliente.update('n-antigo', { clientCategory: 'COMUM' });
+        assert.ok((await list('COMUM')).includes('n-antigo'));
+    } finally { database.close(); }
+});
+
+test('Cliente · os dados da empresa sobrevivem a gravar e recarregar, e todos os campos do formulário têm coluna', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const base = { phone: '', email: '', address: '', creditLimit: 0, usedCredit: 0, availableCredit: 0, defaultInterestRate: 0, lateInterestRate: 0, toleranceDays: 0, status: 'active', riskLevel: 'low', documents: [], bankCoordinates: [], receiveMethod: 'cash', createdAt: new Date(), usuario_id: ADMIN.id };
+        await M.ServicoCliente.add({ ...base, id: 'e-1', name: 'Empresa Teste', nif: '5000000000', clientType: 'EMPRESA', foundationDate: '2010-05-20', legalForm: 'Lda', businessSector: 'Comércio', commercialRegistry: 'CRC-123' });
+        const read = async () => (await M.ServicoCliente.getAll()).find(c => c.id === 'e-1');
+        const saved = await read();
+        assert.deepEqual([saved.clientType, saved.foundationDate, saved.legalForm, saved.businessSector, saved.commercialRegistry], ['EMPRESA', '2010-05-20', 'Lda', 'Comércio', 'CRC-123']);
+        await M.ServicoCliente.update('e-1', { legalForm: 'SA', businessSector: '' });
+        const edited = await read();
+        assert.deepEqual([edited.foundationDate, edited.legalForm, edited.businessSector, edited.commercialRegistry], ['2010-05-20', 'SA', '', 'CRC-123']);
+        // Guarda para o futuro: um campo novo no formulário sem coluna na base volta a perder-se em silêncio.
+        const form = readFileSync(path.join(root, 'src/componentes/forms/ClientForm.tsx'), 'utf8');
+        const schema = form.slice(form.indexOf('const clientSchema = z.object({'), form.indexOf('}).superRefine'));
+        const fields = [...schema.matchAll(/^\s{4}(\w+): z\./gm)].map(match => match[1]);
+        const columns = new Set(database.prepare('PRAGMA table_info(clients)').all().map(column => column.name));
+        const repository = readFileSync(path.join(root, 'src/repositorios/RepositorioCliente.ts'), 'utf8');
+        const insertColumns = repository.match(/INSERT INTO clients \(([^)]*)\)/)[1].split(',').map(item => item.trim());
+        assert.ok(fields.length > 50);
+        assert.deepEqual(fields.filter(field => !columns.has(field)), [], 'sem coluna na base');
+        assert.deepEqual(fields.filter(field => !insertColumns.includes(field)), [], 'fora do INSERT');
+        assert.deepEqual(fields.filter(field => !repository.includes(`${field} = COALESCE(?, ${field})`)), [], 'fora do UPDATE');
     } finally { database.close(); }
 });

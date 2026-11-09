@@ -1447,6 +1447,18 @@ const createTables = async () => {
     await safeAddColumn("clients", "legalRepresentative", "TEXT");
     await safeAddColumn("clients", "legalRepRole", "TEXT");
     // Naturalidade e morada (província, município, bairro, zona) do cliente e do cônjuge.
+    // Carteira e documento do cliente: sem estas colunas perdiam-se ao gravar e todos voltavam a «comum».
+    await safeAddColumn("clients", "clientCategory", "TEXT");
+    await safeAddColumn("clients", "clientType", "TEXT");
+    await safeAddColumn("clients", "documentType", "TEXT");
+    await safeAddColumn("clients", "countryCode", "TEXT");
+    await safeAddColumn("clients", "nationality", "TEXT");
+    await safeAddColumn("clients", "passportFormatValidated", "INTEGER");
+    // Dados de pessoa colectiva: sem estas colunas perdiam-se ao gravar.
+    await safeAddColumn("clients", "foundationDate", "TEXT");
+    await safeAddColumn("clients", "legalForm", "TEXT");
+    await safeAddColumn("clients", "businessSector", "TEXT");
+    await safeAddColumn("clients", "commercialRegistry", "TEXT");
     // Local de trabalho do particular: sector, ministério, NIF da empresa e cargo.
     await safeAddColumn("clients", "employmentSector", "TEXT");
     await safeAddColumn("clients", "ministry", "TEXT");

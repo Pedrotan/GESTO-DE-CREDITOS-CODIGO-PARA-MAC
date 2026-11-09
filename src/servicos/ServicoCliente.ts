@@ -1,6 +1,7 @@
 import { Client } from '@/tipos/credito';
 import { RepositorioCliente } from '@/repositorios/RepositorioCliente';
 import { db } from '@/bibliotecas/bd';
+import { clientCategoryOf } from '@/bibliotecas/carteira-cliente';
 
 export class ServicoCliente {
     private static safeStr(val: any): string {
@@ -20,6 +21,12 @@ export class ServicoCliente {
     private static mapRowToClient(c: any): Client {
         return {
             ...c,
+            clientCategory: clientCategoryOf(c),
+            clientType: c.clientType || undefined,
+            documentType: c.documentType || undefined,
+            countryCode: c.countryCode || undefined,
+            nationality: c.nationality || undefined,
+            passportFormatValidated: Boolean(c.passportFormatValidated),
             createdAt: new Date(c.createdAt),
             deletedAt: c.deletedAt ? new Date(c.deletedAt) : undefined,
             restoredAt: c.restoredAt ? new Date(c.restoredAt) : undefined,

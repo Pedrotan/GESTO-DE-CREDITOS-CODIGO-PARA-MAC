@@ -429,6 +429,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
 
                     await addClient({
                         id: uuidv4(),
+                        clientCategory: category,
                         name: row['Nome'],
                         nif: String(row['NIF']),
                         phone: String(row['Telefone'] || ''),
