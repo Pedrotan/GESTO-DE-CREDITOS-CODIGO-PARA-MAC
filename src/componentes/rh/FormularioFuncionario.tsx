@@ -7,7 +7,8 @@ import { Textarea } from '@/componentes/ui/textarea';
 import { Switch } from '@/componentes/ui/switch';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
-import { ServicoRH, type ActorRH, type Cargo, type Departamento, type Funcionario } from '@/servicos/rh/ServicoRH';
+import { ServicoRH, type AbonoInicial, type ActorRH, type Cargo, type Departamento, type Funcionario, type Rubrica } from '@/servicos/rh/ServicoRH';
+import { RH_RUBRICAS_FOLHA, RH_VINCULOS } from '@/bibliotecas/rh/esquema-rh';
 import { estadoBI, validadeSugerida } from '@/bibliotecas/rh/bi-validade';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { executar, paraMinor, SeloBI } from './comum-rh';
@@ -21,6 +22,9 @@ type Props = {
 
 const NENHUM = '__nenhum__';
 const vazio = (): Partial<Funcionario> => ({ estado: 'activo', data_admissao: luandaTodayKey(), reformado: 0 });
+/** Sugestões de grupo / regime de carreira (como aparecem na folha de salário). */
+const CARREIRAS = ['Chefia - Regime Geral/Local', 'Direcção - Regime Geral/Local', 'Geral - Pessoal Técnico', 'Geral - Pessoal Não Técnico',
+    'Quadro Temporário - Gabinete', 'Administrativo', 'Operacional'];
 
 function Campo({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
     return <div className={className}><Label className="text-xs font-bold text-slate-600 dark:text-slate-300">{label}</Label><div className="mt-1">{children}</div></div>;
@@ -31,6 +35,9 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
     const [contrato, setContrato] = useState({ tipo: 'indeterminado' as 'indeterminado' | 'determinado', inicio: luandaTodayKey(), fim: '', periodo_experiencia_fim: '', salario: 0, horas_semanais: 40, dias_ferias: 22 });
     const [comContrato, setComContrato] = useState(true);
     const [aGuardar, setAGuardar] = useState(false);
+    const [rubricas, setRubricas] = useState<Rubrica[]>([]);
+    // Abonos fixos do registo: código da rubrica → activo e valor (só a remuneração suplementar tem valor próprio).
+    const [abonos, setAbonos] = useState<Record<string, { activo: boolean; valor: number }>>({});
     const { users } = useAuth();
 
     useEffect(() => {
@@ -38,13 +45,22 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
         if (funcionario) { setF({ ...funcionario }); return; }
         setF(vazio());
         setComContrato(true);
+        setAbonos({});
         setContrato(c => ({ ...c, inicio: luandaTodayKey(), salario: 0 }));
         void ServicoRH.proximoNumero().then(numero => setF(prev => ({ ...prev, numero_mecanografico: prev.numero_mecanografico || numero })));
     }, [open, funcionario]);
+    useEffect(() => { if (open && !funcionario) void ServicoRH.rubricas().then(setRubricas); }, [open, funcionario]);
 
     const set = (campo: keyof Funcionario, valor: unknown) => setF(prev => ({ ...prev, [campo]: valor }));
     const sugestao = !f.bi_validade && f.bi_emissao ? validadeSugerida(f.bi_emissao, anosValidadeBI) : null;
     const cargo = cargos.find(c => c.id === f.cargo_id);
+
+    const abonosEscolhidos = (): AbonoInicial[] => RH_RUBRICAS_FOLHA.flatMap(r => {
+        const escolha = abonos[r.codigo];
+        const rubrica = rubricas.find(x => x.codigo === r.codigo && x.activo);
+        if (!escolha?.activo || !rubrica) return [];
+        return [{ rubrica_id: rubrica.id, valor_minor: r.forma === 'fixo' ? paraMinor(escolha.valor) : 0 }];
+    });
 
     const guardar = async () => {
         if (!actor) return;
@@ -54,7 +70,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
             else await ServicoRH.criarFuncionario(f, comContrato ? {
                 tipo: contrato.tipo, inicio: contrato.inicio, fim: contrato.fim || null, periodo_experiencia_fim: contrato.periodo_experiencia_fim || null,
                 salario_base_minor: paraMinor(contrato.salario), horas_semanais: contrato.horas_semanais, dias_ferias: contrato.dias_ferias,
-            } : null, actor);
+            } : null, actor, abonosEscolhidos());
         }, funcionario ? 'Ficha do funcionário actualizada' : 'Funcionário registado');
         setAGuardar(false);
         if (ok) { onSaved(); onClose(); }
@@ -69,8 +85,8 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                 </DialogHeader>
 
                 <section className="grid gap-3 sm:grid-cols-3">
-                    <Campo label="N.º mecanográfico"><Input value={f.numero_mecanografico || ''} onChange={e => set('numero_mecanografico', e.target.value)} /></Campo>
-                    <Campo label="Nome completo" className="sm:col-span-2"><Input value={f.nome || ''} onChange={e => set('nome', e.target.value)} /></Campo>
+                    <Campo label="N.º mecanográfico / agente *"><Input value={f.numero_mecanografico || ''} onChange={e => set('numero_mecanografico', e.target.value)} /></Campo>
+                    <Campo label="Nome completo *" className="sm:col-span-2"><Input value={f.nome || ''} onChange={e => set('nome', e.target.value)} /></Campo>
                     <Campo label="Data de nascimento"><Input type="date" value={f.data_nascimento || ''} onChange={e => set('data_nascimento', e.target.value)} /></Campo>
                     <Campo label="Sexo">
                         <Select value={f.sexo || NENHUM} onValueChange={v => set('sexo', v === NENHUM ? null : v)}>
@@ -111,7 +127,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                     <Campo label="Email"><Input type="email" value={f.email || ''} onChange={e => set('email', e.target.value)} /></Campo>
                     <Campo label="Morada"><Input value={f.morada || ''} onChange={e => set('morada', e.target.value)} /></Campo>
                     <Campo label="Banco"><Input value={f.banco || ''} onChange={e => set('banco', e.target.value)} /></Campo>
-                    <Campo label="IBAN" className="sm:col-span-2"><Input value={f.iban || ''} placeholder="AO06 …" onChange={e => set('iban', e.target.value.toUpperCase())} /></Campo>
+                    <Campo label="IBAN *" className="sm:col-span-2"><Input value={f.iban || ''} placeholder="AO06 …" onChange={e => set('iban', e.target.value.toUpperCase())} /></Campo>
                 </section>
 
                 <h3 className="mt-2 text-xs font-black uppercase tracking-wide text-slate-500">Na empresa</h3>
@@ -123,7 +139,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                             <SelectContent><SelectItem value={NENHUM}>—</SelectItem>{departamentos.filter(d => d.activo).map(d => <SelectItem key={d.id} value={d.id}>{d.nome}</SelectItem>)}</SelectContent>
                         </Select>
                     </Campo>
-                    <Campo label="Cargo">
+                    <Campo label="Cargo *">
                         <Select value={f.cargo_id || NENHUM} onValueChange={v => {
                             set('cargo_id', v === NENHUM ? null : v);
                             const escolhido = cargos.find(c => c.id === v);
@@ -132,6 +148,21 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                             <SelectTrigger><SelectValue /></SelectTrigger>
                             <SelectContent><SelectItem value={NENHUM}>—</SelectItem>{cargos.filter(c => c.activo).map(c => <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>)}</SelectContent>
                         </Select>
+                    </Campo>
+                    <Campo label="Vínculo *">
+                        <Select value={f.vinculo || NENHUM} onValueChange={v => set('vinculo', v === NENHUM ? null : v)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent><SelectItem value={NENHUM}>—</SelectItem>{[...new Set([...RH_VINCULOS, ...(f.vinculo ? [f.vinculo] : [])])].map(v => <SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent>
+                        </Select>
+                    </Campo>
+                    <Campo label="Grupo / regime de carreira *">
+                        <Input list="rh-carreiras" value={f.carreira || ''} placeholder="Chefia - Regime Geral/Local" onChange={e => set('carreira', e.target.value)} />
+                        <datalist id="rh-carreiras">{CARREIRAS.map(c => <option key={c} value={c} />)}</datalist>
+                    </Campo>
+                    <Campo label="Categoria"><Input value={f.categoria || ''} placeholder="Ex.: Técnico Médio" onChange={e => set('categoria', e.target.value)} /></Campo>
+                    <Campo label="Escalão / letra"><Input value={f.escalao || ''} maxLength={4} placeholder="A" onChange={e => set('escalao', e.target.value.toUpperCase())} /></Campo>
+                    <Campo label="Unidade orgânica" className="sm:col-span-2">
+                        <Input value={f.unidade_organica || ''} placeholder={departamentos.find(d => d.id === f.departamento_id)?.nome || 'Ex.: Direcção Administrativa'} onChange={e => set('unidade_organica', e.target.value)} />
                     </Campo>
                     <Campo label="Horário">
                         <Select value={f.horario_id || NENHUM} onValueChange={v => set('horario_id', v === NENHUM ? null : v)}>
@@ -184,6 +215,22 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                                 </Campo>
                             </section>
                         )}
+                        <h3 className="mt-2 text-xs font-black uppercase tracking-wide text-slate-500">Abonos fixos (saem na folha de salário)</h3>
+                        <section className="grid gap-2 sm:grid-cols-2">
+                            {RH_RUBRICAS_FOLHA.map(r => {
+                                const escolha = abonos[r.codigo] || { activo: false, valor: 0 };
+                                const existe = rubricas.some(x => x.codigo === r.codigo && x.activo);
+                                const mudar = (parte: Partial<typeof escolha>) => setAbonos(a => ({ ...a, [r.codigo]: { ...escolha, ...parte } }));
+                                return (
+                                    <div key={r.codigo} className="flex items-center gap-3 rounded-lg border border-slate-200 px-3 py-2 dark:border-slate-700">
+                                        <Switch checked={escolha.activo} disabled={!existe} onCheckedChange={v => mudar({ activo: v })} />
+                                        <span className="flex-1 text-xs font-semibold text-slate-700 dark:text-slate-200">{r.nome}{r.forma === 'percentagem' ? ' do vencimento base' : ''}</span>
+                                        {r.forma === 'fixo' && escolha.activo && <div className="w-36"><CurrencyInput value={escolha.valor} onValueChange={v => mudar({ valor: v })} /></div>}
+                                    </div>
+                                );
+                            })}
+                        </section>
+                        <p className="text-[11px] text-slate-500">Os descontos (Segurança Social, IRT e faltas) são calculados no processamento do mês. Pode acrescentar ou terminar abonos depois, na ficha do funcionário.</p>
                     </>
                 )}
 

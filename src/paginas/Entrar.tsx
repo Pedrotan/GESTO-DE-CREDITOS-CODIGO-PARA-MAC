@@ -412,7 +412,7 @@ export default function Login() {
                             alt=""
                             draggable={false}
                             onError={() => setWatermarkError(true)}
-                            className="h-[88vh] max-h-[1100px] w-[92%] max-w-[1400px] select-none object-contain opacity-[0.07] blur-[2px] grayscale-[35%]"
+                            className="h-[88vh] max-h-[1100px] w-[92%] max-w-[1400px] select-none object-contain opacity-[0.11] blur-[1px] grayscale-[25%]"
                         />
                     </div>
                 )}

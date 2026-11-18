@@ -395,3 +395,26 @@ export const rhSeedPontoV3Statements = (now: string) => RH_PARAMETROS_PONTO_V3.m
 export const rhSeedPontoStatements = (now: string) => RH_PARAMETROS_PONTO.map(p => ({
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
 }));
+
+// ── Folha de salário no modelo «Remunerações para Conferência» (versão 3.0.8) ──
+/** Enquadramento do funcionário impresso na folha: vínculo, grupo/carreira, categoria, escalão e unidade orgânica. */
+export const RH_FOLHA_COLUNAS: Array<[string, string, string]> = [
+    ['rh_funcionario', 'vinculo', 'TEXT'], ['rh_funcionario', 'carreira', 'TEXT'], ['rh_funcionario', 'categoria', 'TEXT'],
+    ['rh_funcionario', 'escalao', 'TEXT'], ['rh_funcionario', 'unidade_organica', 'TEXT'],
+];
+/** Abonos habituais da folha (as percentagens são sobre o vencimento base). */
+export const RH_RUBRICAS_FOLHA: Array<RubricaInicial & { percentagem: number }> = [
+    { codigo: 'RENDA_CASA', nome: 'Renda de casa (30%)', tipo: 'abono', forma: 'percentagem', percentagem: 0.3, inss: 1, irt: 1, ordem: 12 },
+    { codigo: 'ISOLAMENTO', nome: 'Isolamento (30%)', tipo: 'abono', forma: 'percentagem', percentagem: 0.3, inss: 1, irt: 1, ordem: 13 },
+    { codigo: 'GRATIFICACAO', nome: 'Gratificação (30%)', tipo: 'abono', forma: 'percentagem', percentagem: 0.3, inss: 1, irt: 1, ordem: 14 },
+    { codigo: 'REPRESENTACAO', nome: 'Representação (20%)', tipo: 'abono', forma: 'percentagem', percentagem: 0.2, inss: 1, irt: 1, ordem: 15 },
+    { codigo: 'REM_SUPLEMENTAR', nome: 'Remuneração suplementar s/ IRT', tipo: 'abono', forma: 'fixo', percentagem: 0, inss: 0, irt: 0, ordem: 16 },
+];
+export const RH_SEED_RUBRICA_PCT_SQL = `INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt,
+    limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, ?, 0, 1, ?, 'sistema')`;
+export const rhSeedFolhaStatements = (now: string) => RH_RUBRICAS_FOLHA.map(r => ({
+    sql: RH_SEED_RUBRICA_PCT_SQL, params: [`rubrica-${r.codigo}`, r.codigo, r.nome, r.tipo, r.forma, r.percentagem, r.inss, r.irt, r.ordem, now],
+}));
+/** Vínculos (o da folha: «Pessoal do Quadro» imprime-se como «Vinc.:», os restantes como «Cargo:»). */
+export const RH_VINCULOS = ['Comissão de Serviço', 'Pessoal do Quadro', 'Quadro Temporário', 'Contratado', 'Prestador de Serviços'];

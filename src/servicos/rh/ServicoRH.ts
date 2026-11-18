@@ -18,8 +18,12 @@ export type Funcionario = {
     morada: string | null; telefone: string | null; email: string | null; iban: string | null; banco: string | null;
     data_admissao: string; data_saida: string | null; cargo_id: string | null; departamento_id: string | null; horario_id: string | null;
     estado: EstadoFuncionario; foto_url: string | null; utilizador_id: string | null; reformado: number; observacoes: string | null;
+    /** Enquadramento impresso na folha de salário (Cargo/Vinc.): vínculo, grupo/carreira, categoria, escalão e unidade orgânica. */
+    vinculo?: string | null; carreira?: string | null; categoria?: string | null; escalao?: string | null; unidade_organica?: string | null;
     criado_em: string; actualizado_em: string | null;
 };
+/** Abono fixo escolhido no registo do funcionário (Renda de casa, Isolamento, Gratificação…). */
+export type AbonoInicial = { rubrica_id: string; valor_minor: number; quantidade?: number };
 export type Dependente = { id: string; funcionario_id: string; nome: string; parentesco: string | null; data_nascimento: string | null };
 export type Contrato = {
     id: string; funcionario_id: string; tipo: 'indeterminado' | 'determinado'; inicio: string; fim: string | null; periodo_experiencia_fim: string | null;
@@ -153,6 +157,11 @@ export class ServicoRH {
         if (!texto(f.nome)) erros.push('Indique o nome do funcionário.');
         if (!texto(f.numero_mecanografico)) erros.push('Indique o número mecanográfico.');
         if (!data(f.data_admissao)) erros.push('Indique a data de admissão.');
+        // Campos que a folha de salário imprime em cada funcionário.
+        if (!texto(f.iban)) erros.push('Indique o IBAN (sai na folha de salário).');
+        if (!texto(f.vinculo)) erros.push('Indique o vínculo (Comissão de Serviço, Pessoal do Quadro, Quadro Temporário…).');
+        if (!texto(f.carreira)) erros.push('Indique o grupo / regime de carreira.');
+        if (!f.cargo_id) erros.push('Escolha o cargo.');
         if (f.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(f.email)) erros.push('O email é inválido.');
         if (f.iban && !/^[A-Z]{2}\d{2}[A-Z0-9 ]{10,40}$/u.test(f.iban.replace(/\s+/gu, '').toUpperCase())) erros.push('O IBAN é inválido.');
         erros.push(...validarDatasBI(f.bi_emissao, f.bi_validade, luandaTodayKey()));
@@ -166,22 +175,29 @@ export class ServicoRH {
             texto(f.email), f.iban ? f.iban.replace(/\s+/gu, '').toUpperCase() : null, texto(f.banco), data(f.data_admissao), data(f.data_saida),
             f.cargo_id || null, f.departamento_id || null, f.horario_id || null, f.estado || 'activo', texto(f.foto_url), f.utilizador_id || null,
             f.reformado ? 1 : 0, texto(f.observacoes),
+            texto(f.vinculo), texto(f.carreira), texto(f.categoria), texto(f.escalao)?.toUpperCase() ?? null, texto(f.unidade_organica),
         ];
     }
 
     /** Cria o funcionário e, se indicado, o primeiro contrato (e a primeira linha do histórico salarial). */
-    static async criarFuncionario(f: Partial<Funcionario>, contrato: Omit<Contrato, 'id' | 'funcionario_id' | 'estado' | 'motivo_fim' | 'criado_em' | 'documento_id'> | null, actor: ActorRH) {
+    static async criarFuncionario(f: Partial<Funcionario>, contrato: Omit<Contrato, 'id' | 'funcionario_id' | 'estado' | 'motivo_fim' | 'criado_em' | 'documento_id'> | null, actor: ActorRH, abonos: AbonoInicial[] = []) {
         this.validarFuncionario(f);
         const id = crypto.randomUUID();
         const when = agora();
         const statements: Statement[] = [{
             sql: `INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade,
                     numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url,
-                    utilizador_id, reformado, observacoes, criado_em, criado_por)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, criado_em, criado_por)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             params: [id, ...this.linhaFuncionario(f), when, actor.id], expectChanges: 1,
         }];
         if (contrato) statements.push(...this.instrucoesContrato(id, contrato, null, 'Admissão', actor, when));
+        const inicioAbonos = data(contrato?.inicio) || data(f.data_admissao);
+        for (const a of abonos.filter(x => x.rubrica_id)) statements.push({
+            sql: `INSERT INTO rh_funcionario_rubrica (id, funcionario_id, rubrica_id, valor_minor, quantidade, inicio, fim, criado_em, criado_por)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            params: [crypto.randomUUID(), id, a.rubrica_id, minor(a.valor_minor), Number(a.quantidade) || 1, inicioAbonos, null, when, actor.id], expectChanges: 1,
+        });
         statements.push(auditoriaRH(actor, 'create', `Registou o funcionário ${f.nome} (n.º ${f.numero_mecanografico})`, { funcionarioId: id }, undefined, undefined, when));
         await db.transaction(statements);
         return id;
@@ -197,7 +213,7 @@ export class ServicoRH {
             { sql: `UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?,
                     bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?,
                     data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?,
-                    observacoes = ?, actualizado_em = ? WHERE id = ?`,
+                    observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, actualizado_em = ? WHERE id = ?`,
                 params: [...linha, when, id], expectChanges: 1 },
             auditoriaRH(actor, 'update', `Alterou a ficha do funcionário ${f.nome}`, { funcionarioId: id },
                 { ...anterior, foto_url: undefined }, { ...f, foto_url: undefined }, when),

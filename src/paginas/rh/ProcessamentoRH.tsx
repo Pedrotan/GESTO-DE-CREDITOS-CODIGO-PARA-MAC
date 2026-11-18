@@ -58,6 +58,16 @@ export default function ProcessamentoRH() {
         const todas = await ServicoSalariosRH.linhasProcessamento(p.id);
         gerarRecibosPdf(detalhe.dados.recibos.map(r => ({ recibo: r, linhas: todas.filter(l => l.recibo_id === r.id) })), cabecalhoPdf(p), companySettings, actor.name);
     };
+    // Folha no modelo de conferência: linhas de cada recibo e o enquadramento actual de cada funcionário.
+    const pdfFolha = async () => {
+        if (!p || !actor) return;
+        const todas = await ServicoSalariosRH.linhasProcessamento(p.id);
+        gerarFolhaPdf(detalhe.dados.recibos.map(r => {
+            const f = base.dados.funcionarios.find(x => x.id === r.funcionario_id);
+            return { recibo: r, linhas: todas.filter(l => l.recibo_id === r.id),
+                enquadramento: f ? { vinculo: f.vinculo, carreira: f.carreira, categoria: f.categoria, escalao: f.escalao, unidade_organica: f.unidade_organica } : undefined };
+        }), cabecalhoPdf(p), companySettings, actor.name);
+    };
     const transferencias = () => {
         if (!p) return;
         const csv = ficheiroTransferencias(detalhe.dados.recibos, `${ROTULO_TIPO[p.tipo]} ${String(p.mes).padStart(2, '0')}/${p.ano}`);
@@ -114,7 +124,7 @@ export default function ProcessamentoRH() {
                                     {actor && ['calculado', 'aprovado', 'pago'].includes(p.estado) && (calcular || aprovar) && <Button variant="outline" onClick={() => setReabrir(true)}><Undo2 className="mr-1.5 h-4 w-4" /> Reabrir</Button>}
                                     {actor && calcular && p.estado === 'aberto' && <Button variant="outline" className="text-red-600" onClick={() => void accao(() => ServicoSalariosRH.apagarAberto(p, actor), 'Processamento apagado').then(ok => ok && setSeleccionado(null))}><Trash2 className="mr-1.5 h-4 w-4" /> Apagar</Button>}
                                     {detalhe.dados.recibos.length > 0 && actor && <>
-                                        <Button variant="outline" onClick={() => gerarFolhaPdf(detalhe.dados.recibos, cabecalhoPdf(p), companySettings, actor.name)}><FileDown className="mr-1.5 h-4 w-4" /> Folha (PDF)</Button>
+                                        <Button variant="outline" onClick={() => void pdfFolha()}><FileDown className="mr-1.5 h-4 w-4" /> Folha (PDF)</Button>
                                         <Button variant="outline" onClick={() => void pdfRecibos()}><FileDown className="mr-1.5 h-4 w-4" /> Todos os recibos (PDF)</Button>
                                         {['aprovado', 'pago', 'fechado'].includes(p.estado) && <Button variant="outline" onClick={transferencias}><Banknote className="mr-1.5 h-4 w-4" /> Ficheiro de transferências</Button>}
                                     </>}

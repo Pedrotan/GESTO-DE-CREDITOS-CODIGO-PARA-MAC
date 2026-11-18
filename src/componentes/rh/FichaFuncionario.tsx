@@ -77,6 +77,10 @@ export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubric
                             <Linha label="Morada" valor={f.morada} />
                             <Linha label="Banco" valor={f.banco} />
                             <Linha label="IBAN" valor={permissoes.salarios ? f.iban : f.iban ? `${f.iban.slice(0, 4)} •••• ${f.iban.slice(-4)}` : null} />
+                            <Linha label="Vínculo" valor={f.vinculo} />
+                            <Linha label="Grupo / regime de carreira" valor={f.carreira} />
+                            <Linha label="Categoria / escalão" valor={[f.categoria, f.escalao].filter(Boolean).join(' · ') || null} />
+                            <Linha label="Unidade orgânica" valor={f.unidade_organica} />
                             <Linha label="Reformado no activo" valor={f.reformado ? 'Sim (INSS especial)' : 'Não'} />
                             {f.data_saida && <Linha label="Data de saída" valor={dataPt(f.data_saida)} />}
                             <Linha label="Observações" valor={f.observacoes} />
