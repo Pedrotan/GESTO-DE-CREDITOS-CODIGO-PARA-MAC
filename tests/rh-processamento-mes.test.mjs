@@ -53,7 +53,7 @@ async function createDatabase(M, valorFalta = '0') {
     const database = new DatabaseSync(':memory:');
     database.exec(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, timestamp TEXT, userId TEXT, userName TEXT, action TEXT, entity TEXT, details TEXT, previousState TEXT, newState TEXT, metadata TEXT)`);
     for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL]) database.exec(sql);
-    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
+    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS, ...M.E.RH_CATALOGO_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
     const params = values => (values || []).map(value => value === undefined ? null : value);
     const normalizar = sql => sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim().replace(/;$/u, '');
     const prepare = sql => {
@@ -159,5 +159,39 @@ test('cadastro: recusa IBAN e n.º repetidos, BI fora do formato, e aceita os ca
         await M.ServicoRH.alterarEstado(id, 'suspenso', 'Processo disciplinar', RH);
         assert.equal(db.prepare('SELECT estado FROM rh_funcionario WHERE id = ?').get(id).estado, 'suspenso');
         await assert.rejects(M.ServicoRH.alterarEstado(id, 'suspenso', '', RH), /motivo/u);
+    } finally { db.close(); }
+});
+
+test('catálogo de subsídios: valores iguais aos de antes, por dia trabalhado, proporcional às faltas, anual e incidência por confirmar', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        for (const sql of M.E.RH_CATALOGO_MIGRACAO_SQL) db.exec(sql);
+        const f = await registar(M);
+        const id = await M.ServicoSalariosRH.abrir({ ano: 2026, mes: 10, tipo: 'normal' }, RH);
+        await M.ServicoSalariosRH.guardarEntrada(await processamento(M, id), f, { faltas: 2 }, RH);
+        await M.ServicoSalariosRH.calcular(await processamento(M, id), RH);
+        const antes = db.prepare('SELECT total_abonos_minor, inss_minor, irt_minor, liquido_minor FROM rh_recibo WHERE funcionario_id = ?').get(f);
+        // A migração do catálogo não muda nada nos 5 abonos actuais: o mesmo mês dá os mesmos valores.
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM rh_rubrica WHERE codigo IN ('RENDA_CASA','ISOLAMENTO','GRATIFICACAO','REPRESENTACAO','REM_SUPLEMENTAR') AND classe = 'abono' AND incidencia_confirmada = 1`).get().n, 5);
+        await M.ServicoSalariosRH.calcular(await processamento(M, id), RH);
+        assert.deepEqual({ ...db.prepare('SELECT total_abonos_minor, inss_minor, irt_minor, liquido_minor FROM rh_recibo WHERE funcionario_id = ?').get(f) }, { ...antes });
+
+        // Subsídio de alimentação por dia trabalhado (2 faltas em 30 dias = 28 dias) e transporte proporcional às faltas.
+        const alim = await M.ServicoRH.guardarRubrica({ nome: 'Subsídio de refeição', tipo: 'abono', classe: 'subsidio', forma: 'fixo', por_dia: 1, valor_padrao_minor: 100_000, incide_inss: 1, incide_irt: 1, periodicidade: 'mensal' }, RH);
+        const transp = await M.ServicoRH.guardarRubrica({ nome: 'Subsídio de transporte (catálogo)', codigo: 'SUB_TRP2', tipo: 'abono', classe: 'subsidio', forma: 'fixo', valor_padrao_minor: 3_000_000, proporcional_faltas: 1, incide_inss: 1, incide_irt: 1 }, RH);
+        const natal = await M.ServicoRH.guardarRubrica({ nome: 'Gratificação de Dezembro', tipo: 'abono', classe: 'subsidio', forma: 'fixo', valor_padrao_minor: 5_000_000, periodicidade: 'anual', mes_pagamento: 12, incide_inss: 1, incide_irt: 1 }, RH);
+        await assert.rejects(M.ServicoRH.guardarRubrica({ nome: 'subsídio de REFEIÇÃO', tipo: 'abono', forma: 'fixo' }, RH), /Já existe/u);
+        for (const r of [alim, transp, natal]) await M.ServicoRH.atribuirRubrica(f, { rubrica_id: r, valor_minor: 0, inicio: '2026-01-01' }, RH);
+        await M.ServicoSalariosRH.calcular(await processamento(M, id), RH);
+        const l = Object.fromEntries(db.prepare(`SELECT r.nome, l.valor_minor, l.quantidade FROM rh_recibo_linha l JOIN rh_rubrica r ON r.id = l.rubrica_id JOIN rh_recibo c ON c.id = l.recibo_id WHERE c.funcionario_id = ?`).all(f).map(x => [x.nome, x]));
+        assert.deepEqual([l['Subsídio de refeição'].valor_minor, l['Subsídio de refeição'].quantidade], [2_800_000, 28]);
+        assert.equal(l['Subsídio de transporte (catálogo)'].valor_minor, 2_800_000);
+        assert.equal(l['Gratificação de Dezembro'], undefined, 'o anual só entra em Dezembro');
+
+        // Incidência por confirmar bloqueia o processamento de quem o tem atribuído.
+        const novo = await M.ServicoRH.guardarRubrica({ nome: 'Subsídio de risco', tipo: 'abono', classe: 'subsidio', forma: 'percentagem', percentagem: 0.1, incide_inss: 1, incide_irt: 1, incidencia_confirmada: 0 }, RH);
+        await M.ServicoRH.atribuirRubrica(f, { rubrica_id: novo, valor_minor: 0, inicio: '2026-01-01' }, RH);
+        await assert.rejects(M.ServicoSalariosRH.calcular(await processamento(M, id), RH), /Defina se incide IRT e INSS em: Subsídio de risco/u);
     } finally { db.close(); }
 });

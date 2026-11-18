@@ -431,6 +431,18 @@ export const RH_PARAMETROS_CADASTRO: Array<{ chave: string; valor: string; descr
 export const rhSeedCadastroStatements = (now: string) => RH_PARAMETROS_CADASTRO.map(p => ({
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
 }));
+// ── Catálogo de subsídios e abonos (bloco 5): as rubricas ganham os campos do catálogo ──
+export const RH_CATALOGO_COLUNAS: Array<[string, string, string]> = [
+    ['rh_rubrica', 'classe', "TEXT"], ['rh_rubrica', 'por_dia', 'INTEGER NOT NULL DEFAULT 0'], ['rh_rubrica', 'valor_padrao_minor', 'INTEGER NOT NULL DEFAULT 0'],
+    ['rh_rubrica', 'periodicidade', "TEXT NOT NULL DEFAULT 'mensal'"], ['rh_rubrica', 'mes_pagamento', 'INTEGER'], ['rh_rubrica', 'proporcional_faltas', 'INTEGER NOT NULL DEFAULT 0'],
+    ['rh_rubrica', 'auto_atribuir', 'INTEGER NOT NULL DEFAULT 0'], ['rh_rubrica', 'descricao', 'TEXT'], ['rh_rubrica', 'incidencia_confirmada', 'INTEGER NOT NULL DEFAULT 1'],
+    ['rh_funcionario_rubrica', 'observacao', 'TEXT'],
+];
+/** Os 5 abonos da folha passam a «Abono» do catálogo; a incidência já estava definida no código e mantém-se confirmada. */
+export const RH_CATALOGO_MIGRACAO_SQL = [
+    `UPDATE rh_rubrica SET classe = 'abono' WHERE classe IS NULL AND tipo = 'abono' AND codigo IN ('RENDA_CASA', 'ISOLAMENTO', 'GRATIFICACAO', 'REPRESENTACAO', 'REM_SUPLEMENTAR')`,
+    `UPDATE rh_rubrica SET classe = CASE WHEN tipo = 'desconto' THEN 'desconto' ELSE 'abono' END WHERE classe IS NULL`,
+];
 /** BI angolano: 9 algarismos, 2 letras e 3 algarismos (ex.: 002658949BA031). */
 export const FORMATO_BI = /^\d{9}[A-Z]{2}\d{3}$/u;
 /** Vínculos (o da folha: «Pessoal do Quadro» imprime-se como «Vinc.:», os restantes como «Cargo:»). */

@@ -74,6 +74,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)"
   ],
   [
+    "e753b4d1e00c94b49eaec9666206484bba190aa089ffd78b326a7df3f1744af2",
+    "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
+  ],
+  [
     "bc0f875159af9da57c225dad6469d12b54e5ef1d68759b465e01c0aa6af00844",
     "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -160,6 +164,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
   [
     "68302ce31775e48c49ff7d2e78566a71649e827b5bbd3a0693ee878dde64c49c",
     "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "ca4bfe7939b88a0018754073d7044641f42d2d6a77c6e7ba8ea93f7f49fa8596",
+    "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "ef6551e3ab5d9c6c6713ea398c1c1fb2f3c3e1c24d15c78dd7b7b256e81d767d",

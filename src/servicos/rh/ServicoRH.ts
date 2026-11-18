@@ -40,6 +40,11 @@ export type Rubrica = {
     id: string; codigo: string; nome: string; tipo: 'abono' | 'desconto'; forma: 'fixo' | 'percentagem' | 'quantidade'; percentagem: number;
     incide_inss: number; incide_irt: number; limite_isento_irt_minor: number; limite_isento_irt_pct: number; conta_contabilistica: string | null;
     ordem_no_recibo: number; sistema: number; activo: number;
+    /** Catálogo de subsídios: classe (abono, subsídio, desconto), por dia trabalhado, valor padrão, periodicidade, etc. */
+    classe?: 'abono' | 'subsidio' | 'desconto' | null; por_dia?: number; valor_padrao_minor?: number; periodicidade?: 'mensal' | 'anual' | 'pontual';
+    mes_pagamento?: number | null; proporcional_faltas?: number; auto_atribuir?: number; descricao?: string | null;
+    /** 0 = incidência de IRT/INSS por confirmar (bloqueia o processamento de quem o tiver atribuído). */
+    incidencia_confirmada?: number;
 };
 export type FuncionarioRubrica = {
     id: string; funcionario_id: string; rubrica_id: string; valor_minor: number; quantidade: number; inicio: string; fim: string | null;
@@ -357,9 +362,18 @@ export class ServicoRH {
     }
 
     static async guardarRubrica(r: Partial<Rubrica>, actor: ActorRH) {
-        const codigo = texto(r.codigo)?.toUpperCase().replace(/[^A-Z0-9_]/gu, '_');
         const nome = texto(r.nome);
-        if (!codigo || !nome) throw new Error('Indique o código e o nome da rubrica.');
+        // O código é opcional no catálogo: sem ele, gera-se a partir do nome.
+        const codigo = (texto(r.codigo) || (nome ? nome.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').slice(0, 24) : ''))?.toUpperCase().replace(/[^A-Z0-9_]/gu, '_');
+        if (!codigo || !nome) throw new Error('Indique o nome da rubrica.');
+        const repetida = (await this.rubricas()).find(x => x.id !== r.id && (x.nome.trim().toLowerCase() === nome.toLowerCase() || x.codigo === codigo));
+        if (repetida) throw new Error(repetida.codigo === codigo ? `Já existe uma rubrica com o código ${codigo}.` : `Já existe «${repetida.nome}» no catálogo.`);
+        const periodicidade = ['mensal', 'anual', 'pontual'].includes(String(r.periodicidade)) ? String(r.periodicidade) : 'mensal';
+        const mes = periodicidade === 'anual' ? Math.round(Number(r.mes_pagamento)) : null;
+        if (periodicidade === 'anual' && !(mes && mes >= 1 && mes <= 12)) throw new Error('Indique o mês de pagamento do subsídio anual.');
+        const classe = r.tipo === 'desconto' ? 'desconto' : r.classe === 'subsidio' ? 'subsidio' : 'abono';
+        const extra = [classe, r.por_dia ? 1 : 0, minor(r.valor_padrao_minor || 0), periodicidade, mes, r.proporcional_faltas ? 1 : 0, r.auto_atribuir ? 1 : 0,
+            texto(r.descricao), r.incidencia_confirmada === 0 ? 0 : 1];
         if (!['abono', 'desconto'].includes(String(r.tipo))) throw new Error('Escolha se a rubrica é abono ou desconto.');
         if (!['fixo', 'percentagem', 'quantidade'].includes(String(r.forma))) throw new Error('Forma de cálculo inválida.');
         const pct = Number(r.percentagem) || 0;
@@ -372,8 +386,9 @@ export class ServicoRH {
             const anterior = await db.get<Rubrica>('SELECT * FROM rh_rubrica WHERE id = ?', [r.id]);
             await db.transaction([
                 { sql: `UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?,
-                        limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?`,
-                    params: [...valores, when, r.id], expectChanges: 1 },
+                        limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, classe = ?, por_dia = ?, valor_padrao_minor = ?,
+                        periodicidade = ?, mes_pagamento = ?, proporcional_faltas = ?, auto_atribuir = ?, descricao = ?, incidencia_confirmada = ?, actualizado_em = ? WHERE id = ?`,
+                    params: [...valores, ...extra, when, r.id], expectChanges: 1 },
                 auditoriaRH(actor, 'update', `Alterou a rubrica ${anterior?.codigo || codigo}`, { rubricaId: r.id }, anterior, r, when),
             ]);
             return r.id;
@@ -381,8 +396,9 @@ export class ServicoRH {
         const id = crypto.randomUUID();
         await db.transaction([
             { sql: `INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct,
-                    conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-                params: [id, codigo, ...valores, when, actor.id], expectChanges: 1 },
+                    conta_contabilistica, ordem_no_recibo, activo, classe, por_dia, valor_padrao_minor, periodicidade, mes_pagamento, proporcional_faltas, auto_atribuir,
+                    descricao, incidencia_confirmada, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                params: [id, codigo, ...valores, ...extra, when, actor.id], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Criou a rubrica ${codigo} — ${nome}`, { rubricaId: id }, undefined, r, when),
         ]);
         return id;

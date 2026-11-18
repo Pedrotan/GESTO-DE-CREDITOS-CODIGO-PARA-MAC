@@ -140,7 +140,9 @@ export default function ProcessamentoRH() {
             const abonos = fixas.dados.filter(x => x.funcionario_id === id && x.inicio <= fim && (!x.fim || x.fim >= inicio)).map(x => {
                 const rub = base.dados.rubricas.find(y => y.id === x.rubrica_id);
                 if (!rub || rub.tipo !== 'abono') return null;
-                const valor = rub.forma === 'percentagem' ? Math.round(salario * rub.percentagem * (x.quantidade || 1)) : rub.forma === 'quantidade' ? Math.round(x.valor_minor * (x.quantidade || 1)) : x.valor_minor;
+                if (rub.periodicidade === 'pontual' || (rub.periodicidade === 'anual' && Number(rub.mes_pagamento) !== p.mes)) return null;
+                const unit = x.valor_minor || rub.valor_padrao_minor || 0;
+                const valor = rub.por_dia ? unit * 30 : rub.forma === 'percentagem' ? Math.round(salario * rub.percentagem * (x.quantidade || 1)) : rub.forma === 'quantidade' ? Math.round(unit * (x.quantidade || 1)) : unit;
                 return { nome: rub.nome, valor };
             }).filter((x): x is { nome: string; valor: number } => Boolean(x));
             const resumo = r?.resumo_json ? (() => { try { return JSON.parse(r.resumo_json) as { faltasDescontaveis?: number }; } catch { return {}; } })() : {};

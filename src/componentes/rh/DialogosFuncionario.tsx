@@ -113,13 +113,14 @@ export function DialogoSuspender({ funcionarioId, nome, suspenso, actor, onClose
 
 /** Atribuir um subsídio do catálogo a um ou vários funcionários. */
 export function DialogoSubsidio({ funcionarioIds, rubricas, salarioBaseMinor, actor, onClose, onSaved }: Base & { funcionarioIds: string[]; rubricas: Rubrica[]; salarioBaseMinor?: number }) {
-    const escolhiveis = rubricas.filter(r => r.activo && !r.sistema && r.tipo === 'abono');
+    const escolhiveis = rubricas.filter(r => r.activo && !r.sistema && r.tipo === 'abono' && r.periodicidade !== 'pontual');
     const [rubricaId, setRubricaId] = useState(escolhiveis[0]?.id || '');
     const [valor, setValor] = useState(0);
     const [inicio, setInicio] = useState(luandaTodayKey());
     const [fim, setFim] = useState('');
     const r = escolhiveis.find(x => x.id === rubricaId);
     const { aGuardar, guardar } = useGuardar(onSaved, onClose);
+    const escolher = (id: string) => { setRubricaId(id); setValor((escolhiveis.find(x => x.id === id)?.valor_padrao_minor || 0) / 100); };
     return (
         <Moldura titulo={funcionarioIds.length > 1 ? `Atribuir subsídio a ${funcionarioIds.length} funcionários` : 'Atribuir subsídio'} rotulo="Atribuir" aGuardar={aGuardar} onClose={onClose}
             descricao="O subsídio entra em todos os processamentos entre o início e o fim."
@@ -127,7 +128,7 @@ export function DialogoSubsidio({ funcionarioIds, rubricas, salarioBaseMinor, ac
                 for (const id of funcionarioIds) await ServicoRH.atribuirRubrica(id, { rubrica_id: rubricaId, valor_minor: r?.forma === 'percentagem' ? 0 : paraMinor(valor), inicio, fim: fim || null }, actor);
             }, 'Subsídio atribuído')}>
             <CampoDialogo label="Subsídio" largo>
-                <Select value={rubricaId} onValueChange={setRubricaId}>
+                <Select value={rubricaId} onValueChange={escolher}>
                     <SelectTrigger><SelectValue placeholder="Escolha do catálogo" /></SelectTrigger>
                     <SelectContent>{escolhiveis.map(x => <SelectItem key={x.id} value={x.id}>{x.nome}</SelectItem>)}</SelectContent>
                 </Select>
@@ -136,7 +137,7 @@ export function DialogoSubsidio({ funcionarioIds, rubricas, salarioBaseMinor, ac
                 ? <div className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600 sm:col-span-2 dark:bg-slate-800 dark:text-slate-300">
                     {Math.round(r.percentagem * 1000) / 10}% do salário base{salarioBaseMinor ? ` = ${kz(Math.round(salarioBaseMinor * r.percentagem))} por mês` : ''}.
                 </div>
-                : <CampoDialogo label="Valor mensal"><CurrencyInput value={valor} onValueChange={setValor} /></CampoDialogo>}
+                : <CampoDialogo label={r?.por_dia ? 'Valor por dia trabalhado' : 'Valor mensal'}><CurrencyInput value={valor} onValueChange={setValor} /></CampoDialogo>}
             <CampoDialogo label="Início"><Input type="date" value={inicio} onChange={e => setInicio(e.target.value)} /></CampoDialogo>
             <CampoDialogo label="Fim (opcional)"><Input type="date" value={fim} onChange={e => setFim(e.target.value)} /></CampoDialogo>
         </Moldura>

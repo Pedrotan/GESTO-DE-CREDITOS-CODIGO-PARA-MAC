@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/componentes/ui/tabs';
 import { Button } from '@/componentes/ui/button';
@@ -17,6 +18,9 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { NavegacaoRH, dataPt, executar, kz, paraMinor, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { useBaseRH } from './FuncionariosRH';
+import { CatalogoSubsidios } from '@/componentes/rh/CatalogoSubsidios';
+import { type FuncionarioRubrica } from '@/servicos/rh/ServicoRH';
+import { CalendarDays } from 'lucide-react';
 
 const NENHUM = '__nenhum__';
 const pct = (valor: number) => `${(valor * 100).toLocaleString('pt-PT', { maximumFractionDigits: 2 })}%`;
@@ -36,22 +40,35 @@ export default function ConfiguracoesRH() {
     const [tipoAusencia, setTipoAusencia] = useState<Partial<TipoAusencia> | null>(null);
 
     const chaves = useMemo(() => [...new Set(parametros.map(p => p.chave))], [parametros]);
+    const atribuicoes = useCarregar(() => ServicoRH.todasRubricasFuncionarios(), [] as FuncionarioRubrica[]);
+    // Secção aberta na URL (?seccao=…), para os atalhos «Gerir catálogo →» abrirem já em Subsídios e abonos.
+    const [url, setUrl] = useSearchParams();
+    const seccao = url.get('seccao') || 'estrutura';
+    const irSeccao = (v: string) => setUrl(p => { const n = new URLSearchParams(p); n.set('seccao', v); return n; }, { replace: true });
+    const item = 'w-full justify-start rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 data-[state=active]:bg-indigo-50 data-[state=active]:font-bold data-[state=active]:text-indigo-900 data-[state=active]:shadow-none dark:text-slate-300 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white';
     const tabelaActual = tabelaIrtEmVigor(irt.dados.tabelas, hoje);
 
     return (
         <MainLayout title="Configurações de RH" subtitle="Parâmetros legais com vigência, tabela do IRT, rubricas e estrutura da empresa">
             <NavegacaoRH />
             {!configurar && <p className="mb-3 rounded-xl bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">Só consulta: alterar parâmetros, tabela do IRT e rubricas exige a permissão «RH: Configurações legais».</p>}
-            <Tabs defaultValue="parametros">
-                <TabsList className="flex-wrap">
-                    <TabsTrigger value="parametros">Parâmetros legais</TabsTrigger>
-                    <TabsTrigger value="irt">Tabela do IRT</TabsTrigger>
-                    <TabsTrigger value="rubricas">Rubricas</TabsTrigger>
-                    <TabsTrigger value="ausencias">Tipos de ausência</TabsTrigger>
-                    <TabsTrigger value="estrutura">Departamentos e cargos</TabsTrigger>
+            <Tabs value={seccao} onValueChange={irSeccao} orientation="vertical" className="flex flex-wrap items-start gap-5">
+                <TabsList aria-label="Secções das configurações" className="flex h-auto w-full flex-col items-stretch gap-0.5 rounded-xl border border-rh-border bg-white p-2 sm:w-[240px] dark:border-slate-800 dark:bg-slate-900">
+                    <TabsTrigger className={item} value="estrutura">Departamentos e cargos</TabsTrigger>
+                    <Link to="/rh/calendario" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"><CalendarDays className="h-4 w-4" aria-hidden="true" /> Horários e calendário</Link>
+                    <TabsTrigger className={item} value="subsidios">Subsídios e abonos</TabsTrigger>
+                    <TabsTrigger className={item} value="rubricas">Descontos e rubricas do sistema</TabsTrigger>
+                    <TabsTrigger className={item} value="parametros">Parâmetros legais</TabsTrigger>
+                    <TabsTrigger className={item} value="irt">Tabela do IRT</TabsTrigger>
+                    <TabsTrigger className={item} value="ausencias">Tipos de ausência</TabsTrigger>
                 </TabsList>
+                <div className="min-w-0 flex-[999_1_640px]">
 
-                <TabsContent value="parametros">
+                <TabsContent value="subsidios" className="mt-0">
+                    <CatalogoSubsidios rubricas={rubricas} atribuicoes={atribuicoes.dados} actor={actor} podeEditar={configurar} onChange={() => { void base.recarregar(); void atribuicoes.recarregar(); }} />
+                </TabsContent>
+
+                <TabsContent value="parametros" className="mt-0">
                     <p className="mb-3 text-xs text-slate-500">Cada valor tem data de início de vigência. Um novo valor não altera o anterior: os processamentos já feitos continuam a usar a taxa do seu mês. Valide estes valores com um contabilista certificado.</p>
                     <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
                         <table className="w-full text-sm">
@@ -75,7 +92,7 @@ export default function ConfiguracoesRH() {
                     </div>
                 </TabsContent>
 
-                <TabsContent value="irt" className="space-y-4">
+                <TabsContent value="irt" className="mt-0 space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs text-slate-500">IRT do Grupo A (trabalho por conta de outrem). Quando sair um novo OGE, crie uma nova versão: os recibos antigos mantêm a tabela do seu ano.</p>
                         {configurar && <Button size="sm" onClick={() => setNovaTabela(true)}><Plus className="mr-1.5 h-4 w-4" /> Nova versão da tabela</Button>}
@@ -100,15 +117,15 @@ export default function ConfiguracoesRH() {
                     ))}
                 </TabsContent>
 
-                <TabsContent value="rubricas" className="space-y-3">
+                <TabsContent value="rubricas" className="mt-0 space-y-3">
                     <div className="flex items-center justify-between">
-                        <p className="text-xs text-slate-500">Cada linha do recibo é uma rubrica: diz se incide INSS, se incide IRT e a parte isenta de IRT. As de sistema são usadas pelo motor de cálculo.</p>
-                        {configurar && <Button size="sm" onClick={() => setRubrica({ tipo: 'abono', forma: 'fixo', incide_inss: 1, incide_irt: 1, ordem_no_recibo: 100, activo: 1 })}><Plus className="mr-1.5 h-4 w-4" /> Nova rubrica</Button>}
+                        <p className="text-xs text-slate-500">Descontos fixos (adiantamentos, quotas, créditos internos) e as rubricas de sistema usadas pelo motor de cálculo. Os subsídios e abonos estão em «Subsídios e abonos».</p>
+                        {configurar && <Button size="sm" onClick={() => setRubrica({ tipo: 'desconto', forma: 'fixo', incide_inss: 0, incide_irt: 0, ordem_no_recibo: 200, activo: 1 })}><Plus className="mr-1.5 h-4 w-4" /> Novo desconto</Button>}
                     </div>
                     <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
                         <table className="w-full text-sm">
                             <thead className="bg-slate-50 text-left text-[11px] uppercase text-slate-500 dark:bg-slate-900"><tr><th className="px-3 py-2">Código</th><th className="px-3 py-2">Nome</th><th className="px-3 py-2">Tipo</th><th className="px-3 py-2">INSS</th><th className="px-3 py-2">IRT</th><th className="px-3 py-2">Isento de IRT</th><th className="px-3 py-2">Conta</th><th /></tr></thead>
-                            <tbody>{rubricas.map(r => (
+                            <tbody>{rubricas.filter(r => r.sistema || r.tipo === 'desconto').map(r => (
                                 <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${r.activo ? '' : 'opacity-50'}`}>
                                     <td className="px-3 py-2 font-mono text-xs">{r.codigo}{r.sistema ? <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500 dark:bg-slate-800">sistema</span> : null}</td>
                                     <td className="px-3 py-2 font-semibold">{r.nome}</td><td className="px-3 py-2 capitalize">{r.tipo}</td>
@@ -122,7 +139,7 @@ export default function ConfiguracoesRH() {
                     </div>
                 </TabsContent>
 
-                <TabsContent value="ausencias" className="space-y-3">
+                <TabsContent value="ausencias" className="mt-0 space-y-3">
                     <div className="flex items-center justify-between">
                         <p className="text-xs text-slate-500">Tipos de falta e licença. Confirme os dias e a remuneração de cada licença na Lei Geral do Trabalho em vigor.</p>
                         {configurar && <Button size="sm" onClick={() => setTipoAusencia({ justificada: 1, remunerada: 1, desconta_salario: 0 })}><Plus className="mr-1.5 h-4 w-4" /> Novo tipo</Button>}
@@ -142,7 +159,7 @@ export default function ConfiguracoesRH() {
                     </div>
                 </TabsContent>
 
-                <TabsContent value="estrutura" className="grid gap-4 lg:grid-cols-2">
+                <TabsContent value="estrutura" className="mt-0 grid gap-4 lg:grid-cols-2">
                     <div className="space-y-2">
                         <div className="flex items-center justify-between"><h3 className="font-black">Departamentos</h3>{gerir && <Button size="sm" onClick={() => setDepartamento({ nome: '' })}><Plus className="mr-1.5 h-4 w-4" /> Novo</Button>}</div>
                         {departamentos.length === 0 ? <Vazio>Sem departamentos.</Vazio> : departamentos.map(d => (
@@ -163,6 +180,7 @@ export default function ConfiguracoesRH() {
                         ))}
                     </div>
                 </TabsContent>
+                </div>
             </Tabs>
 
             {actor && parametro && <DialogoParametro parametro={parametro} actor={actor} onClose={() => setParametro(null)} onSaved={() => void base.recarregar()} />}

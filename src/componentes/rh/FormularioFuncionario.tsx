@@ -24,6 +24,7 @@ import { useData } from '@/contextos/ContextoDados';
 import { toast } from '@/ganchos/usar-toast';
 import { executar, kz, lerFicheiro, paraMinor } from './comum-rh';
 import { DialogoContrato } from './DialogosFuncionario';
+import { calculoRubrica } from './CatalogoSubsidios';
 
 export type SeccaoFormulario = 'pessoais' | 'identificacao' | 'contactos' | 'empresa' | 'contrato' | 'subsidios' | 'documentos';
 /** Onde abrir a edição: secção e, opcionalmente, o campo a focar (ex.: «Completar agora» da ficha). */
@@ -149,11 +150,19 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
         try { const r = JSON.parse(localStorage.getItem(CHAVE_RASCUNHO) || 'null'); setRascunho(r?.f ? { guardadoEm: r.guardadoEm } : null); } catch { setRascunho(null); }
     }, [open, funcionario]); // eslint-disable-line react-hooks/exhaustive-deps
 
+    // «Gerir catálogo →» abre noutro separador: ao voltar, a lista do catálogo actualiza-se.
+    useEffect(() => {
+        if (!open) return;
+        const actualizar = () => void ServicoRH.rubricas().then(setRubricas);
+        window.addEventListener('focus', actualizar);
+        return () => window.removeEventListener('focus', actualizar);
+    }, [open]);
+
     // Subsídios com «Atribuir automaticamente» entram já seleccionados no «Novo».
     useEffect(() => {
         if (!open || edicao) return;
         const auto = rubricas.filter(r => r.activo && !r.sistema && (r as Rubrica & { auto_atribuir?: number }).auto_atribuir);
-        if (auto.length) setSubsidios(s => (s.length ? s : auto.map(r => ({ chave: crypto.randomUUID(), rubrica_id: r.id, valor: 0 }))));
+        if (auto.length) setSubsidios(s => (s.length ? s : auto.map(r => ({ chave: crypto.randomUUID(), rubrica_id: r.id, valor: (r.valor_padrao_minor || 0) / 100 }))));
     }, [open, edicao, rubricas]);
 
     // Abrir a edição numa secção (e campo) — «Editar» de cada secção da ficha e «Completar agora».
@@ -210,7 +219,8 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
 
     const salarioBase = edicao ? contratoActual?.salario_base_minor || 0 : paraMinor(contrato.salario);
     const catalogo = rubricas.filter(r => r.activo && !r.sistema && r.tipo === 'abono');
-    const valorMensal = (s: SubsidioForm) => { const r = rubricas.find(x => x.id === s.rubrica_id); return r?.forma === 'percentagem' ? Math.round(salarioBase * r.percentagem) : paraMinor(s.valor); };
+    // Valor mensal ao vivo: % do salário base, valor fixo, ou valor por dia × 30 dias (estimativa; o mês real desconta as faltas).
+    const valorMensal = (s: SubsidioForm) => { const r = rubricas.find(x => x.id === s.rubrica_id); return r?.por_dia ? paraMinor(s.valor) * 30 : r?.forma === 'percentagem' ? Math.round(salarioBase * r.percentagem) : paraMinor(s.valor); };
     const totalSubsidios = subsidios.reduce((t, s) => t + valorMensal(s), 0);
 
     // Validação: a mensagem de cada campo com problema (inclui duplicados contra os funcionários carregados).
@@ -602,10 +612,10 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                         <div className="mb-4 flex flex-col gap-2 sm:flex-row">
                             <SearchableSelect className={cn(inp, 'flex-1')} value={escolhaSubsidio} placeholder="Pesquisar e adicionar subsídio do catálogo…" searchPlaceholder="Pesquisar subsídio…"
                                 emptyMessage="Nenhum subsídio disponível no catálogo."
-                                options={catalogo.filter(r => !subsidios.some(s => s.rubrica_id === r.id)).map(r => ({ value: r.id, label: r.nome, subLabel: r.forma === 'percentagem' ? `${Math.round(r.percentagem * 1000) / 10}% do salário base` : 'Valor fixo' }))}
+                                options={catalogo.filter(r => r.periodicidade !== 'pontual' && !subsidios.some(s => s.rubrica_id === r.id)).map(r => ({ value: r.id, label: r.nome, subLabel: calculoRubrica(r) }))}
                                 onValueChange={setEscolhaSubsidio} />
                             <Button type="button" variant="outline" className="h-10 rounded-xl" disabled={!escolhaSubsidio}
-                                onClick={() => { setSubsidios(s => [...s, { chave: crypto.randomUUID(), rubrica_id: escolhaSubsidio, valor: 0 }]); setEscolhaSubsidio(''); setSujo(true); }}><Plus className="mr-1.5 h-4 w-4" /> Adicionar</Button>
+                                onClick={() => { const r = rubricas.find(x => x.id === escolhaSubsidio); setSubsidios(s => [...s, { chave: crypto.randomUUID(), rubrica_id: escolhaSubsidio, valor: (r?.valor_padrao_minor || 0) / 100 }]); setEscolhaSubsidio(''); setSujo(true); }}><Plus className="mr-1.5 h-4 w-4" /> Adicionar</Button>
                         </div>
                         <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-700">
                             <table className="w-full min-w-[720px] text-sm">
@@ -618,16 +628,17 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                                         return (
                                             <tr key={s.chave} className="border-t border-slate-100 dark:border-slate-800">
                                                 <td className="px-4 py-3 font-semibold">{r?.nome || '—'}{s.existenteId && <span className="ml-2 text-[11px] font-normal text-slate-500">desde {dataCurta(s.inicio)}</span>}</td>
-                                                <td className="px-4 py-3">{r?.forma === 'percentagem' ? `${Math.round(r.percentagem * 1000) / 10}% do salário base` : (
-                                                    <span className="flex items-center gap-2">Valor fixo {!s.existenteId && <span className="w-36"><CurrencyInput className="h-8 rounded-lg text-sm" aria-label={`Valor de ${r?.nome}`} value={s.valor} onValueChange={v => { setSubsidios(l => l.map(x => x.chave === s.chave ? { ...x, valor: v } : x)); setSujo(true); }} /></span>}</span>
+                                                <td className="px-4 py-3">{r?.forma === 'percentagem' && !r.por_dia ? calculoRubrica(r) : (
+                                                    <span className="flex items-center gap-2">{r?.por_dia ? 'Por dia' : 'Valor fixo'} {!s.existenteId && <span className="w-36"><CurrencyInput className="h-8 rounded-lg text-sm" aria-label={`Valor de ${r?.nome}`} value={s.valor} onValueChange={v => { setSubsidios(l => l.map(x => x.chave === s.chave ? { ...x, valor: v } : x)); setSujo(true); }} /></span>}</span>
                                                 )}</td>
                                                 <td className="px-4 py-3">
                                                     {r && <span className="flex flex-wrap gap-1">
+                                                        {r.incidencia_confirmada === 0 ? <span className="rounded-full bg-rh-warn-bg px-2 py-0.5 text-[11px] font-semibold text-rh-warn">Incidência a confirmar</span> : <>
                                                         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">{r.incide_irt ? 'IRT' : 'Isento de IRT'}</span>
-                                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">{r.incide_inss ? 'INSS' : 'Sem INSS'}</span>
+                                                        <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700 dark:bg-slate-800 dark:text-slate-300">{r.incide_inss ? 'INSS' : 'Sem INSS'}</span></>}
                                                     </span>}
                                                 </td>
-                                                <td className="px-4 py-3 text-right font-semibold tabular-nums">{salarioBase || r?.forma !== 'percentagem' ? kz(valorMensal(s)) : <span className="font-normal text-slate-400">indique o salário</span>}</td>
+                                                <td className="px-4 py-3 text-right font-semibold tabular-nums">{salarioBase || r?.forma !== 'percentagem' ? <>{kz(valorMensal(s))}{r?.por_dia ? <div className="text-[10px] font-normal text-slate-500">≈ 30 dias</div> : null}</> : <span className="font-normal text-slate-400">indique o salário</span>}</td>
                                                 <td className="px-2 py-3 text-center">
                                                     <button type="button" aria-label={`Remover ${r?.nome}`} title="Remover" className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-red-600"
                                                         onClick={() => { if (s.existenteId) setRemovidos(l => [...l, s.existenteId!]); setSubsidios(l => l.filter(x => x.chave !== s.chave)); setSujo(true); }}><X className="h-4 w-4" /></button>
@@ -642,7 +653,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                             <span className="text-slate-600 dark:text-slate-300">Os descontos (Segurança Social, IRT e faltas) são calculados no processamento do mês.</span>
                             <b className="tabular-nums">Total mensal de subsídios: {kz(totalSubsidios)}</b>
                         </div>
-                    </>, <a href="#/rh/configuracoes" target="_blank" rel="noreferrer" className="text-[13px] font-semibold text-blue-700 hover:underline">Gerir catálogo →</a>)}
+                    </>, <a href="#/rh/configuracoes?seccao=subsidios" target="_blank" rel="noreferrer" className="text-[13px] font-semibold text-blue-700 hover:underline">Gerir catálogo →</a>)}
 
                     {seccao('documentos', 7, (
                         <div className={grelha}>

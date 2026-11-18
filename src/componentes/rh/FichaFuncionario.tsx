@@ -16,6 +16,7 @@ import { ArquivoDocumentos } from './ArquivoDocumentos';
 import { SeccaoRH, SeloBI, SeloEstadoFuncionario, ValorRH, antiguidade, dataPt, executar, idade, iniciais, kz, useCarregar } from './comum-rh';
 import { DialogoContrato, DialogoDependente, DialogoSubsidio } from './DialogosFuncionario';
 import { imprimirFicha } from './accoes-funcionario';
+import { calculoRubrica } from './CatalogoSubsidios';
 import type { AlvoEdicao, SeccaoFormulario } from './FormularioFuncionario';
 
 type Permissoes = { gerir: boolean; salarios: boolean; confidencial: boolean };
@@ -83,7 +84,8 @@ export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubric
     const utilizador = (users || []).find(u => u.id === f.utilizador_id);
     const tipoContrato = activo ? (activo.tipo === 'indeterminado' ? 'Tempo indeterminado' : 'Termo certo') : 'Sem contrato activo';
     const editar = (seccao: SeccaoFormulario, campo?: string) => permissoes.gerir && onEditar({ seccao, campo });
-    const valorSubsidio = (x: FuncionarioRubrica, r?: Rubrica) => r?.forma === 'percentagem' ? Math.round((activo?.salario_base_minor || 0) * r.percentagem * (x.quantidade || 1)) : x.valor_minor;
+    const valorSubsidio = (x: FuncionarioRubrica, r?: Rubrica) => r?.por_dia ? (x.valor_minor || r.valor_padrao_minor || 0) * 30
+        : r?.forma === 'percentagem' ? Math.round((activo?.salario_base_minor || 0) * r.percentagem * (x.quantidade || 1)) : x.valor_minor || r?.valor_padrao_minor || 0;
     const subsidios = useMemo(() => dados.dados.fixas.map(x => ({ x, r: rubricas.find(y => y.id === x.rubrica_id) })), [dados.dados.fixas, rubricas]);
 
     // Realça no índice a secção visível dentro do corpo da ficha.
@@ -251,7 +253,7 @@ export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubric
                                         {subsidios.map(({ x, r }) => (
                                             <tr key={x.id} className={cn('border-b border-slate-100 dark:border-slate-800', x.fim && x.fim < hoje && 'text-slate-400')}>
                                                 <td className="px-5 py-3 font-semibold">{r?.nome || '—'}</td>
-                                                <td className="px-5 py-3">{r?.forma === 'percentagem' ? `${Math.round(r.percentagem * 1000) / 10}% do salário base` : 'Valor fixo'}</td>
+                                                <td className="px-5 py-3">{r ? calculoRubrica(r) : '—'}{r?.incidencia_confirmada === 0 && <span className="ml-2 rounded-full bg-rh-warn-bg px-2 py-0.5 text-[11px] font-semibold text-rh-warn">incidência a confirmar</span>}</td>
                                                 <td className="px-5 py-3 text-right font-semibold tabular-nums">{kz(valorSubsidio(x, r))}</td>
                                                 <td className="px-5 py-3">{dataPt(x.inicio)}{x.fim ? ` a ${dataPt(x.fim)}` : ''}</td>
                                                 <td className="px-5 py-3 text-right">{permissoes.gerir && !x.fim && actor && (

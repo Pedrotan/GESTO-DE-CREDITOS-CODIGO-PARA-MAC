@@ -25,6 +25,10 @@ export type TipoProcessamento = 'normal' | 'ferias' | 'natal' | 'acerto';
 export type RubricaMotor = {
     id: string; codigo: string; nome: string; tipo: 'abono' | 'desconto'; forma: 'fixo' | 'percentagem' | 'quantidade'; percentagem: number;
     incide_inss: number; incide_irt: number; limite_isento_irt_minor: number; limite_isento_irt_pct: number; ordem_no_recibo: number;
+    /** Valor por dia trabalhado (o valor da linha é por dia). */
+    por_dia?: number;
+    /** Desconta proporcionalmente as faltas e os dias fora do contrato. */
+    proporcional_faltas?: number;
 };
 /** Rubrica do funcionário (fixa) ou do mês (pontual): valor em cêntimos, ou % do salário base, ou quantidade × valor. */
 export type LinhaEntrada = { rubrica: RubricaMotor; valorMinor: number; quantidade?: number; descricao?: string };
@@ -87,6 +91,12 @@ export function calcularRecibo(e: EntradaRecibo): ResultadoRecibo {
     const valorDia = base / (e.divisorDia > 0 ? e.divisorDia : 30);
     const valorHora = e.horasSemanais > 0 ? (base * 12) / (52 * e.horasSemanais) : 0;
 
+    // Dias efectivamente trabalhados no mês (para os subsídios por dia e os proporcionais às faltas).
+    const divisorMes = e.divisorDia > 0 ? e.divisorDia : 30;
+    const diasEfectivos = e.tipo === 'normal'
+        ? Math.max(0, divisorMes - Math.min(divisorMes, Math.max(0, e.diasForaContrato || 0)) - Math.max(0, e.faltasDescontaveis))
+        : divisorMes;
+
     // 1. Rubricas: salário base, subsídios do tipo de processamento, rubricas fixas e do mês.
     if (e.tipo === 'normal') linha(e.sistema.SAL_BASE, e.sistema.SAL_BASE.nome, 1, base, base);
     if (e.tipo === 'ferias' || e.tipo === 'natal') {
@@ -97,9 +107,11 @@ export function calcularRecibo(e: EntradaRecibo): ResultadoRecibo {
     }
     for (const item of e.rubricas) {
         const q = item.quantidade ?? 1;
-        const valor = item.rubrica.forma === 'percentagem' ? r(base * item.rubrica.percentagem * q)
+        let valor = item.rubrica.por_dia ? r(item.valorMinor * diasEfectivos)
+            : item.rubrica.forma === 'percentagem' ? r(base * item.rubrica.percentagem * q)
             : item.rubrica.forma === 'quantidade' ? r(item.valorMinor * q) : r(item.valorMinor);
-        linha(item.rubrica, item.descricao || item.rubrica.nome, q, item.rubrica.forma === 'percentagem' ? base : item.valorMinor, valor);
+        if (item.rubrica.proporcional_faltas && !item.rubrica.por_dia && e.tipo === 'normal') valor = r(valor * diasEfectivos / divisorMes);
+        linha(item.rubrica, item.descricao || item.rubrica.nome, item.rubrica.por_dia ? diasEfectivos : q, item.rubrica.forma === 'percentagem' && !item.rubrica.por_dia ? base : item.valorMinor, valor);
     }
 
     // 3. Faltas, atrasos e horas extra (só no processamento normal), lidos do livro de ponto e das ausências.

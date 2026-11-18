@@ -41,6 +41,9 @@ const agora = () => new Date().toISOString();
 const autoridadeTotal = (actor: ActorRH) => actor.role === 'super_admin' || isPrimaryOwner(actor);
 const ultimoDia = (ano: number, mes: number) => `${ano}-${String(mes).padStart(2, '0')}-${String(new Date(Date.UTC(ano, mes, 0)).getUTCDate()).padStart(2, '0')}`;
 const LOTE = 40;
+type RubricaCatalogo = RubricaMotor & { periodicidade?: string; mes_pagamento?: number | null; incidencia_confirmada?: number; valor_padrao_minor?: number; nome: string };
+/** Mensal: todos os meses; anual: só no mês de pagamento; pontual: nunca como rubrica fixa. */
+const periodoPermite = (r: RubricaCatalogo, mes: number) => (r.periodicidade === 'pontual' ? false : r.periodicidade === 'anual' ? Number(r.mes_pagamento) === mes : true);
 
 export class ServicoSalariosRH {
     static processamentos() {
@@ -160,6 +163,14 @@ export class ServicoSalariosRH {
             ServicoTempoRH.tiposAusencia(), ServicoRH.cargos(), ServicoRH.departamentos(), this.entradas(p.id),
         ]);
         const entradaDe = new Map(entradas.map(e => [e.funcionario_id, e]));
+        // Subsídios atribuídos com a incidência de IRT/INSS por confirmar bloqueiam o cálculo até ser definida.
+        if (p.tipo === 'normal') {
+            const inicioM = `${p.ano}-${String(p.mes).padStart(2, '0')}-01`;
+            const porConfirmar = [...new Set(fixas.filter(x => x.inicio <= referencia && (!x.fim || x.fim >= inicioM))
+                .map(x => rubricas.find(r => r.id === x.rubrica_id) as RubricaCatalogo | undefined)
+                .filter((r): r is RubricaCatalogo => Boolean(r && r.incidencia_confirmada === 0 && periodoPermite(r, p.mes))).map(r => r.nome))];
+            if (porConfirmar.length) throw new Error(`Defina se incide IRT e INSS em: ${porConfirmar.join(', ')} (Configurações › Subsídios e abonos). Confirme com o contabilista.`);
+        }
         const tabela = tabelaIrtEmVigor(tabelas, referencia);
         if (!tabela) throw new Error(`Não há tabela do IRT em vigor a ${referencia}. Crie-a nas Configurações de RH.`);
         const escaloes = await ServicoRH.escaloesIrt(tabela.id);
@@ -206,8 +217,10 @@ export class ServicoSalariosRH {
             if (entrada?.faltas != null) resumo.faltasDescontaveis = entrada.faltas;
             else if (p.tipo === 'normal' && !pontoFechado) avisos.push('Livro de ponto do mês por fechar: sem faltas lançadas.');
             const divisor = taxas.divisor_dia === 'uteis' ? diasUteis(inicioMes, referencia, horario, feriados) : 30;
+            // Subsídios do catálogo: mensais todos os meses, anuais só no mês de pagamento, pontuais só pela «Rubrica do mês».
             const linhasFixas = fixas.filter(x => x.funcionario_id === f.id && x.inicio <= referencia && (!x.fim || x.fim >= inicioMes))
-                .map(x => ({ rubrica: porId.get(x.rubrica_id)!, valorMinor: x.valor_minor, quantidade: x.quantidade })).filter(x => x.rubrica);
+                .map(x => ({ rubrica: porId.get(x.rubrica_id)!, valorMinor: x.valor_minor || (porId.get(x.rubrica_id) as RubricaCatalogo | undefined)?.valor_padrao_minor || 0, quantidade: x.quantidade }))
+                .filter(x => x.rubrica && periodoPermite(x.rubrica as RubricaCatalogo, p.mes));
             const linhasMes = pontuais.filter(x => x.funcionario_id === f.id)
                 .map(x => ({ rubrica: porId.get(x.rubrica_id)!, valorMinor: x.valor_minor, quantidade: x.quantidade, descricao: x.descricao || undefined })).filter(x => x.rubrica);
             const reformado = Boolean(f.reformado);
