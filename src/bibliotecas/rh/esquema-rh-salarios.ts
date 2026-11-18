@@ -41,6 +41,23 @@ export const RH_SALARIOS_SCHEMA_SQL = [
         quantidade REAL NOT NULL DEFAULT 1, valor_minor INTEGER NOT NULL, descricao TEXT,
         criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT
     )`,
+    // Valores do mês lançados no ecrã de processamento: salário base deste mês e faltas (sobrepõem o contrato e o ponto).
+    `CREATE TABLE IF NOT EXISTS rh_processamento_entrada (
+        id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL,
+        salario_base_minor INTEGER CHECK(salario_base_minor IS NULL OR salario_base_minor >= 0),
+        faltas REAL CHECK(faltas IS NULL OR (faltas >= 0 AND faltas <= 31)),
+        actualizado_em TEXT NOT NULL, actualizado_por TEXT, actualizado_por_nome TEXT
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_processamento_entrada ON rh_processamento_entrada(processamento_id, funcionario_id)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_insert BEFORE INSERT ON rh_processamento_entrada
+        WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado')
+        BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_update BEFORE UPDATE ON rh_processamento_entrada
+        WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado')
+        BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_delete BEFORE DELETE ON rh_processamento_entrada
+        WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado')
+        BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_fechado_update BEFORE UPDATE ON rh_processamento
         WHEN OLD.estado = 'fechado'
         BEGIN SELECT RAISE(ABORT, 'Um processamento salarial fechado não pode ser alterado (faça um acerto no mês seguinte)'); END`,

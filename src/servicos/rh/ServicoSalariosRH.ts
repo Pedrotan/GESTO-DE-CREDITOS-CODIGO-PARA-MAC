@@ -31,6 +31,8 @@ export type Recibo = {
     outros_descontos_minor: number; liquido_minor: number; custo_empresa_minor: number; avisos_json: string | null; resumo_json: string | null; criado_em: string;
 };
 export type LinhaReciboRH = LinhaRecibo & { id: string; recibo_id: string };
+/** Valores lançados à mão no mês: salário base deste mês e número de faltas (null = usar o contrato / o livro de ponto). */
+export type EntradaMes = { id: string; processamento_id: string; funcionario_id: string; salario_base_minor: number | null; faltas: number | null; actualizado_em: string; actualizado_por_nome: string | null };
 export type RubricaPontual = { id: string; processamento_id: string; funcionario_id: string; rubrica_id: string; quantidade: number; valor_minor: number; descricao: string | null; criado_por_nome: string | null };
 
 export const ROTULO_TIPO: Record<TipoProcessamento, string> = { normal: 'Salário', ferias: 'Subsídio de férias', natal: 'Subsídio de Natal', acerto: 'Acerto' };
@@ -71,6 +73,31 @@ export class ServicoSalariosRH {
     }
     static pontuais(processamentoId: string) {
         return db.all<RubricaPontual>('SELECT * FROM rh_rubrica_pontual WHERE processamento_id = ? ORDER BY criado_em', [processamentoId]).catch(() => [] as RubricaPontual[]);
+    }
+
+    static entradas(processamentoId: string) {
+        return db.all<EntradaMes>('SELECT * FROM rh_processamento_entrada WHERE processamento_id = ?', [processamentoId]).catch(() => [] as EntradaMes[]);
+    }
+
+    /** Grava o salário base do mês e/ou as faltas de um funcionário; o processamento volta a «aberto» para recalcular. */
+    static async guardarEntrada(p: Processamento, funcionarioId: string, valores: { salario_base_minor?: number | null; faltas?: number | null }, actor: ActorRH) {
+        if (!['aberto', 'calculado'].includes(p.estado)) throw new Error('O processamento já foi aprovado: os valores do mês não mudam.');
+        const actual = (await this.entradas(p.id)).find(e => e.funcionario_id === funcionarioId);
+        const salario = valores.salario_base_minor === undefined ? actual?.salario_base_minor ?? null : valores.salario_base_minor;
+        const faltas = valores.faltas === undefined ? actual?.faltas ?? null : valores.faltas;
+        if (salario !== null && (!Number.isSafeInteger(Math.round(salario)) || salario < 0)) throw new Error('Salário inválido.');
+        if (faltas !== null && (!Number.isFinite(faltas) || faltas < 0 || faltas > 31)) throw new Error('Indique entre 0 e 31 faltas.');
+        const when = agora();
+        await db.transaction([
+            actual
+                ? { sql: 'UPDATE rh_processamento_entrada SET salario_base_minor = ?, faltas = ?, actualizado_em = ?, actualizado_por = ?, actualizado_por_nome = ? WHERE id = ?',
+                    params: [salario === null ? null : Math.round(salario), faltas, when, actor.id, actor.name, actual.id], expectChanges: 1 }
+                : { sql: 'INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                    params: [crypto.randomUUID(), p.id, funcionarioId, salario === null ? null : Math.round(salario), faltas, when, actor.id, actor.name], expectChanges: 1 },
+            { sql: `UPDATE rh_processamento SET estado = 'aberto', actualizado_em = ? WHERE id = ? AND estado IN ('aberto', 'calculado')`, params: [when, p.id], expectChanges: 1 },
+            auditoriaRH(actor, 'update', `Valores do mês ${String(p.mes).padStart(2, '0')}/${p.ano} de um funcionário`, { processamentoId: p.id, funcionarioId },
+                actual ? { salario_base_minor: actual.salario_base_minor, faltas: actual.faltas } : undefined, { salario_base_minor: salario, faltas }, when),
+        ]);
     }
 
     /** Abre um processamento: normal (um por mês, todos os activos), férias, Natal ou acerto (funcionários escolhidos). */
@@ -127,11 +154,12 @@ export class ServicoSalariosRH {
         if (!['aberto', 'calculado'].includes(p.estado)) throw new Error('Só se calcula um processamento aberto ou calculado.');
         const referencia = ultimoDia(p.ano, p.mes);
         const hoje = luandaTodayKey();
-        const [funcionarios, contratos, rubricas, fixas, pontuais, parametros, tabelas, horarios, feriados, pontos, ausencias, tipos, cargos, departamentos] = await Promise.all([
+        const [funcionarios, contratos, rubricas, fixas, pontuais, parametros, tabelas, horarios, feriados, pontos, ausencias, tipos, cargos, departamentos, entradas] = await Promise.all([
             ServicoRH.funcionarios(), ServicoRH.contratos(), ServicoRH.rubricas(), ServicoRH.todasRubricasFuncionarios(), this.pontuais(p.id), ServicoRH.parametros(),
             ServicoRH.tabelasIrt(), ServicoTempoRH.horarios(), ServicoTempoRH.feriados(), ServicoTempoRH.pontosMes(p.ano, p.mes), ServicoTempoRH.ausencias(),
-            ServicoTempoRH.tiposAusencia(), ServicoRH.cargos(), ServicoRH.departamentos(),
+            ServicoTempoRH.tiposAusencia(), ServicoRH.cargos(), ServicoRH.departamentos(), this.entradas(p.id),
         ]);
+        const entradaDe = new Map(entradas.map(e => [e.funcionario_id, e]));
         const tabela = tabelaIrtEmVigor(tabelas, referencia);
         if (!tabela) throw new Error(`Não há tabela do IRT em vigor a ${referencia}. Crie-a nas Configurações de RH.`);
         const escaloes = await ServicoRH.escaloesIrt(tabela.id);
@@ -147,11 +175,12 @@ export class ServicoSalariosRH {
             inss_trabalhador: num('inss_trabalhador', 0.03), inss_empresa: num('inss_empresa', 0.08), inss_reformado: num('inss_reformado', 0.08),
             divisor_dia: valorTexto(parametros, 'divisor_dia', referencia, '30'), horas_extra_acrescimo: num('horas_extra_acrescimo', 0.5),
             horas_extra_feriado_acrescimo: num('horas_extra_feriado_acrescimo', 1), subsidio_ferias_pct: num('subsidio_ferias_pct', 0.5),
-            subsidio_natal_pct: num('subsidio_natal_pct', 0.5), salario_minimo: num('salario_minimo', 0), irt_tabela: `${tabela.ano} — ${tabela.lei_referencia}`,
+            subsidio_natal_pct: num('subsidio_natal_pct', 0.5), salario_minimo: num('salario_minimo', 0), valor_falta: num('valor_falta', 0), irt_tabela: `${tabela.ano} — ${tabela.lei_referencia}`,
         };
-        // Faltas, atrasos e horas extra vêm do livro de ponto fechado (secção 10.3 da especificação do ponto).
+        // Faltas, atrasos e horas extra vêm do livro de ponto fechado (secção 10.3 da especificação do ponto). Com o mês
+        // ainda por fechar, valem as faltas lançadas à mão no ecrã do processamento (atrasos e horas extra a zero).
         const ponto = p.tipo === 'normal' ? await ServicoPontoRH.totaisSalario(p.ano, p.mes) : null;
-        if (ponto && !ponto.totais) throw new Error(`Feche primeiro o livro de ponto de ${String(p.mes).padStart(2, '0')}/${p.ano} (Livro de ponto › Fechar mês): o processamento usa os totais do mês fechado.`);
+        const pontoFechado = Boolean(ponto?.totais);
         const escolhidos = p.funcionarios_json ? new Set<string>(JSON.parse(p.funcionarios_json)) : null;
         const inicioMes = `${p.ano}-${String(p.mes).padStart(2, '0')}-01`;
         const elegiveis = funcionarios.filter(f => (escolhidos ? escolhidos.has(f.id) : true) && f.data_admissao <= referencia && (!f.data_saida || f.data_saida >= inicioMes)
@@ -163,8 +192,9 @@ export class ServicoSalariosRH {
             const contrato = contratos.find(c => c.funcionario_id === f.id && c.estado === 'activo')
                 || contratos.filter(c => c.funcionario_id === f.id && c.inicio <= referencia).sort((a, b) => b.inicio.localeCompare(a.inicio))[0];
             const avisos: string[] = [];
-            if (!contrato) avisos.push('Sem contrato: salário base 0.');
-            const base = contrato?.salario_base_minor || 0;
+            const entrada = entradaDe.get(f.id);
+            if (!contrato && entrada?.salario_base_minor == null) avisos.push('Sem contrato: salário base 0.');
+            const base = entrada?.salario_base_minor ?? contrato?.salario_base_minor ?? 0;
             const horario = horarios.find(h => h.id === f.horario_id) || horarios.find(h => h.id === 'horario-normal') || HORARIO_OMISSAO;
             const totaisPonto = ponto?.totais?.get(f.id);
             const resumo = totaisPonto ? {
@@ -172,8 +202,9 @@ export class ServicoSalariosRH {
                 horasExtra: Math.round(totaisPonto.minutos_extra_util / 60 * 100) / 100,
                 horasExtraFeriado: Math.round((totaisPonto.minutos_extra_descanso + totaisPonto.minutos_extra_feriado) / 60 * 100) / 100,
                 ausenciasPendentes: totaisPonto.ausencias_pendentes, diasSemRegisto: totaisPonto.pendentes,
-            } : p.tipo === 'normal' ? resumoMes({ funcionarioId: f.id, ano: p.ano, mes: p.mes, horario, feriados, pontos, ausencias, tipos, admissao: f.data_admissao, saida: f.data_saida, hoje })
-                : { faltasDescontaveis: 0, minutosAtraso: 0, horasExtra: 0, horasExtraFeriado: 0, ausenciasPendentes: 0, diasSemRegisto: 0 };
+            } : { faltasDescontaveis: 0, minutosAtraso: 0, horasExtra: 0, horasExtraFeriado: 0, ausenciasPendentes: 0, diasSemRegisto: 0 };
+            if (entrada?.faltas != null) resumo.faltasDescontaveis = entrada.faltas;
+            else if (p.tipo === 'normal' && !pontoFechado) avisos.push('Livro de ponto do mês por fechar: sem faltas lançadas.');
             const divisor = taxas.divisor_dia === 'uteis' ? diasUteis(inicioMes, referencia, horario, feriados) : 30;
             const linhasFixas = fixas.filter(x => x.funcionario_id === f.id && x.inicio <= referencia && (!x.fim || x.fim >= inicioMes))
                 .map(x => ({ rubrica: porId.get(x.rubrica_id)!, valorMinor: x.valor_minor, quantidade: x.quantidade })).filter(x => x.rubrica);
@@ -183,7 +214,7 @@ export class ServicoSalariosRH {
             const resultado = calcularRecibo({
                 tipo: p.tipo, salarioBaseMinor: base, horasSemanais: contrato?.horas_semanais || horasSemanais(horario) || 40, divisorDia: divisor,
                 diasForaContrato: diasForaDoContrato(p.ano, p.mes, f.data_admissao, f.data_saida, divisor),
-                faltasDescontaveis: resumo.faltasDescontaveis, minutosAtraso: resumo.minutosAtraso, horasExtra: resumo.horasExtra, horasExtraFeriado: resumo.horasExtraFeriado,
+                faltasDescontaveis: resumo.faltasDescontaveis, valorFaltaMinor: Math.round(taxas.valor_falta * 100), minutosAtraso: resumo.minutosAtraso, horasExtra: resumo.horasExtra, horasExtraFeriado: resumo.horasExtraFeriado,
                 acrescimoHorasExtra: taxas.horas_extra_acrescimo, acrescimoHorasExtraFeriado: taxas.horas_extra_feriado_acrescimo,
                 subsidioPct: p.tipo === 'ferias' ? taxas.subsidio_ferias_pct : taxas.subsidio_natal_pct, mesesServico: mesesServicoNoAno(p.ano, f.data_admissao, f.data_saida),
                 // Só as rubricas fixas entram no salário normal; nos subsídios e acertos entram só as do próprio processamento.

@@ -417,4 +417,11 @@ export const rhSeedFolhaStatements = (now: string) => RH_RUBRICAS_FOLHA.map(r =>
     sql: RH_SEED_RUBRICA_PCT_SQL, params: [`rubrica-${r.codigo}`, r.codigo, r.nome, r.tipo, r.forma, r.percentagem, r.inss, r.irt, r.ordem, now],
 }));
 /** Vínculos (o da folha: «Pessoal do Quadro» imprime-se como «Vinc.:», os restantes como «Cargo:»). */
+/** Valor de cada falta (Kz); 0 = desconta o valor-dia (salário base ÷ divisor). */
+export const RH_PARAMETROS_FALTA: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'valor_falta', valor: '0', descricao: 'Valor descontado por cada falta em Kz (0 = valor-dia: salário base ÷ divisor do dia)' },
+];
+export const rhSeedFaltaStatements = (now: string) => RH_PARAMETROS_FALTA.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));
 export const RH_VINCULOS = ['Comissão de Serviço', 'Pessoal do Quadro', 'Quadro Temporário', 'Contratado', 'Prestador de Serviços'];

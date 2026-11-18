@@ -38,6 +38,8 @@ export type EntradaRecibo = {
     /** Dias de calendário do mês fora do contrato (admissão ou saída a meio do mês). */
     diasForaContrato?: number;
     faltasDescontaveis: number;
+    /** Valor de cada falta (cêntimos) definido nas configurações; 0 ou ausente = valor-dia. */
+    valorFaltaMinor?: number;
     minutosAtraso: number;
     horasExtra: number;
     horasExtraFeriado: number;
@@ -105,7 +107,10 @@ export function calcularRecibo(e: EntradaRecibo): ResultadoRecibo {
     if (e.tipo === 'normal') {
         const fora = Math.min(diasTrabalhados, Math.max(0, e.diasForaContrato || 0));
         if (fora) linha({ ...e.sistema.FALTAS, nome: 'Dias fora do contrato' }, `Dias fora do contrato (admissão/saída)`, fora, r(valorDia), Math.min(base, r(valorDia * fora)));
-        if (e.faltasDescontaveis > 0) linha(e.sistema.FALTAS, e.sistema.FALTAS.nome, e.faltasDescontaveis, r(valorDia), r(valorDia * e.faltasDescontaveis));
+        if (e.faltasDescontaveis > 0) {
+            const porFalta = e.valorFaltaMinor && e.valorFaltaMinor > 0 ? e.valorFaltaMinor : valorDia;
+            linha(e.sistema.FALTAS, e.sistema.FALTAS.nome, e.faltasDescontaveis, r(porFalta), r(porFalta * e.faltasDescontaveis));
+        }
         if (e.minutosAtraso > 0) linha(e.sistema.ATRASOS, `${e.sistema.ATRASOS.nome} (${e.minutosAtraso} min)`, Math.round((e.minutosAtraso / 60) * 100) / 100, r(valorHora), r((valorHora * e.minutosAtraso) / 60));
         if (e.horasExtra > 0) linha(e.sistema.HORAS_EXTRA, `${e.sistema.HORAS_EXTRA.nome} (+${Math.round(e.acrescimoHorasExtra * 100)}%)`, e.horasExtra, r(valorHora * (1 + e.acrescimoHorasExtra)), r(valorHora * e.horasExtra * (1 + e.acrescimoHorasExtra)));
         if (e.horasExtraFeriado > 0) linha(e.sistema.HORAS_EXTRA, `${e.sistema.HORAS_EXTRA.nome} em feriado/descanso (+${Math.round(e.acrescimoHorasExtraFeriado * 100)}%)`, e.horasExtraFeriado, r(valorHora * (1 + e.acrescimoHorasExtraFeriado)), r(valorHora * e.horasExtraFeriado * (1 + e.acrescimoHorasExtraFeriado)));

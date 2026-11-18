@@ -185,6 +185,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS rh_ponto ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, entrada TEXT, saida TEXT, horas_trabalhadas REAL NOT NULL DEFAULT 0, horas_extra REAL NOT NULL DEFAULT 0, minutos_atraso INTEGER NOT NULL DEFAULT 0, origem TEXT NOT NULL DEFAULT 'manual' CHECK(origem IN ('manual', 'importado', 'app')), observacoes TEXT, registado_por TEXT, registado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_ponto_periodo ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, mes INTEGER NOT NULL, departamento_id TEXT, estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'em_validacao', 'validado', 'fechado')), validado_por TEXT, validado_por_nome TEXT, validado_em TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, fechado_por TEXT, fechado_por_nome TEXT, fechado_em TEXT, reaberto_por TEXT, reaberto_por_nome TEXT, reaberto_em TEXT, motivo_reabertura TEXT, resumo_json TEXT, processamento_desactualizado INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_processamento ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, mes INTEGER NOT NULL CHECK(mes BETWEEN 1 AND 12), tipo TEXT NOT NULL CHECK(tipo IN ('normal', 'ferias', 'natal', 'acerto')), estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'calculado', 'aprovado', 'pago', 'fechado')), descricao TEXT, funcionarios_json TEXT, irt_tabela_id TEXT, parametros_json TEXT, total_bruto_minor INTEGER NOT NULL DEFAULT 0, total_liquido_minor INTEGER NOT NULL DEFAULT 0, total_inss_trab_minor INTEGER NOT NULL DEFAULT 0, total_inss_emp_minor INTEGER NOT NULL DEFAULT 0, total_irt_minor INTEGER NOT NULL DEFAULT 0, total_outros_minor INTEGER NOT NULL DEFAULT 0, num_recibos INTEGER NOT NULL DEFAULT 0, calculado_por TEXT, calculado_por_nome TEXT, calculado_em TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, pago_por TEXT, pago_por_nome TEXT, pago_em TEXT, conta_pagamento TEXT, fechado_por TEXT, fechado_por_nome TEXT, fechado_em TEXT, lancamentos_json TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_processamento_entrada ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, salario_base_minor INTEGER CHECK(salario_base_minor IS NULL OR salario_base_minor >= 0), faltas REAL CHECK(faltas IS NULL OR (faltas >= 0 AND faltas <= 31)), actualizado_em TEXT NOT NULL, actualizado_por TEXT, actualizado_por_nome TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_recibo ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, numero_recibo TEXT NOT NULL, nome TEXT NOT NULL, numero_mecanografico TEXT, cargo TEXT, departamento TEXT, nif TEXT, numero_inss TEXT, iban TEXT, banco TEXT, salario_base_minor INTEGER NOT NULL DEFAULT 0, dias_trabalhados REAL NOT NULL DEFAULT 0, valor_dia_minor INTEGER NOT NULL DEFAULT 0, valor_hora_minor INTEGER NOT NULL DEFAULT 0, total_abonos_minor INTEGER NOT NULL DEFAULT 0, total_descontos_minor INTEGER NOT NULL DEFAULT 0, bruto_minor INTEGER NOT NULL DEFAULT 0, base_inss_minor INTEGER NOT NULL DEFAULT 0, inss_minor INTEGER NOT NULL DEFAULT 0, inss_emp_minor INTEGER NOT NULL DEFAULT 0, isento_irt_minor INTEGER NOT NULL DEFAULT 0, base_irt_minor INTEGER NOT NULL DEFAULT 0, irt_minor INTEGER NOT NULL DEFAULT 0, escalao_irt INTEGER, outros_descontos_minor INTEGER NOT NULL DEFAULT 0, liquido_minor INTEGER NOT NULL DEFAULT 0, custo_empresa_minor INTEGER NOT NULL DEFAULT 0, avisos_json TEXT, resumo_json TEXT, criado_em TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS rh_recibo_linha ( id TEXT PRIMARY KEY, recibo_id TEXT NOT NULL, rubrica_id TEXT, codigo TEXT NOT NULL, descricao TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')), quantidade REAL NOT NULL DEFAULT 1, valor_unitario_minor INTEGER NOT NULL DEFAULT 0, valor_minor INTEGER NOT NULL, incide_inss INTEGER NOT NULL DEFAULT 0, incide_irt INTEGER NOT NULL DEFAULT 0, isento_irt_minor INTEGER NOT NULL DEFAULT 0, ordem INTEGER NOT NULL DEFAULT 100 )",
   "CREATE TABLE IF NOT EXISTS rh_rubrica ( id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')), forma TEXT NOT NULL DEFAULT 'fixo' CHECK(forma IN ('fixo', 'percentagem', 'quantidade')), percentagem REAL NOT NULL DEFAULT 0, incide_inss INTEGER NOT NULL DEFAULT 1, incide_irt INTEGER NOT NULL DEFAULT 1, limite_isento_irt_minor INTEGER NOT NULL DEFAULT 0, limite_isento_irt_pct REAL NOT NULL DEFAULT 0, conta_contabilistica TEXT, ordem_no_recibo INTEGER NOT NULL DEFAULT 100, sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
@@ -272,6 +273,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_rh_marcacao_delete BEFORE DELETE ON rh_marcacao BEGIN SELECT RAISE(ABORT, 'As marcações de ponto não se apagam: anulam-se com motivo')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_marcacao_imutavel BEFORE UPDATE ON rh_marcacao WHEN OLD.anulada = 1 OR NEW.data_hora <> OLD.data_hora OR COALESCE(NEW.tipo, '') <> COALESCE(OLD.tipo, '') OR NEW.funcionario_id <> OLD.funcionario_id OR NEW.data <> OLD.data BEGIN SELECT RAISE(ABORT, 'Uma marcação de ponto não se altera: anula-se e regista-se outra')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_delete BEFORE DELETE ON rh_processamento WHEN OLD.estado <> 'aberto' BEGIN SELECT RAISE(ABORT, 'Só se apaga um processamento ainda aberto')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_delete BEFORE DELETE ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_insert BEFORE INSERT ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_update BEFORE UPDATE ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_fechado_update BEFORE UPDATE ON rh_processamento WHEN OLD.estado = 'fechado' BEGIN SELECT RAISE(ABORT, 'Um processamento salarial fechado não pode ser alterado (faça um acerto no mês seguinte)')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_recibo_delete BEFORE DELETE ON rh_recibo WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os recibos não mudam')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_recibo_insert BEFORE INSERT ON rh_recibo WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os recibos não mudam')",
@@ -289,6 +293,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_escala_func_data ON rh_escala(funcionario_id, data)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_funcionario_numero ON rh_funcionario(numero_mecanografico)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_ponto_dia ON rh_ponto(funcionario_id, data)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_processamento_entrada ON rh_processamento_entrada(processamento_id, funcionario_id)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_processamento_normal ON rh_processamento(ano, mes) WHERE tipo = 'normal'",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_recibo_funcionario ON rh_recibo(processamento_id, funcionario_id)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_rubrica_codigo ON rh_rubrica(codigo)",
@@ -451,6 +456,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, ?, 'aberto', ?) ON CONFLICT(id) DO NOTHING",
   "INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, NULL, 'aberto', ?) ON CONFLICT(id) DO NOTHING",
   "INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_recibo (id, processamento_id, funcionario_id, numero_recibo, nome, numero_mecanografico, cargo, departamento, nif, numero_inss, iban, banco, salario_base_minor, dias_trabalhados, valor_dia_minor, valor_hora_minor, total_abonos_minor, total_descontos_minor, bruto_minor, base_inss_minor, inss_minor, inss_emp_minor, isento_irt_minor, base_irt_minor, irt_minor, escalao_irt, outros_descontos_minor, liquido_minor, custo_empresa_minor, avisos_json, resumo_json, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_recibo_linha (id, recibo_id, rubrica_id, codigo, descricao, tipo, quantidade, valor_unitario_minor, valor_minor, incide_inss, incide_irt, isento_irt_minor, ordem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
@@ -626,6 +632,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM rh_ponto_periodo WHERE ano = ? AND mes = ?",
   "SELECT * FROM rh_ponto_periodo WHERE id = ?",
   "SELECT * FROM rh_processamento ORDER BY ano DESC, mes DESC, criado_em DESC",
+  "SELECT * FROM rh_processamento_entrada WHERE processamento_id = ?",
   "SELECT * FROM rh_recibo WHERE processamento_id = ? ORDER BY nome",
   "SELECT * FROM rh_recibo_linha WHERE recibo_id = ? ORDER BY ordem, descricao",
   "SELECT * FROM rh_rubrica ORDER BY ordem_no_recibo, nome",
@@ -1022,6 +1029,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_processamento SET estado = 'calculado', irt_tabela_id = ?, parametros_json = ?, total_bruto_minor = ?, total_liquido_minor = ?, total_inss_trab_minor = ?, total_inss_emp_minor = ?, total_irt_minor = ?, total_outros_minor = ?, num_recibos = ?, calculado_por = ?, calculado_por_nome = ?, calculado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'aberto'",
   "UPDATE rh_processamento SET fechado_por = ?, fechado_por_nome = ?, fechado_em = ?, lancamentos_json = ?, estado = 'fechado', actualizado_em = ? WHERE id = ? AND estado = 'pago'",
   "UPDATE rh_processamento SET pago_por = ?, pago_por_nome = ?, pago_em = ?, conta_pagamento = ?, estado = 'pago', actualizado_em = ? WHERE id = ? AND estado = 'aprovado'",
+  "UPDATE rh_processamento_entrada SET salario_base_minor = ?, faltas = ?, actualizado_em = ?, actualizado_por = ?, actualizado_por_nome = ? WHERE id = ?",
   "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_tipo_ausencia SET nome = ?, justificada = ?, remunerada = ?, desconta_salario = ?, desconta_ferias = ?, exige_documento = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE simulations SET clientId = ? WHERE id = ?",
@@ -1803,6 +1811,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_processamento ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, mes INTEGER NOT NULL CHECK(mes BETWEEN 1 AND 12), tipo TEXT NOT NULL CHECK(tipo IN ('normal', 'ferias', 'natal', 'acerto')), estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'calculado', 'aprovado', 'pago', 'fechado')), descricao TEXT, funcionarios_json TEXT, irt_tabela_id TEXT, parametros_json TEXT, total_bruto_minor INTEGER NOT NULL DEFAULT 0, total_liquido_minor INTEGER NOT NULL DEFAULT 0, total_inss_trab_minor INTEGER NOT NULL DEFAULT 0, total_inss_emp_minor INTEGER NOT NULL DEFAULT 0, total_irt_minor INTEGER NOT NULL DEFAULT 0, total_outros_minor INTEGER NOT NULL DEFAULT 0, num_recibos INTEGER NOT NULL DEFAULT 0, calculado_por TEXT, calculado_por_nome TEXT, calculado_em TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, pago_por TEXT, pago_por_nome TEXT, pago_em TEXT, conta_pagamento TEXT, fechado_por TEXT, fechado_por_nome TEXT, fechado_em TEXT, lancamentos_json TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )"
   ],
   [
+    "2298d5dd1fac3fc38fecb98d82187e1791bfc8d658609f022c9c36d8505b187c",
+    "CREATE TABLE IF NOT EXISTS rh_processamento_entrada ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, salario_base_minor INTEGER CHECK(salario_base_minor IS NULL OR salario_base_minor >= 0), faltas REAL CHECK(faltas IS NULL OR (faltas >= 0 AND faltas <= 31)), actualizado_em TEXT NOT NULL, actualizado_por TEXT, actualizado_por_nome TEXT )"
+  ],
+  [
     "6d0d8655b20b37e46f49c022c9b252934ba32b4be0e34a04dd61dc5509ac1e84",
     "CREATE TABLE IF NOT EXISTS rh_recibo ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, numero_recibo TEXT NOT NULL, nome TEXT NOT NULL, numero_mecanografico TEXT, cargo TEXT, departamento TEXT, nif TEXT, numero_inss TEXT, iban TEXT, banco TEXT, salario_base_minor INTEGER NOT NULL DEFAULT 0, dias_trabalhados REAL NOT NULL DEFAULT 0, valor_dia_minor INTEGER NOT NULL DEFAULT 0, valor_hora_minor INTEGER NOT NULL DEFAULT 0, total_abonos_minor INTEGER NOT NULL DEFAULT 0, total_descontos_minor INTEGER NOT NULL DEFAULT 0, bruto_minor INTEGER NOT NULL DEFAULT 0, base_inss_minor INTEGER NOT NULL DEFAULT 0, inss_minor INTEGER NOT NULL DEFAULT 0, inss_emp_minor INTEGER NOT NULL DEFAULT 0, isento_irt_minor INTEGER NOT NULL DEFAULT 0, base_irt_minor INTEGER NOT NULL DEFAULT 0, irt_minor INTEGER NOT NULL DEFAULT 0, escalao_irt INTEGER, outros_descontos_minor INTEGER NOT NULL DEFAULT 0, liquido_minor INTEGER NOT NULL DEFAULT 0, custo_empresa_minor INTEGER NOT NULL DEFAULT 0, avisos_json TEXT, resumo_json TEXT, criado_em TEXT NOT NULL )"
   ],
@@ -2151,6 +2163,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_delete BEFORE DELETE ON rh_processamento WHEN OLD.estado <> 'aberto' BEGIN SELECT RAISE(ABORT, 'Só se apaga um processamento ainda aberto')"
   ],
   [
+    "517b1dba94c8140fde6cc4961d6459c97863dfe312e7542267762dea8e968acd",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_delete BEFORE DELETE ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')"
+  ],
+  [
+    "3828bd8b229e718f907f919d1ecdff6963b19934763f72b299b4e7c83375faab",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_insert BEFORE INSERT ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')"
+  ],
+  [
+    "73c8cc182d115732877b37dfb12b6f9c285c4f6484ba32847adbe49a6432be4c",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_update BEFORE UPDATE ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')"
+  ],
+  [
     "8c91cbeaf3e7b968d3c4bd8c5b9781e8d825682ad31242337507f247d132cde0",
     "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_fechado_update BEFORE UPDATE ON rh_processamento WHEN OLD.estado = 'fechado' BEGIN SELECT RAISE(ABORT, 'Um processamento salarial fechado não pode ser alterado (faça um acerto no mês seguinte)')"
   ],
@@ -2217,6 +2241,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "0b43b96d3c65b4a3b0a539fa00e87472c8ecf742a503d3ef0ad6e2a12e50b43f",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_ponto_dia ON rh_ponto(funcionario_id, data)"
+  ],
+  [
+    "a876f128ca4c8612123cf2c69abec4eec2026b47de4a5915c12c9724015c3fb2",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_processamento_entrada ON rh_processamento_entrada(processamento_id, funcionario_id)"
   ],
   [
     "1919b0450b14bfd3fd435b9b2108fb1bb5c8f72d56046f797cbe1e5452446596",
@@ -2865,6 +2893,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "722a2e06081aa007a7dce95ccbd38a5a3aea293780550971f123975d9643de5e",
     "INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)"
+  ],
+  [
+    "8bedcc28bed45fd045bca2cb593ac4687cba1769066133b4954bfaa9754cc121",
+    "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "69f77f725ac42d21d116ce72f7aede14bebd74e55932ce5f98732a6655a87c80",
@@ -3565,6 +3597,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "2f12f897493f9cee769e375daf774ea00b5b2d095be21f5a7347bbd92b3f6a92",
     "SELECT * FROM rh_processamento ORDER BY ano DESC, mes DESC, criado_em DESC"
+  ],
+  [
+    "43e8953f7ff9c75e0bb5ba212118b6f6781c2fe208d7166a2b6e17e4773d476e",
+    "SELECT * FROM rh_processamento_entrada WHERE processamento_id = ?"
   ],
   [
     "d44f5018e96d43589bd8f0b484a2cf4d671a13001670931ee279862e07a9ab61",
@@ -5149,6 +5185,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "45a9f8be6f789e6d3cfc784a87ce9d8cbd3f0be8aa2e972904a95bafc800749b",
     "UPDATE rh_processamento SET pago_por = ?, pago_por_nome = ?, pago_em = ?, conta_pagamento = ?, estado = 'pago', actualizado_em = ? WHERE id = ? AND estado = 'aprovado'"
+  ],
+  [
+    "51a6f5049c5e4e83c7696c56f9323eeb17bfbfbf837ea5c6ef89b4b234c729fb",
+    "UPDATE rh_processamento_entrada SET salario_base_minor = ?, faltas = ?, actualizado_em = ?, actualizado_por = ?, actualizado_por_nome = ? WHERE id = ?"
   ],
   [
     "ca4bfe7939b88a0018754073d7044641f42d2d6a77c6e7ba8ea93f7f49fa8596",
