@@ -94,6 +94,8 @@ interface MenuItem {
   children?: MenuItem[];
   /** Módulo activado pela licença (funcionalidade do plano no Tango Master Gen). */
   licensedModule?: 'rh';
+  /** Outras rotas que também marcam este item como activo (páginas agrupadas numa só entrada). */
+  alsoActive?: string[];
 }
 
 const menuItems: MenuItem[] = [
@@ -150,18 +152,16 @@ const menuItems: MenuItem[] = [
     path: '/rh',
     licensedModule: 'rh',
     children: [
+      // As mesmas 8 entradas das abas do módulo (as páginas agrupadas abrem com a sub-navegação dentro da aba).
       { icon: LayoutDashboard, label: 'Painel de RH', path: '/rh/painel', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Users, label: 'Funcionários', path: '/rh/funcionarios', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Clock, label: 'Livro de Ponto', path: '/rh/ponto', permission: 'hr_view', licensedModule: 'rh' },
-      { icon: CalendarDays, label: 'Horários e Calendário', path: '/rh/calendario', permission: 'hr_view', licensedModule: 'rh' },
-      { icon: Plane, label: 'Férias', path: '/rh/ferias', permission: 'hr_view', licensedModule: 'rh' },
-      { icon: Plane, label: 'Dispensas e Licenças', path: '/rh/ausencias', permission: 'hr_view', licensedModule: 'rh' },
-      { icon: Banknote, label: 'Processamento Salarial', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh' },
-      { icon: ReciboIcon, label: 'Recibos e Declarações', path: '/rh/recibos', permission: 'hr_view_salaries', licensedModule: 'rh' },
-      { icon: FolderOpen, label: 'Documentos', path: '/rh/documentos', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: Plane, label: 'Férias e Ausências', path: '/rh/ferias', permission: 'hr_view', licensedModule: 'rh', alsoActive: ['/rh/ausencias'] },
+      { icon: Banknote, label: 'Salários', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh', alsoActive: ['/rh/recibos'] },
+      { icon: FolderOpen, label: 'Gestão Documental', path: '/rh/documentos', permission: 'hr_view', licensedModule: 'rh' },
       { icon: BarChart, label: 'Relatórios de RH', path: '/rh/relatorios', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: SlidersHorizontal, label: 'Configurações de RH', path: '/rh/configuracoes', permission: 'hr_view', licensedModule: 'rh', alsoActive: ['/rh/calendario'] },
       { icon: UserCog, label: 'Portal do Funcionário', path: '/rh/portal', permission: 'hr_self', licensedModule: 'rh' },
-      { icon: SlidersHorizontal, label: 'Configurações de RH', path: '/rh/configuracoes', permission: 'hr_view', licensedModule: 'rh' },
     ],
   },
   { icon: Trash2, label: 'Lixeira do Sistema', path: '/lixeira', permission: 'manage_settings' },
@@ -269,7 +269,8 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
       return true;
     }), [isAllowed, isSingular, user]);
 
-  const isChildActive = useCallback((item: MenuItem) => filhosVisiveis(item).some(c => matchPath(c.path)), [filhosVisiveis, matchPath]);
+  const childMatches = useCallback((c: MenuItem) => matchPath(c.path) || Boolean(c.alsoActive?.some(matchPath)), [matchPath]);
+  const isChildActive = useCallback((item: MenuItem) => filhosVisiveis(item).some(childMatches), [filhosVisiveis, childMatches]);
 
   // Abre automaticamente o menu cuja subpágina está activa
   useEffect(() => {
@@ -460,7 +461,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
                       </p>
                       <div className="flex flex-col gap-0.5">
                         {filhos.map(child => {
-                          const childActive = matchPath(child.path);
+                          const childActive = childMatches(child);
                           return (
                             <Link
                               key={child.path}
@@ -517,7 +518,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
                     <div className="overflow-hidden">
                       <div className="ml-[1.55rem] mt-1 flex flex-col gap-0.5 border-l border-sidebar-border/70 pl-3 py-1">
                         {filhos.map(child => {
-                          const childActive = matchPath(child.path);
+                          const childActive = childMatches(child);
                           return (
                             <Link
                               key={child.path}
