@@ -440,7 +440,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO rh_documento_ficheiro (documento_id, data_url) VALUES (?, ?)",
   "INSERT INTO rh_escala (id, funcionario_id, data, horario_id, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(funcionario_id, data) DO UPDATE SET horario_id = excluded.horario_id, criado_por = excluded.criado_por, criado_por_nome = excluded.criado_por_nome, actualizado_em = excluded.criado_em",
   "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-  "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, nacionalidade, telefone_alternativo, provincia, municipio, chefe_id, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_funcionario_rubrica (id, funcionario_id, rubrica_id, valor_minor, quantidade, inicio, fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_historico_salarial (id, funcionario_id, contrato_id, salario_anterior_minor, salario_novo_minor, data_efeito, motivo, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, tipo, ciclo, ciclo_inicio, minimo_diario_min, faixa_inicio, faixa_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -997,8 +997,10 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'",
   "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?",
   "UPDATE rh_funcionario SET banco_horas = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET departamento_id = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET estado = 'cessado', data_saida = ?, actualizado_em = ? WHERE id = ?",
-  "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET estado = ?, actualizado_em = ? WHERE id = ? AND estado <> 'cessado'",
+  "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, nacionalidade = ?, telefone_alternativo = ?, provincia = ?, municipio = ?, chefe_id = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET pin_ponto_hash = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET qr_ponto_hash = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET qr_ponto_hash = NULL, actualizado_em = ? WHERE id = ?",
@@ -2831,8 +2833,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)"
   ],
   [
-    "8f240dc04fe5270e050e613b57b25024a31a3cdf0166fd022a91be78fa2abedb",
-    "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "ca9be5dd425d8be5dfdef45431070b9b98395589e535bcf97f3f185d64af1050",
+    "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, nacionalidade, telefone_alternativo, provincia, municipio, chefe_id, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "3296d55bdf0f2edad5e71508e707c908cce11fb499dd77cb4c7e9920913c7f5a",
@@ -5059,12 +5061,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_funcionario SET banco_horas = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
+    "3ad26c356f68875cd895586c411354fc7602eeb6428ac916d4cbb15e1562821c",
+    "UPDATE rh_funcionario SET departamento_id = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
     "91554a2daffb317a6380ec91e6d4e492c1d3e522d5ec700abc0ba427945f6fcf",
     "UPDATE rh_funcionario SET estado = 'cessado', data_saida = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
-    "cb2546623311d4168adf88f13605ed57aa74af597c394af384e6a2ea1e0b158b",
-    "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, actualizado_em = ? WHERE id = ?"
+    "cd71cc4bcf85df8fab0dd7c4bddc2aeb7b0a03780673c869e2b642347ecaf783",
+    "UPDATE rh_funcionario SET estado = ?, actualizado_em = ? WHERE id = ? AND estado <> 'cessado'"
+  ],
+  [
+    "dad7a372bcdd4cfa7a4e289e81bd25b2164a3adea15e1b1c916a963fb45d289b",
+    "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, nacionalidade = ?, telefone_alternativo = ?, provincia = ?, municipio = ?, chefe_id = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "377b85204f4231d0a3a5e0558324aa9952484cc25da94c63f1c415f197f72c32",

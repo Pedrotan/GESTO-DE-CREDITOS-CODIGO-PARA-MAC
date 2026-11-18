@@ -85,8 +85,10 @@ export default function LivroPontoRH() {
     const [mes, setMes] = useState(Number(hoje.slice(5, 7)));
     const [departamento, setDepartamento] = useState(TODOS);
     const [cargo, setCargo] = useState(TODOS);
-    const [pesquisaBruta, setPesquisaBruta] = useState('');
-    const [pesquisa, setPesquisa] = useState('');
+    // «Ver livro de ponto» na lista de funcionários abre já filtrado pelo n.º (?pesquisa=…).
+    const pesquisaInicial = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '').get('pesquisa') || '';
+    const [pesquisaBruta, setPesquisaBruta] = useState(pesquisaInicial);
+    const [pesquisa, setPesquisa] = useState(pesquisaInicial);
     const [filtro, setFiltro] = useState<FiltroEstado>('todos');
     const [ordem, setOrdem] = useState<Ordenacao>('nome');
     const [mostrarHoras, setMostrarHoras] = useState(lerHoras);

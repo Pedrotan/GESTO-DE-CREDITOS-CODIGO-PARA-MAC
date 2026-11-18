@@ -53,7 +53,7 @@ async function createDatabase(M, valorFalta = '0') {
     const database = new DatabaseSync(':memory:');
     database.exec(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, timestamp TEXT, userId TEXT, userName TEXT, action TEXT, entity TEXT, details TEXT, previousState TEXT, newState TEXT, metadata TEXT)`);
     for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL]) database.exec(sql);
-    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
+    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
     const params = values => (values || []).map(value => value === undefined ? null : value);
     const normalizar = sql => sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim().replace(/;$/u, '');
     const prepare = sql => {
@@ -140,5 +140,24 @@ test('valor de cada falta configurado: substitui o valor-dia', async () => {
         await M.ServicoSalariosRH.calcular(await processamento(M, id), RH);
         const falta = linhas(db, f).find(l => l.codigo === 'FALTAS');
         assert.deepEqual([falta.quantidade, falta.valor_minor], [3, 1_500_000]);
+    } finally { db.close(); }
+});
+
+test('cadastro: recusa IBAN e n.º repetidos, BI fora do formato, e aceita os campos novos', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        await registar(M);
+        const base = { nome: 'Outro Funcionário', data_admissao: '2026-02-01', estado: 'activo', vinculo: 'Pessoal do Quadro', carreira: 'Geral - Pessoal Técnico', cargo_id: 'cargo-x' };
+        await assert.rejects(M.ServicoRH.criarFuncionario({ ...base, numero_mecanografico: '1', iban: 'AO06000600009202770530191' }, null, RH), /IBAN .* já pertence a Pedro de Morais Tango/u);
+        await assert.rejects(M.ServicoRH.criarFuncionario({ ...base, numero_mecanografico: '99445110', iban: 'AO06004000002610435010128' }, null, RH), /n\.º mecanográfico .* já pertence/u);
+        await assert.rejects(M.ServicoRH.criarFuncionario({ ...base, numero_mecanografico: '2', iban: 'AO06004000002610435010128', bi_numero: '12345' }, null, RH), /9 algarismos, 2 letras e 3 algarismos/u);
+        const id = await M.ServicoRH.criarFuncionario({ ...base, numero_mecanografico: '2', iban: 'AO06004000002610435010128', bi_numero: '002658949BA031', nif: '002658949BA031',
+            nacionalidade: 'Angolana', telefone_alternativo: '923 000 000', provincia: 'Benguela', municipio: 'Lobito' }, null, RH);
+        const f = db.prepare('SELECT nacionalidade, telefone_alternativo, provincia, municipio FROM rh_funcionario WHERE id = ?').get(id);
+        assert.deepEqual({ ...f }, { nacionalidade: 'Angolana', telefone_alternativo: '923 000 000', provincia: 'Benguela', municipio: 'Lobito' });
+        await M.ServicoRH.alterarEstado(id, 'suspenso', 'Processo disciplinar', RH);
+        assert.equal(db.prepare('SELECT estado FROM rh_funcionario WHERE id = ?').get(id).estado, 'suspenso');
+        await assert.rejects(M.ServicoRH.alterarEstado(id, 'suspenso', '', RH), /motivo/u);
     } finally { db.close(); }
 });

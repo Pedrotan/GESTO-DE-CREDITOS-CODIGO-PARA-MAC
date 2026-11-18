@@ -5,6 +5,7 @@ import { db } from '@/bibliotecas/bd';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { validarDatasBI } from '@/bibliotecas/rh/bi-validade';
 import { validarEscaloes, type IrtEscalao, type IrtTabela, type ParametroRH } from '@/bibliotecas/rh/parametros-rh';
+import { FORMATO_BI } from '@/bibliotecas/rh/esquema-rh';
 
 export type ActorRH = { id: string; name: string; role?: string; permissions?: string[] };
 type Statement = { sql: string; params?: unknown[]; expectChanges?: number };
@@ -20,6 +21,7 @@ export type Funcionario = {
     estado: EstadoFuncionario; foto_url: string | null; utilizador_id: string | null; reformado: number; observacoes: string | null;
     /** Enquadramento impresso na folha de salário (Cargo/Vinc.): vínculo, grupo/carreira, categoria, escalão e unidade orgânica. */
     vinculo?: string | null; carreira?: string | null; categoria?: string | null; escalao?: string | null; unidade_organica?: string | null;
+    nacionalidade?: string | null; telefone_alternativo?: string | null; provincia?: string | null; municipio?: string | null; chefe_id?: string | null;
     criado_em: string; actualizado_em: string | null;
 };
 /** Abono fixo escolhido no registo do funcionário (Renda de casa, Isolamento, Gratificação…). */
@@ -163,6 +165,9 @@ export class ServicoRH {
         if (!texto(f.carreira)) erros.push('Indique o grupo / regime de carreira.');
         if (!f.cargo_id) erros.push('Escolha o cargo.');
         if (f.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(f.email)) erros.push('O email é inválido.');
+        if (texto(f.bi_numero) && !FORMATO_BI.test(String(f.bi_numero).trim().toUpperCase())) erros.push('O n.º do BI tem 9 algarismos, 2 letras e 3 algarismos (ex.: 002658949BA031).');
+        if (f.data_nascimento && data(f.data_nascimento)! > `${Number(luandaTodayKey().slice(0, 4)) - 14}${luandaTodayKey().slice(4)}`) erros.push('A data de nascimento indica menos de 14 anos (idade mínima para trabalhar).');
+        if (f.chefe_id && f.chefe_id === f.id) erros.push('O chefe directo não pode ser o próprio funcionário.');
         if (f.iban && !/^[A-Z]{2}\d{2}[A-Z0-9 ]{10,40}$/u.test(f.iban.replace(/\s+/gu, '').toUpperCase())) erros.push('O IBAN é inválido.');
         erros.push(...validarDatasBI(f.bi_emissao, f.bi_validade, luandaTodayKey()));
         if (erros.length) throw new Error(erros.join(' '));
@@ -176,19 +181,43 @@ export class ServicoRH {
             f.cargo_id || null, f.departamento_id || null, f.horario_id || null, f.estado || 'activo', texto(f.foto_url), f.utilizador_id || null,
             f.reformado ? 1 : 0, texto(f.observacoes),
             texto(f.vinculo), texto(f.carreira), texto(f.categoria), texto(f.escalao)?.toUpperCase() ?? null, texto(f.unidade_organica),
+            texto(f.nacionalidade), texto(f.telefone_alternativo), texto(f.provincia), texto(f.municipio), f.chefe_id || null,
         ];
+    }
+
+    /**
+     * Duplicados na empresa (n.º mecanográfico, BI, NIF, IBAN, email): devolve as mensagens com o funcionário que já os usa.
+     * Verificado na base de dados ao gravar, e também chamado pelo formulário para avisar antes de guardar.
+     */
+    static async duplicados(f: Partial<Funcionario>, excluirId?: string | null) {
+        const campos: Array<[keyof Funcionario, string, (v: string) => string]> = [
+            ['numero_mecanografico', 'n.º mecanográfico', v => v.trim()], ['bi_numero', 'n.º do BI', v => v.trim().toUpperCase()],
+            ['nif', 'NIF', v => v.trim().toUpperCase()], ['iban', 'IBAN', v => v.replace(/\s+/gu, '').toUpperCase()], ['email', 'email', v => v.trim().toLowerCase()],
+        ];
+        const lista = await this.funcionarios();
+        const conflitos: Array<{ campo: keyof Funcionario; mensagem: string; funcionario: Funcionario }> = [];
+        for (const [campo, rotulo, norm] of campos) {
+            const valor = typeof f[campo] === 'string' && (f[campo] as string).trim() ? norm(f[campo] as string) : '';
+            if (!valor) continue;
+            const outro = lista.find(x => x.id !== excluirId && typeof x[campo] === 'string' && norm(x[campo] as string) === valor);
+            if (outro) conflitos.push({ campo, mensagem: `O ${rotulo} ${valor} já pertence a ${outro.nome} (n.º ${outro.numero_mecanografico}).`, funcionario: outro });
+        }
+        return conflitos;
     }
 
     /** Cria o funcionário e, se indicado, o primeiro contrato (e a primeira linha do histórico salarial). */
     static async criarFuncionario(f: Partial<Funcionario>, contrato: Omit<Contrato, 'id' | 'funcionario_id' | 'estado' | 'motivo_fim' | 'criado_em' | 'documento_id'> | null, actor: ActorRH, abonos: AbonoInicial[] = []) {
         this.validarFuncionario(f);
+        const conflitos = await this.duplicados(f);
+        if (conflitos.length) throw new Error(conflitos.map(c => c.mensagem).join(' '));
         const id = crypto.randomUUID();
         const when = agora();
         const statements: Statement[] = [{
             sql: `INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade,
                     numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url,
-                    utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, criado_em, criado_por)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, nacionalidade, telefone_alternativo,
+                    provincia, municipio, chefe_id, criado_em, criado_por)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             params: [id, ...this.linhaFuncionario(f), when, actor.id], expectChanges: 1,
         }];
         if (contrato) statements.push(...this.instrucoesContrato(id, contrato, null, 'Admissão', actor, when));
@@ -204,16 +233,19 @@ export class ServicoRH {
     }
 
     static async actualizarFuncionario(id: string, f: Partial<Funcionario>, actor: ActorRH) {
-        this.validarFuncionario(f);
+        this.validarFuncionario({ ...f, id });
         const anterior = await this.funcionario(id);
         if (!anterior) throw new Error('Funcionário não encontrado.');
+        const conflitos = await this.duplicados(f, id);
+        if (conflitos.length) throw new Error(conflitos.map(c => c.mensagem).join(' '));
         const when = agora();
         const linha = this.linhaFuncionario(f);
         await db.transaction([
             { sql: `UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?,
                     bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?,
                     data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?,
-                    observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, actualizado_em = ? WHERE id = ?`,
+                    observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, nacionalidade = ?, telefone_alternativo = ?,
+                    provincia = ?, municipio = ?, chefe_id = ?, actualizado_em = ? WHERE id = ?`,
                 params: [...linha, when, id], expectChanges: 1 },
             auditoriaRH(actor, 'update', `Alterou a ficha do funcionário ${f.nome}`, { funcionarioId: id },
                 { ...anterior, foto_url: undefined }, { ...f, foto_url: undefined }, when),
@@ -296,6 +328,26 @@ export class ServicoRH {
                 params: [motivo.trim(), data(dataSaida), when, funcionarioId] },
             { sql: `UPDATE rh_funcionario SET estado = 'cessado', data_saida = ?, actualizado_em = ? WHERE id = ?`, params: [data(dataSaida), when, funcionarioId], expectChanges: 1 },
             auditoriaRH(actor, 'update', `Cessou o contrato do funcionário ${funcionarioId}: ${motivo.trim()}`, { funcionarioId, dataSaida }, undefined, undefined, when),
+        ]);
+    }
+
+    /** Suspende ou reactiva um funcionário (não mexe no contrato). */
+    static async alterarEstado(funcionarioId: string, estado: 'activo' | 'suspenso', motivo: string, actor: ActorRH) {
+        if (estado === 'suspenso' && !texto(motivo)) throw new Error('Indique o motivo da suspensão.');
+        const when = agora();
+        await db.transaction([
+            { sql: `UPDATE rh_funcionario SET estado = ?, actualizado_em = ? WHERE id = ? AND estado <> 'cessado'`, params: [estado, when, funcionarioId], expectChanges: 1 },
+            auditoriaRH(actor, 'update', `${estado === 'suspenso' ? 'Suspendeu' : 'Reactivou'} o funcionário ${funcionarioId}${texto(motivo) ? `: ${motivo.trim()}` : ''}`, { funcionarioId, estado, motivo: texto(motivo) }, undefined, undefined, when),
+        ]);
+    }
+
+    /** Muda o departamento de vários funcionários de uma vez (acção em massa da lista). */
+    static async alterarDepartamento(funcionarioIds: string[], departamentoId: string | null, actor: ActorRH) {
+        if (!funcionarioIds.length) throw new Error('Seleccione pelo menos um funcionário.');
+        const when = agora();
+        await db.transaction([
+            ...funcionarioIds.map(id => ({ sql: 'UPDATE rh_funcionario SET departamento_id = ?, actualizado_em = ? WHERE id = ?', params: [departamentoId, when, id], expectChanges: 1 })),
+            auditoriaRH(actor, 'update', `Mudou o departamento de ${funcionarioIds.length} funcionário(s)`, { funcionarioIds, departamentoId }, undefined, undefined, when),
         ]);
     }
 

@@ -416,6 +416,23 @@ export const RH_SEED_RUBRICA_PCT_SQL = `INSERT OR IGNORE INTO rh_rubrica (id, co
 export const rhSeedFolhaStatements = (now: string) => RH_RUBRICAS_FOLHA.map(r => ({
     sql: RH_SEED_RUBRICA_PCT_SQL, params: [`rubrica-${r.codigo}`, r.codigo, r.nome, r.tipo, r.forma, r.percentagem, r.inss, r.irt, r.ordem, now],
 }));
+// ── Cadastro de funcionários (versão 3.0.9) ──
+export const RH_CADASTRO_COLUNAS: Array<[string, string, string]> = [
+    ['rh_funcionario', 'nacionalidade', 'TEXT'], ['rh_funcionario', 'telefone_alternativo', 'TEXT'], ['rh_funcionario', 'provincia', 'TEXT'],
+    ['rh_funcionario', 'municipio', 'TEXT'], ['rh_funcionario', 'chefe_id', 'TEXT'],
+];
+/** Grupos/regimes de carreira (lista editável nas Configurações, separada por «;») e prazos do período experimental. */
+export const RH_PARAMETROS_CADASTRO: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'carreiras', valor: 'Chefia - Regime Geral/Local;Direcção - Regime Geral/Local;Geral - Pessoal Técnico;Geral - Pessoal Não Técnico;Quadro Temporário - Gabinete;Administrativo;Operacional',
+        descricao: 'Grupos / regimes de carreira do cadastro de funcionários (separados por ;)' },
+    { chave: 'periodo_experimental_dias_indeterminado', valor: '60', descricao: 'Dias do período experimental sugeridos para contratos por tempo indeterminado (confirmar com a Lei Geral do Trabalho)' },
+    { chave: 'periodo_experimental_dias_determinado', valor: '30', descricao: 'Dias do período experimental sugeridos para contratos a termo certo (confirmar com a Lei Geral do Trabalho)' },
+];
+export const rhSeedCadastroStatements = (now: string) => RH_PARAMETROS_CADASTRO.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));
+/** BI angolano: 9 algarismos, 2 letras e 3 algarismos (ex.: 002658949BA031). */
+export const FORMATO_BI = /^\d{9}[A-Z]{2}\d{3}$/u;
 /** Vínculos (o da folha: «Pessoal do Quadro» imprime-se como «Vinc.:», os restantes como «Cargo:»). */
 /** Valor de cada falta (Kz); 0 = desconta o valor-dia (salário base ÷ divisor). */
 export const RH_PARAMETROS_FALTA: Array<{ chave: string; valor: string; descricao: string }> = [

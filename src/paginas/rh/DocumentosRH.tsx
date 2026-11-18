@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Input } from '@/componentes/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
@@ -17,7 +18,9 @@ export default function DocumentosRH() {
     const { actor, gerir, confidencial } = useActorRH();
     const base = useBaseRH();
     const documentos = useCarregar(() => ServicoRH.documentos(), [] as DocumentoRH[]);
-    const [funcionario, setFuncionario] = useState(TODOS);
+    const [parametrosUrl] = useSearchParams();
+    // A acção «Documentos» da lista de funcionários abre já filtrada (?funcionario=…).
+    const [funcionario, setFuncionario] = useState(parametrosUrl.get('funcionario') || TODOS);
     const [categoria, setCategoria] = useState(TODOS);
     const [expiraEm, setExpiraEm] = useState('');
     const hoje = luandaTodayKey();
