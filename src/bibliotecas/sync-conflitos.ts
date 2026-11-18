@@ -38,7 +38,7 @@ const ENTITY_LABELS: Record<string, string> = {
     rh_feriado: 'RH · Feriados', rh_funcionario: 'RH · Funcionários', rh_funcionario_rubrica: 'RH · Rubricas do funcionário', rh_historico_salarial: 'RH · Histórico salarial',
     rh_horario: 'RH · Horários', rh_irt_escalao: 'RH · Escalões de IRT', rh_irt_tabela: 'RH · Tabelas de IRT', rh_parametro: 'RH · Parâmetros', rh_plano_ferias: 'RH · Planos de férias',
     rh_ponto: 'RH · Livro de ponto', rh_processamento: 'RH · Processamentos salariais', rh_recibo: 'RH · Recibos', rh_recibo_linha: 'RH · Linhas de recibo',
-    rh_rubrica: 'RH · Rubricas', rh_rubrica_pontual: 'RH · Rubricas pontuais', rh_processamento_entrada: 'RH · Valores do mês', rh_doc_pasta: 'RH · Pastas de documentos', rh_doc_auditoria: 'RH · Acessos a documentos', rh_tipo_ausencia: 'RH · Tipos de ausência',
+    rh_rubrica: 'RH · Rubricas', rh_rubrica_pontual: 'RH · Rubricas pontuais', rh_processamento_entrada: 'RH · Valores do mês', rh_doc_pasta: 'RH · Pastas de documentos', rh_modelo: 'RH · Modelos de declaração e relatório', rh_doc_auditoria: 'RH · Acessos a documentos', rh_tipo_ausencia: 'RH · Tipos de ausência',
     desconhecido: 'Alteração de outra versão',
 };
 /** Nome em português do tipo de registo (tabela). */

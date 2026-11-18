@@ -22,6 +22,7 @@ import { FormularioFuncionario, type AlvoEdicao } from '@/componentes/rh/Formula
 import { FichaFuncionario } from '@/componentes/rh/FichaFuncionario';
 import { DialogoContrato, DialogoDepartamento, DialogoSubsidio, DialogoSuspender, DialogoTerminar } from '@/componentes/rh/DialogosFuncionario';
 import { emitirDeclaracaoServico, exportarFuncionarios, imprimirFicha } from '@/componentes/rh/accoes-funcionario';
+import { DialogoRelatorioPessoal } from '@/componentes/rh/DialogoRelatorioPessoal';
 
 const TODOS = '__todos__';
 
@@ -40,7 +41,7 @@ export function useBaseRH() {
 
 type Dialogo =
     | { tipo: 'contrato' | 'salario' | 'terminar' | 'suspender'; funcionario: Funcionario }
-    | { tipo: 'subsidio' | 'departamento'; ids: string[] };
+    | { tipo: 'subsidio' | 'departamento' | 'relatorios'; ids: string[] };
 
 /** Avatar com a fotografia ou as iniciais. */
 export function AvatarFuncionario({ f, tamanho = 'h-10 w-10 text-[13px]', className }: { f: Pick<Funcionario, 'nome' | 'foto_url'>; tamanho?: string; className?: string }) {
@@ -113,6 +114,7 @@ export default function FuncionariosRH() {
             <DropdownMenuItem onSelect={() => navigate(`/rh/documentos?funcionario=${f.id}`)}><FolderOpen className="mr-2 h-4 w-4" /> Abrir pasta de documentos</DropdownMenuItem>
             {gerir && <DropdownMenuItem onSelect={() => declaracoes([f])}><FileText className="mr-2 h-4 w-4" /> Gerar declaração de serviço</DropdownMenuItem>}
             <DropdownMenuItem onSelect={() => actor && void executar(() => imprimirFicha(f, ctx, companySettings, actor, salarios), 'Ficha gerada')}><Printer className="mr-2 h-4 w-4" /> Imprimir ficha (PDF)</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setDialogo({ tipo: 'relatorios', ids: [f.id] })}><FileText className="mr-2 h-4 w-4" /> Relatórios pessoais…</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => navigate(`/rh/ponto?pesquisa=${encodeURIComponent(f.numero_mecanografico)}`)}><CalendarClock className="mr-2 h-4 w-4" /> Ver livro de ponto</DropdownMenuItem>
             {gerir && f.estado !== 'cessado' && <>
                 <DropdownMenuSeparator />
@@ -188,6 +190,7 @@ export default function FuncionariosRH() {
                             {gerir && <Button size="sm" variant="outline" onClick={() => declaracoes(seleccionados)}><FileText className="mr-1.5 h-4 w-4" /> Gerar declarações</Button>}
                             {gerir && salarios && <Button size="sm" variant="outline" onClick={() => setDialogo({ tipo: 'subsidio', ids: seleccionados.map(f => f.id) })}><Plus className="mr-1.5 h-4 w-4" /> Atribuir subsídio</Button>}
                             {gerir && <Button size="sm" variant="outline" onClick={() => setDialogo({ tipo: 'departamento', ids: seleccionados.map(f => f.id) })}><Users className="mr-1.5 h-4 w-4" /> Alterar departamento</Button>}
+                            <Button size="sm" variant="outline" onClick={() => setDialogo({ tipo: 'relatorios', ids: seleccionados.map(f => f.id) })}><Printer className="mr-1.5 h-4 w-4" /> Gerar relatórios</Button>
                             <Button size="sm" variant="ghost" className="ml-auto" onClick={() => setSeleccao(new Set())}><X className="mr-1 h-4 w-4" /> Limpar</Button>
                         </div>
                     )}
@@ -264,6 +267,8 @@ export default function FuncionariosRH() {
             {actor && dialogo?.tipo === 'terminar' && <DialogoTerminar funcionarioId={dialogo.funcionario.id} nome={dialogo.funcionario.nome} actor={actor} onClose={() => setDialogo(null)} onSaved={recarregar} />}
             {actor && dialogo?.tipo === 'suspender' && <DialogoSuspender funcionarioId={dialogo.funcionario.id} nome={dialogo.funcionario.nome} suspenso={dialogo.funcionario.estado === 'suspenso'} actor={actor} onClose={() => setDialogo(null)} onSaved={recarregar} />}
             {actor && dialogo?.tipo === 'subsidio' && <DialogoSubsidio funcionarioIds={dialogo.ids} rubricas={rubricas} salarioBaseMinor={dialogo.ids.length === 1 ? salarioActual.get(dialogo.ids[0]) : undefined} actor={actor} onClose={() => setDialogo(null)} onSaved={recarregar} />}
+            {actor && dialogo?.tipo === 'relatorios' && <DialogoRelatorioPessoal funcionarios={funcionarios.filter(f => dialogo.ids.includes(f.id))} ctx={ctx} settings={companySettings} actor={actor}
+                salarios={salarios} gerir={gerir} onClose={() => setDialogo(null)} onSaved={recarregar} />}
             {actor && dialogo?.tipo === 'departamento' && <DialogoDepartamento funcionarioIds={dialogo.ids} departamentos={departamentos} actor={actor} onClose={() => setDialogo(null)} onSaved={() => { setSeleccao(new Set()); recarregar(); }} />}
         </MainLayout>
     );

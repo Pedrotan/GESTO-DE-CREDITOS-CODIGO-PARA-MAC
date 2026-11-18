@@ -28,7 +28,8 @@ import { toast } from '@/ganchos/usar-toast';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { useData } from '@/contextos/ContextoDados';
 import { NavegacaoRH, SeloBI, dataPt, executar, lerFicheiro, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
-import { emitirDeclaracaoServico, imprimirFicha } from '@/componentes/rh/accoes-funcionario';
+import { DialogoRelatorioPessoal } from '@/componentes/rh/DialogoRelatorioPessoal';
+import { RELATORIOS_PESSOAIS, type TipoRelatorio } from '@/componentes/rh/relatorios-pessoais';
 import { AvatarFuncionario, useBaseRH } from './FuncionariosRH';
 
 type Item = {
@@ -76,6 +77,7 @@ export default function DocumentosRH() {
     const [mover, setMover] = useState<DocumentoRH | null>(null);
     const [renomear, setRenomear] = useState<{ tipo: 'documento'; documento: DocumentoRH } | { tipo: 'pasta'; pasta: PastaRH } | null>(null);
     const [historico, setHistorico] = useState<DocumentoRH | null>(null);
+    const [relatorio, setRelatorio] = useState<TipoRelatorio | null>(null);
     const ficheiros = useRef<HTMLInputElement>(null);
     const hoje = luandaTodayKey();
     const maxMb = valorNumerico(parametros, 'documento_max_mb', hoje, 10);
@@ -349,13 +351,10 @@ export default function DocumentosRH() {
                             <div className="rounded-xl border border-rh-border bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
                                 <h2 className="text-base font-bold">Relatórios pessoais</h2>
                                 <p className="mb-1.5 text-[13px] text-rh-muted">Gerar em PDF e guardar na pasta do funcionário.</p>
-                                {[
-                                    ['Ficha individual completa', () => actor && executar(() => imprimirFicha(f, ctx, companySettings, actor, salarios), 'Ficha gerada e guardada em Relatórios pessoais')],
-                                    ...(gerir ? [['Declaração de serviço', () => actor && executar(() => emitirDeclaracaoServico(f, ctx, companySettings, actor), 'Declaração gerada e guardada em Declarações')] as const] : []),
-                                ].map(([nome, accao]) => (
-                                    <div key={nome as string} className="flex items-center justify-between border-b border-slate-100 py-3 text-sm last:border-0 dark:border-slate-800">
-                                        <span>{nome as string}</span>
-                                        <button type="button" className="text-[13px] font-semibold text-rh-link hover:underline" onClick={() => void Promise.resolve((accao as () => unknown)()).then(() => recarregar())}>Gerar</button>
+                                {RELATORIOS_PESSOAIS.filter(r => (salarios || !r.salarial) && (gerir || r.tipo !== 'declaracao')).map(r => (
+                                    <div key={r.tipo} className="flex items-center justify-between border-b border-slate-100 py-3 text-sm last:border-0 dark:border-slate-800">
+                                        <span>{r.tipo === 'personalizado' ? 'Relatório personalizado…' : r.nome}</span>
+                                        <button type="button" className="text-[13px] font-semibold text-rh-link hover:underline" onClick={() => setRelatorio(r.tipo)}>{r.tipo === 'personalizado' ? 'Configurar' : 'Gerar'}</button>
                                     </div>
                                 ))}
                             </div>
@@ -384,6 +383,8 @@ export default function DocumentosRH() {
                 ...pastas.dados.filter(p => p.funcionario_id === mover.funcionario_id).map(p => ({ id: p.id, nome: p.nome })), { id: 'raiz', nome: 'Outros documentos' }]}
                 onClose={() => setMover(null)} onConfirm={destino => executar(() => ServicoDocumentosRH.mover(mover, destino, actor), 'Documento movido').then(ok => { if (ok) recarregar(); return ok; })} />}
             {historico && <DialogoHistorico documento={historico} onClose={() => setHistorico(null)} />}
+            {actor && f && relatorio && <DialogoRelatorioPessoal funcionarios={[f]} tipoInicial={relatorio} ctx={ctx} settings={companySettings} actor={actor} salarios={salarios} gerir={gerir}
+                onClose={() => setRelatorio(null)} onSaved={recarregar} />}
             {previa && (
                 <Dialog open onOpenChange={v => !v && setPrevia(null)}>
                     <DialogContent className="flex h-[90vh] max-w-5xl flex-col">

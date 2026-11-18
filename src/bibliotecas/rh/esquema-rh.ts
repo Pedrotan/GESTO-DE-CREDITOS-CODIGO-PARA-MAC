@@ -465,6 +465,15 @@ export const RH_PARAMETROS_DOCS: Array<{ chave: string; valor: string; descricao
 export const rhSeedDocsStatements = (now: string) => RH_PARAMETROS_DOCS.map(p => ({
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
 }));
+// ── Relatórios pessoais (bloco 7): modelos de declaração e de relatório personalizado ──
+export const RH_MODELOS_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_modelo (
+        id TEXT PRIMARY KEY, tipo TEXT NOT NULL CHECK(tipo IN ('declaracao', 'relatorio')), nome TEXT NOT NULL, titulo TEXT, conteudo TEXT NOT NULL,
+        activo INTEGER NOT NULL DEFAULT 1, sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT
+    )`,
+];
+export const RH_SEED_MODELO_SQL = `INSERT OR IGNORE INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome)
+    VALUES (?, 'declaracao', ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')`;
 /** BI angolano: 9 algarismos, 2 letras e 3 algarismos (ex.: 002658949BA031). */
 export const FORMATO_BI = /^\d{9}[A-Z]{2}\d{3}$/u;
 /** Vínculos (o da folha: «Pessoal do Quadro» imprime-se como «Vinc.:», os restantes como «Cargo:»). */

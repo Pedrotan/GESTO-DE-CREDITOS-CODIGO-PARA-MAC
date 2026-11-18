@@ -19,6 +19,7 @@ import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { NavegacaoRH, dataPt, executar, kz, paraMinor, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { useBaseRH } from './FuncionariosRH';
 import { CatalogoSubsidios } from '@/componentes/rh/CatalogoSubsidios';
+import { ModelosDeclaracao } from '@/componentes/rh/ModelosDeclaracao';
 import { type FuncionarioRubrica } from '@/servicos/rh/ServicoRH';
 import { CalendarDays } from 'lucide-react';
 
@@ -61,8 +62,13 @@ export default function ConfiguracoesRH() {
                     <TabsTrigger className={item} value="parametros">Parâmetros legais</TabsTrigger>
                     <TabsTrigger className={item} value="irt">Tabela do IRT</TabsTrigger>
                     <TabsTrigger className={item} value="ausencias">Tipos de ausência</TabsTrigger>
+                    <TabsTrigger className={item} value="modelos">Modelos de declaração</TabsTrigger>
                 </TabsList>
                 <div className="min-w-0 flex-[999_1_640px]">
+
+                <TabsContent value="modelos" className="mt-0">
+                    <ModelosDeclaracao actor={actor} podeEditar={configurar} />
+                </TabsContent>
 
                 <TabsContent value="subsidios" className="mt-0">
                     <CatalogoSubsidios rubricas={rubricas} atribuicoes={atribuicoes.dados} actor={actor} podeEditar={configurar} onChange={() => { void base.recarregar(); void atribuicoes.recarregar(); }} />

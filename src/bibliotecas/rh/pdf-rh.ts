@@ -366,10 +366,13 @@ export type DadosDeclaracao = {
     numero: string; modelo: 'servico' | 'rendimentos';
     funcionario: { nome: string; numero: string; bi?: string | null; nif?: string | null; cargo?: string; departamento?: string; admissao: string; salarioBaseMinor?: number; tipoContrato?: string };
     ano?: number; rendimentos?: { brutoMinor: number; inssMinor: number; irtMinor: number; liquidoMinor: number; recibos: number }; finalidade?: string;
+    /** Texto já preenchido a partir de um modelo de declaração (substitui o texto fixo) e o seu título. */
+    texto?: string; titulo?: string;
 };
 
 /** Declaração de serviço/salário (vínculo, cargo, antiguidade e salário) ou de rendimentos (ano). */
 export function gerarDeclaracaoPdf(d: DadosDeclaracao, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    if (d.texto) return declaracaoDeModelo(d, settings, userName, saida);
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
     const cor = resolveBrandPrimary(config.primaryColor);
@@ -401,6 +404,31 @@ export function gerarDeclaracaoPdf(d: DadosDeclaracao, settings: unknown, userNa
     doc.text('Por ser verdade, passa-se a presente declaração, que vai assinada e autenticada.', 20, y + 4);
     doc.text(`${config.address || config.location || ''}, ${dataPt(new Date().toISOString())}`, 20, y + 12);
     assinaturas(doc, y + 40, ['Recursos Humanos / Direcção']);
+    return terminar(doc, `Declaracao-${d.numero.replace(/[^\w]+/gu, '-')}.pdf`, saida);
+}
+
+/** Declaração a partir de um modelo editável: título, número, o texto do modelo, local e data, e assinatura. */
+function declaracaoDeModelo(d: DadosDeclaracao, settings: unknown, userName: string, saida: SaidaPdf): FicheiroPdf {
+    const doc = new jsPDF();
+    const config = getCompanySettings(settings);
+    const cor = resolveBrandPrimary(config.primaryColor);
+    applyBranding(doc, config, userName);
+    let y = brandingHeaderBottom(doc) + 16;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(15, 23, 42);
+    doc.text((d.titulo || 'DECLARAÇÃO').toUpperCase(), 105, y, { align: 'center' });
+    doc.setFontSize(9); doc.setTextColor(cor[0], cor[1], cor[2]);
+    doc.text(`N.º ${d.numero}`, 105, y + 6, { align: 'center' });
+    y += 18;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5); doc.setTextColor(30, 41, 59);
+    for (const paragrafo of d.texto!.split(/\n{2,}/u)) {
+        const linhas = doc.splitTextToSize(paragrafo.replace(/\n/gu, ' ').trim(), 170) as string[];
+        if (y + linhas.length * 6.5 > 250) { doc.addPage(); applyBranding(doc, config, userName, true); y = brandingHeaderBottom(doc) + 12; }
+        doc.text(linhas, 20, y, { lineHeightFactor: 1.6 });
+        y += linhas.length * 6.5 + 5;
+    }
+    doc.setFontSize(10);
+    doc.text(`${config.address || config.location || ''}, ${dataPt(new Date().toISOString())}`, 20, y + 6);
+    assinaturas(doc, y + 34, ['Recursos Humanos / Direcção']);
     return terminar(doc, `Declaracao-${d.numero.replace(/[^\w]+/gu, '-')}.pdf`, saida);
 }
 
@@ -492,14 +520,14 @@ export function gerarRelatorioPdf(t: TabelaRel, filtros: string, settings: unkno
 export type SeccaoFicha = { titulo: string; pares?: Array<[string, string]>; tabela?: { colunas: string[]; linhas: string[][] } };
 
 /** Ficha individual do funcionário: dados, contrato, histórico salarial, ausências e documentos. */
-export function gerarFichaIndividualPdf(nome: string, seccoes: SeccaoFicha[], settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+export function gerarFichaIndividualPdf(nome: string, seccoes: SeccaoFicha[], settings: unknown, userName: string, saida: SaidaPdf = 'save', titulo = 'FICHA INDIVIDUAL DO FUNCIONÁRIO', prefixo = 'Ficha'): FicheiroPdf {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
     const cor = resolveBrandPrimary(config.primaryColor);
     applyBranding(doc, config, userName);
     let y = brandingHeaderBottom(doc) + 10;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(15, 23, 42);
-    doc.text('FICHA INDIVIDUAL DO FUNCIONÁRIO', 105, y, { align: 'center' });
+    doc.text(titulo, 105, y, { align: 'center' });
     doc.setFontSize(10); doc.setTextColor(cor[0], cor[1], cor[2]);
     doc.text(nome, 105, y + 6, { align: 'center' });
     y += 12;
@@ -513,5 +541,5 @@ export function gerarFichaIndividualPdf(nome: string, seccoes: SeccaoFicha[], se
         });
         y = ((doc as any).lastAutoTable?.finalY || y + 20) + 5;
     }
-    return terminar(doc, `Ficha-${nome.replace(/[^\w]+/gu, '_')}.pdf`, saida);
+    return terminar(doc, `${prefixo}-${nome.replace(/[^\w]+/gu, '_')}.pdf`, saida);
 }

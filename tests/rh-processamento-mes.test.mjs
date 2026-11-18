@@ -28,6 +28,9 @@ async function loadModules() {
                 export { ServicoDocumentosRH, pastaDoDocumento } from '@/servicos/rh/ServicoDocumentosRH';
                 export { crc32, criarZip } from '@/bibliotecas/rh/zip-simples';
                 export { gerarAlertas } from '@/bibliotecas/rh/alertas-rh';
+                export { aplicarModelo, variaveisDesconhecidas, MODELO_DECLARACAO_SERVICO } from '@/bibliotecas/rh/modelos-rh';
+                export { gerarRelatorioPessoal } from '@/componentes/rh/relatorios-pessoais';
+                export { ServicoModelosRH } from '@/servicos/rh/ServicoModelosRH';
             `,
             resolveDir: root, loader: 'ts',
         },
@@ -55,7 +58,8 @@ async function createDatabase(M, valorFalta = '0') {
     const { RENDERER_SQL_ALLOWLIST } = await import('../electron/renderer-sql-allowlist.ts');
     const database = new DatabaseSync(':memory:');
     database.exec(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, timestamp TEXT, userId TEXT, userName TEXT, action TEXT, entity TEXT, details TEXT, previousState TEXT, newState TEXT, metadata TEXT)`);
-    for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL, ...M.E.RH_DOCS_SQL]) database.exec(sql);
+    for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL, ...M.E.RH_DOCS_SQL, ...M.E.RH_FASE4_SQL, ...M.E.RH_MODELOS_SQL]) database.exec(sql);
+    database.prepare(M.E.RH_SEED_MODELO_SQL).run('modelo-declaracao-servico', 'Declaração de serviço', 'DECLARAÇÃO DE SERVIÇO E SALÁRIO', M.MODELO_DECLARACAO_SERVICO, new Date().toISOString());
     for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS, ...M.E.RH_CATALOGO_COLUNAS, ...M.E.RH_DOCS_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
     const params = values => (values || []).map(value => value === undefined ? null : value);
     const normalizar = sql => sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim().replace(/;$/u, '');
@@ -246,4 +250,36 @@ test('avisos de validade a 90, 30 e 7 dias (configuráveis)', async () => {
     assert.deepEqual(ids('2026-11-18', '2026-12-10', undefined), ['bi-funcionario:f:2027-01-20:90', 'documento-30:d']);
     assert.deepEqual(ids('2026-11-18', '2026-11-22', undefined), ['bi-funcionario:f:2027-01-20:90', 'documento-7:d']);
     assert.deepEqual(ids('2026-11-18', '2026-11-22', [15]), ['documento-15:d'], 'com prazo único de 15 dias o BI (63 dias) ainda não avisa');
+});
+
+test('modelos de declaração: variáveis, blocos condicionais e variáveis desconhecidas', async () => {
+    const M = await loadModules();
+    assert.equal(M.aplicarModelo('Declara-se que {{nome}}{{#finalidade}} ({{finalidade}}){{/finalidade}}, BI {{bi}}.', { nome: 'Ana', bi: '' }), 'Declara-se que Ana, BI —.');
+    assert.equal(M.aplicarModelo('{{nome}}{{#finalidade}} para {{finalidade}}{{/finalidade}}', { nome: 'Ana', finalidade: 'o banco' }), 'Ana para o banco');
+    assert.deepEqual(M.variaveisDesconhecidas('{{nome}} {{salario}} {{#cargo}}x{{/cargo}}'), ['salario']);
+});
+
+test('relatórios pessoais: cada tipo gera um PDF e a declaração usa o modelo editado', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const id = await registar(M);
+        const f = await M.ServicoRH.funcionario(id);
+        const ctx = { cargos: [], departamentos: [], contratos: await M.ServicoRH.contratos() };
+        const settings = { name: 'Bravaldo - Comércio e Serviços, Lda', nif: '5001032771' };
+        for (const tipo of ['ficha', 'historico', 'assiduidade', 'ferias']) {
+            const r = await M.gerarRelatorioPessoal(tipo, f, ctx, settings, RH, true, { ano: 2026 });
+            assert.match(r.pdf.dataUrl, /^data:application\/pdf/u, tipo);
+            assert.equal(r.chave, 'relatorios');
+        }
+        const p = await M.gerarRelatorioPessoal('personalizado', f, ctx, settings, RH, true, { seccoes: ['dados', 'assiduidade'], de: '2026-01-01', ate: '2026-12-31' });
+        assert.match(p.pdf.fileName, /^Relatorio-99445110-/u);
+        // A declaração usa o texto do modelo editado (com as variáveis preenchidas) e fica numerada.
+        await M.ServicoModelosRH.guardar({ id: 'modelo-declaracao-servico', tipo: 'declaracao', nome: 'Declaração de serviço', titulo: 'DECLARAÇÃO', conteudo: 'Declara-se que {{nome}} ({{numero}}) trabalha em {{empresa}}.', activo: 1 }, RH);
+        await assert.rejects(M.ServicoModelosRH.guardar({ tipo: 'declaracao', nome: 'Errado', conteudo: 'Olá {{inexistente}}' }, RH), /desconhecidas/u);
+        const d = await M.gerarRelatorioPessoal('declaracao', f, ctx, settings, RH, true, { finalidade: 'banco' });
+        assert.equal(d.chave, 'declaracoes');
+        assert.match(d.nome, /^Declaração de serviço DS/u);
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM rh_documento_emitido WHERE modelo = 'declaracao_servico'`).get().n, 1);
+    } finally { db.close(); }
 });

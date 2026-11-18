@@ -184,6 +184,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS rh_irt_tabela ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, lei_referencia TEXT NOT NULL, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_justificacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL, ausencia_id TEXT, motivo_codigo TEXT NOT NULL, motivo TEXT NOT NULL, anexo_nome TEXT, anexo_mime TEXT, anexo_data_url TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'rejeitada')), comentario TEXT, decidido_por TEXT, decidido_por_nome TEXT, decidido_em TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_marcacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, data_hora TEXT NOT NULL, tipo TEXT CHECK(tipo IS NULL OR tipo IN ('entrada', 'saida', 'inicio_pausa', 'fim_pausa')), origem TEXT NOT NULL CHECK(origem IN ('manual', 'csv', 'relogio', 'app', 'quiosque')), dispositivo_id TEXT, latitude REAL, longitude REAL, foto_data_url TEXT, pendente_validacao INTEGER NOT NULL DEFAULT 0, motivo TEXT, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0, motivo_anulacao TEXT, anulada_por TEXT, anulada_por_nome TEXT, anulada_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_modelo ( id TEXT PRIMARY KEY, tipo TEXT NOT NULL CHECK(tipo IN ('declaracao', 'relatorio')), nome TEXT NOT NULL, titulo TEXT, conteudo TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1, sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_parametro ( id TEXT PRIMARY KEY, chave TEXT NOT NULL, valor TEXT NOT NULL, descricao TEXT, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_plano_ferias ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, ano INTEGER NOT NULL, mes_previsto INTEGER CHECK(mes_previsto BETWEEN 1 AND 12), data_inicio TEXT, data_fim TEXT, dias REAL NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT 'planeado' CHECK(estado IN ('planeado', 'aprovado', 'em_gozo', 'gozado', 'anulado')), subsidio_processado INTEGER NOT NULL DEFAULT 0, processamento_id TEXT, ausencia_id TEXT, guia_id TEXT, observacoes TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_ponto ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, entrada TEXT, saida TEXT, horas_trabalhadas REAL NOT NULL DEFAULT 0, horas_extra REAL NOT NULL DEFAULT 0, minutos_atraso INTEGER NOT NULL DEFAULT 0, origem TEXT NOT NULL DEFAULT 'manual' CHECK(origem IN ('manual', 'importado', 'app')), observacoes TEXT, registado_por TEXT, registado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
@@ -456,6 +457,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, ?)",
   "INSERT INTO rh_justificacao (id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, anexo_data_url, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)",
   "INSERT INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?)",
   "INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
   "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, estado, observacoes, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, 'planeado', ?, ?, ?, ?)",
   "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)",
@@ -499,6 +501,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT OR IGNORE INTO rh_irt_escalao (id, tabela_id, ordem, limite_inferior_minor, limite_superior_minor, parcela_fixa_minor, taxa) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT OR IGNORE INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, 'declaracao', ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')",
   "INSERT OR IGNORE INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, ?, 0, 1, ?, 'sistema')",
@@ -636,6 +639,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM rh_justificacao WHERE id = ?",
   "SELECT * FROM rh_marcacao WHERE data >= ? AND data <= ?",
   "SELECT * FROM rh_marcacao WHERE funcionario_id = ? AND data = ? ORDER BY data_hora",
+  "SELECT * FROM rh_modelo ORDER BY tipo, sistema DESC, nome",
+  "SELECT * FROM rh_modelo WHERE tipo = ? ORDER BY sistema DESC, nome",
   "SELECT * FROM rh_plano_ferias ORDER BY data_inicio",
   "SELECT * FROM rh_plano_ferias WHERE ano IN (?, ?) ORDER BY data_inicio",
   "SELECT * FROM rh_ponto WHERE data LIKE ? ORDER BY data",
@@ -1026,6 +1031,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_irt_tabela SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL",
   "UPDATE rh_justificacao SET estado = ?, comentario = ?, decidido_por = ?, decidido_por_nome = ?, decidido_em = ? WHERE id = ? AND estado = 'pendente'",
   "UPDATE rh_marcacao SET anulada = 1, motivo_anulacao = ?, anulada_por = ?, anulada_por_nome = ?, anulada_em = ? WHERE id = ? AND anulada = 0",
+  "UPDATE rh_modelo SET nome = ?, titulo = ?, conteudo = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_parametro SET valor = ? WHERE id = ?",
   "UPDATE rh_parametro SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL",
   "UPDATE rh_plano_ferias SET estado = 'anulado', observacoes = ?, actualizado_em = ? WHERE id = ? AND estado IN ('planeado', 'aprovado')",
@@ -1826,6 +1832,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "a20be549c5cf5c16c39c3ffb320d1864f4992067690dbb9408697a1ddd679bd4",
     "CREATE TABLE IF NOT EXISTS rh_marcacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, data_hora TEXT NOT NULL, tipo TEXT CHECK(tipo IS NULL OR tipo IN ('entrada', 'saida', 'inicio_pausa', 'fim_pausa')), origem TEXT NOT NULL CHECK(origem IN ('manual', 'csv', 'relogio', 'app', 'quiosque')), dispositivo_id TEXT, latitude REAL, longitude REAL, foto_data_url TEXT, pendente_validacao INTEGER NOT NULL DEFAULT 0, motivo TEXT, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0, motivo_anulacao TEXT, anulada_por TEXT, anulada_por_nome TEXT, anulada_em TEXT )"
+  ],
+  [
+    "9b07846b0fbfa9290139af4b132957ebf9f8c6f4bc4528a0bf79399307aaf8cc",
+    "CREATE TABLE IF NOT EXISTS rh_modelo ( id TEXT PRIMARY KEY, tipo TEXT NOT NULL CHECK(tipo IN ('declaracao', 'relatorio')), nome TEXT NOT NULL, titulo TEXT, conteudo TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1, sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )"
   ],
   [
     "62206f99801b39e45ad81f7f0ea1de031b72b46ceb183c8be04bc335614fc242",
@@ -2916,6 +2926,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "ca870dcb6db4f15e554f6641916da23aa9e5f02fe230813f8269b31d7bc12e19",
+    "INSERT INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?)"
+  ],
+  [
     "2863a257f0cf68449459d165e20aff8f9e039c73b2bda5fb911c2729f128684a",
     "INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)"
   ],
@@ -3086,6 +3100,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "21f9b987b6abaf4b5e641f81d2b9aecb47349f8d94331e4b4d5382bd663d4dcd",
     "INSERT OR IGNORE INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "3870c76be95e41195ee60f2a70099634764e5816e5b7f38537e8cff349f4797c",
+    "INSERT OR IGNORE INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, 'declaracao', ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')"
   ],
   [
     "e9a1c09c7e89cac3b8cc46a8ef37c93fa38fb99dd8f5ff8f1cf581037bbcab13",
@@ -3634,6 +3652,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "0baab848156e0d51d9e68dbd35c305d2ad81e6bde7db9b4ae192340305c5c144",
     "SELECT * FROM rh_marcacao WHERE funcionario_id = ? AND data = ? ORDER BY data_hora"
+  ],
+  [
+    "3d9aa23fdc7a59324d57f236dd9d94220a3611e29d8888dd0df5155f272b1c5f",
+    "SELECT * FROM rh_modelo ORDER BY tipo, sistema DESC, nome"
+  ],
+  [
+    "0f8e80498d7167343f4b042b7b0ba59f655dde195e9a37a757e69de7d46b4ad4",
+    "SELECT * FROM rh_modelo WHERE tipo = ? ORDER BY sistema DESC, nome"
   ],
   [
     "919dfff0b63cfd1525cc9fd43f79925c65794dc9905952ced5f9dba0fb996d19",
@@ -5194,6 +5220,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "a5c5a1b3ce2eed5cdb8125e9395369e45975d1a16b31db36dbd12c3f6f6836b7",
     "UPDATE rh_marcacao SET anulada = 1, motivo_anulacao = ?, anulada_por = ?, anulada_por_nome = ?, anulada_em = ? WHERE id = ? AND anulada = 0"
+  ],
+  [
+    "adf509fe33aecfb3ca030f1bd3b2324546f8b9dc18ce32a42144a45aa2f99ffc",
+    "UPDATE rh_modelo SET nome = ?, titulo = ?, conteudo = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "c5023b053bd9822fc12fb730d2225d83fba9ef7abdb26cb883134fd15a16e43e",
