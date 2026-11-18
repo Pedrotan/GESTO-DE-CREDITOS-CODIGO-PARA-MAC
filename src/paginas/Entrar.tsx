@@ -59,6 +59,20 @@ const usersRosterMessage = (outcome: UsersRosterOutcome, usersHere: number) => {
     return 'Este email não pertence a nenhum utilizador da empresa. Use o mesmo email com que entra no Tango ERP do computador da empresa.';
 };
 
+/** Marca de água guardada neste computador (Master ou empresa activa), igual à usada nos PDFs. */
+const storedLoginWatermark = (): string | null => {
+    try {
+        const master = localStorage.getItem('tango_master_watermark');
+        if (master) return master;
+        const account = localStorage.getItem('tango_active_account_id') || 'default';
+        const saved = localStorage.getItem('cached_company_settings:' + account) || localStorage.getItem('company_settings');
+        const settings = saved ? JSON.parse(saved) : null;
+        return settings?.watermarkLogo || localStorage.getItem('company_watermark_logo_backup:' + account) || null;
+    } catch {
+        return null;
+    }
+};
+
 const systemSlides = [
     {
         title: "Gestão de Créditos Inteligente",
@@ -100,7 +114,7 @@ export default function Login() {
     const { companySettings } = useData();
     const navigate = useNavigate();
     // No computador as definições completas só se lêem depois do login; a identidade da empresa vem à parte.
-    const [publicInfo, setPublicInfo] = useState<{ name: string; logo: string | null; enableMultiTenant: boolean | null } | null>(null);
+    const [publicInfo, setPublicInfo] = useState<{ name: string; logo: string | null; watermarkLogo?: string | null; reportLogo?: string | null; enableMultiTenant: boolean | null } | null>(null);
     useEffect(() => {
         let cancelled = false;
         window.electronAPI?.companyPublicInfo?.().then(info => { if (!cancelled) setPublicInfo(info); }).catch(() => {});
@@ -110,6 +124,14 @@ export default function Login() {
     const loginCompanyName = isRealCompanyName(companySettings?.name) ? companySettings.name
         : isRealCompanyName(publicInfo?.name) ? publicInfo!.name : 'Tango Gestão de Créditos';
     const loginLogo = companySettings?.logo || publicInfo?.logo || null;
+    // Fundo esbatido: a mesma imagem que os relatórios usam como marca de água (com as mesmas alternativas).
+    const loginWatermark = companySettings?.watermarkLogo || publicInfo?.watermarkLogo || storedLoginWatermark()
+        || companySettings?.reportLogo || publicInfo?.reportLogo || loginLogo;
+    const loginWatermarkSrc = loginWatermark
+        ? (/^(data:|https?:|blob:)/.test(loginWatermark) ? loginWatermark : getFileUrl(loginWatermark))
+        : null;
+    const [watermarkError, setWatermarkError] = useState(false);
+    useEffect(() => { setWatermarkError(false); }, [loginWatermarkSrc]);
     // A "Conta de trabalho" só aparece quando o modo multi-empresa foi activado nas definições.
     // Na versão web vale o modo devolvido pelo Tango Master ao validar o Código de Acesso.
     const webMultiTenant = useWebMultiTenant();
@@ -382,6 +404,18 @@ export default function Login() {
                 {/* Background decorative glow elements */}
                 <div className="absolute top-[-10%] left-[-10%] w-[350px] h-[350px] bg-blue-500/10 rounded-full blur-3xl pointer-events-none z-0" />
                 <div className="absolute bottom-[-10%] right-[-10%] w-[350px] h-[350px] bg-indigo-500/10 rounded-full blur-3xl pointer-events-none z-0" />
+                {/* Marca de água dos relatórios, discreta e ligeiramente desfocada para não competir com o formulário */}
+                {loginWatermarkSrc && !watermarkError && (
+                    <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-0 flex items-center justify-center overflow-hidden">
+                        <img
+                            src={loginWatermarkSrc}
+                            alt=""
+                            draggable={false}
+                            onError={() => setWatermarkError(true)}
+                            className="h-[88vh] max-h-[1100px] w-[92%] max-w-[1400px] select-none object-contain opacity-[0.07] blur-[2px] grayscale-[35%]"
+                        />
+                    </div>
+                )}
 
                 <div className="w-full max-w-[640px] flex flex-col gap-6 z-10 relative animate-in fade-in slide-in-from-bottom-6 duration-700">
                     <div className="text-center mb-3">

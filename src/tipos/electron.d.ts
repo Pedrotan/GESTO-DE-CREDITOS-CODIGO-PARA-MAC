@@ -8,7 +8,7 @@ export interface ElectronAPI {
     accountingSealVerify?: () => Promise<import('@/bibliotecas/selo-contabilistico').SealVerification>;
     auditSealVerify?: () => Promise<{ available: boolean; reason?: string; sealedCount: number; keyFingerprint?: string; tampered: string[]; broken: string[]; missing: string[]; unsealed: number; checkedAt: string }>;
     accountingSealPending?: () => Promise<{ sealed: number }>;
-    companyPublicInfo?: () => Promise<{ name: string; logo: string | null; enableMultiTenant: boolean | null } | null>;
+    companyPublicInfo?: () => Promise<{ name: string; logo: string | null; watermarkLogo?: string | null; reportLogo?: string | null; enableMultiTenant: boolean | null } | null>;
     userAuthMfaBegin: () => Promise<{ secret: string; qrCode: string }>;
     userAuthMfaEnable: (token: string) => Promise<{ enabled: boolean; reason?: 'session_expired' | 'qr_expired' | 'invalid_code'; user?: any; recoveryCodes?: string[] }>;
     userAuthMfaDisable: (token: string) => Promise<{ disabled: boolean; user?: any }>;

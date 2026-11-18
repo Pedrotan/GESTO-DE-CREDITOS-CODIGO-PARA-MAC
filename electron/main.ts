@@ -3486,11 +3486,14 @@ app.whenReady().then(async () => {
   ipcMain.handle("company-public-info", async (event) => {
     assertTrustedIpcSender(event);
     try {
-      const row: any = await runQuery("get", "SELECT name, logo, enableMultiTenant FROM company_settings WHERE id = 1 LIMIT 1");
+      const row: any = await runQuery("get", "SELECT * FROM company_settings WHERE id = 1 LIMIT 1");
       if (!row) return null;
       return {
         name: typeof row.name === "string" ? row.name : "",
         logo: typeof row.logo === "string" ? row.logo : null,
+        // Mesma imagem que os relatórios usam como marca de água (fundo esbatido do login).
+        watermarkLogo: typeof row.watermarkLogo === "string" && row.watermarkLogo ? row.watermarkLogo : null,
+        reportLogo: typeof row.reportLogo === "string" && row.reportLogo ? row.reportLogo : null,
         enableMultiTenant: row.enableMultiTenant === null || row.enableMultiTenant === undefined ? null : Number(row.enableMultiTenant) !== 0
       };
     } catch {
