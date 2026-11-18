@@ -2,7 +2,7 @@
 // documentos emitidos numerados. O ponto de um mês já processado (processamento normal fora do estado
 // «aberto») fica só de leitura: para corrigir, reabre-se o processamento.
 import { db } from '@/bibliotecas/bd';
-import { calcularDia, diasUteis, ehDiaUtil, HORARIO_OMISSAO, type Ausencia, type Feriado, type Horario, type RegistoPonto, type TipoAusencia } from '@/bibliotecas/rh/ponto';
+import { calcularDia, codigoAusencia, diasUteis, ehDiaUtil, HORARIO_OMISSAO, type Ausencia, type Feriado, type Horario, type RegistoPonto, type TipoAusencia } from '@/bibliotecas/rh/ponto';
 import { auditoriaRH, ServicoRH, type ActorRH } from './ServicoRH';
 
 type Statement = { sql: string; params?: unknown[]; expectChanges?: number };
@@ -30,6 +30,9 @@ export class ServicoTempoRH {
         for (const dia of new Set(dias.map(d => d.slice(0, 7)))) {
             const estado = await this.mesBloqueado(`${dia}-01`);
             if (estado) throw new Error(`O mês ${dia.split('-').reverse().join('/')} já foi processado (${estado}): o ponto e as ausências estão só de leitura. Reabra o processamento para corrigir.`);
+            // Livro de ponto fechado: as ausências do mês também ficam bloqueadas até o RH o reabrir.
+            const fechado = await db.get<{ estado: string }>(`SELECT estado FROM rh_ponto_periodo WHERE id = ? AND estado = 'fechado'`, [dia]).catch(() => undefined);
+            if (fechado) throw new Error(`O livro de ponto de ${dia.split('-').reverse().join('/')} está fechado: peça ao RH para o reabrir (com motivo).`);
         }
     }
 
@@ -216,8 +219,16 @@ export class ServicoTempoRH {
         for (const funcionarioId of input.funcionarios) {
             const f = funcionarios.find(x => x.id === funcionarioId);
             if (!f) continue;
-            if (existentes.some(a => a.funcionario_id === funcionarioId && a.estado !== 'anulada' && a.data_inicio <= fim && a.data_fim >= inicio))
-                throw new Error(`${f.nome} já tem uma ausência registada nesse período.`);
+            const sobrepostas = existentes.filter(a => a.funcionario_id === funcionarioId && a.estado !== 'anulada' && a.data_inicio <= fim && a.data_fim >= inicio);
+            // Férias aprovadas depois de lançada uma falta: as férias prevalecem e a falta é anulada (fica na auditoria).
+            const faltas = tipo.desconta_ferias ? sobrepostas.filter(a => { const t = tipos.find(x => x.id === a.tipo_id); return t && !t.desconta_ferias && ['F', 'FJ'].includes(codigoAusencia(t)); }) : [];
+            if (sobrepostas.length > faltas.length) throw new Error(`${f.nome} já tem uma ausência registada nesse período.`);
+            for (const falta of faltas) {
+                statements.push({ sql: `UPDATE rh_ausencia SET estado = 'anulada', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, motivo_anulacao = ?, actualizado_em = ? WHERE id = ? AND estado <> 'anulada'`,
+                    params: [actor.id, actor.name, when, 'Anulada automaticamente: as férias aprovadas têm prioridade', when, falta.id], expectChanges: 1 });
+                statements.push(auditoriaRH(actor, 'cancel', `Anulou a falta ${falta.id} de ${f.nome}: as férias aprovadas têm prioridade`, { modulo: 'ponto', entidade: 'falta', funcionarioId, ausenciaId: falta.id, data: falta.data_inicio },
+                    { estado: falta.estado }, { estado: 'anulada' }, when));
+            }
             const horario = horarios.find(h => h.id === f.horario_id) || horarios.find(h => h.id === 'horario-normal') || HORARIO_OMISSAO;
             const dias = horas > 0 ? 0 : diasUteis(inicio, fim, horario, feriados);
             const id = crypto.randomUUID();
@@ -233,7 +244,7 @@ export class ServicoTempoRH {
                 { funcionarioId, ausenciaId: id, tipo: tipo.codigo, estado }, undefined, undefined, when));
         }
         await db.transaction(statements);
-        return { registadas: statements.length / 2, estado };
+        return { registadas: input.funcionarios.filter(id => funcionarios.some(x => x.id === id)).length, estado };
     }
 
     /** Aprova um pedido pendente (dispensa ou ausência que aguardava documento). */

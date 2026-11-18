@@ -10,6 +10,7 @@ import { estadoEfectivo } from '@/bibliotecas/rh/ferias';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { Indicador, NavegacaoRH, kz, useCarregar } from '@/componentes/rh/comum-rh';
+import { PainelHojePonto } from '@/componentes/rh/ponto/SeccoesPonto';
 import { BannerAniversarios } from '@/componentes/rh/BannerAniversarios';
 import { EVENTO_ALERTAS_RH } from '@/componentes/rh/TarefaDiariaRH';
 import { useBaseRH } from './FuncionariosRH';
@@ -62,6 +63,7 @@ export default function PainelRH() {
         <MainLayout title="Painel de RH" subtitle="Efectivos, custos, alertas e lembretes do dia">
             <NavegacaoRH />
             <BannerAniversarios />
+            <div className="mb-4"><PainelHojePonto actor={actor} gerir={false} /></div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <Indicador titulo="Funcionários activos" valor={activos.length} nota={`${funcionarios.filter(f => f.estado === 'suspenso').length} suspenso(s)`} tom="emerald" />
                 <Indicador titulo="De férias hoje" valor={deFerias} tom="sky" />

@@ -9,6 +9,8 @@ import { ServicoRH, type ActorRH } from './ServicoRH';
 import { ServicoTempoRH } from './ServicoTempoRH';
 import { ServicoSalariosRH } from './ServicoSalariosRH';
 import { ServicoFeriasRH } from './ServicoFeriasRH';
+import { ServicoPontoRH, agoraLuanda } from './ServicoPontoRH';
+import { alertasPonto } from '@/bibliotecas/rh/ponto-alertas';
 
 export type AlertaRH = Alerta & { estado: 'novo' | 'lido' | 'resolvido'; lido_em: string | null; resolvido_em: string | null; criado_em: string };
 const agora = () => new Date().toISOString();
@@ -27,6 +29,33 @@ export class ServicoAlertasRH {
         await db.run(`UPDATE rh_alerta SET estado = 'resolvido', resolvido_por = ?, resolvido_em = ? WHERE id = ? AND estado <> 'resolvido'`, [actor.id, agora(), id]);
     }
 
+    private static async alertasDoPonto(hoje: string): Promise<Alerta[]> {
+        const [ano, mes] = hoje.split('-').map(Number);
+        const anterior = new Date(Date.UTC(ano, mes - 2, 1));
+        const [{ grelha, contexto }, justificacoes, extraAno, estadoAnterior] = await Promise.all([
+            ServicoPontoRH.grelha(ano, mes), ServicoPontoRH.justificacoes(),
+            db.all<{ funcionario_id: string; total: number }>(
+                `SELECT funcionario_id, SUM(COALESCE(minutos_extra, 0)) AS total FROM rh_ponto WHERE data >= ? AND data < ? GROUP BY funcionario_id`,
+                [`${ano}-01-01`, `${hoje.slice(0, 7)}-01`]).catch(() => [] as Array<{ funcionario_id: string; total: number }>),
+            ServicoPontoRH.estadoMes(anterior.getUTCFullYear(), anterior.getUTCMonth() + 1),
+        ]);
+        const alertas = alertasPonto({
+            hoje, agora: agoraLuanda(), config: contexto.config, linhas: grelha.linhas,
+            extraAnoAnterioresMin: new Map(extraAno.map(x => [x.funcionario_id, Number(x.total) || 0] as const)),
+            justificacoesPendentes: justificacoes.filter(j => j.estado === 'pendente'),
+            // O livro novo começa em Novembro de 2026: os meses anteriores não pedem fecho.
+            mesAnteriorFechado: estadoAnterior === 'fechado' || ano * 12 + mes <= 2026 * 12 + 11,
+        });
+        // O próprio funcionário também é avisado na sua conta (sem marcação e entrada sem saída).
+        const avisos = alertas.filter(a => a.tipo === 'ponto_sem_marcacao' || a.tipo === 'ponto_sem_saida').flatMap(a => {
+            const utilizador = contexto.funcionarios.find(f => f.id === a.funcionario_id)?.utilizador_id;
+            return utilizador ? [{ sql: `INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, 'warning', 0, ?)`,
+                params: [`${a.id}:aviso`, utilizador, a.tipo === 'ponto_sem_marcacao' ? 'Ainda não marcou a entrada' : 'Falta marcar a saída', a.mensagem, agora()] }] : [];
+        });
+        if (avisos.length) await db.transaction(avisos).catch(() => undefined);
+        return alertas;
+    }
+
     /** Corre a tarefa: devolve os alertas novos criados agora. */
     static async executar(actor: ActorRH, opcoes: { gerirRH: boolean; gerirClientes: boolean }) {
         const hoje = luandaTodayKey();
@@ -38,11 +67,14 @@ export class ServicoAlertasRH {
                 'SELECT id, name, nif, expiryDate, deletedAt FROM clients WHERE deletedAt IS NULL').catch(() => []),
         ]);
         const num = (chave: string, omissao: number) => valorNumerico(parametros, chave, hoje, omissao);
-        const alertas = gerarAlertas({
+        const alertas: Alerta[] = gerarAlertas({
             hoje, funcionarios, contratos, documentos, planos, processamentos, ausenciasPendentes: ausencias.filter(a => a.estado === 'pendente').length, clientes,
             parametros: { alertaFeriasDias: num('alerta_ferias_dias', 5), mesNatal: num('subsidio_natal_mes', 11), prazoEntregaDia: num('prazo_entrega_dia', 10),
                 alertaPrazosDias: num('alerta_prazos_dias', 5), biDiasAviso: num('bi_dias_aviso', 90) },
         });
+        // Livro de ponto (secção 7.7): sem marcação, entrada sem saída, atrasos repetidos, horas extra acima do limite,
+        // justificações por decidir e mês por fechar.
+        if (opcoes.gerirRH) alertas.push(...await this.alertasDoPonto(hoje).catch(() => [] as Alerta[]));
         const porId = new Map(existentes.map(a => [a.id, a]));
         const actuais = new Set(alertas.map(a => a.id));
         const when = agora();

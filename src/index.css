@@ -425,3 +425,14 @@
 .swal2-styled.swal2-confirm {
   box-shadow: 0 10px 15px -3px rgba(5, 150, 105, 0.25) !important;
 }
+
+/* Livro de ponto: impressão em A4 horizontal, só a grelha, sem menus (F1.15). */
+@media print {
+  @page { size: A4 landscape; margin: 8mm; }
+  body * { visibility: hidden; }
+  .ponto-impressao, .ponto-impressao * { visibility: visible; }
+  .ponto-impressao { position: absolute; inset: 0 auto auto 0; width: 100%; }
+  .ponto-impressao .no-print { display: none !important; }
+  .ponto-grelha { max-height: none !important; overflow: visible !important; border: none !important; }
+  .ponto-grelha th, .ponto-grelha td { position: static !important; }
+}

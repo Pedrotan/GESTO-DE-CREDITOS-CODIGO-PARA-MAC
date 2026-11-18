@@ -1078,6 +1078,10 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_rubrica_pontual: "hr_payroll",
   // rh_alerta fica sem permissão própria: os alertas são derivados e a tarefa diária corre para qualquer utilizador autenticado.
   rh_plano_ferias: "hr_manage",
+  // Livro de ponto: o funcionário e o chefe de departamento são verificados em assertPontoAutorizado.
+  rh_marcacao: "hr_manage",
+  rh_ponto_periodo: "hr_manage",
+  rh_justificacao: "hr_manage",
   // Facturação electrónica AGT e SAF-T
   fiscal_settings: "manage_fiscal",
   fiscal_series: "manage_fiscal",
@@ -1091,6 +1095,31 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
 // Pedidos do portal do funcionário: só estas duas instruções (estado fixo «planeado»/«pendente»), com
 // hr_self e o próprio utilizador como autor. Que a ficha é mesmo do utilizador confirma-se em assertApprovalBatch.
 const isPortalPedido = (statement: { sql: string }) => isPortalPedidoSql(statement.sql);
+// Livro de ponto (especificação, secção 9): sem «gerir RH» só escrevem o próprio funcionário (marcações no portal e
+// pedidos de justificação, na sua ficha) e o chefe do departamento (ponto e validação do seu departamento).
+const PONTO_TABELAS_DELEGADAS = new Set(["rh_marcacao", "rh_ausencia", "rh_ponto", "rh_ponto_periodo", "rh_justificacao"]);
+const assertPontoAutorizado = async (event: Electron.IpcMainInvokeEvent, statement: { sql: string; params?: unknown[] }, query: (type: string, sql: string, params?: unknown[]) => Promise<any>) => {
+  const table = mutationTable(statement.sql);
+  if (financialSchemaBootstrapOpen || !table || !PONTO_TABELAS_DELEGADAS.has(table) || isPortalPedido(statement)) return;
+  const actor: any = userAuth.assertAuthenticated(event.sender.id);
+  if (hasPermission(actor, "hr_manage")) return;
+  const params = statement.params || [];
+  const insert = /^s*INSERT/i.test(statement.sql);
+  const ultimo = params[params.length - 1];
+  const funcionarioDe = async (tabela: string) => (await query("get", `SELECT funcionario_id FROM ${tabela} WHERE id = ?`, [ultimo]))?.funcionario_id;
+  let funcionarioId: unknown;
+  let departamentoId: unknown;
+  if (table === "rh_ponto") funcionarioId = String(insert ? params[1] : ultimo).split(":")[0];
+  else if (table === "rh_ponto_periodo") departamentoId = insert ? params[3] : String(ultimo).split(":")[1];
+  else funcionarioId = insert ? params[1] : await funcionarioDe(table);
+  const ficha = funcionarioId ? await query("get", "SELECT utilizador_id, departamento_id FROM rh_funcionario WHERE id = ?", [funcionarioId]) : null;
+  if (ficha?.utilizador_id === actor.id && insert && ((table === "rh_marcacao" && params[5] === "app") || table === "rh_justificacao")) return;
+  const departamento = departamentoId || ficha?.departamento_id;
+  const chefe = departamento ? await query("get", "SELECT 1 AS ok FROM rh_departamento d JOIN rh_funcionario r ON r.id = d.responsavel_id WHERE d.id = ? AND r.utilizador_id = ?", [departamento, actor.id]) : null;
+  if (!chefe?.ok) throw new Error("Sem permissão para alterar o livro de ponto deste funcionário (só o RH ou o chefe do departamento).");
+  // O chefe valida o seu departamento; aprovar e fechar o mês é do RH.
+  if (table === "rh_ponto_periodo" && /estado = '(validado|fechado)'|'fechado'/i.test(statement.sql)) throw new Error("Só o RH aprova e fecha o mês do livro de ponto.");
+};
 const assertPayrollSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statement: { sql: string; params?: unknown[] }) => {
   const sql = statement.sql.replace(/\s+/g, " ");
   const setClause = /^\s*UPDATE\b/i.test(sql) ? (sql.match(/\bSET\b(.*?)\bWHERE\b/i)?.[1] || "") : "";
@@ -1189,6 +1218,7 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       continue;
     }
     if (table === 'collection_events') continue;
+    if (PONTO_TABELAS_DELEGADAS.has(table) && !hasPermission(userAuth.assertAuthenticated(event.sender.id), 'hr_manage')) continue; // assertPontoAutorizado
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
   }
 };
@@ -1202,6 +1232,7 @@ const loadLimitPolicy = async (query:(type:string,sql:string,params?:unknown[])=
 const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:Array<{sql:string;params?:unknown[]}>,query:(type:string,sql:string,params?:unknown[])=>Promise<any>)=>{
   if(financialSchemaBootstrapOpen)return;
   for(const statement of statements){
+    await assertPontoAutorizado(event,statement,query);
     if(isPortalPedido(statement)){
       // A ficha do pedido tem de estar ligada à conta de quem pede (ou quem pede gere o RH).
       const actor:any=userAuth.assertAuthenticated(event.sender.id);

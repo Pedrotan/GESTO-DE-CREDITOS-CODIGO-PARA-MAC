@@ -285,3 +285,81 @@ export const RH_PARAMETROS_FASE4: Array<{ chave: string; valor: string; descrica
 export const rhSeedFase4Statements = (now: string) => RH_PARAMETROS_FASE4.map(p => ({
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
 }));
+
+// ── Livro de ponto (versão 2): marcações individuais, períodos mensais e configuração ──
+// As marcações nunca se apagam: anulam-se com motivo (prova em caso de inspecção ou litígio). O resumo de cada dia
+// continua em rh_ponto (calculado pelo motor), para os computadores com a versão anterior o verem.
+export const RH_PONTO_V2_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_marcacao (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, data_hora TEXT NOT NULL,
+        tipo TEXT CHECK(tipo IS NULL OR tipo IN ('entrada', 'saida', 'inicio_pausa', 'fim_pausa')),
+        origem TEXT NOT NULL CHECK(origem IN ('manual', 'csv', 'relogio', 'app', 'quiosque')),
+        dispositivo_id TEXT, latitude REAL, longitude REAL, foto_data_url TEXT,
+        pendente_validacao INTEGER NOT NULL DEFAULT 0, motivo TEXT,
+        criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL,
+        anulada INTEGER NOT NULL DEFAULT 0, motivo_anulacao TEXT, anulada_por TEXT, anulada_por_nome TEXT, anulada_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_marcacao_dia ON rh_marcacao(funcionario_id, data)`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_marcacao_data ON rh_marcacao(data)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_marcacao_delete BEFORE DELETE ON rh_marcacao
+        BEGIN SELECT RAISE(ABORT, 'As marcações de ponto não se apagam: anulam-se com motivo'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_marcacao_imutavel BEFORE UPDATE ON rh_marcacao
+        WHEN OLD.anulada = 1 OR NEW.data_hora <> OLD.data_hora OR COALESCE(NEW.tipo, '') <> COALESCE(OLD.tipo, '') OR NEW.funcionario_id <> OLD.funcionario_id OR NEW.data <> OLD.data
+        BEGIN SELECT RAISE(ABORT, 'Uma marcação de ponto não se altera: anula-se e regista-se outra'); END`,
+    // Um registo por mês (id aaaa-mm) e por departamento (id aaaa-mm:departamento) para a validação dos chefes.
+    `CREATE TABLE IF NOT EXISTS rh_ponto_periodo (
+        id TEXT PRIMARY KEY, ano INTEGER NOT NULL, mes INTEGER NOT NULL, departamento_id TEXT,
+        estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'em_validacao', 'validado', 'fechado')),
+        validado_por TEXT, validado_por_nome TEXT, validado_em TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT,
+        fechado_por TEXT, fechado_por_nome TEXT, fechado_em TEXT,
+        reaberto_por TEXT, reaberto_por_nome TEXT, reaberto_em TEXT, motivo_reabertura TEXT,
+        resumo_json TEXT, processamento_desactualizado INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, actualizado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_ponto_periodo_mes ON rh_ponto_periodo(ano, mes)`,
+    // Justificação de uma falta (ou de um dia sem registo) pedida pelo funcionário, com anexo; o chefe ou o RH decide.
+    `CREATE TABLE IF NOT EXISTS rh_justificacao (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL, ausencia_id TEXT,
+        motivo_codigo TEXT NOT NULL, motivo TEXT NOT NULL, anexo_nome TEXT, anexo_mime TEXT, anexo_data_url TEXT,
+        estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'rejeitada')),
+        comentario TEXT, decidido_por TEXT, decidido_por_nome TEXT, decidido_em TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_justificacao_funcionario ON rh_justificacao(funcionario_id, estado)`,
+];
+
+/** Colunas acrescentadas às tabelas existentes (resumo do dia, meio dia de falta, justificação pelo funcionário e PIN do quiosque). */
+export const RH_PONTO_V2_COLUNAS: Array<[string, string, string]> = [
+    ['rh_ponto', 'estado', 'TEXT'], ['rh_ponto', 'minutos_trabalhados', 'INTEGER'], ['rh_ponto', 'minutos_saida_antecipada', 'INTEGER'],
+    ['rh_ponto', 'minutos_extra', 'INTEGER'], ['rh_ponto', 'minutos_noturnos', 'INTEGER'], ['rh_ponto', 'incompleto', 'INTEGER'],
+    ['rh_ponto', 'editado_manualmente', 'INTEGER'], ['rh_ponto', 'primeira_entrada', 'TEXT'], ['rh_ponto', 'ultima_saida', 'TEXT'],
+    ['rh_ponto', 'recalculado_em', 'TEXT'],
+    ['rh_ausencia', 'meio_dia', 'TEXT'],
+    ['rh_funcionario', 'pin_ponto_hash', 'TEXT'],
+];
+
+/** Opções do livro de ponto como parâmetros com vigência (secção 4.6). Os valores legais confirmam-se com a LGT. */
+export const RH_PARAMETROS_PONTO: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'ponto_tolerancia_entrada_min', valor: '10', descricao: 'Ponto: atraso até este número de minutos não conta' },
+    { chave: 'ponto_tolerancia_saida_min', valor: '5', descricao: 'Ponto: saída antecipada até este número de minutos não conta' },
+    { chave: 'ponto_tolerancia_cumulativa', valor: '0', descricao: 'Ponto: 1 = acima da tolerância conta o atraso todo; 0 = só o excesso' },
+    { chave: 'ponto_minimo_extra_min', valor: '15', descricao: 'Ponto: horas extra só contam a partir destes minutos por dia' },
+    { chave: 'ponto_arredondamento_min', valor: '0', descricao: 'Ponto: arredondamento das horas extra (0, 5, 10 ou 15 minutos)' },
+    { chave: 'ponto_pausa_almoco_auto_min', valor: '60', descricao: 'Ponto: pausa descontada sem marcações de pausa (máximo; usa a do horário)' },
+    { chave: 'ponto_inicio_noturno', valor: '20:00', descricao: 'Ponto: início do trabalho nocturno (confirmar com a LGT)' },
+    { chave: 'ponto_fim_noturno', valor: '06:00', descricao: 'Ponto: fim do trabalho nocturno (confirmar com a LGT)' },
+    { chave: 'ponto_limite_extra_diario_min', valor: '120', descricao: 'Ponto: alerta acima destes minutos extra num dia (confirmar com a LGT)' },
+    { chave: 'ponto_limite_extra_anual_min', valor: '12000', descricao: 'Ponto: alerta acima destes minutos extra num ano (confirmar com a LGT)' },
+    { chave: 'ponto_hora_alerta_sem_marcacao', valor: '08:30', descricao: 'Ponto: hora do alerta «sem marcação de entrada»' },
+    { chave: 'ponto_lancar_falta_automatica', valor: '0', descricao: 'Ponto: 1 = permite converter dias sem registo em faltas ao validar o mês' },
+    { chave: 'ponto_exigir_fecho_para_salarios', valor: '1', descricao: 'Ponto: 1 = o processamento salarial só usa meses fechados' },
+    { chave: 'ponto_autoregisto_app', valor: '0', descricao: 'Ponto: 1 = os funcionários marcam o ponto no portal' },
+    { chave: 'ponto_exigir_geolocalizacao', valor: '0', descricao: 'Ponto: 1 = a marcação no portal exige estar na área permitida' },
+    { chave: 'ponto_raio_permitido_m', valor: '200', descricao: 'Ponto: raio da área permitida (metros)' },
+    { chave: 'ponto_local_latitude', valor: '', descricao: 'Ponto: latitude do local de trabalho' },
+    { chave: 'ponto_local_longitude', valor: '', descricao: 'Ponto: longitude do local de trabalho' },
+    { chave: 'ponto_exigir_selfie', valor: '0', descricao: 'Ponto: 1 = a marcação no portal exige uma fotografia tirada no momento' },
+    { chave: 'ponto_alerta_atrasos_mes', valor: '3', descricao: 'Ponto: alerta a partir deste número de atrasos no mês' },
+];
+export const rhSeedPontoStatements = (now: string) => RH_PARAMETROS_PONTO.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));

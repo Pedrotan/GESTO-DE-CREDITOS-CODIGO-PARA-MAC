@@ -65,6 +65,7 @@ const RecibosRH = lazyWithReload(() => import("./paginas/rh/RecibosRH"));
 const FeriasRH = lazyWithReload(() => import("./paginas/rh/FeriasRH"));
 const RelatoriosRH = lazyWithReload(() => import("./paginas/rh/RelatoriosRH"));
 const PortalFuncionario = lazyWithReload(() => import("./paginas/rh/PortalFuncionario"));
+const QuiosquePonto = lazyWithReload(() => import("./paginas/rh/QuiosquePonto"));
 const Scoring = lazyWithReload(() => import("./paginas/Scoring"));
 const SimuladorCredito = lazyWithReload(() => import("./paginas/SimuladorCredito"));
 const TermosPoliticas = lazyWithReload(() => import("./paginas/TermosPoliticas"));
@@ -366,6 +367,7 @@ const AppContent = () => {
             ))}
             <Route path="/rh/relatorios" element={<ProtectedRoute permission="hr_view"><GuardaModuloRH><RelatoriosRH /></GuardaModuloRH></ProtectedRoute>} />
             <Route path="/rh/portal" element={<ProtectedRoute permission="hr_self"><GuardaModuloRH><PortalFuncionario /></GuardaModuloRH></ProtectedRoute>} />
+            <Route path="/rh/quiosque" element={<ProtectedRoute permission="hr_manage"><GuardaModuloRH><QuiosquePonto /></GuardaModuloRH></ProtectedRoute>} />
             <Route
               path="/fornecedores"
               element={

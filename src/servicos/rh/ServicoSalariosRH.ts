@@ -11,6 +11,7 @@ import { ServicoContabilidade } from '@/servicos/ServicoContabilidade';
 import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
 import { auditoriaRH, ServicoRH, type ActorRH } from './ServicoRH';
 import { ServicoTempoRH } from './ServicoTempoRH';
+import { ServicoPontoRH } from './ServicoPontoRH';
 
 type Statement = { sql: string; params?: unknown[]; expectChanges?: number };
 export type EstadoProcessamento = 'aberto' | 'calculado' | 'aprovado' | 'pago' | 'fechado';
@@ -148,6 +149,9 @@ export class ServicoSalariosRH {
             horas_extra_feriado_acrescimo: num('horas_extra_feriado_acrescimo', 1), subsidio_ferias_pct: num('subsidio_ferias_pct', 0.5),
             subsidio_natal_pct: num('subsidio_natal_pct', 0.5), salario_minimo: num('salario_minimo', 0), irt_tabela: `${tabela.ano} — ${tabela.lei_referencia}`,
         };
+        // Faltas, atrasos e horas extra vêm do livro de ponto fechado (secção 10.3 da especificação do ponto).
+        const ponto = p.tipo === 'normal' ? await ServicoPontoRH.totaisSalario(p.ano, p.mes) : null;
+        if (ponto && !ponto.totais) throw new Error(`Feche primeiro o livro de ponto de ${String(p.mes).padStart(2, '0')}/${p.ano} (Livro de ponto › Fechar mês): o processamento usa os totais do mês fechado.`);
         const escolhidos = p.funcionarios_json ? new Set<string>(JSON.parse(p.funcionarios_json)) : null;
         const inicioMes = `${p.ano}-${String(p.mes).padStart(2, '0')}-01`;
         const elegiveis = funcionarios.filter(f => (escolhidos ? escolhidos.has(f.id) : true) && f.data_admissao <= referencia && (!f.data_saida || f.data_saida >= inicioMes)
@@ -162,7 +166,14 @@ export class ServicoSalariosRH {
             if (!contrato) avisos.push('Sem contrato: salário base 0.');
             const base = contrato?.salario_base_minor || 0;
             const horario = horarios.find(h => h.id === f.horario_id) || horarios.find(h => h.id === 'horario-normal') || HORARIO_OMISSAO;
-            const resumo = resumoMes({ funcionarioId: f.id, ano: p.ano, mes: p.mes, horario, feriados, pontos, ausencias, tipos, admissao: f.data_admissao, saida: f.data_saida, hoje });
+            const totaisPonto = ponto?.totais?.get(f.id);
+            const resumo = totaisPonto ? {
+                faltasDescontaveis: totaisPonto.faltas_descontaveis, minutosAtraso: totaisPonto.minutos_atraso,
+                horasExtra: Math.round(totaisPonto.minutos_extra_util / 60 * 100) / 100,
+                horasExtraFeriado: Math.round((totaisPonto.minutos_extra_descanso + totaisPonto.minutos_extra_feriado) / 60 * 100) / 100,
+                ausenciasPendentes: totaisPonto.ausencias_pendentes, diasSemRegisto: totaisPonto.pendentes,
+            } : p.tipo === 'normal' ? resumoMes({ funcionarioId: f.id, ano: p.ano, mes: p.mes, horario, feriados, pontos, ausencias, tipos, admissao: f.data_admissao, saida: f.data_saida, hoje })
+                : { faltasDescontaveis: 0, minutosAtraso: 0, horasExtra: 0, horasExtraFeriado: 0, ausenciasPendentes: 0, diasSemRegisto: 0 };
             const divisor = taxas.divisor_dia === 'uteis' ? diasUteis(inicioMes, referencia, horario, feriados) : 30;
             const linhasFixas = fixas.filter(x => x.funcionario_id === f.id && x.inicio <= referencia && (!x.fim || x.fim >= inicioMes))
                 .map(x => ({ rubrica: porId.get(x.rubrica_id)!, valorMinor: x.valor_minor, quantidade: x.quantidade })).filter(x => x.rubrica);

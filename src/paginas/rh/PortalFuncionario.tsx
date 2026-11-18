@@ -19,6 +19,7 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { useData } from '@/contextos/ContextoDados';
 import { Indicador, dataPt, executar, kz, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
+import { MarcarPonto, MeuPonto } from '@/componentes/rh/ponto/PortalPonto';
 
 /** Portal do funcionário: os seus recibos, o saldo de férias e os pedidos de férias e de dispensa. */
 export default function PortalFuncionario() {
@@ -54,6 +55,11 @@ export default function PortalFuncionario() {
                 <Indicador titulo="Marcados / gozados" valor={`${saldo.marcados} / ${saldo.gozados}`} />
                 <Indicador titulo="Último líquido" valor={d.recibos[0] ? kz(d.recibos[0].liquido_minor) : '—'} nota={d.recibos[0] ? periodoPt(d.recibos[0].ano, d.recibos[0].mes) : ''} tom="sky" />
                 <Indicador titulo="Pedidos pendentes" valor={d.planos.filter((p: any) => p.estado === 'planeado').length + d.ausencias.filter((a: any) => a.estado === 'pendente').length} tom="orange" />
+            </div>
+
+            <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                <MarcarPonto f={f} actor={actor} />
+                <MeuPonto f={f} actor={actor} />
             </div>
 
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
