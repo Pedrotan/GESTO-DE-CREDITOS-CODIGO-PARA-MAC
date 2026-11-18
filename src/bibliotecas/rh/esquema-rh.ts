@@ -360,6 +360,38 @@ export const RH_PARAMETROS_PONTO: Array<{ chave: string; valor: string; descrica
     { chave: 'ponto_exigir_selfie', valor: '0', descricao: 'Ponto: 1 = a marcação no portal exige uma fotografia tirada no momento' },
     { chave: 'ponto_alerta_atrasos_mes', valor: '3', descricao: 'Ponto: alerta a partir deste número de atrasos no mês' },
 ];
+
+/** Escalas, banco de horas, cartões QR e notificações (versão 3.0.7). */
+export const RH_PONTO_V3_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_escala (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, horario_id TEXT,
+        criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT
+    )`,
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_escala_func_data ON rh_escala(funcionario_id, data)',
+    'CREATE INDEX IF NOT EXISTS idx_rh_escala_data ON rh_escala(data)',
+    `CREATE TABLE IF NOT EXISTS rh_banco_horas (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, minutos INTEGER NOT NULL,
+        tipo TEXT NOT NULL CHECK(tipo IN ('extra', 'saida_antecipada', 'folga', 'ajuste')), tipo_extra TEXT,
+        origem TEXT NOT NULL DEFAULT 'manual', descricao TEXT, anulado INTEGER NOT NULL DEFAULT 0, motivo_anulacao TEXT,
+        criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT
+    )`,
+    'CREATE INDEX IF NOT EXISTS idx_rh_banco_horas_func ON rh_banco_horas(funcionario_id, data)',
+];
+export const RH_PONTO_V3_COLUNAS: Array<[string, string, string]> = [
+    ['rh_horario', 'tipo', "TEXT DEFAULT 'fixo'"], ['rh_horario', 'ciclo', 'TEXT'], ['rh_horario', 'ciclo_inicio', 'TEXT'],
+    ['rh_horario', 'minimo_diario_min', 'INTEGER'], ['rh_horario', 'faixa_inicio', 'TEXT'], ['rh_horario', 'faixa_fim', 'TEXT'],
+    ['rh_funcionario', 'banco_horas', 'INTEGER DEFAULT 0'], ['rh_funcionario', 'qr_ponto_hash', 'TEXT'],
+];
+export const RH_PARAMETROS_PONTO_V3: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'ponto_banco_horas_activo', valor: '0', descricao: 'Ponto: 1 = banco de horas activo (horas extra podem ser compensadas em vez de pagas)' },
+    { chave: 'ponto_banco_validade_meses', valor: '6', descricao: 'Ponto: meses para compensar as horas do banco (0 = sem prazo)' },
+    { chave: 'ponto_alertas_email', valor: '0', descricao: 'Ponto: 1 = os alertas também seguem por e-mail (precisa do e-mail configurado no servidor)' },
+    { chave: 'ponto_email_rh', valor: '', descricao: 'Ponto: e-mail do RH para os alertas do livro de ponto' },
+    { chave: 'ponto_notificacoes_ambiente', valor: '1', descricao: 'Ponto: 1 = mostra os avisos do ponto como notificação do Windows/navegador' },
+];
+export const rhSeedPontoV3Statements = (now: string) => RH_PARAMETROS_PONTO_V3.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));
 export const rhSeedPontoStatements = (now: string) => RH_PARAMETROS_PONTO.map(p => ({
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
 }));

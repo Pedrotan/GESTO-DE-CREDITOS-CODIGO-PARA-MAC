@@ -11,6 +11,8 @@ import { ServicoSalariosRH } from './ServicoSalariosRH';
 import { ServicoFeriasRH } from './ServicoFeriasRH';
 import { ServicoPontoRH, agoraLuanda } from './ServicoPontoRH';
 import { alertasPonto } from '@/bibliotecas/rh/ponto-alertas';
+import type { ConfigPonto } from '@/bibliotecas/rh/ponto-calculo';
+import { ServicoRelogiosPonto, relogioOnline } from './ServicoRelogiosPonto';
 
 export type AlertaRH = Alerta & { estado: 'novo' | 'lido' | 'resolvido'; lido_em: string | null; resolvido_em: string | null; criado_em: string };
 const agora = () => new Date().toISOString();
@@ -29,7 +31,9 @@ export class ServicoAlertasRH {
         await db.run(`UPDATE rh_alerta SET estado = 'resolvido', resolvido_por = ?, resolvido_em = ? WHERE id = ? AND estado <> 'resolvido'`, [actor.id, agora(), id]);
     }
 
-    private static async alertasDoPonto(hoje: string): Promise<Alerta[]> {
+    private static async alertasDoPonto(hoje: string, actor: ActorRH): Promise<{ alertas: Alerta[]; config: ConfigPonto | null; emails: Map<string, string> }> {
+        // Primeiro as marcações novas dos relógios com ligação directa (se houver).
+        await ServicoRelogiosPonto.recolher(actor).catch(() => null);
         const [ano, mes] = hoje.split('-').map(Number);
         const anterior = new Date(Date.UTC(ano, mes - 2, 1));
         const [{ grelha, contexto }, justificacoes, extraAno, estadoAnterior] = await Promise.all([
@@ -53,7 +57,30 @@ export class ServicoAlertasRH {
                 params: [`${a.id}:aviso`, utilizador, a.tipo === 'ponto_sem_marcacao' ? 'Ainda não marcou a entrada' : 'Falta marcar a saída', a.mensagem, agora()] }] : [];
         });
         if (avisos.length) await db.transaction(avisos).catch(() => undefined);
-        return alertas;
+        // Relógios sem contacto há mais de 1 hora.
+        const relogios = await ServicoRelogiosPonto.relogios().catch(() => []);
+        for (const r of relogios.filter(x => !relogioOnline(x))) {
+            alertas.push({ id: `ponto_relogio_offline:${r.device_id}:${hoje}`, tipo: 'ponto_relogio_offline', referencia_id: r.device_id, funcionario_id: null,
+                mensagem: `Relógio «${r.nome}» sem contacto ${r.ultimo_contacto ? `desde ${new Date(r.ultimo_contacto).toLocaleString('pt-PT', { timeZone: 'Africa/Luanda' })}` : 'desde que foi registado'}.`,
+                data_alerta: hoje, destinatario_perfil: 'rh', prioridade: 2, accao: '/rh/ponto' });
+        }
+        const emails = new Map(contexto.funcionarios.map(f => [f.id, String((f as { email?: string | null }).email || '')] as const).filter(([, e]) => e));
+        return { alertas, config: contexto.config, emails };
+    }
+
+    /** Alertas novos do ponto também por e-mail (se activo): ao RH e, nos avisos pessoais, ao próprio funcionário. */
+    private static async enviarEmailsPonto(novos: Alerta[], config: ConfigPonto | null, emails: Map<string, string>) {
+        if (!config?.alertas_email) return;
+        const doPonto = novos.filter(a => a.tipo.startsWith('ponto_'));
+        if (!doPonto.length) return;
+        const mensagens: Array<{ para: string; assunto: string; texto: string }> = [];
+        const rh = config.email_rh.trim();
+        if (rh) mensagens.push({ para: rh, assunto: `Livro de ponto: ${doPonto.length} alerta(s) novo(s)`, texto: doPonto.map(a => `• ${a.mensagem}`).join('\n') });
+        for (const a of doPonto.filter(x => (x.tipo === 'ponto_sem_marcacao' || x.tipo === 'ponto_sem_saida') && x.funcionario_id)) {
+            const para = emails.get(a.funcionario_id!);
+            if (para) mensagens.push({ para, assunto: a.tipo === 'ponto_sem_marcacao' ? 'Ainda não marcou a entrada' : 'Falta marcar a saída', texto: a.mensagem });
+        }
+        await ServicoRelogiosPonto.enviarEmails(mensagens);
     }
 
     /** Corre a tarefa: devolve os alertas novos criados agora. */
@@ -74,7 +101,8 @@ export class ServicoAlertasRH {
         });
         // Livro de ponto (secção 7.7): sem marcação, entrada sem saída, atrasos repetidos, horas extra acima do limite,
         // justificações por decidir e mês por fechar.
-        if (opcoes.gerirRH) alertas.push(...await this.alertasDoPonto(hoje).catch(() => [] as Alerta[]));
+        const ponto = opcoes.gerirRH ? await this.alertasDoPonto(hoje, actor).catch(() => null) : null;
+        if (ponto) alertas.push(...ponto.alertas);
         const porId = new Map(existentes.map(a => [a.id, a]));
         const actuais = new Set(alertas.map(a => a.id));
         const when = agora();
@@ -103,6 +131,7 @@ export class ServicoAlertasRH {
             for (let i = 0; i < marcar.length; i += 200)
                 await db.transaction(marcar.slice(i, i + 200).map(id => ({ sql: 'UPDATE clients SET biAlertSentAt = ? WHERE id = ?', params: [hoje, id] }))).catch(() => undefined);
         }
+        if (ponto) await this.enviarEmailsPonto(novos, ponto.config, ponto.emails).catch(() => undefined);
         return novos;
     }
 }

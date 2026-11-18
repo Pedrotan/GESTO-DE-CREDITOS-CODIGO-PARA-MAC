@@ -18,6 +18,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "DELETE FROM sqlite_sequence WHERE name IN ('clients', 'credits', 'payments', 'contracts', 'notifications', 'audit_logs', 'chat_messages', 'payment_gateways', 'payment_references')"
   ],
   [
+    "a3946cfcc37b850495772b94c09f5a800b7f7d4b00aee63e56b23ed84e67b111",
+    "INSERT INTO"
+  ],
+  [
     "48b7bb792006efb10144fcf3be2092fdfe6a95cb5230e261e856bcd5ff1dc3a2",
     "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'payment', ?, ?)"
   ],
@@ -58,8 +62,16 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
+    "e446b6625fe19a9cb51cde871d1d9b70c3d4cf2deeec2e5928fb3f626ee48d44",
+    "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)"
+  ],
+  [
     "bc0f875159af9da57c225dad6469d12b54e5ef1d68759b465e01c0aa6af00844",
     "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "fbdc230669f718dc458fb8227e03e5d1f133c8747cdaa82e2dff17463b713ed7",
+    "INSERT OR IGNORE INTO"
   ],
   [
     "df998797996d43d95de71e39e89241d169bd52689fcc448c18c98df931fc6086",
@@ -128,6 +140,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
   [
     "9091f3e8264d2ba183704a8eb7c40258aa76e992ec9e92298db103596c067d5d",
     "UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "68302ce31775e48c49ff7d2e78566a71649e827b5bbd3a0693ee878dde64c49c",
+    "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "ef6551e3ab5d9c6c6713ea398c1c1fb2f3c3e1c24d15c78dd7b7b256e81d767d",

@@ -1802,6 +1802,31 @@ export const presenceUserKey = async (tenantId: string, userId: string) => {
     return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
 };
 
+/** Endereço do servidor da empresa (null = sem ligação à nuvem). */
+export const urlNuvem = () => {
+    const config = activeConfig || webCloudSyncConfig();
+    return config ? normalizeBaseUrl(config.url) : null;
+};
+
+/**
+ * Pedido JSON autenticado a uma rota do servidor da empresa (ex.: /api/ponto), com o mesmo acesso da sincronização.
+ * Devolve null sem ligação à nuvem; lança o erro do servidor quando o pedido é recusado.
+ */
+export const pedidoNuvem = async <T,>(caminho: string, corpo: Record<string, unknown>, timeoutMs = 30_000): Promise<T | null> => {
+    const config = activeConfig || webCloudSyncConfig();
+    if (!config || (typeof navigator !== 'undefined' && navigator.onLine === false)) return null;
+    const response = await fetch(`${normalizeBaseUrl(config.url)}${caminho}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+        credentials: 'same-origin',
+        body: JSON.stringify({ tenantId: config.tenantId, ...corpo }),
+        signal: AbortSignal.timeout(timeoutMs),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body.success !== true) throw new Error(body.message || `O servidor respondeu ${response.status}.`);
+    return body as T;
+};
+
 /**
  * Sinal de presença deste dispositivo (ou fim de sessão com `active = false`) e lista de quem da empresa está ligado,
  * em qualquer computador ou navegador. Sem ligação à nuvem devolve null (a página usa só este dispositivo).

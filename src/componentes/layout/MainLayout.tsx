@@ -1,5 +1,6 @@
 import { LembretesCobranca } from './LembretesCobranca';
 import { TarefaDiariaRH } from '@/componentes/rh/TarefaDiariaRH';
+import { AvisosPontoSistema } from '@/componentes/rh/ponto/AvisosPontoSistema';
 import { ProcessamentoAlcadas } from './ProcessamentoAlcadas';
 import { VerificacaoContabilisticaDiaria } from './VerificacaoContabilisticaDiaria';
 import React, { ReactNode, useState, useEffect } from 'react';
@@ -89,6 +90,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
         <VerificacaoContabilisticaDiaria />
         <LembretesCobranca />
         <TarefaDiariaRH />
+        <AvisosPontoSistema />
         <ProcessamentoAlcadas />
         <LembreteFechoMes />
         <LigacaoNuvemDesktop />

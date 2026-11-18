@@ -11,6 +11,7 @@ import { ServicoPontoRH, agoraLuanda } from '@/servicos/rh/ServicoPontoRH';
 import { ServicoRH, type Funcionario } from '@/servicos/rh/ServicoRH';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { CapturaFoto } from '@/componentes/rh/ponto/PortalPonto';
+import { CameraQr, useLeitorTeclado } from '@/componentes/rh/ponto/LeitorQr';
 
 const ROTULO: Record<TipoMarcacao, string> = { entrada: 'Entrada', saida: 'Saída', inicio_pausa: 'Início de pausa', fim_pausa: 'Fim de pausa' };
 const ICONE: Record<TipoMarcacao, typeof LogIn> = { entrada: LogIn, saida: LogOut, inicio_pausa: Pause, fim_pausa: Play };
@@ -52,6 +53,15 @@ export default function QuiosquePonto() {
             } else if (novo.length === 6) setMensagem({ texto: 'PIN não reconhecido.', erro: true });
         }
     };
+    // Cartão QR (câmara ou leitor USB): identifica como o PIN.
+    const porCartao = async (codigo: string) => {
+        if (mensagem || funcionario) return;
+        const f = await ServicoPontoRH.identificarPorQr(codigo);
+        if (!f) { setMensagem({ texto: 'Cartão não reconhecido.', erro: true }); return; }
+        setFuncionario(f);
+        setAccoes(ServicoPontoRH.proximasAccoes(await ServicoPontoRH.marcacoesDoDia(f.id, luandaTodayKey())));
+    };
+    useLeitorTeclado(codigo => void porCartao(codigo), !mensagem && !funcionario);
     const marcar = async (tipo: TipoMarcacao) => {
         if (!funcionario || !actor) return;
         try {
@@ -84,7 +94,7 @@ export default function QuiosquePonto() {
                 </div>
             ) : (
                 <div className="flex flex-col items-center">
-                    <p className="mb-4 text-xl text-slate-300">Escreva o seu PIN</p>
+                    <p className="mb-4 text-xl text-slate-300">Escreva o seu PIN ou mostre o cartão</p>
                     <div className="mb-6 flex gap-3">{Array.from({ length: Math.max(4, pin.length) }, (_, i) => <span key={i} className={cn('h-5 w-5 rounded-full border-2 border-slate-400', i < pin.length && 'bg-white')} />)}</div>
                     <div className="grid grid-cols-3 gap-3">
                         {['1', '2', '3', '4', '5', '6', '7', '8', '9', '', '0', 'apagar'].map((t, i) => t === '' ? <span key={i} /> : (
@@ -94,6 +104,7 @@ export default function QuiosquePonto() {
                             </button>
                         ))}
                     </div>
+                    <div className="mt-6"><CameraQr onCodigo={codigo => void porCartao(codigo)} /></div>
                 </div>
             )}
         </div>

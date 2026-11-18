@@ -56,23 +56,29 @@ async function createDatabase(M, extraParametros = {}) {
     const { RENDERER_SQL_ALLOWLIST } = await import('../electron/renderer-sql-allowlist.ts');
     const database = new DatabaseSync(':memory:');
     for (const sql of RENDERER_SQL_ALLOWLIST) if (/^CREATE (TABLE|INDEX|UNIQUE INDEX|TRIGGER) IF NOT EXISTS (rh_|audit_logs|notifications)/u.test(sql) || /^CREATE TABLE IF NOT EXISTS (audit_logs|notifications)\b/u.test(sql)) { try { database.exec(sql); } catch { /* depende de outra tabela */ } }
-    for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL]) database.exec(sql);
+    for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL]) database.exec(sql);
     const adapter = readFileSync(path.join(root, 'src/bibliotecas/adaptador-sqlite.ts'), 'utf8');
     for (const [, table, column, , definition] of adapter.matchAll(/safeAddColumn\(\s*["'](\w+)["']\s*,\s*["'](\w+)["']\s*,\s*(["'])(.+?)\3\s*\)/g)) {
         try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* ausente ou já existe */ }
     }
-    for (const [table, column, definition] of M.E.RH_PONTO_V2_COLUNAS) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
+    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
     database.exec(`CREATE TABLE IF NOT EXISTS rh_processamento (id TEXT PRIMARY KEY, ano INTEGER, mes INTEGER, tipo TEXT, estado TEXT)`);
     const params = values => (values || []).map(value => value === undefined ? null : value);
+    const normalizar = sql => sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim().replace(/;$/u, '');
+    const conhecido = sql => {
+        if (!RENDERER_SQL_ALLOWLIST.has(normalizar(sql))) throw new Error(`SQL fora da lista do desktop: ${normalizar(sql).slice(0, 120)}`);
+        return sql;
+    };
+    const prepare = sql => database.prepare(conhecido(sql));
     globalThis.__testDb = {
-        all: async (sql, values) => database.prepare(sql).all(...params(values)),
-        get: async (sql, values) => database.prepare(sql).get(...params(values)),
-        run: async (sql, values) => database.prepare(sql).run(...params(values)),
+        all: async (sql, values) => prepare(sql).all(...params(values)),
+        get: async (sql, values) => prepare(sql).get(...params(values)),
+        run: async (sql, values) => prepare(sql).run(...params(values)),
         transaction: async statements => {
             database.exec('BEGIN');
             try {
                 for (const s of statements) {
-                    const result = database.prepare(s.sql).run(...params(s.params));
+                    const result = prepare(s.sql).run(...params(s.params));
                     if (s.expectChanges !== undefined && Number(result.changes) !== s.expectChanges) throw new Error(`Conflito de concorrência: ${s.sql.slice(0, 60)}`);
                 }
                 database.exec('COMMIT');
@@ -80,7 +86,7 @@ async function createDatabase(M, extraParametros = {}) {
         },
     };
     const now = new Date().toISOString();
-    for (const seed of [...M.E.rhSeedStatements(now), ...M.E.rhSeedFase2Statements(now), ...M.E.rhSeedPontoStatements(now)]) database.prepare(seed.sql).run(...params(seed.params));
+    for (const seed of [...M.E.rhSeedStatements(now), ...M.E.rhSeedFase2Statements(now), ...M.E.rhSeedPontoStatements(now), ...M.E.rhSeedPontoV3Statements(now)]) database.prepare(seed.sql).run(...params(seed.params));
     for (const [chave, valor] of Object.entries(extraParametros)) database.prepare(`UPDATE rh_parametro SET valor = ? WHERE chave = ?`).run(valor, chave);
     database.prepare(`INSERT INTO rh_departamento (id, nome, responsavel_id, criado_em) VALUES ('dep-loja', 'Loja', 'f-chefe', ?), ('dep-arm', 'Armazém', NULL, ?)`).run(now, now);
     const funcionario = (id, numero, nome, dep, utilizador) => database.prepare(`INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_admissao, departamento_id, horario_id, estado, utilizador_id, criado_em)
@@ -272,5 +278,97 @@ test('configuração: guardar duas vezes no mesmo dia actualiza o mesmo valor', 
         const versoes = db.prepare(`SELECT valor, vigencia_inicio, vigencia_fim FROM rh_parametro WHERE chave = 'ponto_tolerancia_entrada_min' ORDER BY vigencia_inicio`).all();
         assert.deepEqual(versoes.map(v => v.valor), ['10', '7']);
         assert.ok(versoes[0].vigencia_fim, 'a versão anterior fica com fim de vigência');
+    } finally { db.close(); }
+});
+
+test('escalas: turno num sábado e folga num dia útil mudam a grelha; copiar a semana', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        db.prepare(`INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em) VALUES ('noite', 'Noite', '22:00', '06:00', 30, '1,2,3,4,5', 10, 1, ?)`).run(new Date().toISOString());
+        await M.ServicoPontoRH.guardarEscala([{ funcionarioId: 'f-joao', data: '2026-10-03', horarioId: 'noite' }, { funcionarioId: 'f-joao', data: '2026-10-05', horarioId: null }], RH);
+        await assert.rejects(M.ServicoPontoRH.guardarEscala([{ funcionarioId: 'f-joao', data: '2026-10-06', horarioId: 'noite' }], CHEFE), /RH/u);
+        const { grelha } = await M.ServicoPontoRH.grelha(2026, 10);
+        const dias = grelha.linhas.find(l => l.funcionario.id === 'f-joao').dias;
+        assert.equal(dias.find(d => d.data === '2026-10-03').util, true, 'sábado com turno da noite é dia de trabalho');
+        assert.equal(dias.find(d => d.data === '2026-10-05').estado, 'FS', 'folga lançada na escala');
+        await M.ServicoPontoRH.copiarSemana('2026-09-28', '2026-10-05', ['f-joao'], RH);
+        const semana = db.prepare(`SELECT data, horario_id FROM rh_escala WHERE funcionario_id = 'f-joao' AND data >= '2026-10-05' ORDER BY data`).all();
+        assert.deepEqual(semana.map(s => [s.data, s.horario_id]), [['2026-10-10', 'noite']], 'a semana de destino fica igual à de origem');
+    } finally { db.close(); }
+});
+
+test('banco de horas: o fecho envia as horas extra para o banco e tira-as do salário; folga compensatória desconta', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M, { ponto_banco_horas_activo: '1', ponto_banco_validade_meses: '0', ponto_lancar_falta_automatica: '1' });
+    try {
+        await M.ServicoPontoRH.definirBancoFuncionario('f-osv', true, RH);
+        await M.ServicoPontoRH.adicionarMarcacao({ funcionarioId: 'f-osv', data: '2026-10-12', hora: '08:00', tipo: 'entrada', motivo: 'Registo do dia' }, RH);
+        await M.ServicoPontoRH.adicionarMarcacao({ funcionarioId: 'f-osv', data: '2026-10-12', hora: '21:00', tipo: 'saida', motivo: 'Ficou para o inventário' }, RH);
+        const totais = await M.ServicoPontoRH.fecharMes(OUT.ano, OUT.mes, RH, { converterPendentes: true });
+        const osv = totais.find(t => t.funcionario_id === 'f-osv');
+        assert.deepEqual([osv.minutos_extra_util, osv.minutos_banco], [0, 240], '4 h extra no banco, não pagas');
+        const saldo = (await M.ServicoPontoRH.saldosBanco('2026-11-18')).get('f-osv');
+        assert.equal(saldo.saldo, 240);
+        await assert.rejects(M.ServicoPontoRH.folgaCompensatoria('f-osv', '2026-11-20', 'Compensação do inventário', RH), /insuficiente/u);
+        await M.ServicoPontoRH.ajusteBanco('f-osv', '2026-11-18', 300, 'Horas de Setembro acordadas', RH);
+        await M.ServicoPontoRH.folgaCompensatoria('f-osv', '2026-11-20', 'Compensação do inventário', RH);
+        assert.equal((await M.ServicoPontoRH.saldosBanco('2026-11-30')).get('f-osv').saldo, 60, '540 − 480 da folga de 8 h');
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM rh_ausencia WHERE funcionario_id = 'f-osv' AND data_inicio = '2026-11-20' AND estado = 'aprovada'`).get().n, 1);
+        // Reabrir anula os movimentos automáticos do fecho (voltam a ser calculados no fecho seguinte).
+        await M.ServicoPontoRH.reabrirMes(OUT.ano, OUT.mes, 'Correcção das horas do inventário', RH);
+        assert.equal(db.prepare(`SELECT anulado FROM rh_banco_horas WHERE id = 'banco:extra:f-osv:2026-10-12'`).get().anulado, 1);
+        await M.ServicoPontoRH.fecharMes(OUT.ano, OUT.mes, RH, { converterPendentes: true });
+        assert.equal(db.prepare(`SELECT anulado FROM rh_banco_horas WHERE id = 'banco:extra:f-osv:2026-10-12'`).get().anulado, 0);
+    } finally { db.close(); }
+});
+
+test('cartão QR do quiosque: só fica o hash e um cartão novo invalida o anterior', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const codigo = await M.ServicoPontoRH.gerarCartaoQr('f-osv', RH);
+        assert.match(codigo, /^TANGO-PONTO:[A-Z0-9]{16}$/u);
+        assert.notEqual(db.prepare(`SELECT qr_ponto_hash FROM rh_funcionario WHERE id = 'f-osv'`).get().qr_ponto_hash, codigo);
+        assert.equal((await M.ServicoPontoRH.identificarPorQr(codigo.toLowerCase())).id, 'f-osv');
+        const novo = await M.ServicoPontoRH.gerarCartaoQr('f-osv', RH);
+        assert.equal(await M.ServicoPontoRH.identificarPorQr(codigo), null);
+        assert.equal((await M.ServicoPontoRH.identificarPorQr(novo)).id, 'f-osv');
+        await assert.rejects(M.ServicoPontoRH.gerarCartaoQr('f-joao', CHEFE), /RH/u);
+    } finally { db.close(); }
+});
+
+test('marcações dos relógios: entram com origem «relógio», o id do servidor não duplica e meses fechados ficam à espera', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const linhas = [
+            { servidorId: 'a'.repeat(40), dispositivoId: 'rel_1', funcionario_id: 'f-osv', data: '2026-11-16', data_hora: '2026-11-16T07:58', tipo: 'entrada' },
+            { servidorId: 'b'.repeat(40), dispositivoId: 'rel_1', funcionario_id: 'f-osv', data: '2026-11-16', data_hora: '2026-11-16T17:04', tipo: 'saida' },
+            { servidorId: 'c'.repeat(40), dispositivoId: 'rel_1', funcionario_id: 'f-joao', data: '2026-10-02', data_hora: '2026-10-02T08:00', tipo: 'entrada' },
+        ];
+        db.prepare(`INSERT INTO rh_ponto_periodo (id, ano, mes, estado, criado_em) VALUES ('2026-10', 2026, 10, 'fechado', ?)`).run(new Date().toISOString());
+        const r = await M.ServicoPontoRH.importarDoRelogio(linhas, RH);
+        assert.deepEqual([r.importadas, r.bloqueadas], [2, ['c'.repeat(40)]]);
+        await M.ServicoPontoRH.importarDoRelogio(linhas.slice(0, 2), RH);
+        const marcacoes = marcacoesDe(db, 'f-osv', '2026-11-16');
+        assert.deepEqual(marcacoes.map(m => [m.tipo, m.origem, m.dispositivo_id]), [['entrada', 'relogio', 'rel_1'], ['saida', 'relogio', 'rel_1']]);
+        await assert.rejects(M.ServicoPontoRH.importarDoRelogio(linhas, CHEFE), /RH/u);
+    } finally { db.close(); }
+});
+
+test('auditoria do ponto: filtros opcionais num só SQL', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        await M.ServicoPontoRH.acao({ celulas: [{ funcionarioId: 'f-osv', data: '2026-10-06' }], acao: 'presente' }, RH);
+        await M.ServicoPontoRH.acao({ celulas: [{ funcionarioId: 'f-joao', data: '2026-10-06' }], acao: 'falta' }, RH);
+        const hoje = M.luandaTodayKey();
+        const todos = await M.ServicoPontoRH.auditoria({ de: '2026-01-01', ate: hoje });
+        const osv = await M.ServicoPontoRH.auditoria({ de: '2026-01-01', ate: hoje, funcionarioId: 'f-osv' });
+        assert.ok(todos.length >= 2);
+        assert.ok(osv.length >= 1 && osv.length < todos.length);
+        assert.equal((await M.ServicoPontoRH.auditoria({ de: '2026-01-01', ate: hoje, utilizador: 'Ninguém' })).length, 0);
+        assert.ok((await M.ServicoPontoRH.justificacoes()).length === 0);
     } finally { db.close(); }
 });

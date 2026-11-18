@@ -212,6 +212,9 @@ await loadHandler('cobranca', path.join(apiBaseDir, 'cobranca.js'));
 await loadHandler('whatsapp-webhook', path.join(apiBaseDir, 'whatsapp-webhook.js'));
 // Centro de actualizações (desktop e web): separado da sincronização de dados.
 await loadHandler('updates', path.join(apiBaseDir, 'updates.js'));
+// Livro de ponto: relógios biométricos (incl. protocolo ADMS da ZKTeco em /iclock/) e e-mails dos alertas.
+await loadHandler('ponto', path.join(apiBaseDir, 'ponto.js'));
+const { handleIclock } = await import(pathToFileURL(path.join(apiBaseDir, 'ponto.js')).href);
 
 console.log(`[VPS API] ${Object.keys(handlers).length} rotas centrais carregadas com sucesso.`);
 
@@ -269,6 +272,25 @@ const server = http.createServer(async (req, res) => {
 
   const parsedUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const pathname = parsedUrl.pathname;
+
+  // Relógios biométricos ZKTeco (protocolo ADMS): muitos modelos só falam HTTP. Só estas rotas aceitam HTTP; o relógio
+  // identifica-se pelo número de série registado pela empresa e só envia marcações (não recebe dados).
+  if (pathname.startsWith('/iclock/')) {
+    try {
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > 2 * 1024 * 1024) { res.statusCode = 413; return res.end('ERROR'); }
+        chunks.push(chunk);
+      }
+      return await handleIclock(req, res, pathname, Object.fromEntries(parsedUrl.searchParams.entries()), Buffer.concat(chunks).toString('utf8'));
+    } catch (err) {
+      console.error('[VPS iclock]', err);
+      if (!res.headersSent) { res.statusCode = 500; res.end('ERROR'); }
+      return;
+    }
+  }
 
   // HTTPS obrigatório fora da própria máquina: o nginx termina o TLS e indica o protocolo original. Páginas em
   // HTTP são redireccionadas; pedidos à API em HTTP são recusados (códigos e chaves não viajam sem cifra).

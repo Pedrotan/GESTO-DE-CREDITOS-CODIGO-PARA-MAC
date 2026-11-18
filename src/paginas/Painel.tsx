@@ -34,6 +34,10 @@ import {
 import { startOfMonth, subMonths, isWithinInterval, endOfMonth } from 'date-fns';
 import { toast } from '@/componentes/ui/use-toast';
 import { BannerAniversarios } from '@/componentes/rh/BannerAniversarios';
+import { PainelHojePonto } from '@/componentes/rh/ponto/SeccoesPonto';
+import { executar } from '@/componentes/rh/comum-rh';
+import { useActorRH, useModuloRH } from '@/ganchos/usar-modulo-rh';
+import { ServicoPontoRH } from '@/servicos/rh/ServicoPontoRH';
 
 const openCreditStatuses = new Set(['active', 'overdue', 'renegotiated', 'defaulted']);
 const isOpenCredit = (credit: { status: string; currentBalance?: number }) => (
@@ -158,6 +162,7 @@ export default function Dashboard() {
       subtitle="Visão geral do sistema de crédito"
     >
       <BannerAniversarios />
+      <HojePontoPainel />
       <div className="flex justify-end mb-6 -mt-2">
         <Button
           onClick={() => setIsLicenseRenewalOpen(true)}
@@ -284,5 +289,19 @@ export default function Dashboard() {
         onClose={() => setIsLicenseRenewalOpen(false)}
       />
     </MainLayout>
+  );
+}
+
+/** Livro de ponto: cartão «Hoje» no Painel principal (F3.12), para quem vê o RH; actualiza-se a cada 60 segundos. */
+function HojePontoPainel() {
+  const { activo } = useModuloRH();
+  const { actor, ver, gerir } = useActorRH();
+  if (!activo || !ver) return null;
+  return (
+    <div className="mb-6">
+      <PainelHojePonto actor={actor} gerir={gerir} onLancarFalta={async (funcionarioId, data) => {
+        if (actor) await executar(() => ServicoPontoRH.acao({ celulas: [{ funcionarioId, data }], acao: 'falta' }, actor), 'Falta lançada');
+      }} />
+    </div>
   );
 }

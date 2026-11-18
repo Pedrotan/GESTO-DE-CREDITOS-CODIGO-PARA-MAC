@@ -119,6 +119,12 @@ export function PainelDiaPonto({ funcionarioId, data, actor, editavel, onAlterad
                                 ['Saída antecipada', `${c.minutos_saida_antecipada} min`], ['Horas extra', `${formatarMinutos(c.minutos_extra)}${c.tipo_extra && c.tipo_extra !== 'util' ? ` (${c.tipo_extra})` : ''}`], ['Nocturno', formatarMinutos(c.minutos_noturnos)]]
                                 .map(([rotulo, valor]) => <div key={rotulo} className="rounded-lg bg-slate-50 px-3 py-2 dark:bg-slate-800/60"><p className="text-[10px] font-bold uppercase text-slate-500">{rotulo}</p><p className="font-black tabular-nums">{valor}</p></div>)}
                             {c.incompleto && <p className="col-span-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">⚠ Entrada sem saída: não conta horas extra e impede validar o mês até ser corrigida.</p>}
+                            {editavel && d.config.banco_horas_activo && c.minutos_extra > 0 && (
+                                <Button size="sm" variant="outline" className="col-span-2" disabled={aGuardar}
+                                    onClick={() => void correr(() => ServicoPontoRH.extraParaBanco(funcionarioId, data, actor), 'Horas extra enviadas para o banco de horas (não serão pagas)')}>
+                                    Enviar as {formatarMinutos(c.minutos_extra)} de horas extra para o banco de horas
+                                </Button>
+                            )}
                         </section>
 
                         <section>

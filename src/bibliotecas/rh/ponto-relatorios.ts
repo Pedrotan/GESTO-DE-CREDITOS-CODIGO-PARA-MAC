@@ -165,3 +165,64 @@ export function gerarFolhasIndividuais(linhas: LinhaGrelha[], c: Contexto & { ca
     return { fileName, dataUrl: doc.output('datauristring') };
 }
 const l0 = (linhas: LinhaGrelha[]) => linhas[0].funcionario;
+
+/** Banco de horas (secção 8.1): saldo de cada funcionário e os movimentos do período. */
+export function relatorioBancoHoras(
+    funcionarios: Array<{ id: string; nome: string }>, saldos: Map<string, { saldo: number; creditos: number; debitos: number; expirados: number; a_expirar_30d: number }>,
+    movimentos: Array<{ funcionario_id: string; data: string; minutos: number; tipo: string; descricao?: string | null; anulado?: number | null }>, de: string, ate: string,
+): ReportDef {
+    const nomes = new Map(funcionarios.map(f => [f.id, f.nome]));
+    const rotulo: Record<string, string> = { extra: 'Horas extra', saida_antecipada: 'Saída antecipada', folga: 'Folga compensatória', ajuste: 'Ajuste' };
+    const sinal = (m: number) => `${m > 0 ? '+' : m < 0 ? '−' : ''}${horas(Math.abs(m)) || '0:00'}`;
+    const doPeriodo = movimentos.filter(m => !m.anulado && m.data >= de && m.data <= ate);
+    return {
+        key: 'ponto-banco', title: 'Banco de horas', subtitle: `${de.split('-').reverse().join('/')} a ${ate.split('-').reverse().join('/')}`, orientation: 'portrait',
+        fileBase: `banco-horas-${de}-${ate}`, tagline: 'RECURSOS HUMANOS · LIVRO DE PONTO',
+        sections: [
+            {
+                heading: 'Saldos',
+                head: ['Funcionário', 'Créditos', 'Débitos', 'Expirados', 'A expirar (30 dias)', 'Saldo'],
+                rows: [...saldos].filter(([id]) => nomes.has(id)).sort((a, b) => (nomes.get(a[0]) || '').localeCompare(nomes.get(b[0]) || ''))
+                    .map(([id, s]) => [nomes.get(id)!, horas(s.creditos), horas(s.debitos), horas(s.expirados), horas(s.a_expirar_30d), sinal(s.saldo)]),
+                emptyText: 'Sem movimentos no banco de horas.',
+            },
+            {
+                heading: 'Movimentos do período',
+                head: ['Dia', 'Funcionário', 'Tipo', 'Minutos', 'Descrição'],
+                rows: doPeriodo.map(m => [m.data.split('-').reverse().join('/'), nomes.get(m.funcionario_id) || '—', rotulo[m.tipo] || m.tipo, sinal(m.minutos), m.descricao || '']),
+                widths: { 4: 60 }, emptyText: 'Sem movimentos no período.',
+            },
+        ],
+    };
+}
+
+/**
+ * Cartões do quiosque com QR (F3.4): um por funcionário, tamanho de cartão bancário (85,6 × 54 mm), 8 por página A4.
+ * O código só existe neste PDF (no sistema fica o hash): guarde-o bem ou emita um novo cartão.
+ */
+export async function gerarCartoesQr(cartoes: Array<{ nome: string; numero: string; codigo: string }>, empresa: string) {
+    const QRCode = (await import('qrcode')).default;
+    const doc = new jsPDF();
+    const largura = 85.6;
+    const altura = 54;
+    for (let i = 0; i < cartoes.length; i++) {
+        if (i > 0 && i % 8 === 0) doc.addPage();
+        const pos = i % 8;
+        const x = 14 + (pos % 2) * (largura + 10);
+        const y = 14 + Math.floor(pos / 2) * (altura + 12);
+        const c = cartoes[i];
+        doc.setDrawColor(148, 163, 184); doc.setLineWidth(0.3);
+        doc.roundedRect(x, y, largura, altura, 3, 3);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8); doc.setTextColor(100, 116, 139);
+        doc.text(empresa.toUpperCase().slice(0, 40), x + 4, y + 7);
+        doc.setFontSize(11); doc.setTextColor(15, 23, 42);
+        doc.text(doc.splitTextToSize(c.nome, 44).slice(0, 2), x + 4, y + 17);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(71, 85, 105);
+        doc.text(`N.º ${c.numero}`, x + 4, y + 30);
+        doc.text('Cartão do livro de ponto', x + 4, y + 46);
+        doc.setFontSize(6); doc.text('Mostre o código ao quiosque', x + 4, y + 50);
+        const qr = await QRCode.toDataURL(c.codigo, { margin: 0, width: 300, errorCorrectionLevel: 'M' });
+        doc.addImage(qr, 'PNG', x + largura - 40, y + 9, 36, 36);
+    }
+    doc.save(cartoes.length === 1 ? `Cartao-ponto-${cartoes[0].numero}.pdf` : 'Cartoes-ponto.pdf');
+}

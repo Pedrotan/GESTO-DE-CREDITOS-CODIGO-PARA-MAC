@@ -19,6 +19,15 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { MOTIVOS_JUSTIFICACAO, ServicoPontoRH, type EstadoPeriodo, type Justificacao, type PeriodoPonto } from '@/servicos/rh/ServicoPontoRH';
 import type { ActorRH, Funcionario } from '@/servicos/rh/ServicoRH';
 import { abrirDataUrl, executar, Indicador, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
+import { ServicoRelogiosPonto } from '@/servicos/rh/ServicoRelogiosPonto';
+import { CartoesQrPonto } from './ExtrasPonto';
+
+/** O servidor tem o e-mail (SMTP) configurado? Sem isso os alertas ficam só no sistema. */
+function EstadoEmail() {
+    const estado = useCarregar(() => ServicoRelogiosPonto.estadoEmail(), null as Awaited<ReturnType<typeof ServicoRelogiosPonto.estadoEmail>>, []);
+    if (estado.aCarregar || estado.dados?.email) return null;
+    return <p className="mt-2 rounded-xl bg-amber-50 p-2.5 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{estado.dados ? 'O servidor ainda não tem o envio de e-mail configurado (SMTP): os alertas continuam no sistema e seguem por e-mail quando for configurado.' : 'Sem ligação à nuvem: o envio de e-mail precisa da empresa ligada ao servidor.'}</p>;
+}
 
 const dataPt = (d: string) => d.split('-').reverse().join('/');
 
@@ -182,10 +191,15 @@ const CAMPOS: Array<{ campo: keyof ConfigPonto; rotulo: string; tipo: 'numero' |
     { campo: 'local_longitude', rotulo: 'Longitude do local de trabalho', tipo: 'texto' },
     { campo: 'raio_permitido_m', rotulo: 'Raio da área permitida (m)', tipo: 'numero' },
     { campo: 'exigir_selfie', rotulo: 'Exigir fotografia na marcação', tipo: 'sim' },
+    { campo: 'banco_horas_activo', rotulo: 'Banco de horas activo', tipo: 'sim', ajuda: 'Horas extra podem ser compensadas em folgas em vez de pagas.' },
+    { campo: 'banco_validade_meses', rotulo: 'Validade das horas do banco (meses, 0 = sem prazo)', tipo: 'numero' },
+    { campo: 'notificacoes_ambiente', rotulo: 'Avisos do ponto como notificação do Windows/navegador', tipo: 'sim' },
+    { campo: 'alertas_email', rotulo: 'Enviar os alertas também por e-mail', tipo: 'sim', ajuda: 'Ao RH e, nos avisos pessoais, ao e-mail da ficha do funcionário.' },
+    { campo: 'email_rh', rotulo: 'E-mail do RH para os alertas', tipo: 'texto' },
 ];
 
-export function ConfiguracaoPonto({ config, actor, funcionarios, ano, mes, onFechar, onGuardado }: {
-    config: ConfigPonto; actor: ActorRH; funcionarios: Funcionario[]; ano: number; mes: number; onFechar: () => void; onGuardado: () => void;
+export function ConfiguracaoPonto({ config, actor, funcionarios, empresa, ano, mes, onFechar, onGuardado }: {
+    config: ConfigPonto; actor: ActorRH; funcionarios: Funcionario[]; empresa: string; ano: number; mes: number; onFechar: () => void; onGuardado: () => void;
 }) {
     const [valores, setValores] = useState<Record<string, string | boolean>>(() => Object.fromEntries(CAMPOS.map(c => [c.campo, typeof config[c.campo] === 'boolean' ? config[c.campo] as boolean : String(config[c.campo] ?? '')])));
     const [pins, setPins] = useState<Record<string, string>>({});
@@ -226,6 +240,8 @@ export function ConfiguracaoPonto({ config, actor, funcionarios, ano, mes, onFec
                         ))}
                     </div>
                 </div>
+                <CartoesQrPonto actor={actor} funcionarios={funcionarios} empresa={empresa} onAlterado={onGuardado} />
+                {valores.alertas_email && <EstadoEmail />}
                 <DialogFooter className="flex-wrap gap-2">
                     <Button variant="outline" disabled={progresso !== null} onClick={async () => {
                         setProgresso('0%');

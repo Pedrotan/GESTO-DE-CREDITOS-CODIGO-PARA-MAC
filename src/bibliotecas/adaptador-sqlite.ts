@@ -5,7 +5,7 @@ import initSqlJs, { Database } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
-import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V2_COLUNAS, rhSeedPontoStatements, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
+import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_SQL, RH_PONTO_V3_COLUNAS, rhSeedPontoV3Statements, RH_PONTO_V2_COLUNAS, rhSeedPontoStatements, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
 import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
 
 let db: Database | null = null;
@@ -1224,6 +1224,12 @@ const createTables = async () => {
         for (const statement of RH_PONTO_V2_SQL) await executeSql(statement);
         for (const [tabela, coluna, definicao] of RH_PONTO_V2_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
         for (const seed of rhSeedPontoStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
+
+    await applyMigration(2026111901, 'rh-ponto-v3-escalas-banco-de-horas', async () => {
+        for (const statement of RH_PONTO_V3_SQL) await executeSql(statement);
+        for (const [tabela, coluna, definicao] of RH_PONTO_V3_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const seed of rhSeedPontoV3Statements(new Date().toISOString())) await runSql(seed.sql, seed.params);
     });
 
     // safeAddColumns for migrations

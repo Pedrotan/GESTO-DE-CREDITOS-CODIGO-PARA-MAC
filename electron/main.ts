@@ -1082,6 +1082,8 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_marcacao: "hr_manage",
   rh_ponto_periodo: "hr_manage",
   rh_justificacao: "hr_manage",
+  rh_escala: "hr_manage",
+  rh_banco_horas: "hr_manage",
   // Facturação electrónica AGT e SAF-T
   fiscal_settings: "manage_fiscal",
   fiscal_series: "manage_fiscal",

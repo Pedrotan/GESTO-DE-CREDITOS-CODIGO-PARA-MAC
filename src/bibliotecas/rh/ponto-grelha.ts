@@ -2,6 +2,7 @@
 // com o motor (ponto-calculo). Tudo puro: a página, as exportações, o fecho do mês e o processamento salarial
 // usam a mesma função, por isso os números são sempre iguais em todo o lado.
 import { calcularDiaPonto, totaisDosDias, type AusenciaDoDia, type ConfigPonto, type DiaPonto, type Marcacao, type TotaisFuncionario } from './ponto-calculo.ts';
+import { escalasPorChave, horarioNaData, type EscalaDia } from './ponto-escalas.ts';
 import { datasDoMes, diaSemana, feriadoNaData, HORARIO_OMISSAO, somarDias, type Feriado, type Horario, type TipoAusencia } from './ponto.ts';
 
 export const DIAS_SEMANA = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
@@ -9,6 +10,8 @@ export const DIAS_SEMANA = ['', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'
 export type FuncionarioPonto = {
     id: string; nome: string; numero_mecanografico: string; departamento_id: string | null; cargo_id: string | null; horario_id: string | null;
     data_admissao: string; data_saida: string | null; estado: string; utilizador_id?: string | null;
+    /** Horas extra vão para o banco de horas em vez de serem pagas. */
+    banco_horas?: number | null;
 };
 export type AusenciaPonto = {
     id: string; funcionario_id: string; tipo_id: string; data_inicio: string; data_fim: string; horas: number;
@@ -21,6 +24,8 @@ export type DadosGrelha = {
     ano: number; mes: number; hoje: string; agora?: string;
     funcionarios: FuncionarioPonto[]; horarios: Horario[]; feriados: Feriado[]; tipos: TipoAusencia[];
     ausencias: AusenciaPonto[]; marcacoes: Marcacao[]; legados: PontoLegado[]; config: ConfigPonto;
+    /** Turnos e folgas lançados no ecrã Escalas (opcional). */
+    escalas?: EscalaDia[];
 };
 
 export type LinhaGrelha = { funcionario: FuncionarioPonto; horario: Horario; dias: DiaPonto[]; totais: TotaisFuncionario; editados: Set<string>; observacoes: Map<string, string> };
@@ -76,10 +81,11 @@ export function marcacoesPorDia(marcacoes: Marcacao[], legados: PontoLegado[]) {
 
 /** Calcula um funcionário num conjunto de datas (o mês, ou um só dia). */
 export function calcularFuncionario(f: FuncionarioPonto, datas: string[], d: Omit<DadosGrelha, 'ano' | 'mes' | 'funcionarios'>, porDia = marcacoesPorDia(d.marcacoes, d.legados)) {
-    const horario = horarioDoFuncionario(f, d.horarios);
+    const base = horarioDoFuncionario(f, d.horarios);
     const tipos = new Map(d.tipos.map(t => [t.id, t]));
+    const escalas = escalasPorChave(d.escalas || []);
     return datas.map(data => calcularDiaPonto({
-        data, hoje: d.hoje, agora: d.agora, horario, feriados: d.feriados, config: d.config,
+        data, hoje: d.hoje, agora: d.agora, horario: horarioNaData(base, data, d.horarios, escalas.get(`${f.id}:${data}`)).horario, feriados: d.feriados, config: d.config,
         marcacoes: porDia.get(`${f.id}:${data}`) || [], ausencia: ausenciaDoDia(d.ausencias, tipos, f.id, data),
         admissao: f.data_admissao, saida: f.data_saida,
     }));
@@ -131,6 +137,8 @@ export type TotaisSalario = {
     funcionario_id: string; faltas_injustificadas: number; faltas_descontaveis: number; minutos_atraso: number;
     minutos_extra_util: number; minutos_extra_descanso: number; minutos_extra_feriado: number; minutos_noturnos: number;
     dias_trabalho_efectivo: number; pendentes: number; ausencias_pendentes: number;
+    /** Minutos extra que foram para o banco de horas (não se pagam). */
+    minutos_banco?: number;
 };
 export const totaisParaSalario = (linha: LinhaGrelha): TotaisSalario => ({
     funcionario_id: linha.funcionario.id, faltas_injustificadas: linha.totais.faltas, faltas_descontaveis: linha.totais.faltas_descontaveis,

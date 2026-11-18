@@ -45,24 +45,50 @@ export class ServicoTempoRH {
         const nome = h.nome?.trim();
         const entrada = hora(h.entrada);
         const saida = hora(h.saida);
-        const dias = String(h.dias_semana || '').split(',').map(Number).filter(n => n >= 1 && n <= 7);
+        const tipo = (['fixo', 'rotativo', 'flexivel', 'noturno'] as const).find(x => x === h.tipo) || 'fixo';
+        let dias = String(h.dias_semana || '').split(',').map(Number).filter(n => n >= 1 && n <= 7);
         if (!nome || !entrada || !saida) throw new Error('Indique o nome e as horas de entrada e saída (HH:MM).');
+        // Rotativo: os dias de trabalho vêm do ciclo (folgas incluídas), não da semana.
+        let ciclo: string | null = null;
+        let cicloInicio: string | null = null;
+        if (tipo === 'rotativo') {
+            const dias_ = (() => { try { return JSON.parse(String(h.ciclo || '[]')); } catch { return null; } })();
+            if (!Array.isArray(dias_) || dias_.length < 2 || dias_.length > 56) throw new Error('O ciclo da escala tem de ter entre 2 e 56 dias.');
+            if (!dias_.some(x => x)) throw new Error('O ciclo precisa de pelo menos um dia de trabalho.');
+            if (!/^\d{4}-\d{2}-\d{2}$/u.test(String(h.ciclo_inicio || ''))) throw new Error('Indique a data em que começa o ciclo (dia 1).');
+            ciclo = JSON.stringify(dias_.map(x => String(x || '')));
+            cicloInicio = String(h.ciclo_inicio);
+            if (!dias.length) dias = [1, 2, 3, 4, 5, 6, 7];
+        }
         if (!dias.length) throw new Error('Escolha pelo menos um dia de trabalho.');
+        let minimo: number | null = null;
+        let faixaInicio: string | null = null;
+        let faixaFim: string | null = null;
+        if (tipo === 'flexivel') {
+            minimo = Math.round(Number(h.minimo_diario_min) || 0);
+            faixaInicio = hora(h.faixa_inicio);
+            faixaFim = hora(h.faixa_fim);
+            if (minimo <= 0 || minimo > 960) throw new Error('Indique as horas mínimas por dia do horário flexível.');
+            if (!faixaInicio || !faixaFim || faixaFim <= faixaInicio) throw new Error('Indique a faixa obrigatória (início e fim, HH:MM).');
+            if (faixaInicio < entrada || faixaFim > saida) throw new Error('A faixa obrigatória tem de ficar dentro do horário (entrada a saída).');
+        }
+        if (tipo === 'noturno' && saida > entrada) throw new Error('No horário nocturno a saída é no dia seguinte (hora de saída menor que a de entrada).');
         const intervalo = Math.max(0, Math.round(Number(h.intervalo_min) || 0));
         const tolerancia = Math.max(0, Math.round(Number(h.tolerancia_min) || 0));
         const when = agora();
+        const extras = [tipo, ciclo, cicloInicio, minimo, faixaInicio, faixaFim];
         if (h.id) {
             await db.transaction([
-                { sql: 'UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?',
-                    params: [nome, entrada, saida, intervalo, dias.join(','), tolerancia, h.activo === 0 ? 0 : 1, when, h.id], expectChanges: 1 },
+                { sql: 'UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, tipo = ?, ciclo = ?, ciclo_inicio = ?, minimo_diario_min = ?, faixa_inicio = ?, faixa_fim = ?, actualizado_em = ? WHERE id = ?',
+                    params: [nome, entrada, saida, intervalo, dias.join(','), tolerancia, h.activo === 0 ? 0 : 1, ...extras, when, h.id], expectChanges: 1 },
                 auditoriaRH(actor, 'update', `Alterou o horário ${nome}`, { horarioId: h.id }, undefined, h, when),
             ]);
             return h.id;
         }
         const id = crypto.randomUUID();
         await db.transaction([
-            { sql: 'INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)',
-                params: [id, nome, entrada, saida, intervalo, dias.join(','), tolerancia, when, actor.id], expectChanges: 1 },
+            { sql: 'INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, tipo, ciclo, ciclo_inicio, minimo_diario_min, faixa_inicio, faixa_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)',
+                params: [id, nome, entrada, saida, intervalo, dias.join(','), tolerancia, ...extras, when, actor.id], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Criou o horário ${nome}`, { horarioId: id }, undefined, h, when),
         ]);
         return id;

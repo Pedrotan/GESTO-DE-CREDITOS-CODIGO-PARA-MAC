@@ -136,6 +136,10 @@ export function MeuPonto({ f, actor }: { f: Funcionario; actor: ActorRH }) {
                 </span>)}
             </div>
             <p className="mt-3 text-sm">Presenças <b>{totais.presencas}</b> · Faltas <b>{totais.faltas}</b> · FJ <b>{totais.faltas_just}</b> · Horas <b>{formatarMinutos(totais.minutos_trabalhados)}</b> · Atraso <b>{totais.minutos_atraso} min</b> · Extra <b>{formatarMinutos(totais.minutos_extra)}</b></p>
+            {dados.dados.mes.banco && (
+                <p className="mt-1 text-sm">Banco de horas: saldo <b className={dados.dados.mes.banco.saldo < 0 ? 'text-red-600' : ''}>{dados.dados.mes.banco.saldo < 0 ? '−' : ''}{formatarMinutos(Math.abs(dados.dados.mes.banco.saldo))}</b>
+                    {dados.dados.mes.banco.a_expirar_30d > 0 && <span className="text-orange-600"> · {formatarMinutos(dados.dados.mes.banco.a_expirar_30d)} expiram nos próximos 30 dias</span>}</p>
+            )}
 
             {porJustificar.length > 0 && (
                 <div className="mt-4">

@@ -11,7 +11,9 @@ import { calcularFuncionario, celulaElegivel, construirGrelha, funcionariosDoMes
     type AusenciaPonto, type DadosGrelha, type FuncionarioPonto, type Grelha, type PontoLegado, type TotaisSalario } from '@/bibliotecas/rh/ponto-grelha';
 import { idMarcacaoImportada, previsualizarCsv, type LinhaPrevia, type MapeamentoCsv } from '@/bibliotecas/rh/ponto-importacao';
 import { datasDoMes, minutosPrevistos, somarDias, type TipoAusencia } from '@/bibliotecas/rh/ponto';
-import { RH_PARAMETROS_PONTO } from '@/bibliotecas/rh/esquema-rh';
+import { RH_PARAMETROS_PONTO, RH_PARAMETROS_PONTO_V3 } from '@/bibliotecas/rh/esquema-rh';
+import { horarioNaData, type EscalaDia } from '@/bibliotecas/rh/ponto-escalas';
+import { extraNoBanco, idMovimentoExtra, idMovimentoFolga, movimentosDoFecho, saldoBanco, type MovimentoBanco, type SaldoBanco } from '@/bibliotecas/rh/ponto-banco';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { auditoriaRH, ServicoRH, type ActorRH, type Funcionario } from './ServicoRH';
 import { ServicoTempoRH } from './ServicoTempoRH';
@@ -44,6 +46,7 @@ export const MOTIVOS_JUSTIFICACAO: Array<{ codigo: string; nome: string; tipo: s
     { codigo: 'consulta', nome: 'Consulta médica', tipo: 'FJ' },
     { codigo: 'outro', nome: 'Outro motivo', tipo: 'FJ' },
 ];
+const PARAMETROS_PONTO = [...RH_PARAMETROS_PONTO, ...RH_PARAMETROS_PONTO_V3];
 const MIME_ANEXO = /^data:(application\/pdf|image\/(png|jpe?g|webp));base64,/u;
 const LIMITE_ANEXO = 5 * 1024 * 1024;
 
@@ -67,6 +70,9 @@ const ORIGEM_RESUMO: Record<string, 'manual' | 'importado' | 'app'> = { manual: 
 /** Instrução de inserção de uma marcação (o processo principal reconhece esta forma nas marcações do portal). */
 const INSERIR_MARCACAO = `INSERT INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+/** Importações (ficheiro e relógios): o mesmo id não entra duas vezes. Texto literal para a lista de SQL do desktop. */
+const INSERIR_MARCACAO_SE_NOVA = `INSERT OR IGNORE INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 const inserirMarcacao = (m: { id: string; funcionario_id: string; data: string; data_hora: string; tipo: TipoMarcacao | null; origem: Marcacao['origem'];
     dispositivo_id?: string | null; latitude?: number | null; longitude?: number | null; foto?: string | null; pendente?: boolean; motivo?: string | null }, actor: ActorRH, when: string): Statement => ({
     sql: INSERIR_MARCACAO,
@@ -82,20 +88,21 @@ export class ServicoPontoRH {
     /** Carrega tudo o que o motor precisa entre duas datas (com um dia de folga para os turnos nocturnos). */
     static async contexto(de: string, ate: string): Promise<ContextoPonto> {
         const hoje = luandaTodayKey();
-        const [funcionarios, horarios, feriados, tipos, ausencias, marcacoes, legados, parametros, justificacoes] = await Promise.all([
+        const [funcionarios, horarios, feriados, tipos, ausencias, marcacoes, legados, parametros, justificacoes, escalas] = await Promise.all([
             ServicoRH.funcionarios(), ServicoTempoRH.horarios(), ServicoTempoRH.feriados(), ServicoTempoRH.tiposAusencia(),
             lista(db.all<AusenciaPonto>(`SELECT id, funcionario_id, tipo_id, data_inicio, data_fim, horas, estado, meio_dia FROM rh_ausencia WHERE data_fim >= ? AND data_inicio <= ?`, [somarDias(de, -1), somarDias(ate, 1)])),
             lista(db.all<MarcacaoRH>('SELECT * FROM rh_marcacao WHERE data >= ? AND data <= ?', [somarDias(de, -1), somarDias(ate, 1)])),
             lista(db.all<PontoLegado>('SELECT funcionario_id, data, entrada, saida, origem, observacoes FROM rh_ponto WHERE data >= ? AND data <= ?', [de, ate])),
             ServicoRH.parametros(),
             lista(db.all<{ funcionario_id: string; data_inicio: string; data_fim: string }>(`SELECT funcionario_id, data_inicio, data_fim FROM rh_justificacao WHERE estado = 'pendente'`)),
+            lista(db.all<EscalaDia>('SELECT funcionario_id, data, horario_id FROM rh_escala WHERE data >= ? AND data <= ?', [somarDias(de, -1), somarDias(ate, 1)])),
         ]);
         // Ausência com uma justificação pendente do funcionário: assinalada na grelha.
         for (const a of ausencias) {
             if (justificacoes.some(j => j.funcionario_id === a.funcionario_id && j.data_inicio <= a.data_fim && j.data_fim >= a.data_inicio)) a.justificacao_estado = 'pendente';
         }
         return {
-            hoje, agora: agoraLuanda(), funcionarios: funcionarios as FuncionarioPonto[], horarios, feriados, tipos, ausencias, marcacoes, legados,
+            hoje, agora: agoraLuanda(), funcionarios: funcionarios as FuncionarioPonto[], horarios, feriados, tipos, ausencias, marcacoes, legados, escalas,
             config: configDosParametros(parametros, hoje), tiposPorCodigo: new Map(tipos.map(t => [t.codigo, t])), parametros,
         };
     }
@@ -159,7 +166,7 @@ export class ServicoPontoRH {
         const [calculo] = calcularFuncionario(f, [data], ctx);
         const marcacoes = (ctx.marcacoes as MarcacaoRH[]).filter(m => m.funcionario_id === funcionarioId && m.data === data).sort((a, b) => a.data_hora.localeCompare(b.data_hora));
         const legado = ctx.legados.find(p => p.funcionario_id === funcionarioId && p.data === data) || null;
-        return { funcionario: f, horario: horarioDoFuncionario(f, ctx.horarios), calculo, marcacoes, legado, historico: await this.historicoDia(funcionarioId, data), config: ctx.config };
+        return { funcionario: f, horario: this.horarioDoDia(ctx, f, data), calculo, marcacoes, legado, historico: await this.historicoDia(funcionarioId, data), config: ctx.config };
     }
 
     static historicoDia(funcionarioId: string, data: string) {
@@ -360,7 +367,7 @@ export class ServicoPontoRH {
             if (temMarcacoes) { ignoradas.push(`${nome}: já tem marcações (use Limpar ou Editar)`); continue; }
             if (dia.ausencia_id) { ignoradas.push(`${nome}: já tem uma ausência lançada`); continue; }
             if (input.acao === 'presente') {
-                const horario = horarioDoFuncionario(f, ctx.horarios);
+                const horario = this.horarioDoDia(ctx, f, c.data);
                 const saidaDia = horario.saida <= horario.entrada ? somarDias(c.data, 1) : c.data;
                 statements.push(...this.prepararDia(ctx, f, c.data, {
                     novas: [{ data_hora: `${c.data}T${horario.entrada}`, tipo: 'entrada' }, { data_hora: `${saidaDia}T${horario.saida}`, tipo: 'saida' }],
@@ -472,13 +479,26 @@ export class ServicoPontoRH {
         }
         // Totais calculados já com as conversões (o motor volta a correr sobre o contexto actualizado).
         const final = construirGrelha({ ...contexto, ano, mes });
-        const totais: TotaisSalario[] = final.linhas.map(totaisParaSalario);
+        // Banco de horas: quem tem as horas extra no banco recebe-as como crédito (e as saídas antecipadas como débito);
+        // essas horas extra deixam de ir para o salário.
+        const movimentos = await this.movimentosBanco();
+        const bancoStatements: Statement[] = [];
+        if (contexto.config.banco_horas_activo) {
+            const existentes = new Set(movimentos.filter(m => !m.anulado).map(m => m.id));
+            for (const l of final.linhas.filter(x => x.funcionario.banco_horas)) {
+                for (const novo of movimentosDoFecho(l.funcionario.id, l.dias, existentes)) {
+                    bancoStatements.push(upsertMovimento({ ...novo, descricao: `Fecho do livro de ponto de ${mes}/${ano}` }, actor, when));
+                    movimentos.push(novo);
+                }
+            }
+        }
+        const totais: TotaisSalario[] = final.linhas.map(l => semExtraDoBanco(totaisParaSalario(l), extraNoBanco(movimentos, l.funcionario.id, chaveMes(ano, mes))));
         const resumo = JSON.stringify({ fechado_em: when, totais });
         const resumos = final.linhas.flatMap(l => l.dias.filter(d => contexto.marcacoes.some(m => m.funcionario_id === l.funcionario.id && m.data === d.data && !m.anulada))
             .map(d => this.resumoDia(l.funcionario.id, d, contexto.marcacoes.filter(m => m.funcionario_id === l.funcionario.id && m.data === d.data && !m.anulada), actor, when)));
         const id = this.idPeriodo(ano, mes);
         await db.transaction([
-            ...extra, ...resumos,
+            ...extra, ...resumos, ...bancoStatements,
             { sql: `INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, NULL, 'aberto', ?) ON CONFLICT(id) DO NOTHING`, params: [id, ano, mes, when] },
             { sql: `UPDATE rh_ponto_periodo SET estado = 'fechado', fechado_por = ?, fechado_por_nome = ?, fechado_em = ?, resumo_json = ?, processamento_desactualizado = 0, actualizado_em = ? WHERE id = ? AND estado <> 'fechado'`,
                 params: [actor.id, actor.name, when, resumo, when, id], expectChanges: 1 },
@@ -498,6 +518,9 @@ export class ServicoPontoRH {
         await db.transaction([
             { sql: `UPDATE rh_ponto_periodo SET estado = 'aberto', reaberto_por = ?, reaberto_por_nome = ?, reaberto_em = ?, motivo_reabertura = ?, processamento_desactualizado = ?, actualizado_em = ? WHERE id = ? AND estado = 'fechado'`,
                 params: [actor.id, actor.name, when, motivo, processado ? 1 : 0, when, this.idPeriodo(ano, mes)], expectChanges: 1 },
+            // Os movimentos automáticos do banco de horas deste mês voltam a ser calculados no próximo fecho.
+            { sql: `UPDATE rh_banco_horas SET anulado = 1, motivo_anulacao = ?, actualizado_em = ? WHERE origem = 'fecho' AND anulado = 0 AND data >= ? AND data <= ?`,
+                params: ['Mês do livro de ponto reaberto', when, `${chaveMes(ano, mes)}-01`, `${chaveMes(ano, mes)}-31`] },
             auditoriaRH(actor, 'reopen', `Reabriu o livro de ponto de ${mes}/${ano}: ${motivo}`, meta({ entidade: 'periodo', ano, mes, motivo }), { estado: 'fechado' }, { estado: 'aberto' }, when),
         ]);
         return { processamentoDesactualizado: Boolean(processado) };
@@ -517,7 +540,8 @@ export class ServicoPontoRH {
         const ctx = await this.contexto(datas[0], datas[datas.length - 1]);
         if (ctx.config.exigir_fecho_para_salarios) return { totais: null, fechado: false, exigeFecho: true };
         const grelha = construirGrelha({ ...ctx, ano, mes });
-        return { totais: new Map(grelha.linhas.map(l => [l.funcionario.id, totaisParaSalario(l)])), fechado: false, exigeFecho: false };
+        const movimentos = await this.movimentosBanco();
+        return { totais: new Map(grelha.linhas.map(l => [l.funcionario.id, semExtraDoBanco(totaisParaSalario(l), extraNoBanco(movimentos, l.funcionario.id, chaveMes(ano, mes)))])), fechado: false, exigeFecho: false };
     }
 
     // ── Configuração ──────────────────────────────────────────────────────────────
@@ -530,7 +554,7 @@ export class ServicoPontoRH {
         const statements: Statement[] = [];
         for (const [campo, bruto] of Object.entries(alteracoes)) {
             const chave = `ponto_${campo}`;
-            if (!RH_PARAMETROS_PONTO.some(p => p.chave === chave)) continue;
+            if (!PARAMETROS_PONTO.some(p => p.chave === chave)) continue;
             const valor = typeof bruto === 'boolean' ? (bruto ? '1' : '0') : bruto === null || bruto === undefined ? '' : String(bruto).trim();
             const versoes = parametros.filter(p => p.chave === chave).sort((a, b) => b.vigencia_inicio.localeCompare(a.vigencia_inicio));
             const vigente = versoes.find(p => p.vigencia_inicio <= hoje && (!p.vigencia_fim || p.vigencia_fim >= hoje));
@@ -541,7 +565,7 @@ export class ServicoPontoRH {
                 const vespera = somarDias(hoje, -1);
                 if (vigente) statements.push({ sql: 'UPDATE rh_parametro SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL', params: [vespera, vigente.id] });
                 statements.push({ sql: `INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
-                    params: [crypto.randomUUID(), chave, valor, RH_PARAMETROS_PONTO.find(p => p.chave === chave)!.descricao, hoje, when, actor.id], expectChanges: 1 });
+                    params: [crypto.randomUUID(), chave, valor, PARAMETROS_PONTO.find(p => p.chave === chave)!.descricao, hoje, when, actor.id], expectChanges: 1 });
             }
             statements.push(auditoriaRH(actor, 'update', `Configuração do ponto: ${campo} = ${valor || '(vazio)'}`, meta({ entidade: 'configuracao', campo }), { valor: vigente?.valor }, { valor }, when));
         }
@@ -551,13 +575,14 @@ export class ServicoPontoRH {
 
     // ── Auditoria ─────────────────────────────────────────────────────────────────
     static auditoria(filtro: { de: string; ate: string; funcionarioId?: string | null; utilizador?: string | null; accao?: string | null }) {
-        const condicoes = [`entity = 'rh'`, `metadata LIKE '%"modulo":"ponto"%'`, 'timestamp >= ?', 'timestamp <= ?'];
-        const params: unknown[] = [`${filtro.de}T00:00:00`, `${filtro.ate}T23:59:59.999Z`];
-        if (filtro.funcionarioId) { condicoes.push('metadata LIKE ?'); params.push(`%"funcionarioId":"${filtro.funcionarioId}"%`); }
-        if (filtro.utilizador) { condicoes.push('userName = ?'); params.push(filtro.utilizador); }
-        if (filtro.accao) { condicoes.push('action = ?'); params.push(filtro.accao); }
+        // Um só SQL literal (o desktop só aceita instruções conhecidas): cada filtro vazio fica desligado pelo «? = ''».
+        const funcionario = filtro.funcionarioId ? `%"funcionarioId":"${filtro.funcionarioId}"%` : '';
+        const params: unknown[] = [`${filtro.de}T00:00:00`, `${filtro.ate}T23:59:59.999Z`, funcionario, funcionario, filtro.utilizador || '', filtro.utilizador || '', filtro.accao || '', filtro.accao || ''];
         return lista(db.all<{ id: string; timestamp: string; userName: string; action: string; details: string; previousState: string | null; newState: string | null; metadata: string | null }>(
-            `SELECT id, timestamp, userName, action, details, previousState, newState, metadata FROM audit_logs WHERE ${condicoes.join(' AND ')} ORDER BY timestamp DESC LIMIT 2000`, params));
+            `SELECT id, timestamp, userName, action, details, previousState, newState, metadata FROM audit_logs
+             WHERE entity = 'rh' AND metadata LIKE '%"modulo":"ponto"%' AND timestamp >= ? AND timestamp <= ?
+               AND (? = '' OR metadata LIKE ?) AND (? = '' OR userName = ?) AND (? = '' OR action = ?)
+             ORDER BY timestamp DESC LIMIT 2000`, params));
     }
 
     // ── Importação do relógio ─────────────────────────────────────────────────────
@@ -581,7 +606,7 @@ export class ServicoPontoRH {
         const when = agora();
         const aceites = validas.filter(l => !bloqueados.has(l.data!.slice(0, 7)));
         const statements: Statement[] = aceites.map(l => ({
-            sql: INSERIR_MARCACAO.replace('INSERT INTO', 'INSERT OR IGNORE INTO'),
+            sql: INSERIR_MARCACAO_SE_NOVA,
             params: [idMarcacaoImportada(l.funcionario_id!, l.data_hora!, l.tipo), l.funcionario_id, l.data, l.data_hora, l.tipo, 'csv', null, null, null, null, 0, 'Importado do relógio', actor.id, actor.name, when],
         }));
         if (statements.length) {
@@ -589,6 +614,28 @@ export class ServicoPontoRH {
             await db.transaction(statements);
         }
         return { importadas: aceites.length, ignoradas: linhas.filter(l => l.estado === 'duplicada').length, erros: linhas.length - aceites.length - linhas.filter(l => l.estado === 'duplicada').length, mesesBloqueados: [...bloqueados] };
+    }
+
+    /**
+     * Marcações recebidas dos relógios com ligação directa (origem «relógio»). O id vem do servidor, por isso a mesma
+     * marcação recolhida em dois computadores não se repete. Devolve as de meses fechados ou processados (ficam por importar).
+     */
+    static async importarDoRelogio(linhas: Array<{ servidorId: string; dispositivoId: string; funcionario_id: string; data: string; data_hora: string; tipo: TipoMarcacao | null }>, actor: ActorRH) {
+        if (!ServicoControloAcesso.temPermissao(actor as any, 'hr_manage')) throw new Error('Só o RH recolhe as marcações dos relógios.');
+        const meses = new Set<string>();
+        for (const mes of new Set(linhas.map(l => l.data.slice(0, 7)))) await this.assertEditavel([`${mes}-01`]).catch(() => meses.add(mes));
+        const aceites = linhas.filter(l => !meses.has(l.data.slice(0, 7)));
+        const when = agora();
+        if (aceites.length) {
+            await db.transaction([
+                ...aceites.map(l => ({
+                    sql: INSERIR_MARCACAO_SE_NOVA,
+                    params: [`relogio:${l.servidorId}`, l.funcionario_id, l.data, l.data_hora, l.tipo, 'relogio', l.dispositivoId, null, null, null, 0, 'Recebido do relógio', actor.id, actor.name, when],
+                })),
+                auditoriaRH(actor, 'import', `Recebeu ${aceites.length} marcação(ões) dos relógios`, meta({ entidade: 'marcacao', linhas: aceites.length, origem: 'relogio' }), undefined, undefined, when),
+            ]);
+        }
+        return { importadas: aceites.length, bloqueadas: linhas.filter(l => meses.has(l.data.slice(0, 7))).map(l => l.servidorId) };
     }
 
     // ── Marcação pelo funcionário (portal) e no quiosque ──────────────────────────
@@ -679,10 +726,12 @@ export class ServicoPontoRH {
 
     // ── Justificações pelo funcionário ────────────────────────────────────────────
     static justificacoes(funcionarioId?: string) {
-        const colunas = 'id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, estado, comentario, decidido_por_nome, decidido_em, criado_em, criado_por_nome';
+        // SQL literal (o desktop só aceita instruções conhecidas); sem o anexo, que se lê à parte.
         return funcionarioId
-            ? lista(db.all<Justificacao>(`SELECT ${colunas} FROM rh_justificacao WHERE funcionario_id = ? ORDER BY criado_em DESC`, [funcionarioId]))
-            : lista(db.all<Justificacao>(`SELECT ${colunas} FROM rh_justificacao ORDER BY estado = 'pendente' DESC, criado_em DESC`));
+            ? lista(db.all<Justificacao>(`SELECT id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, estado, comentario, decidido_por_nome, decidido_em, criado_em, criado_por_nome
+                FROM rh_justificacao WHERE funcionario_id = ? ORDER BY criado_em DESC`, [funcionarioId]))
+            : lista(db.all<Justificacao>(`SELECT id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, estado, comentario, decidido_por_nome, decidido_em, criado_em, criado_por_nome
+                FROM rh_justificacao ORDER BY estado = 'pendente' DESC, criado_em DESC`));
     }
 
     static async anexoJustificacao(id: string) {
@@ -766,7 +815,191 @@ export class ServicoPontoRH {
         const proprio = ctx.funcionarios.find(x => x.id === f.id);
         if (!proprio) throw new Error('Ficha não encontrada.');
         const dias = calcularFuncionario(proprio, datas, ctx);
-        return { dias, totais: totaisDosDias(dias, ctx.hoje), config: ctx.config, horario: horarioDoFuncionario(proprio, ctx.horarios) };
+        const banco = ctx.config.banco_horas_activo ? saldoBanco(await this.movimentosBanco(f.id), ctx.hoje, ctx.config.banco_validade_meses) : null;
+        return { dias, totais: totaisDosDias(dias, ctx.hoje), config: ctx.config, horario: horarioDoFuncionario(proprio, ctx.horarios), banco };
+    }
+
+    /** Horário aplicável ao funcionário num dia (escala, ciclo rotativo ou horário fixo). */
+    static horarioDoDia(ctx: Pick<ContextoPonto, 'horarios' | 'escalas'>, f: FuncionarioPonto, data: string) {
+        const escala = (ctx.escalas || []).find(e => e.funcionario_id === f.id && e.data === data);
+        return horarioNaData(horarioDoFuncionario(f, ctx.horarios), data, ctx.horarios, escala).horario;
+    }
+
+    // ── Escalas (F3.10) ───────────────────────────────────────────────────────────
+    static escalas(de: string, ate: string) {
+        return lista(db.all<EscalaDia & { id: string; criado_por_nome: string | null }>('SELECT * FROM rh_escala WHERE data >= ? AND data <= ? ORDER BY data', [de, ate]));
+    }
+
+    /** Atribui um turno (horarioId) ou folga (null) a funcionários e dias; `remover` volta ao horário normal ou ao ciclo. */
+    static async guardarEscala(celulas: Array<{ funcionarioId: string; data: string; horarioId: string | null; remover?: boolean }>, actor: ActorRH) {
+        if (!ServicoControloAcesso.temPermissao(actor as any, 'hr_manage')) throw new Error('Só o RH altera as escalas.');
+        if (!celulas.length) return 0;
+        const datas = celulas.map(c => c.data).sort();
+        await this.assertEditavel(datas);
+        const [funcionarios, horarios] = await Promise.all([ServicoRH.funcionarios(), ServicoTempoRH.horarios()]);
+        const when = agora();
+        const statements: Statement[] = [];
+        for (const c of celulas) {
+            const f = funcionarios.find(x => x.id === c.funcionarioId);
+            if (!f) continue;
+            if (c.horarioId && !horarios.some(h => h.id === c.horarioId)) throw new Error('Turno desconhecido.');
+            statements.push(c.remover
+                ? { sql: 'DELETE FROM rh_escala WHERE funcionario_id = ? AND data = ?', params: [f.id, c.data] }
+                : { sql: `INSERT INTO rh_escala (id, funcionario_id, data, horario_id, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(funcionario_id, data) DO UPDATE SET horario_id = excluded.horario_id, criado_por = excluded.criado_por, criado_por_nome = excluded.criado_por_nome, actualizado_em = excluded.criado_em`,
+                    params: [`${f.id}:${c.data}`, f.id, c.data, c.horarioId, actor.id, actor.name, when] });
+        }
+        const nomes = (id: string | null) => (id ? horarios.find(h => h.id === id)?.nome || id : 'Folga');
+        const dataPt = (d: string) => d.split('-').reverse().join('/');
+        const resumo = celulas.length === 1
+            ? `${celulas[0].remover ? 'Retirou a escala' : `Escala: ${nomes(celulas[0].horarioId)}`} em ${dataPt(celulas[0].data)}`
+            : `Alterou ${celulas.length} dia(s) da escala (${dataPt(datas[0])} a ${dataPt(datas[datas.length - 1])})`;
+        statements.push(auditoriaRH(actor, 'update', resumo, meta({ entidade: 'escala', dias: celulas.length }), undefined, undefined, when));
+        await db.transaction(statements);
+        return celulas.length;
+    }
+
+    /** Copia as escalas de uma semana para outra (a semana de destino fica igual à de origem). */
+    static async copiarSemana(origem: string, destino: string, funcionarioIds: string[], actor: ActorRH) {
+        const escalas = await this.escalas(origem, somarDias(origem, 6));
+        const celulas: Array<{ funcionarioId: string; data: string; horarioId: string | null; remover?: boolean }> = [];
+        for (const id of new Set(funcionarioIds)) {
+            for (let i = 0; i < 7; i++) {
+                const deOrigem = escalas.find(e => e.funcionario_id === id && e.data === somarDias(origem, i));
+                celulas.push(deOrigem ? { funcionarioId: id, data: somarDias(destino, i), horarioId: deOrigem.horario_id }
+                    : { funcionarioId: id, data: somarDias(destino, i), horarioId: null, remover: true });
+            }
+        }
+        return this.guardarEscala(celulas, actor);
+    }
+
+    // ── Banco de horas (F3.11) ────────────────────────────────────────────────────
+    static movimentosBanco(funcionarioId?: string) {
+        return lista(funcionarioId
+            ? db.all<MovimentoBanco>('SELECT * FROM rh_banco_horas WHERE funcionario_id = ? ORDER BY data, criado_em', [funcionarioId])
+            : db.all<MovimentoBanco>('SELECT * FROM rh_banco_horas ORDER BY data, criado_em'));
+    }
+
+    /** Saldo de cada funcionário numa data (com a validade configurada). */
+    static async saldosBanco(ate = luandaTodayKey(), config?: ConfigPonto): Promise<Map<string, SaldoBanco>> {
+        const movimentos = await this.movimentosBanco();
+        const validade = (config || configDosParametros(await ServicoRH.parametros(), ate)).banco_validade_meses;
+        const porFuncionario = new Map<string, MovimentoBanco[]>();
+        for (const m of movimentos) porFuncionario.set(m.funcionario_id, [...(porFuncionario.get(m.funcionario_id) || []), m]);
+        return new Map([...porFuncionario].map(([id, doFuncionario]) => [id, saldoBanco(doFuncionario, ate, validade)]));
+    }
+
+    private static assertBanco(ctx: Pick<ContextoPonto, 'config'>, actor: ActorRH) {
+        if (!ServicoControloAcesso.temPermissao(actor as any, 'hr_manage')) throw new Error('Só o RH mexe no banco de horas.');
+        if (!ctx.config.banco_horas_activo) throw new Error('O banco de horas está desligado: active-o na configuração do livro de ponto.');
+    }
+
+    /** Liga ou desliga o banco de horas de um funcionário (as horas extra dos meses fechados a seguir vão para o banco). */
+    static async definirBancoFuncionario(funcionarioId: string, activo: boolean, actor: ActorRH) {
+        if (!ServicoControloAcesso.temPermissao(actor as any, 'hr_manage')) throw new Error('Só o RH mexe no banco de horas.');
+        const when = agora();
+        await db.transaction([
+            { sql: 'UPDATE rh_funcionario SET banco_horas = ?, actualizado_em = ? WHERE id = ?', params: [activo ? 1 : 0, when, funcionarioId], expectChanges: 1 },
+            auditoriaRH(actor, 'update', activo ? 'As horas extra passam a ir para o banco de horas' : 'As horas extra voltam a ser pagas', meta({ entidade: 'banco_horas', funcionarioId }), undefined, { banco_horas: activo }, when),
+        ]);
+    }
+
+    /** Envia as horas extra de um dia para o banco (escolha lançamento a lançamento). */
+    static async extraParaBanco(funcionarioId: string, data: string, actor: ActorRH) {
+        const ctx = await this.contexto(data, data);
+        this.assertBanco(ctx, actor);
+        await this.assertEditavel([data]);
+        const f = ctx.funcionarios.find(x => x.id === funcionarioId);
+        if (!f) throw new Error('Funcionário não encontrado.');
+        const [dia] = calcularFuncionario(f, [data], ctx);
+        if (dia.minutos_extra <= 0) throw new Error('Este dia não tem horas extra.');
+        const when = agora();
+        await db.transaction([
+            upsertMovimento({ id: idMovimentoExtra(f.id, data), funcionario_id: f.id, data, minutos: dia.minutos_extra, tipo: 'extra', tipo_extra: dia.tipo_extra, origem: 'manual', descricao: 'Horas extra do dia enviadas para o banco' }, actor, when),
+            auditoriaRH(actor, 'create', `Banco de horas: +${dia.minutos_extra} min de ${f.nome} (${data.split('-').reverse().join('/')})`, meta({ entidade: 'banco_horas', funcionarioId: f.id, data }), undefined, undefined, when),
+        ]);
+        return dia.minutos_extra;
+    }
+
+    /** Folga compensatória: lança uma dispensa no dia e desconta do banco as horas previstas desse dia. */
+    static async folgaCompensatoria(funcionarioId: string, data: string, motivoBruto: string, actor: ActorRH) {
+        const motivo = motivoValido(motivoBruto);
+        const ctx = await this.contexto(data, data);
+        this.assertBanco(ctx, actor);
+        const f = ctx.funcionarios.find(x => x.id === funcionarioId);
+        if (!f) throw new Error('Funcionário não encontrado.');
+        const [dia] = calcularFuncionario(f, [data], ctx);
+        if (!dia.util) throw new Error('Esse dia não é de trabalho.');
+        const minutos = minutosPrevistos(this.horarioDoDia(ctx, f, data)) || 480;
+        const saldo = (await this.saldosBanco(data, ctx.config)).get(f.id)?.saldo || 0;
+        const hm = (m: number) => `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}`;
+        if (saldo < minutos) throw new Error(`Saldo insuficiente no banco de horas: tem ${hm(Math.max(0, saldo))} e a folga gasta ${hm(minutos)}.`);
+        const r = await this.acao({ celulas: [{ funcionarioId, data }], acao: 'dispensa', motivo: `Folga compensatória: ${motivo}` }, actor);
+        if (!r.alteradas) throw new Error(r.ignoradas[0] || 'Não foi possível lançar a folga nesse dia.');
+        const when = agora();
+        await db.transaction([
+            upsertMovimento({ id: idMovimentoFolga(f.id, data), funcionario_id: f.id, data, minutos: -minutos, tipo: 'folga', origem: 'manual', descricao: motivo }, actor, when),
+            auditoriaRH(actor, 'create', `Banco de horas: folga compensatória de ${f.nome} (${data.split('-').reverse().join('/')}, -${minutos} min)`, meta({ entidade: 'banco_horas', funcionarioId: f.id, data, motivo }), undefined, undefined, when),
+        ]);
+        return minutos;
+    }
+
+    /** Ajuste manual do saldo (positivo ou negativo), com motivo. */
+    static async ajusteBanco(funcionarioId: string, data: string, minutos: number, motivoBruto: string, actor: ActorRH) {
+        const motivo = motivoValido(motivoBruto);
+        const ctx = await this.contexto(data, data);
+        this.assertBanco(ctx, actor);
+        const valor = Math.round(Number(minutos));
+        if (!valor) throw new Error('Indique os minutos do ajuste (positivos ou negativos).');
+        const when = agora();
+        await db.transaction([
+            upsertMovimento({ id: crypto.randomUUID(), funcionario_id: funcionarioId, data, minutos: valor, tipo: 'ajuste', origem: 'manual', descricao: motivo }, actor, when),
+            auditoriaRH(actor, 'create', `Banco de horas: ajuste de ${valor > 0 ? '+' : ''}${valor} min`, meta({ entidade: 'banco_horas', funcionarioId, data, motivo }), undefined, undefined, when),
+        ]);
+    }
+
+    static async anularMovimentoBanco(id: string, motivoBruto: string, actor: ActorRH) {
+        if (!ServicoControloAcesso.temPermissao(actor as any, 'hr_manage')) throw new Error('Só o RH mexe no banco de horas.');
+        const motivo = motivoValido(motivoBruto);
+        const m = await db.get<MovimentoBanco>('SELECT * FROM rh_banco_horas WHERE id = ?', [id]);
+        if (!m || m.anulado) throw new Error('Movimento não encontrado ou já anulado.');
+        await this.assertEditavel([m.data]);
+        const when = agora();
+        await db.transaction([
+            { sql: 'UPDATE rh_banco_horas SET anulado = 1, motivo_anulacao = ?, actualizado_em = ? WHERE id = ? AND anulado = 0', params: [motivo, when, id], expectChanges: 1 },
+            auditoriaRH(actor, 'cancel', `Banco de horas: anulou um movimento de ${m.minutos} min`, meta({ entidade: 'banco_horas', funcionarioId: m.funcionario_id, data: m.data, motivo }), m, undefined, when),
+        ]);
+    }
+
+    // ── Cartão QR do quiosque ─────────────────────────────────────────────────────
+    /** Gera um novo cartão (o anterior deixa de funcionar). Devolve o código a imprimir; só fica guardado o hash. */
+    static async gerarCartaoQr(funcionarioId: string, actor: ActorRH) {
+        if (!ServicoControloAcesso.temPermissao(actor as any, 'hr_manage')) throw new Error('Só o RH emite cartões do quiosque.');
+        const aleatorio = Array.from(crypto.getRandomValues(new Uint8Array(16)), b => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[b % 32]).join('');
+        const codigo = `TANGO-PONTO:${aleatorio}`;
+        const when = agora();
+        await db.transaction([
+            { sql: 'UPDATE rh_funcionario SET qr_ponto_hash = ?, actualizado_em = ? WHERE id = ?', params: [await hashQr(codigo), when, funcionarioId], expectChanges: 1 },
+            auditoriaRH(actor, 'update', 'Emitiu um novo cartão QR do quiosque', meta({ entidade: 'funcionario', funcionarioId }), undefined, undefined, when),
+        ]);
+        return codigo;
+    }
+
+    static async retirarCartaoQr(funcionarioId: string, actor: ActorRH) {
+        if (!ServicoControloAcesso.temPermissao(actor as any, 'hr_manage')) throw new Error('Só o RH emite cartões do quiosque.');
+        const when = agora();
+        await db.transaction([
+            { sql: 'UPDATE rh_funcionario SET qr_ponto_hash = NULL, actualizado_em = ? WHERE id = ?', params: [when, funcionarioId], expectChanges: 1 },
+            auditoriaRH(actor, 'update', 'Retirou o cartão QR do quiosque', meta({ entidade: 'funcionario', funcionarioId }), undefined, undefined, when),
+        ]);
+    }
+
+    /** Quiosque: identifica o funcionário pelo código lido do cartão (câmara ou leitor USB). */
+    static async identificarPorQr(codigo: string) {
+        const limpo = codigo.trim().toUpperCase();
+        if (!/^TANGO-PONTO:[A-Z0-9]{10,40}$/u.test(limpo)) return null;
+        const hash = await hashQr(limpo);
+        return (await ServicoRH.funcionarios()).find(f => f.estado === 'activo' && (f as any).qr_ponto_hash === hash) || null;
     }
 
     // ── Painel «Hoje» ─────────────────────────────────────────────────────────────
@@ -790,6 +1023,25 @@ export class ServicoPontoRH {
     }
 }
 
+const hashQr = async (codigo: string) => {
+    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`tango-ponto-qr:${codigo.trim().toUpperCase()}`));
+    return Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
+};
+const upsertMovimento = (m: MovimentoBanco, actor: ActorRH, when: string): Statement => ({
+    sql: `INSERT INTO rh_banco_horas (id, funcionario_id, data, minutos, tipo, tipo_extra, origem, descricao, anulado, criado_por, criado_por_nome, criado_em)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET minutos = excluded.minutos, tipo_extra = excluded.tipo_extra, origem = excluded.origem, descricao = excluded.descricao,
+            anulado = 0, motivo_anulacao = NULL, actualizado_em = excluded.criado_em`,
+    params: [m.id, m.funcionario_id, m.data, m.minutos, m.tipo, m.tipo_extra || null, m.origem || 'manual', m.descricao || null, actor.id, actor.name, when],
+});
+/** Horas extra que foram para o banco não se pagam: saem dos totais enviados ao salário. */
+const semExtraDoBanco = (t: TotaisSalario, banco: { util: number; descanso: number; feriado: number }): TotaisSalario => ({
+    ...t,
+    minutos_extra_util: Math.max(0, t.minutos_extra_util - banco.util),
+    minutos_extra_descanso: Math.max(0, t.minutos_extra_descanso - banco.descanso),
+    minutos_extra_feriado: Math.max(0, t.minutos_extra_feriado - banco.feriado),
+    minutos_banco: banco.util + banco.descanso + banco.feriado,
+});
 const antesDoDia = (marcacoes: Marcacao[]) => (marcacoes.length ? 'com marcações' : 'sem marcações');
 const datasEntre = (de: string, ate: string) => {
     const datas: string[] = [];

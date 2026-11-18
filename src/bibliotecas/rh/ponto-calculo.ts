@@ -21,6 +21,7 @@ export type ConfigPonto = {
     limite_extra_diario_min: number; limite_extra_anual_min: number; hora_alerta_sem_marcacao: string; lancar_falta_automatica: boolean;
     exigir_fecho_para_salarios: boolean; autoregisto_app: boolean; exigir_geolocalizacao: boolean; raio_permitido_m: number;
     local_latitude: number | null; local_longitude: number | null; exigir_selfie: boolean; alerta_atrasos_mes: number;
+    banco_horas_activo: boolean; banco_validade_meses: number; alertas_email: boolean; email_rh: string; notificacoes_ambiente: boolean;
 };
 
 /** Valores por omissão da especificação (secção 4.6). Os valores legais confirmam-se com a LGT e o contabilista. */
@@ -29,6 +30,7 @@ export const CONFIG_PONTO_OMISSAO: ConfigPonto = {
     pausa_almoco_auto_min: 60, inicio_noturno: '20:00', fim_noturno: '06:00', limite_extra_diario_min: 120, limite_extra_anual_min: 12_000,
     hora_alerta_sem_marcacao: '08:30', lancar_falta_automatica: false, exigir_fecho_para_salarios: true, autoregisto_app: false,
     exigir_geolocalizacao: false, raio_permitido_m: 200, local_latitude: null, local_longitude: null, exigir_selfie: false, alerta_atrasos_mes: 3,
+    banco_horas_activo: false, banco_validade_meses: 6, alertas_email: false, email_rh: '', notificacoes_ambiente: true,
 };
 
 /** Chave do parâmetro (rh_parametro) de cada opção: o ponto usa os parâmetros com vigência do módulo de RH. */
@@ -200,7 +202,9 @@ export function calcularDiaPonto(e: EntradaDia): DiaPonto {
     const feriado = feriadoNaData(e.feriados, data)?.nome || null;
     const trabalha = diasTrabalho(horario).has(diaSemana(data));
     const util = trabalha && !feriado;
-    const previsto = minutosPrevistos(horario);
+    // Horário flexível: o previsto é o mínimo diário e as referências de atraso e saída são a faixa obrigatória.
+    const flexivel = horario.tipo === 'flexivel' && Boolean(horario.faixa_inicio && horario.faixa_fim);
+    const previsto = flexivel && Number(horario.minimo_diario_min) > 0 ? Number(horario.minimo_diario_min) : minutosPrevistos(horario);
     const ausencia = e.ausencia && e.ausencia.estado !== 'anulada' ? e.ausencia : null;
     const estadoAusencia = ausencia ? estadoDaAusencia(ausencia.tipo) : null;
     const horasDia = previsto / 60 || 8;
@@ -215,8 +219,16 @@ export function calcularDiaPonto(e: EntradaDia): DiaPonto {
     if (saidaHorario <= entradaHorario) saidaHorario += 1440;
     const meioDia = ausencia?.meio_dia || null;
     const metade = Math.round(previsto / 2);
-    const entradaPrevistaMin = inicioDoDia(data) + (meioDia === 'manha' ? saidaHorario - metade : entradaHorario);
-    const saidaPrevistaMin = inicioDoDia(data) + (meioDia === 'tarde' ? entradaHorario + metade : saidaHorario);
+    const fimDoDiaMin = inicioDoDia(data) + saidaHorario;
+    let entradaPrevistaMin = inicioDoDia(data) + (meioDia === 'manha' ? saidaHorario - metade : entradaHorario);
+    let saidaPrevistaMin = inicioDoDia(data) + (meioDia === 'tarde' ? entradaHorario + metade : saidaHorario);
+    if (flexivel && !meioDia) {
+        const inicioFaixa = minutosDaHora(horario.faixa_inicio!);
+        let fimFaixa = minutosDaHora(horario.faixa_fim!);
+        if (fimFaixa <= inicioFaixa) fimFaixa += 1440;
+        entradaPrevistaMin = inicioDoDia(data) + inicioFaixa;
+        saidaPrevistaMin = inicioDoDia(data) + fimFaixa;
+    }
     const previstoDia = meioDia ? previsto - metade : previsto;
 
     const { ficam, ignoradas } = semRepetidas(e.marcacoes.filter(m => m.data === data));
@@ -248,7 +260,7 @@ export function calcularDiaPonto(e: EntradaDia): DiaPonto {
 
     // 8. Emparelhar as marcações.
     const { segmentos, aberto, comPausas } = emparelhar(ficam);
-    const diaTerminou = data < e.hoje || (data === e.hoje && Boolean(e.agora) && minutosAbsolutos(e.agora!) > saidaPrevistaMin + 120);
+    const diaTerminou = data < e.hoje || (data === e.hoje && Boolean(e.agora) && minutosAbsolutos(e.agora!) > Math.max(saidaPrevistaMin, fimDoDiaMin) + 120);
     const incompleto = aberto && (diaTerminou || segmentos.some((s, i) => s.fim === null && i < segmentos.length - 1));
     const trabalho = segmentos.filter(s => s.tipo === 'trabalho' && s.fim !== null) as Array<{ inicio: number; fim: number; tipo: 'trabalho' }>;
     const pausas = segmentos.filter(s => s.tipo === 'pausa' && s.fim !== null) as Array<{ inicio: number; fim: number; tipo: 'pausa' }>;

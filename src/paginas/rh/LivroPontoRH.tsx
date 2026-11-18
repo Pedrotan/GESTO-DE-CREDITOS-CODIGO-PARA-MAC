@@ -31,6 +31,8 @@ import { GrelhaPonto, type CampoDestaque } from '@/componentes/rh/ponto/GrelhaPo
 import { BarraAccoesMassa, DialogoFalta, DialogoTexto, MenuCelula, ResolverPendentes, type AccaoMenu } from '@/componentes/rh/ponto/DialogosPonto';
 import { PainelDiaPonto } from '@/componentes/rh/ponto/PainelDiaPonto';
 import { AuditoriaPonto, ConfiguracaoPonto, DialogoPeriodo, ImportarPonto, JustificacoesPonto, PainelHojePonto, ROTULO_PERIODO } from '@/componentes/rh/ponto/SeccoesPonto';
+import { BancoHorasPonto, EscalasPonto, RelogiosPonto } from '@/componentes/rh/ponto/ExtrasPonto';
+import { ServicoRelogiosPonto } from '@/servicos/rh/ServicoRelogiosPonto';
 import { ESTADOS, FILTROS_ESTADO, ORDENACOES, type FiltroEstado, type Ordenacao } from '@/componentes/rh/ponto/ponto-ui';
 
 export const LIGACOES_TEMPO = [
@@ -83,6 +85,13 @@ export default function LivroPontoRH() {
         return { ...resultado, escopo, processado };
     }, null as null | (Awaited<ReturnType<typeof ServicoPontoRH.grelha>> & { escopo: Escopo | null; processado: string | null }), [ano, mes, actor?.id]);
     const recarregar = useCallback(() => { void dados.recarregar(); }, [dados.recarregar]);
+    useEffect(() => {
+        if (!actor || !gerir) return;
+        const recolher = () => void ServicoRelogiosPonto.recolher(actor, { seNecessario: true }).then(r => { if (r?.importadas) recarregar(); }).catch(() => undefined);
+        recolher();
+        const t = window.setInterval(recolher, 120_000);
+        return () => window.clearInterval(t);
+    }, [actor, gerir, recarregar]);
     const d = dados.dados;
     const escopo = d?.escopo || null;
     const periodoEmpresa = d?.periodos.find(p => !p.departamento_id) || null;
@@ -188,6 +197,9 @@ export default function LivroPontoRH() {
                     <TabsTrigger value="grelha">Grelha do mês</TabsTrigger>
                     <TabsTrigger value="hoje">Hoje</TabsTrigger>
                     <TabsTrigger value="justificacoes">Justificações</TabsTrigger>
+                    <TabsTrigger value="escalas">Escalas</TabsTrigger>
+                    {gerir && <TabsTrigger value="banco">Banco de horas</TabsTrigger>}
+                    {gerir && <TabsTrigger value="relogios">Relógios</TabsTrigger>}
                     {gerir && <TabsTrigger value="auditoria">Auditoria</TabsTrigger>}
                 </TabsList>
 
@@ -306,6 +318,14 @@ export default function LivroPontoRH() {
                     {actor && escopo && <JustificacoesPonto actor={actor} nomes={new Map(base.dados.funcionarios.map(f => [f.id, f.nome]))} onDecidido={recarregar}
                         podeDecidir={id => { const f = base.dados.funcionarios.find(x => x.id === id); return Boolean(f && ServicoPontoRH.podeGerir(escopo, f)); }} />}
                 </TabsContent>
+                <TabsContent value="escalas">
+                    <EscalasPonto actor={actor} gerir={gerir} funcionarios={base.dados.funcionarios} departamentos={departamentosVisiveis} />
+                </TabsContent>
+                {gerir && <TabsContent value="banco">
+                    <BancoHorasPonto actor={actor} gerir={gerir} config={d?.contexto.config || null} funcionarios={base.dados.funcionarios} settings={companySettings}
+                        onAlterado={() => { recarregar(); void base.recarregar(); }} />
+                </TabsContent>}
+                {gerir && actor && <TabsContent value="relogios"><RelogiosPonto actor={actor} onRecebido={recarregar} /></TabsContent>}
                 {gerir && <TabsContent value="auditoria"><AuditoriaPonto funcionarios={base.dados.funcionarios} settings={companySettings} userName={actor?.name || ''} /></TabsContent>}
             </Tabs>
 
@@ -353,7 +373,7 @@ export default function LivroPontoRH() {
             )}
             {pedido?.tipo === 'importar' && actor && <ImportarPonto actor={actor} funcionarios={base.dados.funcionarios} onFechar={() => setPedido(null)} onImportado={recarregar} />}
             {pedido?.tipo === 'configuracao' && actor && d && (
-                <ConfiguracaoPonto config={d.contexto.config} actor={actor} funcionarios={base.dados.funcionarios} ano={ano} mes={mes} onFechar={() => setPedido(null)}
+                <ConfiguracaoPonto config={d.contexto.config} actor={actor} funcionarios={base.dados.funcionarios} empresa={companySettings?.name || ''} ano={ano} mes={mes} onFechar={() => setPedido(null)}
                     onGuardado={() => { recarregar(); void base.recarregar(); }} />
             )}
             {pedido?.tipo === 'periodo' && actor && d && (() => {
