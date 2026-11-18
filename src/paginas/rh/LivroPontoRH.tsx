@@ -3,7 +3,7 @@
 // exportações e impressão; separadores «Hoje», «Justificações» e «Auditoria».
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, CircleHelp, Download, FileSpreadsheet, FileText, Lock, Printer, Settings, Tablet, Upload } from 'lucide-react';
+import { AlarmClock, ChevronLeft, ChevronRight, CircleHelp, Download, FileSpreadsheet, FileText, Lock, Printer, Settings, Tablet, TimerReset, TriangleAlert, Upload, UserCheck, Users, UserX, type LucideIcon } from 'lucide-react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -42,6 +42,29 @@ export const LIGACOES_TEMPO = [
 ];
 const TODOS = '__todos__';
 const CHAVE_HORAS = 'ponto_mostrar_horas';
+
+/** Indicador da barra de resumo: ícone de linha numa pastilha com a cor do indicador, valor em destaque e legenda. */
+const TONS_METRICA = {
+    slate: 'bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700',
+    emerald: 'bg-emerald-50 text-emerald-600 ring-emerald-100 dark:bg-emerald-950/50 dark:text-emerald-400 dark:ring-emerald-900',
+    rose: 'bg-rose-50 text-rose-600 ring-rose-100 dark:bg-rose-950/50 dark:text-rose-400 dark:ring-rose-900',
+    amber: 'bg-amber-50 text-amber-600 ring-amber-100 dark:bg-amber-950/50 dark:text-amber-400 dark:ring-amber-900',
+    violet: 'bg-violet-50 text-violet-600 ring-violet-100 dark:bg-violet-950/50 dark:text-violet-400 dark:ring-violet-900',
+    orange: 'bg-orange-50 text-orange-600 ring-orange-100 dark:bg-orange-950/50 dark:text-orange-400 dark:ring-orange-900',
+} as const;
+function MetricaResumo({ icone: Icone, tom, valor, unidade, rotulo }: { icone: LucideIcon; tom: keyof typeof TONS_METRICA; valor: string | number; unidade?: string; rotulo: string }) {
+    return (
+        <div className="flex items-center gap-2.5">
+            <span className={cn('flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset print:hidden', TONS_METRICA[tom])}>
+                <Icone className="h-[18px] w-[18px]" strokeWidth={2} aria-hidden />
+            </span>
+            <span className="leading-tight">
+                <span className="block text-base font-black tabular-nums text-slate-900 dark:text-white">{valor}{unidade && <span className="ml-0.5 text-xs font-semibold text-slate-500">{unidade}</span>}</span>
+                <span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">{rotulo}</span>
+            </span>
+        </div>
+    );
+}
 const lerHoras = () => { try { return localStorage.getItem(CHAVE_HORAS) === '1'; } catch { return false; } };
 
 type Pedido =
@@ -258,14 +281,14 @@ export default function LivroPontoRH() {
                     </div>
 
                     {/* Barra de resumo do mês (F1.12) */}
-                    <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900">
+                    <div className="mb-3 flex flex-wrap items-center gap-x-6 gap-y-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm dark:border-slate-800 dark:bg-slate-900">
                         <span className="hidden font-black print:inline">Livro de ponto · {nomeDoMes(ano, mes)}</span>
-                        <span>👥 <b>{resumo.funcionarios}</b> funcionários</span>
-                        <span>✅ <b>{resumo.presenca}%</b> presença</span>
-                        <span>❌ <b>{resumo.faltas}</b> faltas</span>
-                        <span>⏰ <b>{resumo.atraso}</b> min de atraso</span>
-                        <span>➕ <b>{formatarMinutos(resumo.extra)}</b> extra</span>
-                        {resumo.incompletos > 0 && <span className="text-amber-700">⚠ <b>{resumo.incompletos}</b> incompletos</span>}
+                        <MetricaResumo icone={Users} tom="slate" valor={resumo.funcionarios} rotulo="Funcionários" />
+                        <MetricaResumo icone={UserCheck} tom="emerald" valor={`${resumo.presenca}%`} rotulo="Presença" />
+                        <MetricaResumo icone={UserX} tom="rose" valor={resumo.faltas} rotulo="Faltas" />
+                        <MetricaResumo icone={AlarmClock} tom="amber" valor={resumo.atraso} unidade="min" rotulo="Atrasos" />
+                        <MetricaResumo icone={TimerReset} tom="violet" valor={formatarMinutos(resumo.extra)} rotulo="Horas extra" />
+                        {resumo.incompletos > 0 && <MetricaResumo icone={TriangleAlert} tom="orange" valor={resumo.incompletos} rotulo="Incompletos" />}
                         <span className={cn('rounded-full px-2.5 py-0.5 text-xs font-black', resumo.pendentes ? 'bg-orange-500 text-white' : 'bg-slate-100 text-slate-500 dark:bg-slate-800')}>{resumo.pendentes} pendentes</span>
                         {resumo.pendentes > 0 && !bloqueado && <Button size="sm" variant="outline" className="no-print border-orange-300 text-orange-700" onClick={() => setPedido({ tipo: 'pendentes' })}>Resolver pendentes</Button>}
                         <span className="ml-auto flex items-center gap-2">
