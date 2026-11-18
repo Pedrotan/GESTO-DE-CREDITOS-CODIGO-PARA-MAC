@@ -73,6 +73,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_rh_ausencia_funcionario ON rh_ausencia(funcionario_id, data_inicio)",
   "CREATE INDEX IF NOT EXISTS idx_rh_banco_horas_func ON rh_banco_horas(funcionario_id, data)",
   "CREATE INDEX IF NOT EXISTS idx_rh_contrato_funcionario ON rh_contrato(funcionario_id, estado)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_doc_auditoria_documento ON rh_doc_auditoria(documento_id, criado_em)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_doc_pasta_funcionario ON rh_doc_pasta(funcionario_id)",
   "CREATE INDEX IF NOT EXISTS idx_rh_documento_funcionario ON rh_documento(funcionario_id, categoria)",
   "CREATE INDEX IF NOT EXISTS idx_rh_escala_data ON rh_escala(data)",
   "CREATE INDEX IF NOT EXISTS idx_rh_funcionario_rubrica ON rh_funcionario_rubrica(funcionario_id)",
@@ -167,6 +169,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS rh_contrato ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('indeterminado', 'determinado')), inicio TEXT NOT NULL, fim TEXT, periodo_experiencia_fim TEXT, salario_base_minor INTEGER NOT NULL CHECK(salario_base_minor >= 0), horas_semanais REAL NOT NULL DEFAULT 40, dias_ferias INTEGER NOT NULL DEFAULT 22, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'terminado')), motivo_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_departamento ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, responsavel_id TEXT, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_dependente ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, parentesco TEXT, data_nascimento TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_doc_auditoria ( id TEXT PRIMARY KEY, documento_id TEXT NOT NULL, accao TEXT NOT NULL, detalhe TEXT, utilizador_id TEXT, utilizador_nome TEXT, criado_em TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS rh_doc_pasta ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_documento ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, categoria TEXT NOT NULL, nome TEXT NOT NULL, ficheiro_nome TEXT NOT NULL, mime TEXT NOT NULL, tamanho INTEGER NOT NULL DEFAULT 0, data_emissao TEXT, data_validade TEXT, confidencial INTEGER NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'substituido', 'arquivado')), substituido_por TEXT, carregado_por TEXT, carregado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_documento_emitido ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, modelo TEXT NOT NULL, ano INTEGER NOT NULL, sequencia INTEGER NOT NULL, numero TEXT NOT NULL, dados_json TEXT NOT NULL, emitido_por TEXT, emitido_por_nome TEXT, emitido_em TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS rh_documento_ficheiro ( documento_id TEXT PRIMARY KEY, data_url TEXT NOT NULL )",
@@ -320,6 +324,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM payments",
   "DELETE FROM report_schedules WHERE id = ?",
   "DELETE FROM rh_dependente WHERE id = ? AND funcionario_id = ?",
+  "DELETE FROM rh_documento WHERE id = ? AND estado = 'arquivado'",
+  "DELETE FROM rh_documento_ficheiro WHERE documento_id = ?",
   "DELETE FROM rh_escala WHERE funcionario_id = ? AND data = ?",
   "DELETE FROM rh_ponto WHERE id = ?",
   "DELETE FROM rh_processamento WHERE id = ? AND estado = 'aberto'",
@@ -435,7 +441,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO rh_contrato (id, funcionario_id, tipo, inicio, fim, periodo_experiencia_fim, salario_base_minor, horas_semanais, dias_ferias, estado, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)",
   "INSERT INTO rh_departamento (id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_dependente (id, funcionario_id, nome, parentesco, data_nascimento, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)",
+  "INSERT INTO rh_doc_auditoria (id, documento_id, accao, detalhe, utilizador_id, utilizador_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_doc_pasta (id, funcionario_id, nome, anulada, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, 0, ?, ?, ?)",
+  "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em, pasta_id, origem, versao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_documento_emitido (id, funcionario_id, modelo, ano, sequencia, numero, dados_json, emitido_por, emitido_por_nome, emitido_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_documento_ficheiro (documento_id, data_url) VALUES (?, ?)",
   "INSERT INTO rh_escala (id, funcionario_id, data, horario_id, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(funcionario_id, data) DO UPDATE SET horario_id = excluded.horario_id, criado_por = excluded.criado_por, criado_por_nome = excluded.criado_por_nome, actualizado_em = excluded.criado_em",
@@ -607,8 +615,11 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM rh_contrato ORDER BY inicio DESC",
   "SELECT * FROM rh_contrato WHERE funcionario_id = ? AND estado = 'activo'",
   "SELECT * FROM rh_contrato WHERE funcionario_id = ? ORDER BY inicio DESC",
+  "SELECT * FROM rh_doc_auditoria WHERE documento_id = ? ORDER BY criado_em DESC",
+  "SELECT * FROM rh_doc_pasta WHERE anulada = 0 ORDER BY nome",
   "SELECT * FROM rh_documento ORDER BY criado_em DESC",
   "SELECT * FROM rh_documento WHERE funcionario_id = ? ORDER BY criado_em DESC",
+  "SELECT * FROM rh_documento WHERE id = ?",
   "SELECT * FROM rh_documento_emitido ORDER BY emitido_em DESC",
   "SELECT * FROM rh_documento_emitido WHERE funcionario_id = ? ORDER BY emitido_em DESC",
   "SELECT * FROM rh_escala WHERE data >= ? AND data <= ? ORDER BY data",
@@ -993,8 +1004,14 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_contrato SET estado = 'terminado', motivo_fim = ?, actualizado_em = ? WHERE funcionario_id = ? AND estado = 'activo'",
   "UPDATE rh_contrato SET estado = 'terminado', motivo_fim = ?, fim = COALESCE(fim, ?), actualizado_em = ? WHERE funcionario_id = ? AND estado = 'activo'",
   "UPDATE rh_departamento SET nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?",
-  "UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'",
+  "UPDATE rh_doc_pasta SET anulada = 1, actualizado_em = ? WHERE id = ? AND anulada = 0",
+  "UPDATE rh_doc_pasta SET nome = ?, actualizado_em = ? WHERE id = ? AND anulada = 0",
+  "UPDATE rh_documento SET estado = 'activo', anulado_por = NULL, anulado_por_nome = NULL, anulado_em = NULL, actualizado_em = ? WHERE id = ? AND estado = 'arquivado'",
+  "UPDATE rh_documento SET estado = 'arquivado', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'",
   "UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'",
+  "UPDATE rh_documento SET nome = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_documento SET pasta_id = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_documento SET pasta_id = NULL, actualizado_em = ? WHERE pasta_id = ?",
   "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?",
   "UPDATE rh_funcionario SET banco_horas = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET departamento_id = ?, actualizado_em = ? WHERE id = ?",
@@ -1365,6 +1382,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "475c53ab4b4afa352ad6baa3786529c24e4193823321f6180e4b9732113e3df2",
     "CREATE INDEX IF NOT EXISTS idx_rh_contrato_funcionario ON rh_contrato(funcionario_id, estado)"
+  ],
+  [
+    "369df1ef24e5da3ba55d45bbb26cf660f58d533efb24e5e620cba6e648adfa97",
+    "CREATE INDEX IF NOT EXISTS idx_rh_doc_auditoria_documento ON rh_doc_auditoria(documento_id, criado_em)"
+  ],
+  [
+    "81141b411ab5146d4214e0347450240d8ced24396459da5bb920f27a5386264c",
+    "CREATE INDEX IF NOT EXISTS idx_rh_doc_pasta_funcionario ON rh_doc_pasta(funcionario_id)"
   ],
   [
     "031cd56f2fedcd988e2031964014148df86bd0b7030c586088d679431381ec17",
@@ -1741,6 +1766,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "5708fa90ca7067c1ca9c7272c9b09b123079b98d3cb61c559e8c0b1f9d6908d4",
     "CREATE TABLE IF NOT EXISTS rh_dependente ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, parentesco TEXT, data_nascimento TEXT, criado_em TEXT NOT NULL, criado_por TEXT )"
+  ],
+  [
+    "0b8a7b1f2a531ab7942326353aa49ef08224d2b578b238d912bb19e37c14c399",
+    "CREATE TABLE IF NOT EXISTS rh_doc_auditoria ( id TEXT PRIMARY KEY, documento_id TEXT NOT NULL, accao TEXT NOT NULL, detalhe TEXT, utilizador_id TEXT, utilizador_nome TEXT, criado_em TEXT NOT NULL )"
+  ],
+  [
+    "e2cc8a5bc2bd5994394e4717b662147d57e824c66906c8aac7a52c854db4a6be",
+    "CREATE TABLE IF NOT EXISTS rh_doc_pasta ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )"
   ],
   [
     "59b7ec807896a5f08a70fbd0c443cf7892f40a521e514bd2dc1329c24f30efbd",
@@ -2355,6 +2388,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DELETE FROM rh_dependente WHERE id = ? AND funcionario_id = ?"
   ],
   [
+    "5dbd52cbdc17b1fd3faa32f45a9a8a237d1096cb601590dda8e09e2ca46580f2",
+    "DELETE FROM rh_documento WHERE id = ? AND estado = 'arquivado'"
+  ],
+  [
+    "1ff3d0ee89647e811246e4957573708c40e8b82aa02b893b6688ccff4af42f1b",
+    "DELETE FROM rh_documento_ficheiro WHERE documento_id = ?"
+  ],
+  [
     "87a61e9ff98830b48d0b0944d78d2180fadf10ed1731e88c39ee704af473d2f4",
     "DELETE FROM rh_escala WHERE funcionario_id = ? AND data = ?"
   ],
@@ -2815,8 +2856,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_dependente (id, funcionario_id, nome, parentesco, data_nascimento, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ],
   [
-    "cd0c588f12979e2c59fe2269a935adf530e4e5bccddeedcd18f08a14b9337baf",
-    "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
+    "cccc8d6c2184c15a578050d8d76f9efebb857b7ba42019819b7c23f2639709a5",
+    "INSERT INTO rh_doc_auditoria (id, documento_id, accao, detalhe, utilizador_id, utilizador_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "c57e7d8626f50f10a6f3725a33a3c47aaf8224b887fa412089356c50b205bab9",
+    "INSERT INTO rh_doc_pasta (id, funcionario_id, nome, anulada, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, 0, ?, ?, ?)"
+  ],
+  [
+    "44feaf02f12e0d82c61db1ee1cf99b870858cc69f9d8dd33b29124307a7d0223",
+    "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em, pasta_id, origem, versao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?)"
   ],
   [
     "3aceab1c4adf3ee92566163b62049a5d34e763c4e1516525c87f42e9e891d560",
@@ -3503,12 +3552,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_contrato WHERE funcionario_id = ? ORDER BY inicio DESC"
   ],
   [
+    "eea4851e54b89a0c52c813241c63158d3d1256af94d2af23d30a0e3697b202f0",
+    "SELECT * FROM rh_doc_auditoria WHERE documento_id = ? ORDER BY criado_em DESC"
+  ],
+  [
+    "b3371e7287f42e5cb4bb4bda4a9128fcad500f67a2f423ac45c0661cfad6bc10",
+    "SELECT * FROM rh_doc_pasta WHERE anulada = 0 ORDER BY nome"
+  ],
+  [
     "aa1e133601e56627bacc00253d1e7566984edb10b455be4e07ae19304bb52ac9",
     "SELECT * FROM rh_documento ORDER BY criado_em DESC"
   ],
   [
     "cc762411bd9a2434394dcfd839cc30f789e0c0a48c6936470060b04ac22cc041",
     "SELECT * FROM rh_documento WHERE funcionario_id = ? ORDER BY criado_em DESC"
+  ],
+  [
+    "11e07648f147a68911a2316a267478557f8478796dba2e7e13c95010c9aeb171",
+    "SELECT * FROM rh_documento WHERE id = ?"
   ],
   [
     "6653fa81e92a5d2d603baf1b202fcf63f0decd8d2e29f14aaff66d403dd426da",
@@ -5047,12 +5108,36 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_departamento SET nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
-    "132514af7576aea98e763da69454ed277f3a99793260bcc22ccef69642cdeb26",
-    "UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'"
+    "414a8e9799efafc8198eac0d0757aa3541bdb3a7346924ec1955932e8a0c7c9f",
+    "UPDATE rh_doc_pasta SET anulada = 1, actualizado_em = ? WHERE id = ? AND anulada = 0"
+  ],
+  [
+    "4a99ed3f8e60dbacbaad0ca34714726333d3186b6635bd192989a3904bbe118e",
+    "UPDATE rh_doc_pasta SET nome = ?, actualizado_em = ? WHERE id = ? AND anulada = 0"
+  ],
+  [
+    "211cf4d87ea2ca01907c2184b344fc66570b53f173a29d1018d17fa0387fcc56",
+    "UPDATE rh_documento SET estado = 'activo', anulado_por = NULL, anulado_por_nome = NULL, anulado_em = NULL, actualizado_em = ? WHERE id = ? AND estado = 'arquivado'"
+  ],
+  [
+    "84510c2519b50e716c3da411ef381a926fb9e7574da2453bdac15aff99ec9e66",
+    "UPDATE rh_documento SET estado = 'arquivado', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'"
   ],
   [
     "bb41ab2231a439651f053a7e7926ef4936116cb106d7d812915f6d9e27bb4fad",
     "UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'"
+  ],
+  [
+    "ddab18aa8762c9acd2520360cd4b879ad87c698669ba5e760d22680b04c54644",
+    "UPDATE rh_documento SET nome = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "45a93ad2f03094bb3e7333525105a6449aa62e70f4f30148a8932500ecbf6967",
+    "UPDATE rh_documento SET pasta_id = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "b133f82bf9292f0f600ba62b7a28ff57618e155e1703536e4ab65405bda11a4f",
+    "UPDATE rh_documento SET pasta_id = NULL, actualizado_em = ? WHERE pasta_id = ?"
   ],
   [
     "ccfe9f9dafb2bd15a93d3fa2c30d35c1722bfd1d868d60f4658e8ff790e70e62",

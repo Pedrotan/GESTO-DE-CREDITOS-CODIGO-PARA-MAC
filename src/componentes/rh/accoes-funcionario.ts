@@ -8,6 +8,12 @@ import { estadoBI, ROTULO_ESTADO_BI } from '@/bibliotecas/rh/bi-validade';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { antiguidade, dataPt, kz } from './comum-rh';
 
+/** Guarda um PDF gerado pelo sistema na subpasta da pasta pessoal do funcionário (declarações, relatórios). */
+export async function arquivarPdf(funcionarioId: string, chave: 'declaracoes' | 'relatorios' | 'recibos', nome: string, ficheiro: { fileName: string; dataUrl: string }, origem: string, actor: ActorRH) {
+    await ServicoRH.carregarDocumento({ funcionario_id: funcionarioId, categoria: 'outros', nome, ficheiro_nome: ficheiro.fileName, data_url: ficheiro.dataUrl,
+        pasta_id: `sys:${chave}`, origem }, 20, actor);
+}
+
 export type ContextoRH = { cargos: Cargo[]; departamentos: Departamento[]; contratos: Contrato[] };
 const nome = (lista: Array<{ id: string; nome: string }>, id: string | null | undefined) => lista.find(x => x.id === id)?.nome || '—';
 const ESTADO: Record<string, string> = { activo: 'Activo', suspenso: 'Suspenso', cessado: 'Terminado' };
@@ -19,7 +25,7 @@ export async function imprimirFicha(f: Funcionario, ctx: ContextoRH, settings: u
         ServicoRH.contratos(f.id), salarios ? ServicoRH.historicoSalarial(f.id) : Promise.resolve([]), ServicoTempoRH.ausencias(), ServicoRH.documentos(f.id),
         ServicoTempoRH.tiposAusencia(), salarios ? ServicoRH.rubricasFuncionario(f.id) : Promise.resolve([]), ServicoRH.rubricas(), ServicoRH.dependentes(f.id),
     ]);
-    gerarFichaIndividualPdf(f.nome, [
+    const pdf = gerarFichaIndividualPdf(f.nome, [
         { titulo: 'Dados pessoais e identificação', pares: [['N.º mecanográfico', f.numero_mecanografico], ['Data de nascimento', dataPt(f.data_nascimento)], ['BI', `${f.bi_numero || '—'} (validade ${dataPt(f.bi_validade)})`],
             ['NIF', f.nif || '—'], ['N.º INSS', f.numero_inss || '—'], ['Telefone / email', [f.telefone, f.telefone_alternativo, f.email].filter(Boolean).join(' · ') || '—'],
             ['Morada', [f.morada, f.municipio, f.provincia].filter(Boolean).join(', ') || '—'], ['IBAN', salarios ? f.iban || '—' : '•••']] },
@@ -35,18 +41,22 @@ export async function imprimirFicha(f: Funcionario, ctx: ContextoRH, settings: u
         { titulo: 'Ausências', tabela: { colunas: ['Tipo', 'Período', 'Dias / horas', 'Estado'], linhas: ausencias.filter(a => a.funcionario_id === f.id).map(a => [tipos.find(t => t.id === a.tipo_id)?.nome || '—', `${dataPt(a.data_inicio)} a ${dataPt(a.data_fim)}`, a.horas ? `${a.horas} h` : `${a.dias} d`, a.estado]) } },
         { titulo: 'Documentos', tabela: { colunas: ['Documento', 'Categoria', 'Validade', 'Estado'], linhas: documentos.filter(d => !d.confidencial).map(d => [d.nome, CATEGORIAS_DOCUMENTO.find(c => c.id === d.categoria)?.nome || d.categoria, dataPt(d.data_validade), d.estado]) } },
     ], settings, actor.name);
+    // Arquivo automático na pasta pessoal › Relatórios pessoais (sem permissão de gestão, fica só a descarga).
+    await arquivarPdf(f.id, 'relatorios', `Ficha individual ${dataPt(luandaTodayKey())}`, pdf, 'relatorio', actor).catch(() => undefined);
 }
 
 /** Declaração de serviço e salário, numerada e registada nos documentos emitidos. */
 export async function emitirDeclaracaoServico(f: Funcionario, ctx: ContextoRH, settings: unknown, actor: ActorRH, finalidade = '') {
     const contrato = contratoActivo(ctx, f.id);
     const emitido = await ServicoTempoRH.emitirDocumento(f.id, 'declaracao_servico', 'DS', { finalidade, salarioBaseMinor: contrato?.salario_base_minor }, actor);
-    gerarDeclaracaoPdf({
+    const pdf = gerarDeclaracaoPdf({
         numero: emitido.numero, modelo: 'servico', finalidade,
         funcionario: { nome: f.nome, numero: f.numero_mecanografico, bi: f.bi_numero, nif: f.nif, admissao: f.data_admissao, cargo: nome(ctx.cargos, f.cargo_id),
             departamento: nome(ctx.departamentos, f.departamento_id), salarioBaseMinor: contrato?.salario_base_minor,
             tipoContrato: contrato ? (contrato.tipo === 'indeterminado' ? 'por tempo indeterminado' : `a termo certo até ${dataPt(contrato.fim)}`) : undefined },
     }, settings, actor.name);
+    // Arquivo automático na pasta pessoal › Declarações.
+    await arquivarPdf(f.id, 'declaracoes', `Declaração de serviço ${emitido.numero}`, pdf, 'declaracao', actor);
 }
 
 /** Exporta a lista (filtrada ou seleccionada) em Excel ou PDF. */

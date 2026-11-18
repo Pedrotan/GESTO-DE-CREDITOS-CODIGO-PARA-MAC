@@ -3,7 +3,7 @@
 // É idempotente (id = chave única), por isso vários computadores da mesma empresa podem corrê-la sem duplicar.
 import { db } from '@/bibliotecas/bd';
 import { gerarAlertas, type Alerta } from '@/bibliotecas/rh/alertas-rh';
-import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
+import { valorNumerico, valorTexto } from '@/bibliotecas/rh/parametros-rh';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { ServicoRH, type ActorRH } from './ServicoRH';
 import { ServicoTempoRH } from './ServicoTempoRH';
@@ -97,7 +97,8 @@ export class ServicoAlertasRH {
         const alertas: Alerta[] = gerarAlertas({
             hoje, funcionarios, contratos, documentos, planos, processamentos, ausenciasPendentes: ausencias.filter(a => a.estado === 'pendente').length, clientes,
             parametros: { alertaFeriasDias: num('alerta_ferias_dias', 5), mesNatal: num('subsidio_natal_mes', 11), prazoEntregaDia: num('prazo_entrega_dia', 10),
-                alertaPrazosDias: num('alerta_prazos_dias', 5), biDiasAviso: num('bi_dias_aviso', 90) },
+                alertaPrazosDias: num('alerta_prazos_dias', 5), biDiasAviso: num('bi_dias_aviso', 90),
+                alertasDocumentoDias: valorTexto(parametros, 'documento_alertas_dias', hoje, '90,30,7').split(',').map(Number).filter(n => Number.isFinite(n) && n > 0) },
         });
         // Livro de ponto (secção 7.7): sem marcação, entrada sem saída, atrasos repetidos, horas extra acima do limite,
         // justificações por decidir e mês por fechar.

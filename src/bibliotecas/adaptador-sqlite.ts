@@ -5,7 +5,7 @@ import initSqlJs, { Database } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
-import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_SQL, RH_PONTO_V3_COLUNAS, rhSeedPontoV3Statements, RH_FOLHA_COLUNAS, rhSeedFolhaStatements, rhSeedFaltaStatements, RH_CADASTRO_COLUNAS, rhSeedCadastroStatements, RH_CATALOGO_COLUNAS, RH_CATALOGO_MIGRACAO_SQL, RH_PONTO_V2_COLUNAS, rhSeedPontoStatements, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
+import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_SQL, RH_PONTO_V3_COLUNAS, rhSeedPontoV3Statements, RH_FOLHA_COLUNAS, rhSeedFolhaStatements, rhSeedFaltaStatements, RH_CADASTRO_COLUNAS, rhSeedCadastroStatements, RH_CATALOGO_COLUNAS, RH_CATALOGO_MIGRACAO_SQL, RH_DOCS_SQL, RH_DOCS_COLUNAS, rhSeedDocsStatements, RH_PONTO_V2_COLUNAS, rhSeedPontoStatements, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
 import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
 
 let db: Database | null = null;
@@ -1249,6 +1249,12 @@ const createTables = async () => {
     await applyMigration(2026111905, 'rh-catalogo-subsidios', async () => {
         for (const [tabela, coluna, definicao] of RH_CATALOGO_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
         for (const statement of RH_CATALOGO_MIGRACAO_SQL) await executeSql(statement);
+    });
+    // Gestão documental: pastas, versões, anulados e auditoria (os documentos actuais ficam nas subpastas pela categoria).
+    await applyMigration(2026111906, 'rh-gestao-documental', async () => {
+        for (const statement of RH_DOCS_SQL) await executeSql(statement);
+        for (const [tabela, coluna, definicao] of RH_DOCS_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const seed of rhSeedDocsStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
     });
 
     // safeAddColumns for migrations

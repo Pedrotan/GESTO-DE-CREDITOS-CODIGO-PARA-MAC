@@ -25,6 +25,9 @@ async function loadModules() {
                 export { ServicoRH } from '@/servicos/rh/ServicoRH';
                 export * as E from '@/bibliotecas/rh/esquema-rh';
                 export { RH_SALARIOS_SCHEMA_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
+                export { ServicoDocumentosRH, pastaDoDocumento } from '@/servicos/rh/ServicoDocumentosRH';
+                export { crc32, criarZip } from '@/bibliotecas/rh/zip-simples';
+                export { gerarAlertas } from '@/bibliotecas/rh/alertas-rh';
             `,
             resolveDir: root, loader: 'ts',
         },
@@ -52,8 +55,8 @@ async function createDatabase(M, valorFalta = '0') {
     const { RENDERER_SQL_ALLOWLIST } = await import('../electron/renderer-sql-allowlist.ts');
     const database = new DatabaseSync(':memory:');
     database.exec(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, timestamp TEXT, userId TEXT, userName TEXT, action TEXT, entity TEXT, details TEXT, previousState TEXT, newState TEXT, metadata TEXT)`);
-    for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL]) database.exec(sql);
-    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS, ...M.E.RH_CATALOGO_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
+    for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL, ...M.E.RH_DOCS_SQL]) database.exec(sql);
+    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS, ...M.E.RH_CATALOGO_COLUNAS, ...M.E.RH_DOCS_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
     const params = values => (values || []).map(value => value === undefined ? null : value);
     const normalizar = sql => sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim().replace(/;$/u, '');
     const prepare = sql => {
@@ -194,4 +197,53 @@ test('catálogo de subsídios: valores iguais aos de antes, por dia trabalhado, 
         await M.ServicoRH.atribuirRubrica(f, { rubrica_id: novo, valor_minor: 0, inicio: '2026-01-01' }, RH);
         await assert.rejects(M.ServicoSalariosRH.calcular(await processamento(M, id), RH), /Defina se incide IRT e INSS em: Subsídio de risco/u);
     } finally { db.close(); }
+});
+
+test('gestão documental: pastas pela categoria, novas versões, mover, anular/restaurar, apagar só pelo Super Administrador, acessos e ZIP', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const f = await registar(M);
+        const pdf = 'data:application/pdf;base64,JVBERi0xLjQK';
+        const carregar = (extra = {}) => M.ServicoRH.carregarDocumento({ funcionario_id: f, categoria: 'identificacao', nome: 'Bilhete de Identidade', ficheiro_nome: 'bi.pdf', data_url: pdf, ...extra }, 10, RH);
+        const v1 = await carregar();
+        const v2 = await carregar({ data_validade: '2032-10-16' });
+        const docs = await M.ServicoRH.documentos(f);
+        assert.deepEqual(docs.map(d => [d.estado, d.versao]).sort(), [['activo', 2], ['substituido', 1]], 'o mesmo nome na mesma pasta é nova versão');
+        assert.equal(M.pastaDoDocumento(docs.find(d => d.id === v2)), 'sys:identificacao');
+        const pasta = await M.ServicoDocumentosRH.criarPasta(f, 'Processo de admissão', RH);
+        await assert.rejects(M.ServicoDocumentosRH.criarPasta(f, 'Contratos', RH), /Já existe/u);
+        const actual = (await M.ServicoRH.documentos(f)).find(d => d.id === v2);
+        await M.ServicoDocumentosRH.mover(actual, pasta, RH);
+        assert.equal(db.prepare('SELECT pasta_id FROM rh_documento WHERE id = ?').get(v2).pasta_id, pasta);
+        await M.ServicoRH.arquivarDocumento(v2, RH);
+        const anulado = (await M.ServicoRH.documentos(f)).find(d => d.id === v2);
+        await assert.rejects(M.ServicoDocumentosRH.apagarDefinitivo(anulado, { id: 'u2', name: 'Gestor', role: 'manager' }), /Super Administrador/u);
+        await M.ServicoDocumentosRH.restaurar(anulado, RH);
+        assert.equal(db.prepare('SELECT estado FROM rh_documento WHERE id = ?').get(v2).estado, 'activo');
+        await assert.rejects(M.ServicoDocumentosRH.apagarDefinitivo((await M.ServicoRH.documentos(f)).find(d => d.id === v2), RH), /Anule primeiro/u);
+        await M.ServicoRH.arquivarDocumento(v2, RH);
+        await M.ServicoDocumentosRH.apagarDefinitivo((await M.ServicoRH.documentos(f)).find(d => d.id === v2), RH);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rh_documento WHERE id = ?').get(v2).n, 0);
+        assert.equal(db.prepare('SELECT COUNT(*) AS n FROM rh_documento_ficheiro WHERE documento_id = ?').get(v2).n, 0);
+        await M.ServicoDocumentosRH.registarAcesso(v1, 'ver', RH);
+        const accoes = db.prepare('SELECT accao FROM rh_doc_auditoria ORDER BY criado_em').all().map(x => x.accao);
+        for (const a of ['carregar', 'mover', 'anular', 'restaurar', 'apagar', 'ver']) assert.ok(accoes.includes(a), `auditoria de ${a}`);
+        // ZIP: CRC-32 de referência e assinatura do ficheiro.
+        assert.equal(M.crc32(new TextEncoder().encode('123456789')), 0xcbf43926);
+        const zip = new Uint8Array(await M.criarZip([{ nome: 'a/b.txt', dados: new TextEncoder().encode('ola') }]).arrayBuffer());
+        assert.deepEqual([...zip.slice(0, 4)], [0x50, 0x4b, 0x03, 0x04]);
+    } finally { db.close(); }
+});
+
+test('avisos de validade a 90, 30 e 7 dias (configuráveis)', async () => {
+    const M = await loadModules();
+    const base = { funcionarios: [{ id: 'f', nome: 'Ana', data_nascimento: null, estado: 'activo', bi_validade: '2027-01-20' }], contratos: [], planos: [], processamentos: [], ausenciasPendentes: 0,
+        parametros: { alertaFeriasDias: 5, mesNatal: 11, prazoEntregaDia: 10, alertaPrazosDias: 5, biDiasAviso: 90 } };
+    const doc = validade => [{ id: 'd', funcionario_id: 'f', nome: 'Carta de condução', estado: 'activo', data_validade: validade }];
+    const ids = (hoje, validade, prazos) => M.gerarAlertas({ ...base, hoje, documentos: doc(validade), parametros: { ...base.parametros, alertasDocumentoDias: prazos } }).filter(a => a.tipo === 'documento').map(a => a.id).sort();
+    assert.deepEqual(ids('2026-11-18', '2027-02-10', undefined), ['bi-funcionario:f:2027-01-20:90', 'documento-90:d']);
+    assert.deepEqual(ids('2026-11-18', '2026-12-10', undefined), ['bi-funcionario:f:2027-01-20:90', 'documento-30:d']);
+    assert.deepEqual(ids('2026-11-18', '2026-11-22', undefined), ['bi-funcionario:f:2027-01-20:90', 'documento-7:d']);
+    assert.deepEqual(ids('2026-11-18', '2026-11-22', [15]), ['documento-15:d'], 'com prazo único de 15 dias o BI (63 dias) ainda não avisa');
 });

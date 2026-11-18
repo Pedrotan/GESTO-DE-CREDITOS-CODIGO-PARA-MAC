@@ -7,6 +7,7 @@ import { FileDown } from 'lucide-react';
 import { ServicoSalariosRH, ROTULO_TIPO } from '@/servicos/rh/ServicoSalariosRH';
 import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
 import { gerarDeclaracaoPdf, gerarReciboPdf, periodoPt } from '@/bibliotecas/rh/pdf-rh';
+import { arquivarPdf } from '@/componentes/rh/accoes-funcionario';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { useData } from '@/contextos/ContextoDados';
@@ -37,12 +38,14 @@ export default function RecibosRH() {
             if (modelo === 'rendimentos' && !doAno.length) throw new Error(`Não há recibos aprovados de ${ano}.`);
             const emitido = await ServicoTempoRH.emitirDocumento(f.id, modelo === 'servico' ? 'declaracao_servico' : 'declaracao_rendimentos', modelo === 'servico' ? 'DS' : 'DR',
                 modelo === 'servico' ? { finalidade, salarioBaseMinor: contrato?.salario_base_minor } : { ano, ...rendimentos }, actor);
-            gerarDeclaracaoPdf({
+            const pdf = gerarDeclaracaoPdf({
                 numero: emitido.numero, modelo, ano, rendimentos, finalidade,
                 funcionario: { nome: f.nome, numero: f.numero_mecanografico, bi: f.bi_numero, nif: f.nif, admissao: f.data_admissao,
                     cargo: base.dados.cargos.find(c => c.id === f.cargo_id)?.nome, departamento: base.dados.departamentos.find(d => d.id === f.departamento_id)?.nome,
                     salarioBaseMinor: contrato?.salario_base_minor, tipoContrato: contrato ? (contrato.tipo === 'indeterminado' ? 'por tempo indeterminado' : `a termo certo até ${dataPt(contrato.fim)}`) : undefined },
             }, companySettings, actor.name);
+            // Arquivo automático na pasta pessoal › Declarações.
+            await arquivarPdf(f.id, 'declaracoes', `${modelo === 'servico' ? 'Declaração de serviço' : `Declaração de rendimentos ${ano}`} ${emitido.numero}`, pdf, 'declaracao', actor);
             void emitidos.recarregar();
         } catch (error) {
             toast({ variant: 'destructive', title: 'Não foi possível emitir', description: (error as Error).message });

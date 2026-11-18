@@ -443,6 +443,28 @@ export const RH_CATALOGO_MIGRACAO_SQL = [
     `UPDATE rh_rubrica SET classe = 'abono' WHERE classe IS NULL AND tipo = 'abono' AND codigo IN ('RENDA_CASA', 'ISOLAMENTO', 'GRATIFICACAO', 'REPRESENTACAO', 'REM_SUPLEMENTAR')`,
     `UPDATE rh_rubrica SET classe = CASE WHEN tipo = 'desconto' THEN 'desconto' ELSE 'abono' END WHERE classe IS NULL`,
 ];
+// ── Gestão documental (bloco 6): pastas pessoais e da empresa, versões, anulados e auditoria de acessos ──
+export const RH_DOCS_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_doc_pasta (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0,
+        criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT
+    )`,
+    'CREATE INDEX IF NOT EXISTS idx_rh_doc_pasta_funcionario ON rh_doc_pasta(funcionario_id)',
+    `CREATE TABLE IF NOT EXISTS rh_doc_auditoria (
+        id TEXT PRIMARY KEY, documento_id TEXT NOT NULL, accao TEXT NOT NULL, detalhe TEXT, utilizador_id TEXT, utilizador_nome TEXT, criado_em TEXT NOT NULL
+    )`,
+    'CREATE INDEX IF NOT EXISTS idx_rh_doc_auditoria_documento ON rh_doc_auditoria(documento_id, criado_em)',
+];
+export const RH_DOCS_COLUNAS: Array<[string, string, string]> = [
+    ['rh_documento', 'pasta_id', 'TEXT'], ['rh_documento', 'origem', "TEXT NOT NULL DEFAULT 'upload'"], ['rh_documento', 'versao', 'INTEGER NOT NULL DEFAULT 1'],
+    ['rh_documento', 'anulado_por', 'TEXT'], ['rh_documento', 'anulado_por_nome', 'TEXT'], ['rh_documento', 'anulado_em', 'TEXT'],
+];
+export const RH_PARAMETROS_DOCS: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'documento_alertas_dias', valor: '90,30,7', descricao: 'Dias antes da validade de um documento (e do BI) em que se avisa (separados por vírgula)' },
+];
+export const rhSeedDocsStatements = (now: string) => RH_PARAMETROS_DOCS.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));
 /** BI angolano: 9 algarismos, 2 letras e 3 algarismos (ex.: 002658949BA031). */
 export const FORMATO_BI = /^\d{9}[A-Z]{2}\d{3}$/u;
 /** Vínculos (o da folha: «Pessoal do Quadro» imprime-se como «Vinc.:», os restantes como «Cargo:»). */

@@ -62,6 +62,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
+    "cd0c588f12979e2c59fe2269a935adf530e4e5bccddeedcd18f08a14b9337baf",
+    "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
+  ],
+  [
     "50c7a85dd159988cf3805e7f28f223e3af10359786a402b4991053767e086afa",
     "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -152,6 +156,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
   [
     "9091f3e8264d2ba183704a8eb7c40258aa76e992ec9e92298db103596c067d5d",
     "UPDATE payments SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "132514af7576aea98e763da69454ed277f3a99793260bcc22ccef69642cdeb26",
+    "UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'"
   ],
   [
     "443db8e17413940e67a56041d89d2541fc325019f8c8207ad99943e207749deb",

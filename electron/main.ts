@@ -1077,6 +1077,8 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_recibo_linha: "hr_payroll",
   rh_rubrica_pontual: "hr_payroll",
   rh_processamento_entrada: "hr_payroll",
+  rh_doc_pasta: "hr_manage",
+  rh_doc_auditoria: "hr_view",
   // rh_alerta fica sem permissão própria: os alertas são derivados e a tarefa diária corre para qualquer utilizador autenticado.
   rh_plano_ferias: "hr_manage",
   // Livro de ponto: o funcionário e o chefe de departamento são verificados em assertPontoAutorizado.

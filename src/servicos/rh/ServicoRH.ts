@@ -54,6 +54,8 @@ export type DocumentoRH = {
     id: string; funcionario_id: string; categoria: CategoriaDocumento; nome: string; ficheiro_nome: string; mime: string; tamanho: number;
     data_emissao: string | null; data_validade: string | null; confidencial: number; estado: 'activo' | 'substituido' | 'arquivado';
     substituido_por: string | null; carregado_por_nome: string | null; criado_em: string;
+    /** Gestão documental: pasta (sys:<chave> ou id de uma pasta pessoal), origem, versão e anulação. */
+    pasta_id?: string | null; origem?: string | null; versao?: number; anulado_por_nome?: string | null; anulado_em?: string | null;
 };
 
 export const CATEGORIAS_DOCUMENTO: Array<{ id: CategoriaDocumento; nome: string; validade: boolean; confidencial?: boolean }> = [
@@ -66,7 +68,7 @@ export const CATEGORIAS_DOCUMENTO: Array<{ id: CategoriaDocumento; nome: string;
     { id: 'outros', nome: 'Outros', validade: false },
 ];
 export const CATEGORIAS_CONFIDENCIAIS = new Set<CategoriaDocumento>(['saude', 'disciplinar']);
-const MIMES_DOCUMENTO = /^data:(application\/pdf|image\/(png|jpe?g)|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document);base64,/u;
+const MIMES_DOCUMENTO = /^data:(application\/pdf|image\/(png|jpe?g)|application\/vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet));base64,/u;
 
 const agora = () => new Date().toISOString();
 /** Lista vazia quando a tabela ainda não existe (base de dados antiga a meio da migração). */
@@ -516,10 +518,10 @@ export class ServicoRH {
      * o antigo passa a «substituído». As categorias Saúde e Disciplinar ficam sempre confidenciais.
      */
     static async carregarDocumento(input: { funcionario_id: string; categoria: CategoriaDocumento; nome: string; ficheiro_nome: string; data_url: string;
-        data_emissao?: string | null; data_validade?: string | null; confidencial?: boolean; substitui?: string | null }, maxMb: number, actor: ActorRH) {
+        data_emissao?: string | null; data_validade?: string | null; confidencial?: boolean; substitui?: string | null; pasta_id?: string | null; origem?: string }, maxMb: number, actor: ActorRH) {
         if (!texto(input.nome)) throw new Error('Indique o nome do documento.');
         if (!CATEGORIAS_DOCUMENTO.some(c => c.id === input.categoria)) throw new Error('Categoria inválida.');
-        if (!MIMES_DOCUMENTO.test(input.data_url)) throw new Error('O ficheiro tem de ser PDF, JPG, PNG ou DOCX.');
+        if (!MIMES_DOCUMENTO.test(input.data_url)) throw new Error('O ficheiro tem de ser PDF, JPG, PNG, DOCX ou XLSX.');
         const tamanho = Math.floor((input.data_url.length - input.data_url.indexOf(',') - 1) * 3 / 4);
         if (tamanho > maxMb * 1024 * 1024) throw new Error(`O ficheiro é demasiado grande (máximo ${maxMb} MB).`);
         if (input.data_emissao && input.data_validade && data(input.data_validade)! <= data(input.data_emissao)!) throw new Error('A validade tem de ser posterior à emissão.');
@@ -529,14 +531,24 @@ export class ServicoRH {
         const when = agora();
         const hoje = luandaTodayKey().replace(/-/gu, '');
         const extensao = input.ficheiro_nome.includes('.') ? input.ficheiro_nome.slice(input.ficheiro_nome.lastIndexOf('.')).toLowerCase() : '';
+        // O mesmo nome na mesma pasta cria uma nova versão (a anterior fica no histórico como «substituída»).
+        const pasta = input.pasta_id || null;
+        const anterior = input.substitui
+            ? await db.get<DocumentoRH>('SELECT * FROM rh_documento WHERE id = ?', [input.substitui]).catch(() => undefined)
+            : (await this.documentos(input.funcionario_id)).find(d => d.estado === 'activo' && d.nome.trim().toLowerCase() === input.nome.trim().toLowerCase()
+                && (d.pasta_id || null) === pasta && d.categoria === input.categoria);
+        if (anterior) input = { ...input, substitui: anterior.id };
+        const versao = (anterior?.versao || 1) + (anterior ? 1 : 0);
         const normalizado = `${hoje}-${input.nome.trim().normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^A-Za-z0-9]+/gu, '-').replace(/^-|-$/gu, '').toLowerCase()}${extensao}`;
         await db.transaction([
             ...(input.substitui ? [{ sql: `UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'`,
                 params: [id, when, input.substitui], expectChanges: 1 }] : []),
             { sql: `INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado,
-                    carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)`,
+                    carregado_por, carregado_por_nome, criado_em, pasta_id, origem, versao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?)`,
                 params: [id, input.funcionario_id, input.categoria, input.nome.trim(), normalizado, mime, tamanho, data(input.data_emissao), data(input.data_validade),
-                    confidencial ? 1 : 0, actor.id, actor.name, when], expectChanges: 1 },
+                    confidencial ? 1 : 0, actor.id, actor.name, when, pasta || anterior?.pasta_id || null, input.origem || 'upload', versao], expectChanges: 1 },
+            { sql: 'INSERT INTO rh_doc_auditoria (id, documento_id, accao, detalhe, utilizador_id, utilizador_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                params: [crypto.randomUUID(), id, 'carregar', anterior ? `versão ${versao}` : null, actor.id, actor.name, when] },
             { sql: 'INSERT INTO rh_documento_ficheiro (documento_id, data_url) VALUES (?, ?)', params: [id, input.data_url], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Carregou o documento «${input.nome.trim()}» (${input.categoria}) do funcionário ${input.funcionario_id}`,
                 { funcionarioId: input.funcionario_id, documentoId: id, substitui: input.substitui || null }, undefined, undefined, when),
@@ -544,11 +556,15 @@ export class ServicoRH {
         return id;
     }
 
+    /** Anula (não apaga): o documento vai para «Anulados» e pode ser restaurado. */
     static async arquivarDocumento(id: string, actor: ActorRH) {
         const when = agora();
         await db.transaction([
-            { sql: `UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'`, params: [when, id], expectChanges: 1 },
-            auditoriaRH(actor, 'delete', 'Arquivou um documento do funcionário', { documentoId: id }, undefined, undefined, when),
+            { sql: `UPDATE rh_documento SET estado = 'arquivado', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'`,
+                params: [actor.id, actor.name, when, when, id], expectChanges: 1 },
+            { sql: 'INSERT INTO rh_doc_auditoria (id, documento_id, accao, detalhe, utilizador_id, utilizador_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                params: [crypto.randomUUID(), id, 'anular', null, actor.id, actor.name, when] },
+            auditoriaRH(actor, 'delete', 'Anulou um documento do funcionário', { documentoId: id }, undefined, undefined, when),
         ]);
     }
 
