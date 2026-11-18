@@ -22,7 +22,7 @@ import { cn } from '@/bibliotecas/utils';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
 import { toast } from '@/ganchos/usar-toast';
-import { executar, kz, lerFicheiro, paraMinor } from './comum-rh';
+import { deslocarDentro, executar, kz, lerFicheiro, paraMinor, seccaoVisivel } from './comum-rh';
 import { DialogoContrato } from './DialogosFuncionario';
 import { calculoRubrica } from './CatalogoSubsidios';
 
@@ -169,8 +169,10 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
     useEffect(() => {
         if (!open || !seccaoInicial?.seccao) return;
         const t = setTimeout(() => {
-            corpo.current?.querySelector(`#ff-sec-${seccaoInicial.seccao}`)?.scrollIntoView({ block: 'start' });
-            if (seccaoInicial.campo) (document.getElementById(`ff-${seccaoInicial.campo}`) as HTMLElement | null)?.focus();
+            const campo = seccaoInicial.campo ? document.getElementById(`ff-${seccaoInicial.campo}`) : null;
+            deslocarDentro(corpo.current, campo?.parentElement || corpo.current?.querySelector(`#ff-sec-${seccaoInicial.seccao}`) || null, false);
+            actualizarActiva();
+            campo?.focus({ preventScroll: true });
         }, 150);
         return () => clearTimeout(t);
     }, [open, seccaoInicial]);
@@ -258,18 +260,9 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
     const erro = (campo: string) => (mostrarTodos || visitados.has(campo) ? erros[campo] : undefined);
     const seccaoComErro = (s: SeccaoFormulario) => Object.keys(erros).some(c => SECCAO_DO_CAMPO[c] === s && (mostrarTodos || visitados.has(c)));
 
-    // Realça a secção visível na navegação.
-    useEffect(() => {
-        const raiz = corpo.current;
-        if (!open || !raiz || typeof IntersectionObserver === 'undefined') return;
-        const obs = new IntersectionObserver(es => {
-            const v = es.filter(x => x.isIntersecting).sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0];
-            if (v) setActiva(v.target.id.replace('ff-sec-', '') as SeccaoFormulario);
-        }, { root: raiz, rootMargin: '0px 0px -70% 0px' });
-        const t = setTimeout(() => raiz.querySelectorAll('section[id^="ff-sec-"]').forEach(s => obs.observe(s)), 50);
-        return () => { clearTimeout(t); obs.disconnect(); };
-    }, [open, edicao]);
-    const irPara = (s: SeccaoFormulario) => corpo.current?.querySelector(`#ff-sec-${s}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Realça a secção visível na navegação (calculada a cada deslocamento do corpo).
+    const actualizarActiva = () => { const id = seccaoVisivel(corpo.current, 'section[id^="ff-sec-"]'); if (id) setActiva(id.replace('ff-sec-', '') as SeccaoFormulario); };
+    const irPara = (s: SeccaoFormulario) => deslocarDentro(corpo.current, corpo.current?.querySelector(`#ff-sec-${s}`) || null);
 
     const fechar = () => {
         if (sujo && !window.confirm('Há alterações por guardar. Fechar sem guardar?')) return;
@@ -282,7 +275,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
         if (primeiro) {
             const s = SECCAO_DO_CAMPO[primeiro];
             if (s) irPara(s);
-            setTimeout(() => (document.getElementById(`ff-${primeiro}`) as HTMLElement | null)?.focus(), 300);
+            setTimeout(() => { const campo = document.getElementById(`ff-${primeiro}`); if (campo) { deslocarDentro(corpo.current, campo.parentElement); campo.focus({ preventScroll: true }); } }, 300);
             toast({ variant: 'destructive', title: 'Há campos por corrigir', description: erros[primeiro] });
             return;
         }
@@ -379,7 +372,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                     ))}
                 </nav>
 
-                <div ref={corpo} className="min-h-0 flex-1 space-y-6 overflow-y-auto bg-slate-50/50 p-4 md:p-6 lg:p-8 dark:bg-slate-950">
+                <div ref={corpo} onScroll={actualizarActiva} className="min-h-0 flex-1 space-y-6 overflow-y-auto bg-slate-50/50 p-4 md:p-6 lg:p-8 dark:bg-slate-950">
                     {rascunho && !edicao && (
                         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950">
                             <span className="flex-1">Há um rascunho de novo funcionário guardado a {new Date(rascunho.guardadoEm).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' })}. Recuperar rascunho?</span>

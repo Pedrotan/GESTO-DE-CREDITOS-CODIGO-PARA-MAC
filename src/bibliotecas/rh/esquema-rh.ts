@@ -461,6 +461,7 @@ export const RH_DOCS_COLUNAS: Array<[string, string, string]> = [
 ];
 export const RH_PARAMETROS_DOCS: Array<{ chave: string; valor: string; descricao: string }> = [
     { chave: 'documento_alertas_dias', valor: '90,30,7', descricao: 'Dias antes da validade de um documento (e do BI) em que se avisa (separados por vírgula)' },
+    { chave: 'chefe_ve_documentos', valor: '1', descricao: 'Permissões: 1 = o chefe do departamento vê os documentos (não confidenciais) da sua equipa; 0 = não vê' },
 ];
 export const rhSeedDocsStatements = (now: string) => RH_PARAMETROS_DOCS.map(p => ({
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],

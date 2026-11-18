@@ -138,6 +138,26 @@ export function idade(nascimento: string | null | undefined, ate: string) {
     return a2 - a1 - (m2 < m1 || (m2 === m1 && d2 < d1) ? 1 : 0);
 }
 
+/** Desloca só o contentor até ao elemento (sem mexer nos antepassados, como faria scrollIntoView). */
+export function deslocarDentro(contentor: HTMLElement | null, alvo: Element | null, suave = true) {
+    if (!contentor || !alvo) return;
+    // Em ecrãs pequenos quem desloca pode ser um antepassado (ex.: a ficha inteira): usa o primeiro que tenha deslocamento.
+    while (contentor.scrollHeight <= contentor.clientHeight + 1 && contentor.parentElement && contentor.parentElement !== document.body) contentor = contentor.parentElement;
+    const topo = (alvo as HTMLElement).getBoundingClientRect().top - contentor.getBoundingClientRect().top + contentor.scrollTop - 12;
+    contentor.scrollTo({ top: Math.max(0, topo), behavior: suave ? 'smooth' : 'auto' });
+}
+
+/** Secção activa de um contentor com secções (a última cujo topo já passou o topo visível), para os índices. */
+export function seccaoVisivel(contentor: HTMLElement | null, seletor: string) {
+    if (!contentor) return null;
+    const topo = contentor.getBoundingClientRect().top + 90;
+    const seccoes = [...contentor.querySelectorAll<HTMLElement>(seletor)];
+    if (contentor.scrollTop + contentor.clientHeight >= contentor.scrollHeight - 4) return seccoes[seccoes.length - 1]?.id ?? null;
+    let actual = seccoes[0]?.id ?? null;
+    for (const s of seccoes) if (s.getBoundingClientRect().top <= topo) actual = s.id;
+    return actual;
+}
+
 /** Iniciais para o avatar (primeiro e último nome). */
 export function iniciais(nome: string) {
     const partes = nome.trim().split(/\s+/u).filter(Boolean);

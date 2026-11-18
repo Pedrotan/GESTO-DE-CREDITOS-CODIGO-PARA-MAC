@@ -30,7 +30,10 @@ async function loadModules() {
                 export { gerarAlertas } from '@/bibliotecas/rh/alertas-rh';
                 export { aplicarModelo, variaveisDesconhecidas, MODELO_DECLARACAO_SERVICO } from '@/bibliotecas/rh/modelos-rh';
                 export { gerarRelatorioPessoal } from '@/componentes/rh/relatorios-pessoais';
+                export { arquivarPdf } from '@/componentes/rh/accoes-funcionario';
                 export { ServicoModelosRH } from '@/servicos/rh/ServicoModelosRH';
+                export { regraLeituraRH, carregamentoPortalPermitido } from '@/bibliotecas/rh/permissoes-rh';
+                export { ABAS_RH } from '@/componentes/rh/comum-rh';
             `,
             resolveDir: root, loader: 'ts',
         },
@@ -281,5 +284,67 @@ test('relatórios pessoais: cada tipo gera um PDF e a declaração usa o modelo 
         assert.equal(d.chave, 'declaracoes');
         assert.match(d.nome, /^Declaração de serviço DS/u);
         assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM rh_documento_emitido WHERE modelo = 'declaracao_servico'`).get().n, 1);
+        // O PDF real do jsPDF (com «;filename=») é aceite ao guardar na pasta pessoal.
+        assert.ok(d.pdf.dataUrl.startsWith('data:application/pdf;filename='), 'o jsPDF inclui o nome do ficheiro no data URL');
+        await M.arquivarPdf(id, d.chave, d.nome, d.pdf, d.origem, RH);
+        const guardado = db.prepare("SELECT pasta_id, mime FROM rh_documento WHERE origem = 'declaracao'").get();
+        assert.deepEqual({ ...guardado }, { pasta_id: 'sys:declaracoes', mime: 'application/pdf' });
     } finally { db.close(); }
+});
+
+test('permissões no processo principal: leituras sensíveis e carregamento pelo portal', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        // As leituras que os serviços fazem são classificadas (as outras não).
+        const lidas = [];
+        const original = globalThis.__testDb.get;
+        const originalAll = globalThis.__testDb.all;
+        globalThis.__testDb.get = async (sql, v) => { lidas.push(sql); return original(sql, v); };
+        globalThis.__testDb.all = async (sql, v) => { lidas.push(sql); return originalAll(sql, v); };
+        const f = await registar(M);
+        await M.ServicoRH.ficheiroDocumento('x');
+        await M.ServicoRH.historicoSalarial(f);
+        globalThis.__testDb.get = original; globalThis.__testDb.all = originalAll;
+        assert.equal(M.regraLeituraRH(lidas.find(s => s.includes('rh_documento_ficheiro'))).tipo, 'ficheiro_documento');
+        assert.equal(M.regraLeituraRH(lidas.find(s => s.includes('rh_historico_salarial'))).tipo, 'salarial_funcionario');
+        assert.equal(M.regraLeituraRH('SELECT * FROM rh_recibo WHERE processamento_id = ? ORDER BY nome').tipo, 'salarial');
+        assert.equal(M.regraLeituraRH('SELECT * FROM rh_funcionario ORDER BY nome'), null);
+
+        // Carregamento pelo portal: aceite na subpasta Formação em nome próprio; recusado noutra pasta ou confidencial.
+        const transaccoes = [];
+        const tx = globalThis.__testDb.transaction;
+        globalThis.__testDb.transaction = async st => { transaccoes.push(st); return tx(st); };
+        const portal = { id: 'u-portal', name: 'Pedro', role: 'operator', permissions: ['hr_self'] };
+        const pdf = 'data:application/pdf;base64,JVBERi0xLjQK';
+        await M.ServicoRH.carregarDocumento({ funcionario_id: f, categoria: 'academica', nome: 'Certificado', ficheiro_nome: 'c.pdf', data_url: pdf, pasta_id: 'sys:formacao', origem: 'portal' }, 5, portal);
+        await M.ServicoRH.carregarDocumento({ funcionario_id: f, categoria: 'contratual', nome: 'Contrato', ficheiro_nome: 'k.pdf', data_url: pdf, pasta_id: 'sys:contratos' }, 5, portal);
+        globalThis.__testDb.transaction = tx;
+        assert.ok(M.carregamentoPortalPermitido(transaccoes[0], portal.id), 'Formação e certificados: permitido');
+        assert.equal(M.carregamentoPortalPermitido(transaccoes[1], portal.id), null, 'Contratos: recusado');
+        assert.equal(M.carregamentoPortalPermitido(transaccoes[0], 'outro-utilizador'), null, 'em nome de outro: recusado');
+        const comConfidencial = transaccoes[0].map(s => (/^INSERT INTO rh_documento \(/u.test(s.sql) ? { ...s, params: s.params.map((v, i) => (i === 9 ? 1 : v)) } : s));
+        assert.equal(M.carregamentoPortalPermitido(comConfidencial, portal.id), null, 'confidencial: recusado');
+    } finally { db.close(); }
+});
+
+test('critérios: terminar contrato não apaga, abas iguais ao menu lateral e rotas antigas mantidas', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const f = await registar(M);
+        await M.ServicoRH.cessarContrato(f, '2026-11-30', 'Fim do termo', RH);
+        const r = db.prepare('SELECT estado, data_saida FROM rh_funcionario WHERE id = ?').get(f);
+        assert.deepEqual({ ...r }, { estado: 'cessado', data_saida: '2026-11-30' });
+        assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM rh_contrato WHERE funcionario_id = ? AND estado = 'terminado' AND motivo_fim = 'Fim do termo'`).get(f).n, 1);
+    } finally { db.close(); }
+    const { readFileSync } = await import('node:fs');
+    const sidebar = readFileSync(path.join(root, 'src/componentes/layout/Sidebar.tsx'), 'utf8');
+    const grupo = sidebar.slice(sidebar.indexOf("label: 'Recursos Humanos'"), sidebar.indexOf("label: 'Lixeira do Sistema'"));
+    const menu = [...grupo.matchAll(/path: '(\/rh\/[a-z]+)'/gu)].map(m => m[1]).filter(p => p !== '/rh/portal');
+    assert.deepEqual(menu, M.ABAS_RH.map(a => a.path), 'o menu lateral tem as mesmas entradas que as abas');
+    const app = readFileSync(path.join(root, 'src/App.tsx'), 'utf8');
+    for (const antiga of ['/rh/ferias', '/rh/ausencias', '/rh/calendario', '/rh/processamento', '/rh/recibos', '/rh/documentos']) assert.ok(app.includes(`'${antiga}'`) || app.includes(`"${antiga}"`), `rota ${antiga}`);
+    const subs = M.ABAS_RH.flatMap(a => (a.subs || []).map(s => s.path));
+    for (const antiga of ['/rh/ausencias', '/rh/calendario', '/rh/recibos']) assert.ok(subs.includes(antiga), `${antiga} está numa aba`);
 });

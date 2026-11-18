@@ -20,6 +20,7 @@ import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { useData } from '@/contextos/ContextoDados';
 import { Indicador, dataPt, executar, kz, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { MarcarPonto, MeuPonto } from '@/componentes/rh/ponto/PortalPonto';
+import { MeusDocumentos } from '@/componentes/rh/MeusDocumentos';
 
 /** Portal do funcionário: os seus recibos, o saldo de férias e os pedidos de férias e de dispensa. */
 export default function PortalFuncionario() {
@@ -130,6 +131,7 @@ export default function PortalFuncionario() {
                     </table>
                 )}
             </section>
+            <MeusDocumentos f={f} actor={actor} />
         </MainLayout>
     );
 }

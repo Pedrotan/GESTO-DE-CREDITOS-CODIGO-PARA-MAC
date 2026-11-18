@@ -13,7 +13,7 @@ import { cn } from '@/bibliotecas/utils';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
 import { ArquivoDocumentos } from './ArquivoDocumentos';
-import { SeccaoRH, SeloBI, SeloEstadoFuncionario, ValorRH, antiguidade, dataPt, executar, idade, iniciais, kz, useCarregar } from './comum-rh';
+import { SeccaoRH, SeloBI, SeloEstadoFuncionario, ValorRH, antiguidade, dataPt, deslocarDentro, seccaoVisivel, executar, idade, iniciais, kz, useCarregar } from './comum-rh';
 import { DialogoContrato, DialogoDependente, DialogoSubsidio } from './DialogosFuncionario';
 import { imprimirFicha } from './accoes-funcionario';
 import { calculoRubrica } from './CatalogoSubsidios';
@@ -99,7 +99,7 @@ export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubric
         raiz.querySelectorAll('section[id^="ficha-"]').forEach(s => obs.observe(s));
         return () => obs.disconnect();
     }, [carregado, seccoes.length]);
-    const irPara = (s: string) => corpo.current?.querySelector(`#ficha-${s}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const irPara = (s: string) => deslocarDentro(corpo.current, corpo.current?.querySelector(`#ficha-${s}`) || null);
 
     const botaoEscuro = 'inline-flex h-10 items-center gap-2 rounded-lg border border-white/25 bg-white/10 px-3.5 text-sm font-semibold text-white transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white';
     const grelha = 'grid gap-x-6 gap-y-[18px] px-5 py-[18px] sm:grid-cols-2 lg:grid-cols-3';
@@ -107,15 +107,15 @@ export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubric
 
     return (
         <Dialog open onOpenChange={v => !v && onClose()}>
-            <DialogContent className="flex h-[calc(100vh-48px)] w-[calc(100vw-48px)] max-w-[1240px] flex-col gap-0 overflow-hidden rounded-2xl border-0 bg-rh-bg p-0 dark:bg-slate-950 [&>button]:hidden">
+            <DialogContent className="flex h-[calc(100vh-24px)] w-[calc(100vw-24px)] max-w-[1240px] flex-col gap-0 overflow-y-auto rounded-2xl border-0 bg-rh-bg p-0 sm:h-[calc(100vh-48px)] sm:w-[calc(100vw-48px)] sm:overflow-hidden dark:bg-slate-950 [&>button]:hidden">
                 {/* Cabeçalho fixo */}
-                <div className="shrink-0 bg-rh-navy px-7 pt-6 text-white">
+                <div className="shrink-0 bg-rh-navy px-4 pt-5 text-white sm:px-7 sm:pt-6">
                     <div className="flex flex-wrap items-start gap-5">
                         {f.foto_url ? <img src={f.foto_url} alt="" className="h-[72px] w-[72px] rounded-2xl object-cover" />
                             : <span aria-hidden="true" className="flex h-[72px] w-[72px] items-center justify-center rounded-2xl bg-indigo-100 text-2xl font-extrabold text-indigo-900">{iniciais(f.nome)}</span>}
                         <div className="min-w-0 flex-[1_1_360px]">
                             <div className="flex flex-wrap items-center gap-2.5">
-                                <DialogTitle className="text-2xl font-extrabold">{f.nome}</DialogTitle>
+                                <DialogTitle className="text-xl font-extrabold sm:text-2xl">{f.nome}</DialogTitle>
                                 <span className="rounded-full bg-white/15 px-2.5 py-0.5 text-xs font-bold">N.º {f.numero_mecanografico}</span>
                                 <SeloEstadoFuncionario estado={f.estado} className="border-transparent" />
                             </div>
@@ -141,17 +141,17 @@ export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubric
                             ['Antiguidade', antiguidade(f.data_admissao, f.data_saida || hoje)],
                             ['Contrato', tipoContrato],
                             ['Validade do BI', f.bi_validade ? dataPt(f.bi_validade) : 'Sem dados'],
-                        ].map(([r, v]) => <div key={r} className="bg-rh-navy-2 px-[18px] py-3.5"><div className="text-xs text-indigo-300">{r}</div><div className="mt-1 text-lg font-extrabold tabular-nums">{v}</div></div>)}
+                        ].map(([r, v]) => <div key={r} className="min-w-0 bg-rh-navy-2 px-3 py-3 sm:px-[18px] sm:py-3.5"><div className="text-xs text-indigo-300">{r}</div><div className="mt-1 break-words text-sm font-extrabold tabular-nums sm:text-lg">{v}</div></div>)}
                     </div>
                 </div>
 
                 {/* Índice em linha nos ecrãs estreitos */}
-                <nav aria-label="Secções da ficha" className="flex shrink-0 gap-1 overflow-x-auto border-b border-rh-border bg-white px-4 py-2 min-[900px]:hidden dark:border-slate-800 dark:bg-slate-900">
+                <nav aria-label="Secções da ficha" className="sticky top-0 z-10 flex shrink-0 gap-1 overflow-x-auto border-b border-rh-border bg-white px-4 py-2 min-[900px]:hidden dark:border-slate-800 dark:bg-slate-900">
                     {seccoes.map(s => <button key={s.id} type="button" onClick={() => irPara(s.id)} className={cn('whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold', visivel === s.id ? 'bg-indigo-50 text-indigo-900' : 'text-slate-600')}>{s.titulo}</button>)}
                 </nav>
 
-                <div ref={corpo} className="min-h-0 flex-1 overflow-y-auto">
-                    <div className="flex items-start gap-6 px-7 pb-7 pt-6">
+                <div ref={corpo} onScroll={() => { const id = seccaoVisivel(corpo.current, 'section[id^="ficha-"]'); if (id) setVisivel(id.replace('ficha-', '')); }} className="sm:min-h-0 sm:flex-1 sm:overflow-y-auto">
+                    <div className="flex items-start gap-6 px-3 pb-6 pt-4 sm:px-7 sm:pb-7 sm:pt-6">
                         <aside aria-label="Índice da ficha" className="sticky top-6 hidden w-[220px] shrink-0 rounded-xl border border-rh-border bg-white p-2 min-[900px]:block dark:border-slate-800 dark:bg-slate-900">
                             {seccoes.map(s => (
                                 <a key={s.id} href={`#ficha-${s.id}`} onClick={e => { e.preventDefault(); irPara(s.id); }} aria-current={visivel === s.id ? 'true' : undefined}

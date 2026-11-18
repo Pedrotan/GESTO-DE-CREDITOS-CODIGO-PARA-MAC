@@ -149,11 +149,11 @@ export default function FuncionariosRH() {
                     </div>
                 </div>
 
-                <div className={cn('grid gap-4 sm:grid-cols-2', salarios ? 'xl:grid-cols-4' : 'xl:grid-cols-3')}>
+                <div className={cn('grid grid-cols-2 gap-3 sm:gap-4', salarios ? 'xl:grid-cols-4' : 'xl:grid-cols-3')}>
                     {indicadores.map(i => (
                         <div key={i.rotulo} className="rounded-xl border border-rh-border bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
                             <div className="text-[13px] text-rh-muted dark:text-slate-400">{i.rotulo}</div>
-                            <div className="mt-1.5 text-2xl font-extrabold tabular-nums text-rh-text dark:text-white">{base.aCarregar && !funcionarios.length ? '…' : i.valor}</div>
+                            <div className="mt-1.5 break-words text-lg font-extrabold tabular-nums text-rh-text sm:text-2xl dark:text-white">{base.aCarregar && !funcionarios.length ? '…' : i.valor}</div>
                         </div>
                     ))}
                 </div>
@@ -166,7 +166,7 @@ export default function FuncionariosRH() {
                             <Input className="h-10 pl-9" placeholder="Pesquisar por nome, n.º, BI, telefone ou email" value={pesquisaBruta} onChange={e => setPesquisaBruta(e.target.value)} />
                         </label>
                         <Select value={departamento} onValueChange={v => mudar('departamento', v)}>
-                            <SelectTrigger className="h-10 w-48" aria-label="Departamento"><SelectValue /></SelectTrigger>
+                            <SelectTrigger className="h-10 w-56" aria-label="Departamento"><SelectValue /></SelectTrigger>
                             <SelectContent><SelectItem value={TODOS}>Todos os departamentos</SelectItem>{departamentos.map(d => <SelectItem key={d.id} value={d.id}>{d.nome}</SelectItem>)}</SelectContent>
                         </Select>
                         <Select value={cargo} onValueChange={v => mudar('cargo', v)}>

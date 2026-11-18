@@ -21,6 +21,7 @@ import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
 import { isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
+import { carregamentoPortalPermitido, regraLeituraRH } from '../src/bibliotecas/rh/permissoes-rh';
 import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
@@ -1126,6 +1127,44 @@ const assertPontoAutorizado = async (event: Electron.IpcMainInvokeEvent, stateme
   // O chefe valida o seu departamento; aprovar e fechar o mês é do RH.
   if (table === "rh_ponto_periodo" && /estado = '(validado|fechado)'|'fechado'/i.test(statement.sql)) throw new Error("Só o RH aprova e fecha o mês do livro de ponto.");
 };
+// Leituras sensíveis do RH (ficheiros, anexos e dados salariais): verificadas aqui e não só escondidas na interface.
+// O RH com «documentos confidenciais» vê tudo; sem ela não abre documentos confidenciais. O próprio funcionário vê os
+// seus (não confidenciais) e os seus recibos; o chefe do departamento vê os documentos da equipa (parâmetro
+// «chefe_ve_documentos», 1 por omissão) mas nunca os dados salariais.
+const assertLeituraRH = async (event: Electron.IpcMainInvokeEvent, sql: string, params: unknown[] | undefined, query: (type: string, sql: string, params?: unknown[]) => Promise<any>) => {
+  const regra = regraLeituraRH(sql);
+  if (!regra) return;
+  const actor: any = userAuth.assertAuthenticated(event.sender.id);
+  const p = params || [];
+  const proprioOuChefe = async (funcionarioId: unknown, chefePode: boolean) => {
+    const ficha = funcionarioId ? await query("get", "SELECT utilizador_id, departamento_id FROM rh_funcionario WHERE id = ?", [funcionarioId]) : null;
+    if (!ficha) return false;
+    if (ficha.utilizador_id === actor.id) return true;
+    if (!chefePode || !ficha.departamento_id) return false;
+    const parametro = await query("get", "SELECT valor FROM rh_parametro WHERE chave = 'chefe_ve_documentos' AND vigencia_fim IS NULL ORDER BY vigencia_inicio DESC LIMIT 1").catch(() => null);
+    if (parametro && String(parametro.valor) === '0') return false;
+    const chefe = await query("get", "SELECT 1 AS ok FROM rh_departamento d JOIN rh_funcionario r ON r.id = d.responsavel_id WHERE d.id = ? AND r.utilizador_id = ?", [ficha.departamento_id, actor.id]);
+    return Boolean(chefe?.ok);
+  };
+  if (regra.tipo === 'ficheiro_documento' || regra.tipo === 'anexo_justificacao') {
+    const linha = regra.tipo === 'ficheiro_documento'
+      ? await query("get", "SELECT funcionario_id, confidencial FROM rh_documento WHERE id = ?", [p[regra.documentoParam]])
+      : await query("get", "SELECT funcionario_id, 0 AS confidencial FROM rh_justificacao WHERE id = ?", [p[regra.justificacaoParam]]);
+    if (!linha) return;
+    if (Number(linha.confidencial) && !hasPermission(actor, "hr_confidential")) throw new Error("Sem permissão para abrir documentos confidenciais.");
+    if (hasPermission(actor, "hr_manage") || hasPermission(actor, "hr_view")) return;
+    if (linha.funcionario_id === '__empresa__' && hasPermission(actor, "hr_self")) return;
+    if (await proprioOuChefe(linha.funcionario_id, true)) return;
+    throw new Error("Sem permissão para abrir este documento.");
+  }
+  if (hasPermission(actor, "hr_view_salaries") || hasPermission(actor, "hr_payroll")) return;
+  if (regra.tipo === 'salarial_funcionario' && await proprioOuChefe(p[regra.funcionarioParam], false)) return;
+  if (regra.tipo === 'salarial_recibo') {
+    const recibo = await query("get", "SELECT funcionario_id FROM rh_recibo WHERE id = ?", [p[regra.reciboParam]]);
+    if (recibo && await proprioOuChefe(recibo.funcionario_id, false)) return;
+  }
+  throw new Error("Sem permissão para ver dados salariais (RH: Ver salários).");
+};
 const assertPayrollSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statement: { sql: string; params?: unknown[] }) => {
   const sql = statement.sql.replace(/\s+/g, " ");
   const setClause = /^\s*UPDATE\b/i.test(sql) ? (sql.match(/\bSET\b(.*?)\bWHERE\b/i)?.[1] || "") : "";
@@ -1225,6 +1264,11 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
     }
     if (table === 'collection_events') continue;
     if (PONTO_TABELAS_DELEGADAS.has(table) && !hasPermission(userAuth.assertAuthenticated(event.sender.id), 'hr_manage')) continue; // assertPontoAutorizado
+    // Carregamento de documentos pelo próprio funcionário (portal): só na sua pasta e nas subpastas permitidas.
+    if (['rh_documento', 'rh_documento_ficheiro', 'rh_doc_auditoria'].includes(table)) {
+      const actor: any = userAuth.assertAuthenticated(event.sender.id);
+      if (!hasPermission(actor, 'hr_manage') && hasPermission(actor, 'hr_self') && carregamentoPortalPermitido(statements, actor.id)) continue;
+    }
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
   }
 };
@@ -1246,6 +1290,14 @@ const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:
       if(ficha?.utilizador_id!==actor.id && !hasPermission(actor,'hr_manage'))throw new Error('Só pode fazer pedidos na sua própria ficha.');
     }
     const table=mutationTable(statement.sql);
+    if(table==='rh_documento' && /^\s*INSERT/i.test(statement.sql)){
+      // Documento carregado sem «gerir RH» (portal): a ficha tem de ser a do utilizador autenticado.
+      const actor:any=userAuth.assertAuthenticated(event.sender.id);
+      if(!hasPermission(actor,'hr_manage')){
+        const ficha=await query('get','SELECT utilizador_id FROM rh_funcionario WHERE id = ?',[statement.params?.[1]]);
+        if(ficha?.utilizador_id!==actor.id)throw new Error('Só pode carregar documentos na sua própria pasta.');
+      }
+    }
     if(table==='limit_policy_versions' && /^\s*INSERT/i.test(statement.sql)){
       const actor=assertUserPermission(event,'manage_limits');
       if(statement.params?.[9]!==actor.id)throw new Error('A versão dos limites tem de ser criada pelo utilizador autenticado.');
@@ -3650,14 +3702,20 @@ app.whenReady().then(async () => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("query", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
+    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) {
+      userAuth.assertAuthenticated(event.sender.id);
+      await assertLeituraRH(event, request.sql, request.params, runQuery);
+    }
     return runQuery("query", request.sql, request.params);
   });
   ipcMain.handle("db-get", async (event, sql, params) => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("get", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
+    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) {
+      userAuth.assertAuthenticated(event.sender.id);
+      await assertLeituraRH(event, request.sql, request.params, runQuery);
+    }
     return runQuery("get", request.sql, request.params);
   });
   ipcMain.handle("db-exec", async (event, sql) => {

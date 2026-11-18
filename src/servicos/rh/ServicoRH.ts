@@ -519,6 +519,8 @@ export class ServicoRH {
      */
     static async carregarDocumento(input: { funcionario_id: string; categoria: CategoriaDocumento; nome: string; ficheiro_nome: string; data_url: string;
         data_emissao?: string | null; data_validade?: string | null; confidencial?: boolean; substitui?: string | null; pasta_id?: string | null; origem?: string }, maxMb: number, actor: ActorRH) {
+        // Os PDF gerados pelo sistema vêm como «data:application/pdf;filename=…;base64,»: guarda-se só o tipo.
+        input = { ...input, data_url: input.data_url.replace(/^data:([^;,]+)(?:;[^,;]+=[^,;]*)*;base64,/u, 'data:$1;base64,') };
         if (!texto(input.nome)) throw new Error('Indique o nome do documento.');
         if (!CATEGORIAS_DOCUMENTO.some(c => c.id === input.categoria)) throw new Error('Categoria inválida.');
         if (!MIMES_DOCUMENTO.test(input.data_url)) throw new Error('O ficheiro tem de ser PDF, JPG, PNG, DOCX ou XLSX.');
