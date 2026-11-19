@@ -1,6 +1,30 @@
+import { useEffect, useState } from 'react';
 import './carregamento.css';
 
+/** Depois deste tempo o esqueleto explica a demora e oferece recarregar (ex.: ligação à internet em baixo). */
+const DEMORA_MS = 15_000;
+
+function useEstadoLigacao() {
+  const [offline, setOffline] = useState(() => typeof navigator !== 'undefined' && navigator.onLine === false);
+  const [demorado, setDemorado] = useState(false);
+  useEffect(() => {
+    const ligado = () => setOffline(false);
+    const desligado = () => setOffline(true);
+    window.addEventListener('online', ligado);
+    window.addEventListener('offline', desligado);
+    const temporizador = window.setTimeout(() => setDemorado(true), DEMORA_MS);
+    return () => { window.removeEventListener('online', ligado); window.removeEventListener('offline', desligado); window.clearTimeout(temporizador); };
+  }, []);
+  return { offline, demorado };
+}
+
 export function LoadingSkeleton() {
+  const { offline, demorado } = useEstadoLigacao();
+  const aviso = offline
+    ? 'Sem ligação à internet. O sistema continua sozinho assim que a ligação voltar.'
+    : demorado
+      ? 'O servidor está a demorar a responder. Verifique a ligação à internet ou tente novamente.'
+      : null;
   return (
     <div className="tango-skeleton" role="status" aria-live="polite" aria-busy="true" aria-label="A carregar o sistema">
       <aside className="tango-skeleton-sidebar" aria-hidden="true">
@@ -19,6 +43,12 @@ export function LoadingSkeleton() {
           </div>
         </div>
         <p className="tango-skeleton-message">A preparar o sistema. Aguarde um momento…</p>
+        {aviso && (
+          <div className="tango-skeleton-aviso">
+            <span>{aviso}</span>
+            {!offline && <button type="button" className="tango-skeleton-botao" onClick={() => window.location.reload()}>Tentar novamente</button>}
+          </div>
+        )}
       </div>
     </div>
   );

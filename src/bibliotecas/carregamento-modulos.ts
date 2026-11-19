@@ -28,6 +28,11 @@ export const reloadForNewVersion = () => {
         return false;
     }
     reloadPending = true;
+    // Sem internet a recarga daria a página de erro do navegador: espera que a ligação volte.
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+        window.addEventListener('online', () => window.location.reload(), { once: true });
+        return true;
+    }
     window.location.reload();
     return true;
 };

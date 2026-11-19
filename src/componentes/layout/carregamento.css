@@ -32,6 +32,10 @@
 .tango-skeleton-row { height: 24px; margin-bottom: 22px; }
 .tango-skeleton-row:last-child { margin-bottom: 0; }
 .tango-skeleton-message { margin: 22px 0 0; line-height: 1.6; }
+.tango-skeleton-aviso { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 14px; padding: 12px 16px; border: 1px solid #fcd34d; border-radius: 12px; background: #fffbeb; color: #92400e; line-height: 1.5; }
+.tango-skeleton-botao { padding: 7px 14px; border: 0; border-radius: 8px; background: #0f1b3d; color: #fff; font: 600 13px system-ui, sans-serif; cursor: pointer; }
+.tango-skeleton-botao:hover { background: #1e2b55; }
+.dark .tango-skeleton-aviso { border-color: #78350f; background: #2a1a06; color: #fcd34d; }
 @keyframes tangoSkeletonPulse { 50% { opacity: .45; } }
 @media (max-width: 1000px) {
   .tango-skeleton-sidebar { display: none; }
