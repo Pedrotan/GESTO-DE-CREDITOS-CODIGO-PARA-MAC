@@ -1,5 +1,46 @@
-import React, { Component, ErrorInfo, ReactNode } from 'react';
+import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from 'react';
 import { isChunkLoadError, isReloadPending, reloadForNewVersion } from '@/bibliotecas/carregamento-modulos';
+
+const ESPERA_SEGUNDOS = 10;
+
+/**
+ * Um ficheiro da aplicação não chegou (rede instável ou sem internet): não é um erro do sistema. Explica-o e
+ * volta a tentar sozinho — quando a ligação voltar, se estiver sem internet, ou ao fim de alguns segundos.
+ */
+function LigacaoInstavel() {
+    const [offline, setOffline] = useState(() => navigator.onLine === false);
+    const [segundos, setSegundos] = useState(ESPERA_SEGUNDOS);
+    useEffect(() => {
+        const ligado = () => { setOffline(false); window.location.reload(); };
+        const desligado = () => setOffline(true);
+        window.addEventListener('online', ligado);
+        window.addEventListener('offline', desligado);
+        return () => { window.removeEventListener('online', ligado); window.removeEventListener('offline', desligado); };
+    }, []);
+    useEffect(() => {
+        if (offline) return;
+        if (segundos <= 0) { window.location.reload(); return; }
+        const t = window.setTimeout(() => setSegundos(x => x - 1), 1000);
+        return () => window.clearTimeout(t);
+    }, [offline, segundos]);
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
+            <div className="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 border border-amber-100 text-center">
+                <h1 className="text-2xl font-black tracking-tight text-slate-900 mb-1">Tango Gestão de Créditos ERP</h1>
+                <h2 className="text-lg font-bold text-amber-600 mb-2">{offline ? 'Sem ligação à internet' : 'Ligação instável'}</h2>
+                <p className="text-slate-600 mb-6 font-medium text-sm">
+                    {offline
+                        ? 'Parte do sistema ainda não foi descarregada. Continua sozinho assim que a ligação voltar.'
+                        : `Parte do sistema não chegou a ser descarregada. A tentar de novo em ${segundos} s…`}
+                </p>
+                <button onClick={() => window.location.reload()}
+                    className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl transition-all active:scale-[0.98]">
+                    Tentar agora
+                </button>
+            </div>
+        </div>
+    );
+}
 
 export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: Error | null }> {
     constructor(props: { children: ReactNode }) {
@@ -26,6 +67,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
                 </div>
             );
         }
+
+        if (this.state.hasError && isChunkLoadError(this.state.error)) return <LigacaoInstavel />;
 
         if (this.state.hasError) {
             return (

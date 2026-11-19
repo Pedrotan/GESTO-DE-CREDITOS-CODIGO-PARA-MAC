@@ -50,9 +50,20 @@ self.addEventListener('fetch', event => {
   }
 
   event.respondWith(
-    caches.match(request).then(cached => cached || fetch(request).then(response => {
+    caches.match(request).then(cached => cached || fetchWithRetry(request, url.pathname.startsWith('/assets/')).then(response => {
       storeInCache(request, response.clone());
       return response;
-    }))
+    })).catch(() => Response.error())
   );
 });
+
+// Ficheiros da aplicação (nome com hash, nunca mudam): numa rede instável, uma falha passageira não pode
+// deixar a página sem um módulo. Tenta de novo duas vezes antes de desistir.
+const ESPERAS_MS = [800, 2500];
+function fetchWithRetry(request, repetir) {
+  const tentar = attempt => fetch(request).catch(error => {
+    if (!repetir || attempt >= ESPERAS_MS.length) throw error;
+    return new Promise(resolve => setTimeout(resolve, ESPERAS_MS[attempt])).then(() => tentar(attempt + 1));
+  });
+  return tentar(0);
+}
