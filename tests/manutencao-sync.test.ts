@@ -58,3 +58,29 @@ test('manutenção: funde os repetidos sem tocar nas aprovações, resolve os co
     const again = await executarManutencaoSync(deps, { limparAlertasFalsos: true });
     assert.equal(again.fundidos + again.resolvidos + again.alertasLimpos + again.religados, 0, 'depois de feita, nada a fazer');
 });
+
+test('processamento salarial de uma versão anterior que não existe aqui: o conflito resolve-se; o do mês unificado fica', async () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT, nif TEXT, createdAt TEXT, deletedAt TEXT, deletedBy TEXT);
+        CREATE TABLE sync_conflicts (id TEXT PRIMARY KEY, entityType TEXT, entityId TEXT, operation TEXT, status TEXT, createdAt TEXT, resolutionNote TEXT, resolvedBy TEXT, resolvedAt TEXT);
+        CREATE TABLE rh_processamento (id TEXT PRIMARY KEY); CREATE TABLE rh_recibo (id TEXT PRIMARY KEY);
+        CREATE TABLE rh_processamento_entrada (id TEXT PRIMARY KEY); CREATE TABLE rh_rubrica_pontual (id TEXT PRIMARY KEY);
+        INSERT INTO rh_processamento VALUES ('rh-proc-normal-2026-11'), ('c0ffee00-0000-4000-8000-000000000001');`);
+    const conflito = (id: string, entityType: string, params: unknown[]) => db.prepare(`INSERT INTO sync_conflicts VALUES (?, ?, NULL, ?, 'pending', '2026-11-19', NULL, NULL, NULL)`)
+        .run(id, entityType, JSON.stringify({ kind: 'statement', reason: 'Conflito de concorrência: esperadas 1 alterações, obtidas 0.', params }));
+    const antigo = 'b8fe0276-b37a-4ba6-ac54-13550096711b';
+    conflito('p', 'rh_processamento', ['2026-11-19T11:13:45.646Z', antigo]);
+    conflito('l', 'rh_recibo_linha', [antigo]);
+    conflito('r', 'rh_recibo', [antigo]);
+    conflito('fixo', 'rh_processamento', ['2026-11-19T12:00:00.000Z', 'rh-proc-normal-2026-11']);
+    conflito('ferias', 'rh_processamento', ['2026-11-19T12:00:00.000Z', 'c0ffee00-0000-4000-8000-000000000001']);
+    const deps = {
+        all: async <T,>(sql: string, params: unknown[] = []) => db.prepare(sql).all(...(params as never[])).map(row => ({ ...row })) as T[],
+        transaction: async (statements: ComandoManutencao[]) => { for (const s of statements) db.prepare(s.sql).run(...((s.params || []) as never[])); },
+        sqlById: new Map<string, string>(),
+    };
+    const resultado = await executarManutencaoSync(deps);
+    assert.equal(resultado.resolvidos, 3);
+    assert.deepEqual(db.prepare(`SELECT id, status FROM sync_conflicts ORDER BY id`).all().map(x => [x.id, x.status]),
+        [['ferias', 'pending'], ['fixo', 'pending'], ['l', 'accepted'], ['p', 'accepted'], ['r', 'accepted']]);
+});

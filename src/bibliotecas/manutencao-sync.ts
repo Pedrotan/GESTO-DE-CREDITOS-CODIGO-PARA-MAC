@@ -57,6 +57,27 @@ export const reconciliarClientes = async (deps: DepsManutencao, agora = new Date
     return { restaurados: plano.restaurados, fundidos: plano.fundidos, religados: plano.religados };
 };
 
+// Processamento salarial: até 19/11/2026 o processamento normal do mês tinha um identificador aleatório em cada
+// computador (rh-proc-normal-AAAA-MM desde então). As alterações das versões anteriores apontam para processamentos,
+// recibos ou valores do mês que não existem neste computador — nunca se vão aplicar; o próximo cálculo alinha tudo.
+const TABELAS_PROCESSAMENTO_RH = new Set(['rh_processamento', 'rh_recibo', 'rh_recibo_linha', 'rh_processamento_entrada', 'rh_rubrica_pontual']);
+export const NOTA_PROCESSAMENTO_RH = 'Alteração de um processamento salarial que não existe neste computador (versão anterior à unificação do mês). Recalcule o mês para alinhar.';
+const REGISTO_RH_SQL = `SELECT 1 AS found FROM rh_processamento WHERE id = ? UNION ALL SELECT 1 FROM rh_recibo WHERE id = ?
+    UNION ALL SELECT 1 FROM rh_processamento_entrada WHERE id = ? UNION ALL SELECT 1 FROM rh_rubrica_pontual WHERE id = ? LIMIT 1`;
+/** A alteração só refere identificadores de processamento/recibo/valores do mês que não existem aqui. */
+const processamentoRhInexistente = async (deps: DepsManutencao, params: string[]) => {
+    if (params.some(param => param.startsWith('rh-proc-normal-'))) return false;
+    const ids = params.filter(param => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(:\d+)?$/iu.test(param));
+    if (!ids.length) return false;
+    for (const id of ids) {
+        const base = id.replace(/:\d+$/u, '');
+        try {
+            if ((await deps.all(REGISTO_RH_SQL, [base, base, base, base])).length) return false;
+        } catch { return false; }
+    }
+    return true;
+};
+
 /**
  * Conflitos que já não têm efeito e se resolvem sozinhos: a alteração condicionada de um cliente apagado
  * definitivamente (lápide, ou «Apagar definitivamente» de uma ficha que já não existe aqui) e um lançamento
@@ -83,6 +104,10 @@ export const resolverConflitosSemEfeito = async (deps: DepsManutencao, agora = n
                 statements.push({ sql: CONFLICT_RESOLVE_SQL, params: ['O cliente foi apagado definitivamente; a alteração já não se aplica.', agora, row.id] });
                 continue;
             }
+        }
+        if (TABELAS_PROCESSAMENTO_RH.has(row.entityType) && await processamentoRhInexistente(deps, params)) {
+            statements.push({ sql: CONFLICT_RESOLVE_SQL, params: [NOTA_PROCESSAMENTO_RH, agora, row.id] });
+            continue;
         }
         if (row.entityType === 'accounting_entries' && /Cadeia contabil/iu.test(reason)) {
             const columns = operation.columns || [];

@@ -674,6 +674,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM warranties WHERE deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE id = ?",
   "SELECT 1 AS found FROM accounting_entries WHERE id = ? LIMIT 1",
+  "SELECT 1 AS found FROM rh_processamento WHERE id = ? UNION ALL SELECT 1 FROM rh_recibo WHERE id = ? UNION ALL SELECT 1 FROM rh_processamento_entrada WHERE id = ? UNION ALL SELECT 1 FROM rh_rubrica_pontual WHERE id = ? LIMIT 1",
   "SELECT 1 AS ok",
   "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?",
   "SELECT COALESCE(SUM(grossTotalMinor), 0) AS total FROM fiscal_documents WHERE documentType = 'NC' AND referenceDocumentNo = ?",
@@ -3801,6 +3802,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6823e64a1ac0800156b11833ff575cd07ac9d15d759f71f00d60a5f9f17a1726",
     "SELECT 1 AS found FROM accounting_entries WHERE id = ? LIMIT 1"
+  ],
+  [
+    "f7c10f0d19ea00dbf21d309c97659499a89bca361bc598f89088ff7680a9b19c",
+    "SELECT 1 AS found FROM rh_processamento WHERE id = ? UNION ALL SELECT 1 FROM rh_recibo WHERE id = ? UNION ALL SELECT 1 FROM rh_processamento_entrada WHERE id = ? UNION ALL SELECT 1 FROM rh_rubrica_pontual WHERE id = ? LIMIT 1"
   ],
   [
     "90ca954a9febd2d81d7a73ecfef56f93ba114d5421d827e9583a919c7538f18d",
