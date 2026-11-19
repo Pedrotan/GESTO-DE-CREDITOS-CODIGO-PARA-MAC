@@ -78,6 +78,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)"
   ],
   [
+    "8bedcc28bed45fd045bca2cb593ac4687cba1769066133b4954bfaa9754cc121",
+    "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "e753b4d1e00c94b49eaec9666206484bba190aa089ffd78b326a7df3f1744af2",
     "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
   ],
@@ -172,6 +176,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
   [
     "68302ce31775e48c49ff7d2e78566a71649e827b5bbd3a0693ee878dde64c49c",
     "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "51a6f5049c5e4e83c7696c56f9323eeb17bfbfbf837ea5c6ef89b4b234c729fb",
+    "UPDATE rh_processamento_entrada SET salario_base_minor = ?, faltas = ?, actualizado_em = ?, actualizado_por = ?, actualizado_por_nome = ? WHERE id = ?"
   ],
   [
     "ca4bfe7939b88a0018754073d7044641f42d2d6a77c6e7ba8ea93f7f49fa8596",
