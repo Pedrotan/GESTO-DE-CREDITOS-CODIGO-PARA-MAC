@@ -41,11 +41,54 @@ const agora = () => new Date().toISOString();
 const autoridadeTotal = (actor: ActorRH) => actor.role === 'super_admin' || isPrimaryOwner(actor);
 const ultimoDia = (ano: number, mes: number) => `${ano}-${String(mes).padStart(2, '0')}-${String(new Date(Date.UTC(ano, mes, 0)).getUTCDate()).padStart(2, '0')}`;
 const LOTE = 40;
+/**
+ * Identificador fixo do processamento normal de um mês. Com um identificador aleatório, dois computadores que abriam
+ * o mesmo mês antes de sincronizar criavam dois «Novembro» diferentes: cada um recusava o do outro e todas as
+ * alterações seguintes (cálculo, faltas, aprovação) ficavam em conflito nos restantes computadores.
+ */
+export const idProcessamentoNormal = (ano: number, mes: number) => `rh-proc-normal-${ano}-${String(mes).padStart(2, '0')}`;
+/** Valores do mês de um funcionário: um registo por processamento e funcionário, com o mesmo id em todos os computadores. */
+export const idEntradaMes = (processamentoId: string, funcionarioId: string) => `${processamentoId}:${funcionarioId}`;
+export const NOTA_UNIFICACAO = 'Processamento do mês unificado entre computadores (identificador fixo). Recalcule o mês para alinhar os valores.';
 type RubricaCatalogo = RubricaMotor & { periodicidade?: string; mes_pagamento?: number | null; incidencia_confirmada?: number; valor_padrao_minor?: number; nome: string };
 /** Mensal: todos os meses; anual: só no mês de pagamento; pontual: nunca como rubrica fixa. */
 const periodoPermite = (r: RubricaCatalogo, mes: number) => (r.periodicidade === 'pontual' ? false : r.periodicidade === 'anual' ? Number(r.mes_pagamento) === mes : true);
 
 export class ServicoSalariosRH {
+    private static unificado = false;
+
+    /**
+     * Passa os processamentos normais ainda abertos ou calculados para o identificador fixo do mês (com os recibos,
+     * rubricas e valores do mês) e dá por resolvidos os conflitos que os identificadores antigos deixaram. Todos os
+     * computadores chegam ao mesmo identificador; o próximo cálculo alinha os recibos em todos. Uma vez por sessão.
+     */
+    static async unificarNormais(forcar = false) {
+        if (this.unificado && !forcar) return 0;
+        this.unificado = true;
+        const linhas = await db.all<{ id: string; ano: number; mes: number; estado: string }>(
+            `SELECT id, ano, mes, estado FROM rh_processamento WHERE tipo = 'normal' AND estado IN ('aberto', 'calculado')`).catch(() => []);
+        const antigos = linhas.filter(p => p.id !== idProcessamentoNormal(p.ano, p.mes));
+        if (!antigos.length) return 0;
+        const statements = antigos.flatMap(p => {
+            const fixo = idProcessamentoNormal(p.ano, p.mes);
+            return [
+                { sql: `UPDATE rh_processamento_entrada SET id = ? || ':' || funcionario_id, processamento_id = ? WHERE processamento_id = ?`, params: [fixo, fixo, p.id] },
+                { sql: 'UPDATE rh_rubrica_pontual SET processamento_id = ? WHERE processamento_id = ?', params: [fixo, p.id] },
+                { sql: 'UPDATE rh_recibo SET processamento_id = ? WHERE processamento_id = ?', params: [fixo, p.id] },
+                // Sem expectChanges: nos outros computadores este id não existe e a alteração não pode virar conflito.
+                { sql: `UPDATE rh_processamento SET id = ? WHERE id = ? AND tipo = 'normal'`, params: [fixo, p.id] },
+            ];
+        });
+        await db.transaction(statements);
+        // Alterações antigas que apontavam para identificadores que já não existem em nenhum computador.
+        await db.transaction([{
+            sql: `UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending'
+                  AND entityType IN ('rh_processamento', 'rh_recibo', 'rh_recibo_linha', 'rh_processamento_entrada', 'rh_rubrica_pontual')`,
+            params: [NOTA_UNIFICACAO, agora()],
+        }]).catch(() => undefined);
+        return antigos.length;
+    }
+
     static processamentos() {
         return db.all<Processamento>('SELECT * FROM rh_processamento ORDER BY ano DESC, mes DESC, criado_em DESC').catch(() => [] as Processamento[]);
     }
@@ -92,11 +135,10 @@ export class ServicoSalariosRH {
         if (faltas !== null && (!Number.isFinite(faltas) || faltas < 0 || faltas > 31)) throw new Error('Indique entre 0 e 31 faltas.');
         const when = agora();
         await db.transaction([
-            actual
-                ? { sql: 'UPDATE rh_processamento_entrada SET salario_base_minor = ?, faltas = ?, actualizado_em = ?, actualizado_por = ?, actualizado_por_nome = ? WHERE id = ?',
-                    params: [salario === null ? null : Math.round(salario), faltas, when, actor.id, actor.name, actual.id], expectChanges: 1 }
-                : { sql: 'INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                    params: [crypto.randomUUID(), p.id, funcionarioId, salario === null ? null : Math.round(salario), faltas, when, actor.id, actor.name], expectChanges: 1 },
+            { sql: `INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(processamento_id, funcionario_id) DO UPDATE SET salario_base_minor = excluded.salario_base_minor,
+                    faltas = excluded.faltas, actualizado_em = excluded.actualizado_em, actualizado_por = excluded.actualizado_por, actualizado_por_nome = excluded.actualizado_por_nome`,
+                params: [actual?.id ?? idEntradaMes(p.id, funcionarioId), p.id, funcionarioId, salario === null ? null : Math.round(salario), faltas, when, actor.id, actor.name] },
             { sql: `UPDATE rh_processamento SET estado = 'aberto', actualizado_em = ? WHERE id = ? AND estado IN ('aberto', 'calculado')`, params: [when, p.id], expectChanges: 1 },
             auditoriaRH(actor, 'update', `Valores do mês ${String(p.mes).padStart(2, '0')}/${p.ano} de um funcionário`, { processamentoId: p.id, funcionarioId },
                 actual ? { salario_base_minor: actual.salario_base_minor, faltas: actual.faltas } : undefined, { salario_base_minor: salario, faltas }, when),
@@ -110,14 +152,29 @@ export class ServicoSalariosRH {
         if (input.tipo === 'normal' && existentes.some(p => p.tipo === 'normal' && p.ano === input.ano && p.mes === input.mes))
             throw new Error('Já existe o processamento normal deste mês.');
         if (input.tipo === 'acerto' && !input.funcionarios?.length) throw new Error('Escolha os funcionários do acerto.');
-        const id = crypto.randomUUID();
+        const normal = input.tipo === 'normal';
+        const id = normal ? idProcessamentoNormal(input.ano, input.mes) : crypto.randomUUID();
         const when = agora();
         await db.transaction([
-            { sql: `INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)`,
-                params: [id, input.ano, input.mes, input.tipo, input.descricao?.trim() || null, input.funcionarios?.length ? JSON.stringify(input.funcionarios) : null, when, actor.id, actor.name], expectChanges: 1 },
+            normal
+                ? { sql: `INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, ?, ?)`,
+                    params: [id, input.ano, input.mes, when, actor.id, actor.name] }
+                : { sql: `INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)`,
+                    params: [id, input.ano, input.mes, input.tipo, input.descricao?.trim() || null, input.funcionarios?.length ? JSON.stringify(input.funcionarios) : null, when, actor.id, actor.name], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Abriu o processamento ${ROTULO_TIPO[input.tipo]} de ${String(input.mes).padStart(2, '0')}/${input.ano}`, { processamentoId: id }, undefined, undefined, when),
         ]);
         return id;
+    }
+
+    /**
+     * Abertura automática do mês corrente: o mesmo registo em todos os computadores (identificador, data e autor fixos),
+     * por isso abrir em dois computadores antes de sincronizar não cria conflito.
+     */
+    static async abrirAutomatico(ano: number, mes: number) {
+        await db.transaction([{
+            sql: `INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, NULL, ?)`,
+            params: [idProcessamentoNormal(ano, mes), ano, mes, `${ano}-${String(mes).padStart(2, '0')}-01T00:00:00.000Z`, 'Abertura automática'],
+        }]);
     }
 
     /** Apaga um processamento que ainda está aberto (aberto por engano). */

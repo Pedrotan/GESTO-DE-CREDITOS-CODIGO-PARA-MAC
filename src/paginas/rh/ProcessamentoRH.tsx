@@ -50,7 +50,7 @@ export default function ProcessamentoRH() {
     const { actor, calcular, aprovar, salarios } = useActorRH();
     const { companySettings } = useData();
     const base = useBaseRH();
-    const lista = useCarregar(() => ServicoSalariosRH.processamentos(), [] as Processamento[]);
+    const lista = useCarregar(async () => { await ServicoSalariosRH.unificarNormais().catch(() => 0); return ServicoSalariosRH.processamentos(); }, [] as Processamento[]);
     const fixas = useCarregar(() => ServicoRH.todasRubricasFuncionarios(), [] as FuncionarioRubrica[]);
     const hoje = luandaTodayKey();
     const anoActual = Number(hoje.slice(0, 4));
@@ -80,7 +80,7 @@ export default function ProcessamentoRH() {
     useEffect(() => {
         if (abertoAuto.current || lista.aCarregar || !actor || !calcular || normalDe(anoActual, mesActual)) return;
         abertoAuto.current = true;
-        void ServicoSalariosRH.abrir({ ano: anoActual, mes: mesActual, tipo: 'normal' }, actor)
+        void ServicoSalariosRH.abrirAutomatico(anoActual, mesActual)
             .then(() => lista.recarregar())
             .catch(() => undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps

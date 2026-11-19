@@ -348,3 +348,41 @@ test('critérios: terminar contrato não apaga, abas iguais ao menu lateral e ro
     const subs = M.ABAS_RH.flatMap(a => (a.subs || []).map(s => s.path));
     for (const antiga of ['/rh/ausencias', '/rh/calendario', '/rh/recibos']) assert.ok(subs.includes(antiga), `${antiga} está numa aba`);
 });
+
+test('dois computadores abrem o mesmo mês: o mesmo identificador; um processamento antigo é unificado e os conflitos ficam resolvidos', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    db.exec(`CREATE TABLE sync_conflicts (id TEXT PRIMARY KEY, entityType TEXT NOT NULL, entityId TEXT, operation TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending',
+        createdAt TEXT NOT NULL, resolvedAt TEXT, resolvedBy TEXT, resolutionNote TEXT)`);
+    try {
+        const f = await registar(M);
+        // Abertura automática repetida (outro computador, ou a sincronização a trazer a mesma abertura): um só registo, igual.
+        await M.ServicoSalariosRH.abrirAutomatico(2026, 12);
+        await M.ServicoSalariosRH.abrirAutomatico(2026, 12);
+        const dez = db.prepare(`SELECT id, criado_em, criado_por_nome FROM rh_processamento WHERE ano = 2026 AND mes = 12`).all();
+        assert.deepEqual(dez.map(x => ({ ...x })), [{ id: 'rh-proc-normal-2026-12', criado_em: '2026-12-01T00:00:00.000Z', criado_por_nome: 'Abertura automática' }]);
+        assert.equal(await M.ServicoSalariosRH.abrir({ ano: 2026, mes: 9, tipo: 'normal' }, RH), 'rh-proc-normal-2026-09');
+
+        // Processamento de Novembro criado pela versão anterior (identificador aleatório), já calculado, com faltas e um conflito.
+        db.prepare(`INSERT INTO rh_processamento (id, ano, mes, tipo, estado, criado_em) VALUES ('antigo-uuid', 2026, 11, 'normal', 'aberto', '2026-11-02')`).run();
+        const antigo = await processamento(M, 'antigo-uuid');
+        await M.ServicoSalariosRH.guardarEntrada(antigo, f, { faltas: 1 }, RH);
+        await M.ServicoSalariosRH.calcular(await processamento(M, 'antigo-uuid'), RH);
+        db.prepare(`INSERT INTO sync_conflicts (id, entityType, operation, createdAt) VALUES ('c1', 'rh_recibo', '{}', '2026-11-19'), ('c2', 'clients', '{}', '2026-11-19')`).run();
+
+        assert.equal(await M.ServicoSalariosRH.unificarNormais(true), 1);
+        const fixo = 'rh-proc-normal-2026-11';
+        assert.equal(db.prepare(`SELECT COUNT(*) n FROM rh_processamento WHERE id = 'antigo-uuid'`).get().n, 0);
+        assert.equal(db.prepare(`SELECT estado FROM rh_processamento WHERE id = ?`).get(fixo).estado, 'calculado', 'o estado mantém-se');
+        assert.equal(db.prepare(`SELECT COUNT(*) n FROM rh_recibo WHERE processamento_id = ?`).get(fixo).n, 1, 'os recibos acompanham');
+        assert.deepEqual({ ...db.prepare(`SELECT id, faltas FROM rh_processamento_entrada WHERE processamento_id = ?`).get(fixo) }, { id: `${fixo}:${f}`, faltas: 1 });
+        assert.deepEqual(db.prepare(`SELECT id, status FROM sync_conflicts ORDER BY id`).all().map(x => [x.id, x.status]), [['c1', 'accepted'], ['c2', 'pending']],
+            'só os conflitos do processamento salarial ficam resolvidos');
+        assert.equal(await M.ServicoSalariosRH.unificarNormais(true), 0, 'nada mais a unificar');
+
+        // Depois de unificado, gravar valores do mês e recalcular funciona sem conflitos (upsert pelo funcionário).
+        await M.ServicoSalariosRH.guardarEntrada(await processamento(M, fixo), f, { faltas: 2 }, RH);
+        await M.ServicoSalariosRH.calcular(await processamento(M, fixo), RH);
+        assert.equal(db.prepare(`SELECT faltas FROM rh_processamento_entrada WHERE id = ?`).get(`${fixo}:${f}`).faltas, 2);
+    } finally { db.close(); }
+});

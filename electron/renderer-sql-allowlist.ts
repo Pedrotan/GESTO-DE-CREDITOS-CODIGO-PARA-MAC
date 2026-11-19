@@ -468,7 +468,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, ?, 'aberto', ?) ON CONFLICT(id) DO NOTHING",
   "INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, NULL, 'aberto', ?) ON CONFLICT(id) DO NOTHING",
   "INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)",
-  "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(processamento_id, funcionario_id) DO UPDATE SET salario_base_minor = excluded.salario_base_minor, faltas = excluded.faltas, actualizado_em = excluded.actualizado_em, actualizado_por = excluded.actualizado_por, actualizado_por_nome = excluded.actualizado_por_nome",
   "INSERT INTO rh_recibo (id, processamento_id, funcionario_id, numero_recibo, nome, numero_mecanografico, cargo, departamento, nif, numero_inss, iban, banco, salario_base_minor, dias_trabalhados, valor_dia_minor, valor_hora_minor, total_abonos_minor, total_descontos_minor, bruto_minor, base_inss_minor, inss_minor, inss_emp_minor, isento_irt_minor, base_irt_minor, irt_minor, escalao_irt, outros_descontos_minor, liquido_minor, custo_empresa_minor, avisos_json, resumo_json, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_recibo_linha (id, recibo_id, rubrica_id, codigo, descricao, tipo, quantidade, valor_unitario_minor, valor_minor, incide_inss, incide_irt, isento_irt_minor, ordem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, classe, por_dia, valor_padrao_minor, periodicidade, mes_pagamento, proporcional_faltas, auto_atribuir, descricao, incidencia_confirmada, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
@@ -505,6 +505,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT OR IGNORE INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, 'declaracao', ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')",
   "INSERT OR IGNORE INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, 'sistema')",
+  "INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, ?, ?)",
+  "INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, NULL, ?)",
   "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, ?, 0, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_tipo_ausencia (id, codigo, nome, justificada, remunerada, desconta_salario, desconta_ferias, exige_documento, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 'sistema')",
@@ -773,6 +775,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id FROM users WHERE role IN ('super_admin', 'internal_auditor') AND (status IS NULL OR status <> 'blocked')",
   "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?",
   "SELECT id, ano, lei_referencia, vigencia_inicio, vigencia_fim FROM rh_irt_tabela ORDER BY vigencia_inicio DESC",
+  "SELECT id, ano, mes, estado FROM rh_processamento WHERE tipo = 'normal' AND estado IN ('aberto', 'calculado')",
   "SELECT id, chave, valor, descricao, vigencia_inicio, vigencia_fim FROM rh_parametro ORDER BY chave, vigencia_inicio DESC",
   "SELECT id, clientId, NULL AS clientName FROM legal_cases",
   "SELECT id, clientId, NULL AS clientName FROM warranties",
@@ -1055,16 +1058,20 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_processamento SET estado = 'calculado', aprovado_por = NULL, aprovado_por_nome = NULL, aprovado_em = NULL, pago_por = NULL, pago_por_nome = NULL, pago_em = NULL, actualizado_em = ? WHERE id = ? AND estado IN ('aprovado', 'pago')",
   "UPDATE rh_processamento SET estado = 'calculado', irt_tabela_id = ?, parametros_json = ?, total_bruto_minor = ?, total_liquido_minor = ?, total_inss_trab_minor = ?, total_inss_emp_minor = ?, total_irt_minor = ?, total_outros_minor = ?, num_recibos = ?, calculado_por = ?, calculado_por_nome = ?, calculado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'aberto'",
   "UPDATE rh_processamento SET fechado_por = ?, fechado_por_nome = ?, fechado_em = ?, lancamentos_json = ?, estado = 'fechado', actualizado_em = ? WHERE id = ? AND estado = 'pago'",
+  "UPDATE rh_processamento SET id = ? WHERE id = ? AND tipo = 'normal'",
   "UPDATE rh_processamento SET pago_por = ?, pago_por_nome = ?, pago_em = ?, conta_pagamento = ?, estado = 'pago', actualizado_em = ? WHERE id = ? AND estado = 'aprovado'",
-  "UPDATE rh_processamento_entrada SET salario_base_minor = ?, faltas = ?, actualizado_em = ?, actualizado_por = ?, actualizado_por_nome = ? WHERE id = ?",
+  "UPDATE rh_processamento_entrada SET id = ? || ':' || funcionario_id, processamento_id = ? WHERE processamento_id = ?",
+  "UPDATE rh_recibo SET processamento_id = ? WHERE processamento_id = ?",
   "UPDATE rh_rubrica SET classe = 'abono' WHERE classe IS NULL AND tipo = 'abono' AND codigo IN ('RENDA_CASA', 'ISOLAMENTO', 'GRATIFICACAO', 'REPRESENTACAO', 'REM_SUPLEMENTAR')",
   "UPDATE rh_rubrica SET classe = CASE WHEN tipo = 'desconto' THEN 'desconto' ELSE 'abono' END WHERE classe IS NULL",
   "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, classe = ?, por_dia = ?, valor_padrao_minor = ?, periodicidade = ?, mes_pagamento = ?, proporcional_faltas = ?, auto_atribuir = ?, descricao = ?, incidencia_confirmada = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_rubrica_pontual SET processamento_id = ? WHERE processamento_id = ?",
   "UPDATE rh_tipo_ausencia SET nome = ?, justificada = ?, remunerada = ?, desconta_salario = ?, desconta_ferias = ?, exige_documento = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE simulations SET clientId = ? WHERE id = ?",
   "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
   "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
+  "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND entityType IN ('rh_processamento', 'rh_recibo', 'rh_recibo_linha', 'rh_processamento_entrada', 'rh_rubrica_pontual')",
   "UPDATE sync_conflicts SET status = 'pending', resolutionNote = NULL, resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'rejected' AND resolutionNote LIKE '[ARQUIVADO] %'",
   "UPDATE sync_conflicts SET status = 'pending', resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'archived'",
   "UPDATE sync_conflicts SET status = 'rejected', resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
@@ -2972,8 +2979,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)"
   ],
   [
-    "8bedcc28bed45fd045bca2cb593ac4687cba1769066133b4954bfaa9754cc121",
-    "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    "6c01c851355f1e5d191f9d174d78222fb8cc527999e8fbeaac15f5c7a6ac406a",
+    "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(processamento_id, funcionario_id) DO UPDATE SET salario_base_minor = excluded.salario_base_minor, faltas = excluded.faltas, actualizado_em = excluded.actualizado_em, actualizado_por = excluded.actualizado_por, actualizado_por_nome = excluded.actualizado_por_nome"
   ],
   [
     "69f77f725ac42d21d116ce72f7aede14bebd74e55932ce5f98732a6655a87c80",
@@ -3118,6 +3125,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "e9a1c09c7e89cac3b8cc46a8ef37c93fa38fb99dd8f5ff8f1cf581037bbcab13",
     "INSERT OR IGNORE INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, 'sistema')"
+  ],
+  [
+    "23939b5a3d1536535d2ddba15f06f52527755624631217ea2a71785c84dd9b94",
+    "INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, ?, ?)"
+  ],
+  [
+    "e3c7c8dabe7d93b20bb472514f094e994d0cefa368e15956bc28e38800a7572d",
+    "INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, NULL, ?)"
   ],
   [
     "e16374e668915efbf27cbce0b5bb7626dade1be79c95d1c48379c271017e4355",
@@ -4190,6 +4205,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "1d0bb0e8c1e55cda9b7b0c003cf6120f27dc6fd10da89e322d2a857caa3d66f9",
     "SELECT id, ano, lei_referencia, vigencia_inicio, vigencia_fim FROM rh_irt_tabela ORDER BY vigencia_inicio DESC"
+  ],
+  [
+    "45deb9d1e3e49c8285d81234f9a4a11fb21c91bb67e50bfbbecdf31f8e5e78d7",
+    "SELECT id, ano, mes, estado FROM rh_processamento WHERE tipo = 'normal' AND estado IN ('aberto', 'calculado')"
   ],
   [
     "6d7b3935f9f8e4a18e369d3e76f6ce48e560a71f078c394f230a91155d30eb19",
@@ -5320,12 +5339,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_processamento SET fechado_por = ?, fechado_por_nome = ?, fechado_em = ?, lancamentos_json = ?, estado = 'fechado', actualizado_em = ? WHERE id = ? AND estado = 'pago'"
   ],
   [
+    "ce354c2dd8205914097363d6bdf17575dd256a6381d9aa68a9a9a8a248eead55",
+    "UPDATE rh_processamento SET id = ? WHERE id = ? AND tipo = 'normal'"
+  ],
+  [
     "45a9f8be6f789e6d3cfc784a87ce9d8cbd3f0be8aa2e972904a95bafc800749b",
     "UPDATE rh_processamento SET pago_por = ?, pago_por_nome = ?, pago_em = ?, conta_pagamento = ?, estado = 'pago', actualizado_em = ? WHERE id = ? AND estado = 'aprovado'"
   ],
   [
-    "51a6f5049c5e4e83c7696c56f9323eeb17bfbfbf837ea5c6ef89b4b234c729fb",
-    "UPDATE rh_processamento_entrada SET salario_base_minor = ?, faltas = ?, actualizado_em = ?, actualizado_por = ?, actualizado_por_nome = ? WHERE id = ?"
+    "aa14e21efe846c45a987bdebd03dbee080dd29e0a7c4169124ef7cc9429828bc",
+    "UPDATE rh_processamento_entrada SET id = ? || ':' || funcionario_id, processamento_id = ? WHERE processamento_id = ?"
+  ],
+  [
+    "a637275716e5c74186aabe798fe4f59ea2cff6258bf26df1aaca985c029631d5",
+    "UPDATE rh_recibo SET processamento_id = ? WHERE processamento_id = ?"
   ],
   [
     "b09add5b32852d9029b3a3f24a3bb9f3b268d19f2da785e41f81a8b046e5574d",
@@ -5338,6 +5365,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "bb5095356949ee1a7a4393dc34b55e0ec01d8533999304390af89620b573b7e4",
     "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, classe = ?, por_dia = ?, valor_padrao_minor = ?, periodicidade = ?, mes_pagamento = ?, proporcional_faltas = ?, auto_atribuir = ?, descricao = ?, incidencia_confirmada = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "66659958a91cc8d5cffe74bb693ad36a9457d14dec1061b12f36f440a83f7545",
+    "UPDATE rh_rubrica_pontual SET processamento_id = ? WHERE processamento_id = ?"
   ],
   [
     "5d5dd6d186e54faa20ce797f30001ca5cc398a3f6ae1f7844e6bfe55b5e77f33",
@@ -5358,6 +5389,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6ab67be9e4abff9f62321f06e31923459f9ad9eab5998d473946c8903d9ba820",
     "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'"
+  ],
+  [
+    "758571444fa4d7d04da4adfad350a2aefa97e23a4588ab235674ce30a10c150c",
+    "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND entityType IN ('rh_processamento', 'rh_recibo', 'rh_recibo_linha', 'rh_processamento_entrada', 'rh_rubrica_pontual')"
   ],
   [
     "d8cbfaf1464662df9dfc78f3270a83832ab0ea264725dffb847f2855cf12f4df",
