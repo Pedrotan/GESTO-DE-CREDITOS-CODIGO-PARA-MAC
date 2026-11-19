@@ -12,6 +12,7 @@ import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Badge } from '@/componentes/ui/badge';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { ehSoFuncionario } from '@/bibliotecas/portal-funcionario';
 import { PainelSincronizacao } from '@/componentes/sync/PainelSincronizacao';
 import { useData } from '@/contextos/ContextoDados';
 import { formatCurrency, formatDateTime } from '@/bibliotecas/formatters';
@@ -338,8 +339,8 @@ export function Header({ title, subtitle, onMobileMenuToggle }: HeaderProps) {
             <span className="hidden min-[1800px]:inline">Instalar App</span>
           </Button>
         )}
-        {/* Search - Responsive */}
-        <div className="relative">
+        {/* Search - Responsive (o funcionário não pesquisa clientes nem créditos) */}
+        <div className={cn("relative", ehSoFuncionario(user) && "hidden")}>
           <Button
             variant="ghost"
             size="icon"

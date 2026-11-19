@@ -27,6 +27,7 @@ import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
 import { MASTER_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-licencas';
 import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, isPrimaryOwner, PAGE_PERMISSIONS, parsePermissionList } from '../src/bibliotecas/conta-principal';
+import { CHAVE_ADMIN_PRINCIPAL, lerAdminPrincipal, motivoRecusaDesignar } from '../src/bibliotecas/administrador-principal';
 import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-tokens';
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
@@ -3212,6 +3213,22 @@ app.whenReady().then(async () => {
     let reservedHere = false;
     try {
       for (const statement of statements) {
+      // Designar ou transferir o Administrador principal (shared_settings): as regras são verificadas aqui, com a base.
+      if (mutationTable(statement.sql) === 'shared_settings' && String(statement.params?.[0] ?? '') === CHAVE_ADMIN_PRINCIPAL) {
+        const sessao: any = userAuth.assertAuthenticated(event.sender.id);
+        const actorRow: any = await runQuery('get', 'SELECT id, role, status, name FROM users WHERE id = ? LIMIT 1', [sessao.id]);
+        const actualRow: any = await runQuery('get', 'SELECT value FROM shared_settings WHERE key = ? LIMIT 1', [CHAVE_ADMIN_PRINCIPAL]).catch(() => null);
+        const novo = lerAdminPrincipal(statement.params?.[1]);
+        const alvo: any = novo ? await runQuery('get', 'SELECT id, role, status, name FROM users WHERE id = ? LIMIT 1', [novo.userId]) : null;
+        const motivo = !novo ? 'Designação do Administrador principal inválida.'
+          : novo.designadoPor !== sessao.id ? 'A designação tem de ser feita pelo utilizador autenticado.'
+            : motivoRecusaDesignar(actorRow, alvo, lerAdminPrincipal(actualRow?.value));
+        if (motivo) {
+          await writeAuthAudit(sessao, 'permission_denied', motivo, { targetUserId: novo?.userId || null, sql: 'admin_principal' });
+          throw new Error(motivo);
+        }
+        continue;
+      }
       const kind = userStatementKind(statement.sql);
       if (!kind) continue;
       if (kind === 'schema' && financialSchemaBootstrapOpen) continue;
@@ -3251,7 +3268,8 @@ app.whenReady().then(async () => {
         const target: any = kind === 'insert' ? null : await runQuery("get", "SELECT id, role, isOwner FROM users WHERE id = ? LIMIT 1", [params[params.length - 1]]);
         // A conta da sessão é relida da base: a marca de conta principal nunca vem do renderer.
         const actorRow: any = await runQuery("get", "SELECT id, role, isOwner, permissions FROM users WHERE id = ? LIMIT 1", [currentUser.id]);
-        const verdict = checkUserMutation({ kind, sql: statement.sql, params, actor: actorRow || currentUser, target });
+        const principalRow: any = await runQuery('get', 'SELECT value FROM shared_settings WHERE key = ? LIMIT 1', [CHAVE_ADMIN_PRINCIPAL]).catch(() => null);
+        const verdict = checkUserMutation({ kind, sql: statement.sql, params, actor: actorRow || currentUser, target, principal: lerAdminPrincipal(principalRow?.value) });
         if (verdict.error) {
           await writeAuthAudit(currentUser, "permission_denied", verdict.error, { targetUserId: target?.id || null, sql: statement.sql.slice(0, 120) });
           throw new Error(verdict.error);

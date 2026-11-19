@@ -6,6 +6,7 @@ import { useData } from '@/contextos/ContextoDados';
 import { Role } from '@/tipos/autenticacao';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { isPrimaryOwner } from '@/bibliotecas/conta-principal';
+import { ehSoFuncionario } from '@/bibliotecas/portal-funcionario';
 import { validateLicense } from '@/bibliotecas/licenciamento';
 import { CaixaEletronicoIcon } from '@/componentes/ui/CaixaEletronicoIcon';
 import {
@@ -97,6 +98,11 @@ interface MenuItem {
   /** Outras rotas que também marcam este item como activo (páginas agrupadas numa só entrada). */
   alsoActive?: string[];
 }
+
+const MENU_FUNCIONARIO: MenuItem[] = [
+  { icon: UserCog, label: 'Portal do Funcionário', path: '/rh/portal' },
+  { icon: Gavel, label: 'Termos e Políticas', path: '/termos-e-politicas' },
+];
 
 const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: 'Painel', path: '/' },
@@ -299,7 +305,10 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
     }
   };
 
-  const filteredMenu = menuItems.filter(item => {
+  // Funcionário: o menu é só o portal (nada de créditos nem da gestão da empresa).
+  const soFuncionario = ehSoFuncionario(user);
+  const filteredMenu = (soFuncionario ? MENU_FUNCIONARIO : menuItems).filter(item => {
+    if (soFuncionario) return true;
     // Grupos sem permissão própria (ex.: "Usuários") só existem para juntar
     // subitens com regras de acesso diferentes; a visibilidade do grupo
     // depende de haver pelo menos um subitem visível para este utilizador.

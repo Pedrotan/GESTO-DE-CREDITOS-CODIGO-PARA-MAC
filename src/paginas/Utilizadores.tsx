@@ -32,7 +32,7 @@ import {
     Trash2, UserPlus, ShieldAlert, KeyRound, Lock, LockOpen, Download, Upload,
     FileText, Bell, Eye, EyeOff, ShieldCheck, ShieldX, Users as UsersIcon,
     Search, Sliders, ChevronDown, ChevronRight, AlertTriangle, Clock,
-    Building2, Shield, CheckCircle2, XCircle, ArrowRight, RefreshCw, Calendar
+    Building2, Shield, CheckCircle2, XCircle, ArrowRight, RefreshCw, Calendar, Crown
 } from 'lucide-react';
 import { toast } from '@/ganchos/usar-toast';
 import { generateExcelTemplate, parseExcelFile } from '@/bibliotecas/ExcelHelper';
@@ -48,6 +48,8 @@ import { ServicoAuditoriaAvancada } from '@/servicos/ServicoAuditoriaAvancada';
 import { formatAuditTimestamp, toAuditEvent, type AuditEvent } from '@/bibliotecas/auditoria-analise';
 import { generateUsersPermissionsMatrixPDF } from '@/bibliotecas/matriz-permissoes-pdf';
 import { hasFullAuthority, isPrimaryOwner } from '@/bibliotecas/conta-principal';
+import { motivoRecusaDesignar, motivoRecusaNivel, type AdminPrincipal } from '@/bibliotecas/administrador-principal';
+import { ServicoAdminPrincipal } from '@/servicos/ServicoAdminPrincipal';
 import { maisRecentePrimeiro } from '@/bibliotecas/ordenacao';
 
 interface PasswordResetRequest {
@@ -89,12 +91,38 @@ export default function Utilizadores() {
         void db.all<{ id: string }>('SELECT id FROM users WHERE isOwner = 1').then(rows => setContasPrincipais(new Set(rows.map(row => String(row.id))))).catch(() => setContasPrincipais(new Set()));
     }, [nivelAlvo]);
     const contaMarcadaPrincipal = (u: User | null) => Boolean(u && contasPrincipais.has(u.id));
+    // Administrador principal (sincronizado): só ele muda o nível de outro Super Administrador.
+    const [principal, setPrincipal] = useState<AdminPrincipal | null>(null);
+    const recarregarPrincipal = useCallback(() => ServicoAdminPrincipal.obter().then(setPrincipal).catch(() => setPrincipal(null)), []);
+    useEffect(() => { void recarregarPrincipal(); }, [recarregarPrincipal, users]);
+    const [designarAlvo, setDesignarAlvo] = useState<User | null>(null);
+    const [aDesignar, setADesignar] = useState(false);
+    const podeDesignar = (u: User) => !motivoRecusaDesignar(currentUser, u, principal);
+    const confirmarDesignacao = async () => {
+        if (!designarAlvo || !currentUser) return;
+        setADesignar(true);
+        try {
+            const anterior = principal;
+            await ServicoAdminPrincipal.designar(currentUser, designarAlvo);
+            await addLog('update', 'user', anterior
+                ? `Transferiu a função de Administrador principal de ${anterior.nome} para ${designarAlvo.name}`
+                : `Designou ${designarAlvo.name} como Administrador principal`, currentUser.id, currentUser.name,
+                anterior ? { adminPrincipal: anterior.nome } : undefined, { adminPrincipal: designarAlvo.name }, { targetUserId: designarAlvo.id, origin: 'admin_principal' });
+            await recarregarPrincipal();
+            toast({ title: 'Administrador principal', description: `${designarAlvo.name} é agora o Administrador principal.` });
+            setDesignarAlvo(null);
+        } catch (error) {
+            toast({ variant: 'destructive', title: 'Não foi possível designar', description: error instanceof Error ? error.message : String(error) });
+        } finally { setADesignar(false); }
+    };
     const bloqueioNivel = (u: User | null) => !u ? null
         : u.id === currentUser?.id ? 'Não pode mudar o seu próprio nível. Peça a outro Super Administrador.'
-            : contaMarcadaPrincipal(u) ? 'Esta é a conta principal da instalação: o nível dela só pode ser alterado pela própria.'
-                : null;
+            : contaMarcadaPrincipal(u) && !principal ? 'Esta é a conta principal da instalação: o nível dela só pode ser alterado pela própria.'
+                : motivoRecusaNivel(currentUser, u, principal);
     const atribuirNivel = async (role: string, motivo: string) => {
         if (!nivelAlvo || !currentUser) return;
+        const recusa = motivoRecusaNivel(currentUser, nivelAlvo, await ServicoAdminPrincipal.obter());
+        if (recusa) throw new Error(recusa);
         const erroMotivo = await ServicoAuditoriaAvancada.checkJustification(motivo, currentUser.id);
         if (erroMotivo) throw new Error(erroMotivo);
         ServicoControloAcesso.verificarUltimoSuperAdmin(users, nivelAlvo.id, nivelAlvo.status, role);
@@ -885,9 +913,10 @@ export default function Utilizadores() {
                                                         <Badge variant="outline" className={ROLES[u.role]?.badgeColor || 'border-slate-200'}>
                                                             {ROLES[u.role]?.label || u.role}
                                                         </Badge>
-                                                        {isSuperAdmin && (
-                                                            <Badge className="border-amber-300 bg-amber-100 text-[10px] text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300">
-                                                                Conta principal
+                                                        {principal?.userId === u.id && (
+                                                            <Badge className="gap-1 border-amber-300 bg-amber-100 text-[10px] text-amber-800 hover:bg-amber-100 dark:bg-amber-950/40 dark:text-amber-300"
+                                                                title={`Designado por ${principal.designadoPorNome} em ${new Date(principal.em).toLocaleString('pt-AO')}`}>
+                                                                <Crown className="h-3 w-3" /> Administrador principal
                                                             </Badge>
                                                         )}
                                                     </div>
@@ -967,6 +996,18 @@ export default function Utilizadores() {
                                                         onClick={() => setNivelAlvo(u)}
                                                     >
                                                         <ShieldCheck className="h-4 w-4" />
+                                                    </Button>}
+
+                                                    {/* Definir como Administrador principal (designar, ou transferir pelo principal actual) */}
+                                                    {u.role === 'super_admin' && principal?.userId !== u.id && podeDesignar(u) && <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-950/30"
+                                                        title={principal ? 'Transferir a função de Administrador principal' : 'Definir como Administrador principal'}
+                                                        aria-label={`Definir ${u.name} como Administrador principal`}
+                                                        onClick={() => setDesignarAlvo(u)}
+                                                    >
+                                                        <Crown className="h-4 w-4" />
                                                     </Button>}
 
                                                     {/* Ficha PDF */}
@@ -1731,6 +1772,22 @@ export default function Utilizadores() {
                 cancelLabel={alertModal.cancelLabel}
                 onConfirm={alertModal.onConfirm}
             />
+            <Dialog open={Boolean(designarAlvo)} onOpenChange={open => { if (!open && !aDesignar) setDesignarAlvo(null); }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle className="flex items-center gap-2"><Crown className="h-5 w-5 text-amber-500" /> {principal ? 'Transferir Administrador principal' : 'Definir Administrador principal'}</DialogTitle>
+                        <DialogDescription>
+                            {principal
+                                ? `${designarAlvo?.name} passa a ser o Administrador principal. Deixa de o ser e, a partir daí, só ${designarAlvo?.name} pode mudar o nível de outros Super Administradores.`
+                                : `${designarAlvo?.name} passa a ser o Administrador principal: só ele pode baixar ou mudar o nível de outros Super Administradores, e o nível dele não pode ser alterado por outros. Só ele poderá transferir esta função.`}
+                        </DialogDescription>
+                    </DialogHeader>
+                    <DialogFooter>
+                        <Button variant="outline" disabled={aDesignar} onClick={() => setDesignarAlvo(null)}>Cancelar</Button>
+                        <Button className="bg-amber-600 hover:bg-amber-700" disabled={aDesignar} onClick={() => void confirmarDesignacao()}><Crown className="mr-1.5 h-4 w-4" /> Confirmar</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
             <AtribuirNivel
                 open={Boolean(nivelAlvo)}
                 onOpenChange={open => { if (!open) setNivelAlvo(null); }}

@@ -1,7 +1,8 @@
 import { Suspense, useEffect, useState } from "react";
 import { isChunkLoadError, lazyWithReload, reloadForNewVersion } from "@/bibliotecas/carregamento-modulos";
 import { TooltipProvider } from "@/componentes/ui/tooltip";
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { ehSoFuncionario, rotaPermitidaFuncionario } from "@/bibliotecas/portal-funcionario";
 import { useData } from "@/contextos/ContextoDados";
 import { useAuth } from "@/contextos/ContextoAutenticacao";
 import { MaintenanceGuard } from "@/componentes/MaintenanceGuard";
@@ -84,9 +85,15 @@ const suspenseFallback = <SplashScreen />;
 
 const ProtectedRoute = ({ children, permission }: { children: JSX.Element; permission?: string }) => {
   const { isAuthenticated, user } = useAuth();
+  const location = useLocation();
 
   if (!isAuthenticated) {
     return <Navigate to="/entrar" replace />;
+  }
+
+  // Funcionário: só o portal (nada de créditos nem da gestão). Qualquer outra página leva ao portal.
+  if (ehSoFuncionario(user) && !rotaPermitidaFuncionario(location.pathname)) {
+    return <Navigate to="/rh/portal" replace />;
   }
 
   // Página com permissão própria: só a conta principal passa sempre; os outros precisam da permissão
@@ -112,7 +119,10 @@ import { AVAILABLE_PERMISSIONS } from "@/tipos/autenticacao";
 /** Páginas de RH: só com o módulo incluído na licença da empresa. */
 const GuardaModuloRH = ({ children }: { children: JSX.Element }) => {
   const { activo, aCarregar } = useModuloRH();
+  const { user } = useAuth();
   if (aCarregar) return suspenseFallback;
+  // Sem o módulo, o funcionário não tem para onde ir (o painel é de créditos): explica em vez de redireccionar.
+  if (!activo && ehSoFuncionario(user)) return <div className="flex min-h-[60vh] items-center justify-center p-6 text-center text-sm text-slate-600">O módulo de Recursos Humanos não está activo nesta empresa. Fale com o administrador.</div>;
   return activo ? children : <Navigate to="/" replace />;
 };
 

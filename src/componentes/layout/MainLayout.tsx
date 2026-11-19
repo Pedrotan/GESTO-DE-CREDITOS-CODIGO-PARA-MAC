@@ -16,6 +16,8 @@ import { BannerCongelamento } from '@/componentes/contabilidade/ControloPanico';
 import { MonitorSeguranca } from '@/componentes/seguranca/MonitorSeguranca';
 import { EnvioRelatoriosAgendados } from '@/componentes/pagamentos/EnvioRelatoriosAgendados';
 import { cn } from '@/bibliotecas/utils';
+import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { ehSoFuncionario } from '@/bibliotecas/portal-funcionario';
 import { discardDraftsOnRouteChange } from '@/ganchos/usar-rascunho-formulario';
 import { AvisosMensagens } from '@/componentes/chat/AvisosMensagens';
 
@@ -26,6 +28,7 @@ interface MainLayoutProps {
 }
 
 export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
+  const soFuncionario = ehSoFuncionario(useAuth().user);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem('tango_sidebar_collapsed') === 'true';
@@ -75,7 +78,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
         )}
       >
         {/* Cotações do BNA, acima do cabeçalho */}
-        <TickerTaxas />
+        {!soFuncionario && <TickerTaxas />}
 
         <Header
           title={title}
@@ -86,13 +89,16 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
         <BannerCongelamento />
         <MonitorSeguranca />
         <AvisosMensagens />
-        <EnvioRelatoriosAgendados />
-        <VerificacaoContabilisticaDiaria />
-        <LembretesCobranca />
-        <TarefaDiariaRH />
-        <AvisosPontoSistema />
-        <ProcessamentoAlcadas />
-        <LembreteFechoMes />
+        {/* Avisos de créditos, contabilidade e gestão: nunca para o funcionário (só vê o portal). */}
+        {!soFuncionario && <>
+          <EnvioRelatoriosAgendados />
+          <VerificacaoContabilisticaDiaria />
+          <LembretesCobranca />
+          <TarefaDiariaRH />
+          <AvisosPontoSistema />
+          <ProcessamentoAlcadas />
+          <LembreteFechoMes />
+        </>}
         <LigacaoNuvemDesktop />
         <ControloHorarioAcesso />
         <main className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">{children}</main>

@@ -4,6 +4,8 @@
 //
 // Regras partilhadas pela interface e pelo processo principal (que é quem as impõe de facto).
 
+import { motivoRecusaNivel, type AdminPrincipal } from './administrador-principal.ts';
+
 export const isPrimaryOwner = (user: { isOwner?: unknown; role?: unknown } | null | undefined) =>
     Boolean(user) && (user!.isOwner === true || user!.isOwner === 1 || user!.isOwner === '1' || String(user!.role) === 'super_admin');
 
@@ -101,6 +103,8 @@ export type UserMutationCheck = {
     actor: { id: string; isOwner?: unknown; permissions?: unknown };
     /** Utilizador alvo (UPDATE/DELETE ... WHERE id = ?), lido da base pelo processo principal. */
     target?: { id: string; isOwner?: unknown; role?: string } | null;
+    /** Administrador principal designado (shared_settings), lido da base pelo processo principal. */
+    principal?: AdminPrincipal | null;
 };
 
 /**
@@ -125,6 +129,20 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
         return { error: null, changesPrivileges: true };
     }
     const targetIsOwner = isPrimaryOwner(input.target);
+    // Administrador principal: só ele muda o nível, as permissões ou o estado de outro Super Administrador, e o dele
+    // ninguém muda (nem ele próprio, sem transferir antes a função). Desbloquear depois de palavras-passe erradas continua livre.
+    if (input.principal) {
+        const cols = input.kind === 'delete' ? [] : updatedUserColumns(input.sql);
+        // Estado: só conta desactivar/bloquear (entrar, sair ou desbloquear mudam o estado para active/online/offline).
+        const estado = cols.includes('status') ? updatedUserValue(input.sql, input.params, 'status') : undefined;
+        const desactiva = estado !== undefined && estado !== null && !['active', 'online', 'offline'].includes(String(estado));
+        // Perfil: só conta quando muda de facto (os formulários de perfil reenviam o papel actual).
+        const papel = cols.includes('role') ? updatedUserValue(input.sql, input.params, 'role') : undefined;
+        const mudaPapel = papel !== undefined && String(papel) !== String(input.target?.role ?? '');
+        const mudaNivel = input.kind === 'delete' || desactiva || mudaPapel;
+        const motivo = mudaNivel ? motivoRecusaNivel(input.actor, input.target, input.principal) : null;
+        if (motivo) return { error: motivo, changesPrivileges: true };
+    }
     if (input.kind === 'delete') {
         if (targetIsOwner) return { error: 'O Super Administrador principal não pode ser eliminado.', changesPrivileges: true };
         return { error: null, changesPrivileges: true };
@@ -142,6 +160,9 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
     const levelChangeOnly = columns.length > 0 && columns.every(column => ['role', 'permissions'].includes(column));
     const markedOwner = input.target?.isOwner === true || input.target?.isOwner === 1 || input.target?.isOwner === '1';
     if (targetIsOwner && !selfUpdate && levelChangeOnly && !markedOwner && hasFullAuthority(input.actor)) return { error: null, changesPrivileges: true };
+    // Com Administrador principal designado, é ele quem decide o nível dos outros Super Administradores (também da conta
+    // marcada como dona da instalação neste computador).
+    if (input.principal && String(input.actor.id) === input.principal.userId && targetIsOwner && !selfUpdate && levelChangeOnly) return { error: null, changesPrivileges: true };
     if (targetIsOwner && !selfUpdate) {
         return { error: 'O Super Administrador principal só pode ser alterado por ele próprio.', changesPrivileges: privileged.length > 0 };
     }
