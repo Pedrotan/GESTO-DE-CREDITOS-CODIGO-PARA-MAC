@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
+import { cn } from '@/bibliotecas/utils';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
@@ -177,46 +178,53 @@ export default function ProcessamentoRH() {
     return (
         <MainLayout title="Processamento salarial" subtitle="Mês a mês: lançar salários e faltas, calcular, aprovar, pagar e fechar">
             <NavegacaoRH extra={LIGACOES_SALARIOS} />
-            <div className="grid gap-4 lg:grid-cols-[290px_1fr]">
-                <aside className="space-y-3">
-                    <div className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-2 dark:border-slate-800 dark:bg-slate-900">
-                        <Button size="icon" variant="ghost" aria-label="Ano anterior" onClick={() => { setAno(a => a - 1); setSeleccionado(null); }}><ChevronLeft className="h-4 w-4" /></Button>
-                        <div className="text-center"><div className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Exercício</div><div className="text-lg font-black tabular-nums">{ano}</div></div>
-                        <Button size="icon" variant="ghost" aria-label="Ano seguinte" onClick={() => { setAno(a => a + 1); setSeleccionado(null); }}><ChevronRight className="h-4 w-4" /></Button>
+            <div className="space-y-4">
+                {/* Faixa de meses igual à da página de Contratos. */}
+                <div className="space-y-3">
+                    <div className="flex flex-col gap-3 rounded-lg border border-border/40 bg-muted/20 p-3 lg:flex-row lg:items-center lg:justify-between">
+                        <h2 className="text-base font-bold text-foreground md:text-lg">Salários de {MESES_CURTOS[mesSel - 1]} de {ano}</h2>
+                        <div className="flex flex-wrap items-center gap-2">
+                            {calcular && <Button variant="outline" size="sm" className="h-9" onClick={() => setAbrir(true)}><Plus className="mr-1.5 h-4 w-4" /> Férias, Natal ou acerto</Button>}
+                            <div className="flex items-center gap-1 rounded-lg border bg-background p-0.5">
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Ano anterior" onClick={() => { setAno(a => a - 1); setSeleccionado(null); }}><ChevronLeft className="h-4 w-4" /></Button>
+                                <span className="min-w-[40px] px-2 text-center text-xs font-bold">{ano}</span>
+                                <Button variant="ghost" size="sm" className="h-8 w-8 p-0" aria-label="Ano seguinte" onClick={() => { setAno(a => a + 1); setSeleccionado(null); }}><ChevronRight className="h-4 w-4" /></Button>
+                            </div>
+                        </div>
                     </div>
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 px-1 text-[10px] font-semibold text-slate-500">
-                        {(['passado', 'actual', 'futuro'] as Fase[]).map(f => <span key={f} className="flex items-center gap-1"><span className={`h-2 w-2 rounded-full ${CORES_FASE[f].ponto}`} />{f === 'passado' ? 'Passados' : f === 'actual' ? 'Em aberto' : 'Por chegar'}</span>)}
-                    </div>
-                    <div className="space-y-1.5">
-                        {MESES_CURTOS.map((nome, i) => {
-                            const m = i + 1;
-                            const f = fase(ano, m);
-                            const c = CORES_FASE[f];
-                            const proc = normalDe(ano, m);
-                            const activo = mesSel === m && (!seleccionado || p?.tipo === 'normal');
-                            return (
-                                <div key={m} className={`group flex items-center gap-2 rounded-xl border px-3 py-2 transition ${c.cartao} ${activo ? c.activo : ''}`}>
-                                    <button type="button" className="min-w-0 flex-1 text-left" onClick={() => { setMesSel(m); setSeleccionado(null); }}>
-                                        <div className="flex items-center gap-2">
-                                            <span className={`h-2 w-2 shrink-0 rounded-full ${c.ponto}`} />
-                                            <span className="text-sm font-black text-slate-800 dark:text-slate-100">{nome}</span>
-                                            {proc && <span className={`ml-auto rounded-full px-1.5 py-0.5 text-[10px] font-bold ${CORES_ESTADO[proc.estado]}`}>{proc.estado}</span>}
-                                        </div>
-                                        <div className={`mt-0.5 text-[11px] font-semibold ${c.texto}`}>
-                                            {proc ? (proc.num_recibos ? `${proc.num_recibos} funcionário(s) · ${kz(proc.total_liquido_minor)}` : 'Aberto, por calcular') : c.rotulo}
-                                        </div>
+                    <div>
+                        <div className="flex gap-2.5 overflow-x-auto rounded-2xl border border-primary/15 bg-primary/10 p-2 shadow-sm" style={{ scrollbarWidth: 'thin' }}>
+                            {MESES_CURTOS.map((nome, i) => {
+                                const m = i + 1;
+                                const f = fase(ano, m);
+                                const proc = normalDe(ano, m);
+                                const activo = mesSel === m && (!seleccionado || p?.tipo === 'normal');
+                                const fechado = proc?.estado === 'fechado';
+                                const ponto = proc ? (proc.num_recibos ? 'bg-green-500' : 'bg-orange-500') : f === 'actual' ? 'bg-slate-400' : null;
+                                return (
+                                    <button key={m} type="button" onClick={() => { setMesSel(m); setSeleccionado(null); }}
+                                        title={proc ? `${nome}: ${proc.estado}${proc.num_recibos ? ` · ${proc.num_recibos} funcionário(s) · ${kz(proc.total_liquido_minor)}` : ''}` : `${nome}: ${CORES_FASE[f].rotulo}`}
+                                        className={cn('relative flex min-w-[64px] flex-col items-center gap-1 whitespace-nowrap rounded-xl px-3.5 py-2.5 text-xs transition-all duration-200',
+                                            activo ? (fechado ? 'scale-[1.03] bg-slate-700 font-bold text-white shadow-md' : 'scale-[1.03] bg-sidebar-primary font-bold text-sidebar-primary-foreground shadow-gold')
+                                                : fechado ? 'bg-background/70 text-muted-foreground/60 shadow-sm hover:bg-muted/60'
+                                                    : 'bg-background text-foreground/80 shadow-sm hover:-translate-y-0.5 hover:shadow-md dark:bg-white/10 dark:hover:bg-white/15',
+                                            !activo && f === 'passado' && 'text-red-600 dark:text-red-400')}>
+                                        <span className="font-semibold tracking-wide">{nome.slice(0, 3)}</span>
+                                        {fechado ? <Lock className="h-3 w-3 opacity-70" /> : ponto ? <span className={cn('inline-block h-1.5 w-1.5 rounded-full', ponto, f === 'actual' && 'animate-pulse')} /> : <span className="inline-block h-1.5 w-1.5" />}
                                     </button>
-                                    {proc && proc.num_recibos > 0 && (
-                                        <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0" title={`Baixar a folha de ${nome}`} aria-label={`Baixar a folha de ${nome}`} onClick={() => void pdfFolhaDe(proc)}>
-                                            <FileDown className="h-4 w-4" />
-                                        </Button>
-                                    )}
-                                </div>
-                            );
-                        })}
+                                );
+                            })}
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-muted-foreground">
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500" /> Salários calculados</span>
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-orange-500" /> Aberto, por calcular</span>
+                            <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-slate-400" /> Mês corrente por abrir</span>
+                            <span className="flex items-center gap-1.5"><Lock className="h-3 w-3" /> Mês fechado</span>
+                            <span className="flex items-center gap-1.5"><span className="font-bold text-red-600 dark:text-red-400">Mês</span> já passado</span>
+                            <span>Os meses futuros não têm ponto.</span>
+                        </div>
                     </div>
-                    {calcular && <Button variant="outline" className="w-full" onClick={() => setAbrir(true)}><Plus className="mr-1.5 h-4 w-4" /> Férias, Natal ou acerto</Button>}
-                </aside>
+                </div>
 
                 <section className="min-w-0 space-y-4">
                     {outrosDoMes.length > 0 && (
