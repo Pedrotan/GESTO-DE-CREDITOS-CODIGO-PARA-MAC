@@ -210,12 +210,12 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE simulations_flat_v2 ( id TEXT PRIMARY KEY, reference TEXT, date TEXT NOT NULL, clientName TEXT, clientIncome REAL DEFAULT 0, amount REAL DEFAULT 0, term INTEGER DEFAULT 0, interestRate REAL DEFAULT 0, method TEXT CHECK(method IN ('price', 'sac', 'flat')), riskProfile TEXT CHECK(riskProfile IN ('low', 'medium', 'high')), totalPayment REAL DEFAULT 0, monthlyPayment REAL DEFAULT 0, aiAnalysis TEXT, usuario_id TEXT, createdAt TEXT NOT NULL, status TEXT DEFAULT 'simulated', clientId TEXT, productId TEXT, verificationCode TEXT, expiresAt TEXT, details TEXT, convertedCreditId TEXT, updatedAt TEXT )",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_delete BEFORE DELETE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_update BEFORE UPDATE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')",
-  "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period_v2 BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) AND NOT EXISTS (SELECT 1 FROM accounting_entries WHERE id = NEW.id) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_daily_closes_immutable_delete BEFORE DELETE ON accounting_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_daily_closes_immutable_update BEFORE UPDATE ON accounting_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_delete BEFORE DELETE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_update BEFORE UPDATE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis')",
-  "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique_v2 BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' AND id <> NEW.id ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entry_seals_delete BEFORE DELETE ON accounting_entry_seals BEGIN SELECT RAISE(ABORT, 'Os selos contabilísticos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entry_seals_update BEFORE UPDATE ON accounting_entry_seals BEGIN SELECT RAISE(ABORT, 'Os selos contabilísticos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_decided BEFORE UPDATE ON accounting_requests WHEN OLD.status <> 'pending' BEGIN SELECT RAISE(ABORT, 'Pedido já decidido: não pode ser alterado')",
@@ -345,7 +345,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DROP TABLE dictionary_old",
   "DROP TABLE payments_old",
   "DROP TABLE simulations",
+  "DROP TRIGGER IF EXISTS trg_accounting_closed_period",
   "DROP TRIGGER IF EXISTS trg_accounting_entries_chain",
+  "DROP TRIGGER IF EXISTS trg_accounting_entries_payment_unique",
   "DROP TRIGGER IF EXISTS trg_accounting_requests_segregation",
   "DROP TRIGGER IF EXISTS trg_audit_alerts_self_close",
   "DROP TRIGGER IF EXISTS trg_credit_restructurings_four_eyes",
@@ -1938,8 +1940,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_update BEFORE UPDATE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')"
   ],
   [
-    "b6df90ca87031a2803a33cfdd969cb06d81f4e4ca69aacf0f8ca408559b1fe43",
-    "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')"
+    "4868f97b71f4ccb11a8807757815eb23eea45ddcdd363641007f35f907f5790d",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period_v2 BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) AND NOT EXISTS (SELECT 1 FROM accounting_entries WHERE id = NEW.id) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')"
   ],
   [
     "87c9807850fd739106f771d516096e7ec8df4c42535b810503b7a64091de8f41",
@@ -1958,8 +1960,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_update BEFORE UPDATE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis')"
   ],
   [
-    "b60134d5f108909e150202f69308450822503e53f187db23da3c5d0ab20ddcd9",
-    "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')"
+    "6cbd2d9ac8b7fac9fd66ae97dac1e7a9c43ab975c0b4a5370eb282ce89c7729e",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique_v2 BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' AND id <> NEW.id ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')"
   ],
   [
     "1b608049247978e2dbe06f7477ba9e50083eeaf30f9d752889cb6bb099014f2a",
@@ -2478,8 +2480,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DROP TABLE simulations"
   ],
   [
+    "29265ea91d8b7941748eb3535ac3d9babf57c5200cc44047f01c3010165aa4a7",
+    "DROP TRIGGER IF EXISTS trg_accounting_closed_period"
+  ],
+  [
     "ad80615c68c7fc370bec78de78820ceb836baeda98a21a3c89047fe4c9399d45",
     "DROP TRIGGER IF EXISTS trg_accounting_entries_chain"
+  ],
+  [
+    "4663e2984cea00c6c369b6bea25d286a5f986178e6688e8934ac675b6acda8de",
+    "DROP TRIGGER IF EXISTS trg_accounting_entries_payment_unique"
   ],
   [
     "90a6efc0e4431481fdcaf66c4270cdc654a9c19e066a7b9874b70e2dc5bb5b39",

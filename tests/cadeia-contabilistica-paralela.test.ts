@@ -35,3 +35,27 @@ test('apontar para um lançamento que não existe continua recusado', () => {
     lancar('a', LEDGER_GENESIS_HASH);
     assert.throws(() => lancar('x', 'f'.repeat(64)), /o lançamento anterior não existe/);
 });
+
+test('lançamento repetido pela sincronização num mês fechado é ignorado; um novo continua recusado', () => {
+    const db = new DatabaseSync(':memory:');
+    db.exec(`CREATE TABLE accounting_entries (id TEXT PRIMARY KEY, timestamp TEXT, type TEXT, paymentId TEXT, integrityHash TEXT, previousHash TEXT);
+        CREATE TABLE closed_months (id TEXT PRIMARY KEY);
+        CREATE TRIGGER trg_accounting_closed_period BEFORE INSERT ON accounting_entries
+        WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7))
+        BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.'); END;
+        CREATE TRIGGER trg_accounting_entries_payment_unique BEFORE INSERT ON accounting_entries
+        WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS (SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment')
+        BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger'); END;`);
+    for (const sql of LEDGER_PROTECTION_SQL.filter(s => /accounting_closed_period|accounting_entries_payment_unique/u.test(s))) db.exec(sql);
+    const repetir = (id: string, timestamp: string, paymentId: string | null) =>
+        db.prepare(`INSERT OR IGNORE INTO accounting_entries (id, timestamp, type, paymentId) VALUES (?, ?, 'payment', ?)`).run(id, timestamp, paymentId);
+    repetir('payment:p1', '2026-10-20T10:00:00Z', 'p1');
+    db.exec(`INSERT INTO closed_months (id) VALUES ('2026-10')`);
+    // Já existe aqui: a sincronização volta a enviá-lo e é ignorado sem erro.
+    assert.doesNotThrow(() => repetir('payment:p1', '2026-10-20T10:00:00Z', 'p1'));
+    // Lançamento novo num mês fechado, ou outro lançamento para o mesmo pagamento: continuam recusados.
+    assert.throws(() => repetir('payment:p2', '2026-10-21T10:00:00Z', 'p2'), /Período contabilístico fechado/);
+    assert.throws(() => repetir('payment:p1-b', '2026-11-02T10:00:00Z', 'p1'), /Pagamento já registado/);
+    const triggers = (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'trigger' ORDER BY name`).all() as Array<{ name: string }>).map(t => t.name);
+    assert.deepEqual(triggers, ['trg_accounting_closed_period_v2', 'trg_accounting_entries_payment_unique_v2']);
+});
