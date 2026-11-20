@@ -1,7 +1,9 @@
 import { Suspense, useEffect, useState } from "react";
 import { isChunkLoadError, lazyWithReload, reloadForNewVersion } from "@/bibliotecas/carregamento-modulos";
 import { TooltipProvider } from "@/componentes/ui/tooltip";
-import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
+import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { ehSoFuncionario, rotaPermitidaFuncionario } from "@/bibliotecas/portal-funcionario";
+import { TrocaSenhaObrigatoria, precisaTrocarSenha } from "@/componentes/autenticacao/TrocaSenhaObrigatoria";
 import { useData } from "@/contextos/ContextoDados";
 import { useAuth } from "@/contextos/ContextoAutenticacao";
 import { MaintenanceGuard } from "@/componentes/MaintenanceGuard";
@@ -10,6 +12,9 @@ import { LigacaoEmpresaWeb } from "@/componentes/layout/LigacaoEmpresaWeb";
 import { GuardaSubscricaoWeb } from "@/componentes/layout/GuardaSubscricaoWeb";
 import { BackupReminder } from "@/componentes/layout/BackupReminder";
 import { AutoBackupManager } from "@/componentes/layout/AutoBackupManager";
+import { FilaFiscalGlobal } from "@/componentes/fiscal/FilaFiscalGlobal";
+import { HubCobrancaGlobal } from "@/componentes/cobranca/HubCobrancaGlobal";
+import { AvisoActualizacao } from "@/componentes/layout/AvisoActualizacao";
 import { SplashScreen } from "@/componentes/layout/SplashScreen";
 import { isPublicWebBuild } from "@/bibliotecas/ambiente";
 
@@ -62,6 +67,7 @@ const RecibosRH = lazyWithReload(() => import("./paginas/rh/RecibosRH"));
 const FeriasRH = lazyWithReload(() => import("./paginas/rh/FeriasRH"));
 const RelatoriosRH = lazyWithReload(() => import("./paginas/rh/RelatoriosRH"));
 const PortalFuncionario = lazyWithReload(() => import("./paginas/rh/PortalFuncionario"));
+const QuiosquePonto = lazyWithReload(() => import("./paginas/rh/QuiosquePonto"));
 const Scoring = lazyWithReload(() => import("./paginas/Scoring"));
 const SimuladorCredito = lazyWithReload(() => import("./paginas/SimuladorCredito"));
 const TermosPoliticas = lazyWithReload(() => import("./paginas/TermosPoliticas"));
@@ -80,9 +86,18 @@ const suspenseFallback = <SplashScreen />;
 
 const ProtectedRoute = ({ children, permission }: { children: JSX.Element; permission?: string }) => {
   const { isAuthenticated, user } = useAuth();
+  const location = useLocation();
 
   if (!isAuthenticated) {
     return <Navigate to="/entrar" replace />;
+  }
+
+  // Senha temporária (ex.: acesso ao portal criado pelo RH): troca obrigatória antes de qualquer página.
+  if (precisaTrocarSenha(user)) return <TrocaSenhaObrigatoria />;
+
+  // Funcionário: só o portal (nada de créditos nem da gestão). Qualquer outra página leva ao portal.
+  if (ehSoFuncionario(user) && !rotaPermitidaFuncionario(location.pathname)) {
+    return <Navigate to="/rh/portal" replace />;
   }
 
   // Página com permissão própria: só a conta principal passa sempre; os outros precisam da permissão
@@ -108,7 +123,10 @@ import { AVAILABLE_PERMISSIONS } from "@/tipos/autenticacao";
 /** Páginas de RH: só com o módulo incluído na licença da empresa. */
 const GuardaModuloRH = ({ children }: { children: JSX.Element }) => {
   const { activo, aCarregar } = useModuloRH();
+  const { user } = useAuth();
   if (aCarregar) return suspenseFallback;
+  // Sem o módulo, o funcionário não tem para onde ir (o painel é de créditos): explica em vez de redireccionar.
+  if (!activo && ehSoFuncionario(user)) return <div className="flex min-h-[60vh] items-center justify-center p-6 text-center text-sm text-slate-600">O módulo de Recursos Humanos não está activo nesta empresa. Fale com o administrador.</div>;
   return activo ? children : <Navigate to="/" replace />;
 };
 
@@ -133,7 +151,6 @@ const AcessoNegado = ({ permission }: { permission: string }) => {
 
 const AppContent = () => {
   const { companySettings, isDataLoading } = useData();
-  const [forceReady, setForceReady] = useState(false);
   const [tenantAuthorized, setTenantAuthorized] = useState(() => {
     return localStorage.getItem('tango_company_status') === 'ACTIVE' ||
            localStorage.getItem('tango_active_tenant_authorized') === 'true' ||
@@ -156,13 +173,6 @@ const AppContent = () => {
       window.removeEventListener('tango_company_status_changed', handleAuth);
       window.removeEventListener('storage', handleAuth);
     };
-  }, []);
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setForceReady(true);
-    }, 2000);
-    return () => clearTimeout(timer);
   }, []);
 
   useEffect(() => {
@@ -217,19 +227,22 @@ const AppContent = () => {
     updateFavicon();
   }, [companySettings?.logo]);
 
-  // Splash Screen para evitar a tela branca durante o carregamento inicial intenso
-  if (isDataLoading && !forceReady) {
+  // O fornecedor de dados já tem recuperação e timeout; não abrir páginas com dados ainda incompletos.
+  if (isDataLoading) {
     return <SplashScreen />;
   }
 
   return (
     <TooltipProvider>
       <LigacaoEmpresaWeb />
+      <HubCobrancaGlobal />
       {isPublicWebBuild && tenantAuthorized && <GuardaSubscricaoWeb />}
       {!isCompanyActiveLocally() && tenantAuthorized && <OnboardingWizard />}
       <HashRouter>
         <BackupReminder />
         <AutoBackupManager />
+        <FilaFiscalGlobal />
+        <AvisoActualizacao />
         <Suspense fallback={suspenseFallback}>
           <Routes>
             <Route path="/login" element={<Navigate to="/entrar" replace />} />
@@ -368,6 +381,7 @@ const AppContent = () => {
             ))}
             <Route path="/rh/relatorios" element={<ProtectedRoute permission="hr_view"><GuardaModuloRH><RelatoriosRH /></GuardaModuloRH></ProtectedRoute>} />
             <Route path="/rh/portal" element={<ProtectedRoute permission="hr_self"><GuardaModuloRH><PortalFuncionario /></GuardaModuloRH></ProtectedRoute>} />
+            <Route path="/rh/quiosque" element={<ProtectedRoute permission="hr_manage"><GuardaModuloRH><QuiosquePonto /></GuardaModuloRH></ProtectedRoute>} />
             <Route
               path="/fornecedores"
               element={

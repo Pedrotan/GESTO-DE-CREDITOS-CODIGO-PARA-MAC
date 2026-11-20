@@ -6,9 +6,12 @@ import { PORTFOLIO_SCHEMA_SQL } from './esquema-carteira.ts';
 import { BANK_IMPORT_SCHEMA_SQL } from './esquema-extratos.ts';
 import { COLLECTION_SCHEMA_SQL } from './cobranca-operacional.ts';
 import { RH_SALARIOS_SCHEMA_SQL } from './rh/esquema-rh-salarios.ts';
+import { FISCAL_SCHEMA_SQL } from './fiscal/esquema-fiscal.ts';
+import { HUB_COLLECTION_SCHEMA_SQL } from './esquema-hub-cobranca.ts';
 export const LEDGER_GENESIS_HASH = '0'.repeat(64);
 
 export const LEDGER_PROTECTION_SQL = [
+    ...HUB_COLLECTION_SCHEMA_SQL,
     ...COLLECTION_SCHEMA_SQL,
     ...BANK_IMPORT_SCHEMA_SQL,
     ...RECEIPT_SCHEMA_SQL,
@@ -17,6 +20,7 @@ export const LEDGER_PROTECTION_SQL = [
     ...LIMITS_EXTENSION_SQL,
     ...PORTFOLIO_SCHEMA_SQL,
     ...RH_SALARIOS_SCHEMA_SQL,
+    ...FISCAL_SCHEMA_SQL,
     `CREATE TABLE IF NOT EXISTS accounting_divergence_events (
         id TEXT PRIMARY KEY, issueKey TEXT NOT NULL, previousId TEXT NOT NULL DEFAULT '',
         source TEXT NOT NULL, description TEXT NOT NULL,
@@ -55,9 +59,13 @@ export const LEDGER_PROTECTION_SQL = [
     `CREATE TRIGGER IF NOT EXISTS trg_audit_logs_immutable_delete
         BEFORE DELETE ON audit_logs BEGIN
         SELECT RAISE(ABORT, 'Os registos de auditoria são imutáveis'); END`,
-    `CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period
+    // Os gatilhos BEFORE INSERT correm antes da verificação da chave: um lançamento que já existe aqui e volta a
+    // chegar pela sincronização (INSERT OR IGNORE) não é um lançamento novo e só deve ser ignorado, não recusado.
+    `DROP TRIGGER IF EXISTS trg_accounting_closed_period`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period_v2
         BEFORE INSERT ON accounting_entries
         WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7))
+            AND NOT EXISTS (SELECT 1 FROM accounting_entries WHERE id = NEW.id)
         BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_update
         BEFORE UPDATE ON accounting_entries BEGIN
@@ -65,10 +73,11 @@ export const LEDGER_PROTECTION_SQL = [
     `CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_delete
         BEFORE DELETE ON accounting_entries BEGIN
         SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis; use um estorno'); END`,
-    `CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique
+    `DROP TRIGGER IF EXISTS trg_accounting_entries_payment_unique`,
+    `CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique_v2
         BEFORE INSERT ON accounting_entries
         WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS (
-            SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment'
+            SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' AND id <> NEW.id
         ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger'); END`,
     // Cadeia com vários computadores: cada lançamento aponta para um lançamento que já existe (ou para a origem).
     // Dois computadores que lançam ao mesmo tempo criam ramos paralelos, que se juntam no lançamento seguinte;

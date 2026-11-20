@@ -4,6 +4,8 @@
 //
 // Regras partilhadas pela interface e pelo processo principal (que é quem as impõe de facto).
 
+import { motivoRecusaNivel, type AdminPrincipal } from './administrador-principal.ts';
+
 export const isPrimaryOwner = (user: { isOwner?: unknown; role?: unknown } | null | undefined) =>
     Boolean(user) && (user!.isOwner === true || user!.isOwner === 1 || user!.isOwner === '1' || String(user!.role) === 'super_admin');
 
@@ -94,13 +96,47 @@ export const parsePermissionList = (value: unknown): string[] => {
     catch { return []; }
 };
 
+/** Permissões do perfil «Funcionário» só com o portal (sem créditos nem gestão). */
+export const PERMISSOES_PORTAL_FUNCIONARIO = new Set(['hr_self', 'rh_portal.ver', 'rh_portal.criar']);
+
+/**
+ * Conta do portal criada pelo RH a partir da ficha do funcionário: perfil «employee», só permissões do portal,
+ * activa e com troca obrigatória da senha no primeiro acesso. Quem gere o RH pode criá-la sem gerir utilizadores.
+ */
+export const ehContaPortalNova = (sql: string, params: unknown[]) => {
+    const colunas = insertedUserColumns(sql);
+    if (colunas.includes('isowner')) return false;
+    const permissoes = parsePermissionList(insertedUserValue(sql, params, 'permissions'));
+    return String(insertedUserValue(sql, params, 'role')) === 'employee'
+        && permissoes.length > 0 && permissoes.every(p => PERMISSOES_PORTAL_FUNCIONARIO.has(p))
+        && String(insertedUserValue(sql, params, 'status')) === 'active'
+        && Number(insertedUserValue(sql, params, 'mustchangepassword')) === 1;
+};
+/** Conta que só tem o portal do funcionário (perfil «employee», só permissões do portal, não é a conta principal). */
+export const ehContaSoPortal = (u: { role?: unknown; permissions?: unknown; isOwner?: unknown } | null | undefined) => {
+    if (!u || isPrimaryOwner(u) || String(u.role) !== 'employee') return false;
+    const permissoes = parsePermissionList(u.permissions);
+    return permissoes.length > 0 && permissoes.every(p => PERMISSOES_PORTAL_FUNCIONARIO.has(p));
+};
+
+/** Reposição da senha do portal pelo RH: só a senha e a troca obrigatória no próximo acesso (UPDATE ... WHERE id = ?). */
+export const ehReposicaoSenhaPortal = (sql: string, params: unknown[]) => {
+    const colunas = updatedUserColumns(sql);
+    return colunas.length === 2 && colunas.includes('password') && colunas.includes('mustchangepassword')
+        && Number(updatedUserValue(sql, params, 'mustchangepassword')) === 1;
+};
+
+const gereRH = (actor: { role?: unknown; permissions?: unknown }) => String(actor.role) === 'super_admin' || parsePermissionList(actor.permissions).includes('hr_manage');
+
 export type UserMutationCheck = {
     kind: 'insert' | 'update' | 'delete';
     sql: string;
     params: unknown[];
-    actor: { id: string; isOwner?: unknown; permissions?: unknown };
+    actor: { id: string; isOwner?: unknown; permissions?: unknown; role?: unknown };
     /** Utilizador alvo (UPDATE/DELETE ... WHERE id = ?), lido da base pelo processo principal. */
-    target?: { id: string; isOwner?: unknown; role?: string } | null;
+    target?: { id: string; isOwner?: unknown; role?: string; permissions?: unknown } | null;
+    /** Administrador principal designado (shared_settings), lido da base pelo processo principal. */
+    principal?: AdminPrincipal | null;
 };
 
 /**
@@ -113,6 +149,7 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
         const columns = insertedUserColumns(input.sql);
         if (columns.includes('isowner')) return { error: 'A conta principal não pode ser criada nem atribuída por outro utilizador.', changesPrivileges: true };
         if (actorIsOwner) return { error: null, changesPrivileges: true };
+        if (ehContaPortalNova(input.sql, input.params) && gereRH(input.actor)) return { error: null, changesPrivileges: true };
         if (String(insertedUserValue(input.sql, input.params, 'role')) === 'super_admin') {
             return { error: 'Só o Super Administrador principal pode criar Super Administradores.', changesPrivileges: true };
         }
@@ -125,18 +162,49 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
         return { error: null, changesPrivileges: true };
     }
     const targetIsOwner = isPrimaryOwner(input.target);
+    // Administrador principal: só ele muda o nível, as permissões ou o estado de outro Super Administrador, e o dele
+    // ninguém muda (nem ele próprio, sem transferir antes a função). Desbloquear depois de palavras-passe erradas continua livre.
+    if (input.principal) {
+        const cols = input.kind === 'delete' ? [] : updatedUserColumns(input.sql);
+        // Estado: só conta desactivar/bloquear (entrar, sair ou desbloquear mudam o estado para active/online/offline).
+        const estado = cols.includes('status') ? updatedUserValue(input.sql, input.params, 'status') : undefined;
+        const desactiva = estado !== undefined && estado !== null && !['active', 'online', 'offline'].includes(String(estado));
+        // Perfil: só conta quando muda de facto (os formulários de perfil reenviam o papel actual).
+        const papel = cols.includes('role') ? updatedUserValue(input.sql, input.params, 'role') : undefined;
+        const mudaPapel = papel !== undefined && String(papel) !== String(input.target?.role ?? '');
+        const mudaNivel = input.kind === 'delete' || desactiva || mudaPapel;
+        const motivo = mudaNivel ? motivoRecusaNivel(input.actor, input.target, input.principal) : null;
+        if (motivo) return { error: motivo, changesPrivileges: true };
+        // Eliminar utilizadores é do Administrador principal (as operações deles ficam no sistema).
+        if (input.kind === 'delete' && String(input.actor.id) !== input.principal.userId)
+            return { error: `Só o Administrador principal (${input.principal.nome}) pode eliminar utilizadores.`, changesPrivileges: true };
+    }
     if (input.kind === 'delete') {
-        if (targetIsOwner) return { error: 'O Super Administrador principal não pode ser eliminado.', changesPrivileges: true };
+        // Com Administrador principal designado, ele pode eliminar outros Super Administradores (nunca a si próprio).
+        const principalElimina = Boolean(input.principal && String(input.actor.id) === input.principal.userId && String(input.target?.id) !== input.principal.userId);
+        if (targetIsOwner && !principalElimina) return { error: 'O Super Administrador principal não pode ser eliminado.', changesPrivileges: true };
         return { error: null, changesPrivileges: true };
     }
     const columns = updatedUserColumns(input.sql);
     if (columns.includes('isowner')) return { error: 'A conta principal não pode ser alterada.', changesPrivileges: true };
     const privileged = columns.filter(column => (PRIVILEGE_COLUMNS as readonly string[]).includes(column));
     const selfUpdate = input.target ? String(input.target.id) === String(input.actor.id) : false;
+    // A troca obrigatória da senha só desaparece com a nova senha (não basta desligar a marca).
+    if (selfUpdate && columns.includes('mustchangepassword') && Number(updatedUserValue(input.sql, input.params, 'mustchangepassword')) === 0 && !columns.includes('password')) {
+        return { error: 'Defina a nova senha para concluir a troca obrigatória.', changesPrivileges: false };
+    }
     // Desbloqueio depois de palavras-passe erradas: um Super Administrador pode reactivar outro (e só isso).
     const unblockOnly = columns.length > 0 && columns.every(column => ['status', 'failedattempts', 'blockedat'].includes(column))
         && String(updatedUserValue(input.sql, input.params, 'status')) === 'active';
     if (targetIsOwner && !selfUpdate && unblockOnly && hasFullAuthority(input.actor)) return { error: null, changesPrivileges: true };
+    // Atribuir novo nível: um Super Administrador muda o perfil (e as permissões do perfil) de outro Super
+    // Administrador. A conta marcada como principal (dona da instalação) continua intocável por outros.
+    const levelChangeOnly = columns.length > 0 && columns.every(column => ['role', 'permissions'].includes(column));
+    const markedOwner = input.target?.isOwner === true || input.target?.isOwner === 1 || input.target?.isOwner === '1';
+    if (targetIsOwner && !selfUpdate && levelChangeOnly && !markedOwner && hasFullAuthority(input.actor)) return { error: null, changesPrivileges: true };
+    // Com Administrador principal designado, é ele quem decide o nível dos outros Super Administradores (também da conta
+    // marcada como dona da instalação neste computador).
+    if (input.principal && String(input.actor.id) === input.principal.userId && targetIsOwner && !selfUpdate && levelChangeOnly) return { error: null, changesPrivileges: true };
     if (targetIsOwner && !selfUpdate) {
         return { error: 'O Super Administrador principal só pode ser alterado por ele próprio.', changesPrivileges: privileged.length > 0 };
     }

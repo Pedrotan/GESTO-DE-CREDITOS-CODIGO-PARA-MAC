@@ -41,6 +41,23 @@ export const RH_SALARIOS_SCHEMA_SQL = [
         quantidade REAL NOT NULL DEFAULT 1, valor_minor INTEGER NOT NULL, descricao TEXT,
         criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT
     )`,
+    // Valores do mês lançados no ecrã de processamento: salário base deste mês e faltas (sobrepõem o contrato e o ponto).
+    `CREATE TABLE IF NOT EXISTS rh_processamento_entrada (
+        id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL,
+        salario_base_minor INTEGER CHECK(salario_base_minor IS NULL OR salario_base_minor >= 0),
+        faltas REAL CHECK(faltas IS NULL OR (faltas >= 0 AND faltas <= 31)),
+        actualizado_em TEXT NOT NULL, actualizado_por TEXT, actualizado_por_nome TEXT
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_processamento_entrada ON rh_processamento_entrada(processamento_id, funcionario_id)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_insert BEFORE INSERT ON rh_processamento_entrada
+        WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado')
+        BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_update BEFORE UPDATE ON rh_processamento_entrada
+        WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado')
+        BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_delete BEFORE DELETE ON rh_processamento_entrada
+        WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado')
+        BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam'); END`,
     `CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_fechado_update BEFORE UPDATE ON rh_processamento
         WHEN OLD.estado = 'fechado'
         BEGIN SELECT RAISE(ABORT, 'Um processamento salarial fechado não pode ser alterado (faça um acerto no mês seguinte)'); END`,
@@ -67,6 +84,32 @@ export const RH_SALARIOS_SCHEMA_SQL = [
     `CREATE TRIGGER IF NOT EXISTS trg_rh_rubrica_pontual_delete BEFORE DELETE ON rh_rubrica_pontual
         WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado')
         BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado'); END`,
+    // Reclamações do funcionário sobre a folha de correcção (recibo calculado, ainda por aprovar). O RH responde antes de aprovar.
+    `CREATE TABLE IF NOT EXISTS rh_reclamacao (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, processamento_id TEXT NOT NULL, recibo_id TEXT, codigo TEXT, descricao TEXT,
+        valor_minor INTEGER NOT NULL DEFAULT 0, motivo TEXT NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aceite', 'recusada')), resposta TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, respondido_em TEXT, respondido_por TEXT, respondido_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_reclamacao_processamento ON rh_reclamacao(processamento_id, estado)`,
+    // Só da folha de correcção (calculado) e só do próprio recibo.
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_reclamacao_insert BEFORE INSERT ON rh_reclamacao
+        WHEN COALESCE((SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id), '') <> 'calculado'
+            OR (NEW.recibo_id IS NOT NULL AND COALESCE((SELECT funcionario_id FROM rh_recibo WHERE id = NEW.recibo_id AND processamento_id = NEW.processamento_id), '') <> NEW.funcionario_id)
+        BEGIN SELECT RAISE(ABORT, 'Só se reclama da sua folha de correcção, antes da aprovação'); END`,
+    // Confirmação da recepção do salário pelo funcionário (recebido / não recebido), depois de o RH marcar como pago.
+    `CREATE TABLE IF NOT EXISTS rh_recebimento (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, recibo_id TEXT NOT NULL, processamento_id TEXT NOT NULL,
+        estado TEXT NOT NULL CHECK(estado IN ('recebido', 'nao_recebido')), observacao TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_recebimento_processamento ON rh_recebimento(processamento_id)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_recebimento_insert BEFORE INSERT ON rh_recebimento
+        WHEN COALESCE((SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id), '') NOT IN ('pago', 'fechado')
+            OR COALESCE((SELECT funcionario_id FROM rh_recibo WHERE id = NEW.recibo_id AND processamento_id = NEW.processamento_id), '') <> NEW.funcionario_id
+        BEGIN SELECT RAISE(ABORT, 'Só se confirma a recepção do seu próprio salário, depois de pago'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_recebimento_imutavel BEFORE UPDATE ON rh_recebimento
+        BEGIN SELECT RAISE(ABORT, 'A confirmação da recepção não se altera: registe uma nova'); END`,
 ];
 
 /** Só as tabelas e índices (para a migração versionada; os triggers vêm do esquema protegido). */

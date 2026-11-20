@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useData } from '@/contextos/ContextoDados';
 import { buildJournal, type JournalEntry } from '@/bibliotecas/relatorios-contabeis';
-import { isRemovedFromAccounting, loadDataRemovalState } from '@/bibliotecas/eliminacao-dados';
+import { loadDataRemovalState } from '@/bibliotecas/eliminacao-dados';
 import type { AuditResult } from '@/bibliotecas/auditoria-contabil';
 import type { SealVerification } from '@/bibliotecas/selo-contabilistico';
 import { ServicoDefinicoesPartilhadas } from '@/servicos/ServicoDefinicoesPartilhadas';
@@ -61,10 +61,10 @@ export function useContabilidade() {
             let catalog: AccountCatalog = {};
             try { catalog = catalogRaw ? JSON.parse(catalogRaw) : {}; } catch { catalog = {}; }
             setState({
-                // Clientes/contratos eliminados com «Contabilidade» marcada (ou apagados definitivamente) saem do diário,
-                // do balancete e dos relatórios; a auditoria continua a verificar o razão completo.
+                // O diário mostra sempre o razão completo: os saldos aqui são os mesmos que o controlo de saldo e a auditoria
+                // usam. Um crédito eliminado não "desaparece" da contabilidade: o seu desembolso é anulado por um estorno.
                 snapshot, journal: buildJournal(snapshot.entries as any, snapshot.transactions as any, snapshot.lines as any)
-                    .filter(entry => !isRemovedFromAccounting(entry)).map((entry, index) => ({ ...entry, sequence: index + 1 })),
+                    .map((entry, index) => ({ ...entry, sequence: index + 1 })),
                 evaluation: result, seals, config, panic, runs, closes, requests, catalog,
                 loading: false, error: '', loadedAt: new Date().toISOString(),
             });

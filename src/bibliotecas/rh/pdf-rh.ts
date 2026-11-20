@@ -3,6 +3,8 @@ import jsPDF from '@/bibliotecas/pdf-documento';
 import autoTable from '@/bibliotecas/pdf-tabela';
 import { applyBranding, brandingHeaderBottom, getCompanySettings, resolveBrandPrimary, writeClosingNote } from '@/bibliotecas/pdf';
 import { formatCurrency } from '@/bibliotecas/formatters';
+import { formatLuandaDateTime } from '@/bibliotecas/fuso-angola';
+import { scopedStorageKey } from '@/bibliotecas/contas';
 
 export type SaidaPdf = 'save' | 'datauri';
 export type FicheiroPdf = { fileName: string; dataUrl: string };
@@ -156,46 +158,221 @@ export function gerarRecibosPdf(recibos: Array<{ recibo: ReciboPdf; linhas: Linh
     return terminar(doc, `Recibos-${p.ano}-${String(p.mes).padStart(2, '0')}-${p.tipoRotulo.replace(/[^\w]+/gu, '_')}.pdf`, saida);
 }
 
-/** Folha de salários mensal: todos os funcionários e totais por departamento. */
-export function gerarFolhaPdf(recibos: ReciboPdf[], p: CabecalhoProcessamento, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
-    const doc = new jsPDF({ orientation: 'landscape' });
+/** Enquadramento do funcionário impresso na linha «Cargo:» / «Vinc.:» da folha. */
+export type EnquadramentoFolha = { vinculo?: string | null; carreira?: string | null; categoria?: string | null; escalao?: string | null; unidade_organica?: string | null };
+export type ItemFolha = { recibo: ReciboPdf; linhas: LinhaPdf[]; enquadramento?: EnquadramentoFolha };
+
+/** 60943560 → «609.435,60» (como na folha de conferência, sem símbolo da moeda). */
+const valorFolha = (minor: number) => {
+    const n = Math.round(Number(minor) || 0);
+    const inteiro = Math.floor(Math.abs(n) / 100).toString().replace(/\B(?=(\d{3})+(?!\d))/gu, '.');
+    return `${n < 0 ? '-' : ''}${inteiro},${String(Math.abs(n) % 100).padStart(2, '0')}`;
+};
+/** Descrição da rubrica como na folha («Vencimento Base», «Falta(S) (2)»). */
+const descricaoFolha = (l: LinhaPdf) => {
+    if (l.codigo === 'SAL_BASE') return 'Vencimento Base';
+    if (l.codigo === 'FALTAS') return `Falta(S) (${Number(l.quantidade).toLocaleString('pt-PT', { maximumFractionDigits: 2 })})`;
+    return l.descricao;
+};
+const imagemValida = (v: unknown): v is string => typeof v === 'string' && (v.startsWith('data:image/') || (v.length > 100 && /^[A-Za-z0-9+/=]+$/u.test(v.slice(0, 200))));
+const comoDataUrl = (v: string) => (v.startsWith('data:') ? v : `data:image/png;base64,${v}`);
+/** Logótipo da empresa carregado nas definições (ou a cópia guardada neste computador). */
+function logotipoEmpresa(config: ReturnType<typeof getCompanySettings>): string | null {
+    for (const v of [config.logo, config.reportLogo]) if (imagemValida(v)) return comoDataUrl(v);
+    try {
+        for (const chave of ['company_logo_backup', 'company_report_logo_backup']) {
+            const guardado = localStorage.getItem(scopedStorageKey(chave));
+            if (imagemValida(guardado)) return comoDataUrl(guardado);
+        }
+    } catch { /* sem armazenamento local */ }
+    return null;
+}
+
+/**
+ * Folha de salários no modelo «Remunerações para Conferência Por Unidade Pagadora»: cabeçalho com o logótipo da empresa,
+ * exercício, emissão e paginação; um bloco por funcionário (número, nome, IBAN, cargo/vínculo, abonos, descontos e líquido);
+ * totais por unidade orgânica, total geral e número de agentes. O mês e o ano são os do processamento.
+ */
+export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const config = getCompanySettings(settings);
-    const cor = resolveBrandPrimary(config.primaryColor);
-    applyBranding(doc, config, userName);
-    const y = brandingHeaderBottom(doc) + 9;
-    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(15, 23, 42);
-    doc.text(`FOLHA DE SALÁRIOS — ${p.tipoRotulo.toUpperCase()} — ${periodoPt(p.ano, p.mes).toUpperCase()}`, 148, y, { align: 'center' });
-    const soma = (lista: ReciboPdf[], k: keyof ReciboPdf) => lista.reduce((s, r) => s + (Number(r[k]) || 0), 0);
-    const departamentos = [...new Set(recibos.map(r => r.departamento || 'Sem departamento'))].sort();
-    const corpo: string[][] = [];
-    for (const d of departamentos) {
-        const lista = recibos.filter(r => (r.departamento || 'Sem departamento') === d);
-        lista.forEach(r => corpo.push([r.numero_mecanografico || '', r.nome, r.cargo || '', kz(r.salario_base_minor), kz(r.bruto_minor), kz(r.inss_minor), kz(r.irt_minor), kz(r.outros_descontos_minor), kz(r.liquido_minor), kz(r.inss_emp_minor)]));
-        corpo.push(['', `Total ${d}`, '', '', kz(soma(lista, 'bruto_minor')), kz(soma(lista, 'inss_minor')), kz(soma(lista, 'irt_minor')), kz(soma(lista, 'outros_descontos_minor')), kz(soma(lista, 'liquido_minor')), kz(soma(lista, 'inss_emp_minor'))]);
+    const largura = doc.internal.pageSize.getWidth();
+    const altura = doc.internal.pageSize.getHeight();
+    const esq = 5;
+    const dir = largura - 12;
+    const limite = altura - 16;
+    const logo = logotipoEmpresa(config);
+    const empresa = (config.name || 'Empresa').toUpperCase();
+    const mesAno = `${MESES[p.mes - 1]}/${p.ano}`;
+    const emissao = formatLuandaDateTime(new Date()).replace(' ', ' - ');
+    const rascunho = p.estado === 'aberto' || p.estado === 'calculado';
+
+    const unidadeDe = (i: ItemFolha) => i.enquadramento?.unidade_organica?.trim() || i.recibo.departamento || config.name || 'Sem unidade orgânica';
+    const unidades = [...new Set(itens.map(unidadeDe))].sort((a, b) => a.localeCompare(b, 'pt'));
+    const ordenados = (u: string) => itens.filter(i => unidadeDe(i) === u).sort((a, b) => a.recibo.nome.localeCompare(b.recibo.nome, 'pt'));
+
+    const cabecalho = (unidade: string) => {
+        if (logo) {
+            try {
+                const prop = doc.getImageProperties(logo);
+                const escala = Math.min(13 / prop.width, 13 / prop.height);
+                const w = prop.width * escala;
+                const h = prop.height * escala;
+                doc.addImage(logo, prop.fileType || 'PNG', 7 + (13 - w) / 2, 4 + (13 - h) / 2, w, h, undefined, 'FAST');
+            } catch { /* logótipo ilegível: segue sem ele */ }
+        }
+        doc.setTextColor(0, 0, 0);
+        doc.setFont('times', 'bold'); doc.setFontSize(7.5);
+        doc.text('REPÚBLICA DE ANGOLA', 23, 8.6);
+        doc.setFontSize(9.5);
+        doc.text(doc.splitTextToSize(empresa, 112)[0] as string, 23, 12.8);
+        doc.setFontSize(7.2);
+        doc.text('Exercício :', 145, 7.6); doc.text(String(p.ano), 160, 7.6);
+        doc.text('Emissão', 145, 11.2); doc.text(`:   ${emissao}`, 157, 11.2);
+        doc.text('Página', 145, 14.8);
+        doc.setLineWidth(0.45); doc.setDrawColor(0, 0, 0);
+        doc.line(esq, 18.6, dir, 18.6);
+        doc.setFontSize(9.5);
+        doc.text(`Remunerações para Conferência Por Unidade Pagadora - ${mesAno}`, (esq + dir) / 2, 22.6, { align: 'center' });
+        doc.line(esq, 24.4, dir, 24.4);
+        doc.setFontSize(6.8);
+        doc.text('Unidade Pagadora', esq + 1, 28.6);
+        doc.text(doc.splitTextToSize(config.name || '', 58)[0] as string, 33, 28.6);
+        doc.text('Unidade Orgânica:', 96, 28.6);
+        doc.text(doc.splitTextToSize(unidade, 72)[0] as string, 120, 28.6);
+        doc.setFont('times', 'italic'); doc.setFontSize(5.5); doc.setTextColor(120, 120, 120);
+        doc.text('Fonte: Tango ERP - Sistema Integrado de Gestão de Recursos Humanos', esq, altura - 6);
+        doc.text(`Utilizador: ${userName}`, dir, altura - 6, { align: 'right' });
+        doc.setTextColor(0, 0, 0);
+        if (rascunho) {
+            doc.saveGraphicsState();
+            try { doc.setGState(new (doc.GState as unknown as { new (o: { opacity: number }): any })({ opacity: 0.12 })); } catch { /* sem transparência */ }
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(78); doc.setTextColor(30, 120, 60);
+            doc.text('RASCUNHO', largura / 2, altura / 2 + 20, { align: 'center', angle: 28 });
+            doc.restoreGraphicsState();
+            doc.setTextColor(0, 0, 0);
+        }
+    };
+
+    const ALTURA_LINHA = 2.45;
+    const descontosDe = (i: ItemFolha): Array<[string, number]> => [
+        ...i.linhas.filter(l => l.tipo === 'desconto').map(l => [descricaoFolha(l), l.valor_minor] as [string, number]),
+        ...(i.recibo.inss_minor > 0 ? [['Seg Soc INSS', i.recibo.inss_minor] as [string, number]] : []),
+        ...(i.recibo.irt_minor > 0 ? [['Imposto Rendimento Trabalho', i.recibo.irt_minor] as [string, number]] : []),
+    ];
+    const alturaBloco = (i: ItemFolha) => 12.2 + Math.max(i.linhas.filter(l => l.tipo === 'abono').length, descontosDe(i).length, 1) * ALTURA_LINHA;
+
+    const bloco = (i: ItemFolha, y0: number) => {
+        const r = i.recibo;
+        const e = i.enquadramento || {};
+        const abonos = i.linhas.filter(l => l.tipo === 'abono');
+        const descontos = descontosDe(i);
+        const totalAbonos = abonos.reduce((s, l) => s + l.valor_minor, 0);
+        const totalDescontos = totalAbonos - r.liquido_minor;
+        const h = alturaBloco(i);
+
+        doc.setLineWidth(0.2); doc.setDrawColor(0, 0, 0);
+        doc.rect(esq, y0, dir - esq, h);
+        // Linha 1: número - nome, IBAN e espaço para a rubrica do funcionário.
+        doc.setFont('times', 'bold'); doc.setFontSize(7.2);
+        doc.text(doc.splitTextToSize(`${r.numero_mecanografico || '—'}  -  ${r.nome.toUpperCase()}`, 104)[0] as string, esq + 1, y0 + 3.1);
+        doc.text('IBAN:', 112, y0 + 3.1);
+        doc.setFont('times', 'normal');
+        doc.text(r.iban ? r.iban.replace(/\s+/gu, '').replace(/(.{4})(?=.)/gu, '$1.') : '—', 120, y0 + 3.1);
+        doc.setLineWidth(0.15);
+        doc.line(174, y0 + 3.6, dir - 0.5, y0 + 3.6);
+        // Linha 2: Cargo / Vinc. e total líquido.
+        const rotulo = /quadro/iu.test(e.vinculo || '') && !/tempor/iu.test(e.vinculo || '') ? 'Vinc.:' : 'Cargo:';
+        const enquadramento = [e.vinculo, e.carreira, r.cargo, e.categoria, e.escalao].map(x => (x || '').trim()).filter(Boolean).join('   ') || '—';
+        doc.setFont('times', 'bold'); doc.setFontSize(6.8);
+        doc.text(rotulo, esq + 1, y0 + 6.6);
+        doc.setFont('times', 'normal');
+        doc.text(doc.splitTextToSize(enquadramento, 135)[0] as string, esq + 9.5, y0 + 6.6);
+        doc.setFont('times', 'bold'); doc.setFontSize(7.2);
+        doc.text('Total Liq.:', 152, y0 + 6.8);
+        doc.setFontSize(7.6);
+        doc.text(valorFolha(r.liquido_minor), dir - 1, y0 + 6.8, { align: 'right' });
+        // Faixa Abonos / Descontos.
+        doc.setFillColor(236, 236, 236);
+        doc.rect(esq + 0.15, y0 + 8.1, dir - esq - 0.3, 2.9, 'F');
+        doc.setFontSize(6.9);
+        doc.text('Abonos', esq + 1, y0 + 10.2);
+        doc.text(valorFolha(totalAbonos), 98, y0 + 10.2, { align: 'right' });
+        doc.text('Descontos', 112, y0 + 10.2);
+        doc.text(valorFolha(totalDescontos), dir - 1, y0 + 10.2, { align: 'right' });
+        // Rubricas.
+        doc.setFont('times', 'normal'); doc.setFontSize(6.6);
+        abonos.forEach((l, k) => {
+            const y = y0 + 12.6 + k * ALTURA_LINHA;
+            doc.text(doc.splitTextToSize(descricaoFolha(l), 68)[0] as string, esq + 2, y);
+            doc.text(valorFolha(l.valor_minor), 98, y, { align: 'right' });
+        });
+        descontos.forEach(([descricao, valor], k) => {
+            const y = y0 + 12.6 + k * ALTURA_LINHA;
+            doc.text(doc.splitTextToSize(descricao, 60)[0] as string, 112, y);
+            doc.text(valorFolha(valor), dir - 1, y, { align: 'right' });
+        });
+        return { h, totalAbonos, totalDescontos, liquido: r.liquido_minor };
+    };
+
+    const linhaTotal = (rotulo: string, y: number, a: number, d: number, l: number) => {
+        doc.setFont('times', 'bold'); doc.setFontSize(7.4);
+        doc.text(rotulo, esq + 2, y);
+        doc.text(valorFolha(a), 80, y, { align: 'right' });
+        doc.text(valorFolha(d), 140, y, { align: 'right' });
+        doc.text(valorFolha(l), dir - 1, y, { align: 'right' });
+    };
+
+    const geral = { a: 0, d: 0, l: 0 };
+    if (!itens.length) {
+        cabecalho(config.name || '—');
+        doc.setFont('times', 'italic'); doc.setFontSize(9);
+        doc.text('Sem funcionários neste processamento.', largura / 2, 45, { align: 'center' });
     }
-    autoTable(doc, {
-        startY: y + 5, theme: 'striped', styles: { fontSize: 7.5, cellPadding: 1.4 }, headStyles: { fillColor: cor },
-        head: [['N.º', 'Funcionário', 'Cargo', 'Base', 'Bruto', 'INSS 3%', 'IRT', 'Outros', 'Líquido', 'INSS empresa']],
-        body: corpo,
-        foot: [['', `TOTAL (${recibos.length})`, '', kz(soma(recibos, 'salario_base_minor')), kz(soma(recibos, 'bruto_minor')), kz(soma(recibos, 'inss_minor')), kz(soma(recibos, 'irt_minor')), kz(soma(recibos, 'outros_descontos_minor')), kz(soma(recibos, 'liquido_minor')), kz(soma(recibos, 'inss_emp_minor'))]],
-        footStyles: { fillColor: [15, 23, 42] },
-        columnStyles: Object.fromEntries([3, 4, 5, 6, 7, 8, 9].map(i => [i, { halign: 'right' as const }])),
-        didParseCell: (data: any) => { if (data.section === 'body' && String((data.row.raw as string[])?.[1] || '').startsWith('Total ')) data.cell.styles.fontStyle = 'bold'; },
-        didDrawPage: () => applyBranding(doc, config, userName, true),
+    unidades.forEach((unidade, indice) => {
+        if (indice > 0) doc.addPage();
+        cabecalho(unidade);
+        let y = 31;
+        const soma = { a: 0, d: 0, l: 0 };
+        for (const item of ordenados(unidade)) {
+            if (y + alturaBloco(item) > limite) { doc.addPage(); cabecalho(unidade); y = 31; }
+            const t = bloco(item, y);
+            y += t.h;
+            soma.a += t.totalAbonos; soma.d += t.totalDescontos; soma.l += t.liquido;
+        }
+        geral.a += soma.a; geral.d += soma.d; geral.l += soma.l;
+        const ultima = indice === unidades.length - 1;
+        if (y + (ultima ? 22 : 8) > limite) { doc.addPage(); cabecalho(unidade); y = 31; }
+        linhaTotal('Total da Unidade Orgânica:', y + 5, soma.a, soma.d, soma.l);
+        if (ultima) {
+            linhaTotal('Total Geral:', y + 11, geral.a, geral.d, geral.l);
+            doc.text('Total de Agentes:', esq + 2, y + 18.5);
+            doc.text(String(itens.length), 80, y + 17.5, { align: 'right' });
+        }
     });
-    const fim = (doc as any).lastAutoTable?.finalY || y + 40;
-    writeClosingNote(doc, `Estado do processamento: ${p.estado}. Custo total para a empresa: ${kz(soma(recibos, 'bruto_minor') + soma(recibos, 'inss_emp_minor'))}.`, fim, config, userName, { line: false });
-    return terminar(doc, `Folha-salarios-${p.ano}-${String(p.mes).padStart(2, '0')}.pdf`, saida);
+
+    // «Página : n de N» em todas as páginas.
+    const total = doc.getNumberOfPages();
+    for (let n = 1; n <= total; n++) {
+        doc.setPage(n);
+        doc.setFont('times', 'bold'); doc.setFontSize(7.2); doc.setTextColor(0, 0, 0);
+        doc.text(`:   ${n}  de ${total}`, 157, 14.8);
+    }
+    const nomeEmpresa = (config.name || 'Empresa').normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^\w]+/gu, '_').replace(/^_+|_+$/gu, '');
+    return terminar(doc, `Folha de salario_${MESES[p.mes - 1]}_${p.ano}_${nomeEmpresa}.pdf`, saida);
 }
 
 export type DadosDeclaracao = {
     numero: string; modelo: 'servico' | 'rendimentos';
     funcionario: { nome: string; numero: string; bi?: string | null; nif?: string | null; cargo?: string; departamento?: string; admissao: string; salarioBaseMinor?: number; tipoContrato?: string };
     ano?: number; rendimentos?: { brutoMinor: number; inssMinor: number; irtMinor: number; liquidoMinor: number; recibos: number }; finalidade?: string;
+    /** Texto já preenchido a partir de um modelo de declaração (substitui o texto fixo) e o seu título. */
+    texto?: string; titulo?: string;
 };
 
 /** Declaração de serviço/salário (vínculo, cargo, antiguidade e salário) ou de rendimentos (ano). */
 export function gerarDeclaracaoPdf(d: DadosDeclaracao, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    if (d.texto) return declaracaoDeModelo(d, settings, userName, saida);
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
     const cor = resolveBrandPrimary(config.primaryColor);
@@ -230,11 +407,36 @@ export function gerarDeclaracaoPdf(d: DadosDeclaracao, settings: unknown, userNa
     return terminar(doc, `Declaracao-${d.numero.replace(/[^\w]+/gu, '-')}.pdf`, saida);
 }
 
+/** Declaração a partir de um modelo editável: título, número, o texto do modelo, local e data, e assinatura. */
+function declaracaoDeModelo(d: DadosDeclaracao, settings: unknown, userName: string, saida: SaidaPdf): FicheiroPdf {
+    const doc = new jsPDF();
+    const config = getCompanySettings(settings);
+    const cor = resolveBrandPrimary(config.primaryColor);
+    applyBranding(doc, config, userName);
+    let y = brandingHeaderBottom(doc) + 16;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(15, 23, 42);
+    doc.text((d.titulo || 'DECLARAÇÃO').toUpperCase(), 105, y, { align: 'center' });
+    doc.setFontSize(9); doc.setTextColor(cor[0], cor[1], cor[2]);
+    doc.text(`N.º ${d.numero}`, 105, y + 6, { align: 'center' });
+    y += 18;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5); doc.setTextColor(30, 41, 59);
+    for (const paragrafo of d.texto!.split(/\n{2,}/u)) {
+        const linhas = doc.splitTextToSize(paragrafo.replace(/\n/gu, ' ').trim(), 170) as string[];
+        if (y + linhas.length * 6.5 > 250) { doc.addPage(); applyBranding(doc, config, userName, true); y = brandingHeaderBottom(doc) + 12; }
+        doc.text(linhas, 20, y, { lineHeightFactor: 1.6 });
+        y += linhas.length * 6.5 + 5;
+    }
+    doc.setFontSize(10);
+    doc.text(`${config.address || config.location || ''}, ${dataPt(new Date().toISOString())}`, 20, y + 6);
+    assinaturas(doc, y + 34, ['Recursos Humanos / Direcção']);
+    return terminar(doc, `Declaracao-${d.numero.replace(/[^\w]+/gu, '-')}.pdf`, saida);
+}
+
 /** Ficheiro de transferências (CSV): IBAN, nome, valor e descrição, um funcionário por linha. */
 export function ficheiroTransferencias(recibos: ReciboPdf[], descricao: string) {
     const linhas = [['IBAN', 'Beneficiario', 'Valor', 'Descricao', 'NumeroRecibo'].join(';'),
         ...recibos.filter(r => r.liquido_minor > 0).map(r => [r.iban || 'SEM IBAN', `"${r.nome.replace(/"/gu, "'")}"`, (r.liquido_minor / 100).toFixed(2), `"${descricao}"`, r.numero_recibo].join(';'))];
-    return `﻿${linhas.join('\r\n')}\r\n`;
+    return `\uFEFF${linhas.join('\r\n')}\r\n`;
 }
 
 export type DadosGuiaFerias = {
@@ -318,14 +520,14 @@ export function gerarRelatorioPdf(t: TabelaRel, filtros: string, settings: unkno
 export type SeccaoFicha = { titulo: string; pares?: Array<[string, string]>; tabela?: { colunas: string[]; linhas: string[][] } };
 
 /** Ficha individual do funcionário: dados, contrato, histórico salarial, ausências e documentos. */
-export function gerarFichaIndividualPdf(nome: string, seccoes: SeccaoFicha[], settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+export function gerarFichaIndividualPdf(nome: string, seccoes: SeccaoFicha[], settings: unknown, userName: string, saida: SaidaPdf = 'save', titulo = 'FICHA INDIVIDUAL DO FUNCIONÁRIO', prefixo = 'Ficha'): FicheiroPdf {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
     const cor = resolveBrandPrimary(config.primaryColor);
     applyBranding(doc, config, userName);
     let y = brandingHeaderBottom(doc) + 10;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(14); doc.setTextColor(15, 23, 42);
-    doc.text('FICHA INDIVIDUAL DO FUNCIONÁRIO', 105, y, { align: 'center' });
+    doc.text(titulo, 105, y, { align: 'center' });
     doc.setFontSize(10); doc.setTextColor(cor[0], cor[1], cor[2]);
     doc.text(nome, 105, y + 6, { align: 'center' });
     y += 12;
@@ -339,5 +541,5 @@ export function gerarFichaIndividualPdf(nome: string, seccoes: SeccaoFicha[], se
         });
         y = ((doc as any).lastAutoTable?.finalY || y + 20) + 5;
     }
-    return terminar(doc, `Ficha-${nome.replace(/[^\w]+/gu, '_')}.pdf`, saida);
+    return terminar(doc, `${prefixo}-${nome.replace(/[^\w]+/gu, '_')}.pdf`, saida);
 }

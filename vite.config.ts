@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react-swc";
 import path from "path";
+import fs from "fs";
 import { componentTagger } from "lovable-tagger";
 import obfuscator from 'vite-plugin-javascript-obfuscator';
 
@@ -35,9 +36,27 @@ function lookupDocumentDevPlugin() {
   };
 }
 
+// Identificador desta build: os separadores web abertos comparam-no com /version.json para avisar que há versão nova.
+const APP_VERSION = JSON.parse(fs.readFileSync(path.resolve(__dirname, "package.json"), "utf8")).version as string;
+const BUILD_ID = `${APP_VERSION}+${Date.now().toString(36)}`;
+
+function versionFilePlugin() {
+  return {
+    name: 'tango-version-file',
+    apply: 'build' as const,
+    generateBundle(this: any) {
+      this.emitFile({ type: 'asset', fileName: 'version.json', source: `${JSON.stringify({ version: APP_VERSION, buildId: BUILD_ID })}\n` });
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => ({
   base: './',
+  define: {
+    __TANGO_BUILD_ID__: JSON.stringify(mode === "development" ? "" : BUILD_ID),
+    __TANGO_APP_VERSION__: JSON.stringify(APP_VERSION),
+  },
   server: {
     host: "::",
     port: 8081,
@@ -60,6 +79,7 @@ export default defineConfig(({ mode }) => ({
   plugins: [
     react(),
     lookupDocumentDevPlugin(),
+    versionFilePlugin(),
     mode === "development" ? componentTagger() : null,
   ].filter(Boolean),
   resolve: {

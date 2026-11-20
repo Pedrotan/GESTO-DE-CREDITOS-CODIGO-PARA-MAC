@@ -70,4 +70,34 @@ const arrancar = async () => {
     );
 };
 
-if (!precisaHttps) void arrancar();
+// Com a ligação lenta ou cortada, um ficheiro da aplicação pode não chegar e a página ficava para sempre em «A preparar
+// o sistema». Recarrega sozinha até 3 vezes (cada vez mais devagar); depois explica e deixa recarregar à mão.
+const TENTATIVAS_ARRANQUE = 'tango_arranque_tentativas';
+const avisoArranque = (texto: string, botao: boolean) => {
+    const mensagem = document.querySelector('.tango-skeleton-message');
+    if (!mensagem) return;
+    mensagem.textContent = texto;
+    if (botao && !document.getElementById('tango-arranque-recarregar')) {
+        const recarregar = document.createElement('button');
+        recarregar.id = 'tango-arranque-recarregar';
+        recarregar.type = 'button';
+        recarregar.textContent = 'Recarregar';
+        recarregar.style.cssText = 'margin-top:12px;padding:8px 16px;border-radius:10px;border:0;background:#0f172a;color:#fff;font-weight:700;cursor:pointer';
+        recarregar.addEventListener('click', () => { sessionStorage.removeItem(TENTATIVAS_ARRANQUE); window.location.reload(); });
+        mensagem.after(recarregar);
+    }
+};
+
+if (!precisaHttps) {
+    arrancar().then(() => sessionStorage.removeItem(TENTATIVAS_ARRANQUE)).catch(error => {
+        console.error('[Arranque] A aplicação não carregou:', error);
+        const tentativas = Number(sessionStorage.getItem(TENTATIVAS_ARRANQUE) || 0);
+        if (tentativas < 3) {
+            sessionStorage.setItem(TENTATIVAS_ARRANQUE, String(tentativas + 1));
+            avisoArranque('A ligação à Internet está lenta. A tentar de novo…', false);
+            setTimeout(() => window.location.reload(), 3_000 * (tentativas + 1));
+        } else {
+            avisoArranque('Não foi possível carregar o sistema: a ligação à Internet está muito lenta ou foi interrompida. Verifique a ligação e carregue em «Recarregar».', true);
+        }
+    });
+}

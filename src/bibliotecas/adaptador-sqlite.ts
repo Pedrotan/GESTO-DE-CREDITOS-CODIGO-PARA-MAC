@@ -5,8 +5,9 @@ import initSqlJs, { Database } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
-import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
+import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_SQL, RH_PONTO_V3_COLUNAS, rhSeedPontoV3Statements, RH_FOLHA_COLUNAS, rhSeedFolhaStatements, rhSeedFaltaStatements, RH_CADASTRO_COLUNAS, rhSeedCadastroStatements, RH_CATALOGO_COLUNAS, RH_CATALOGO_MIGRACAO_SQL, RH_DOCS_SQL, RH_DOCS_COLUNAS, rhSeedDocsStatements, RH_MODELOS_SQL, RH_SEED_MODELO_SQL, RH_PORTAL_V2_SQL, RH_HIERARQUIA_SQL, RH_HIERARQUIA_COLUNAS, RH_PONTO_V2_COLUNAS, rhSeedPontoStatements, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
 import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
+import { MODELO_DECLARACAO_SERVICO } from '@/bibliotecas/rh/modelos-rh';
 
 let db: Database | null = null;
 let sqlPromise: Promise<any> | null = null;
@@ -14,6 +15,14 @@ const IS_DEV = typeof window !== 'undefined' && (window.location.hostname === 'l
 const IDB_NAME = IS_DEV ? 'TangoGestaoCreditosERP_DevDB' : 'TangoGestaoCreditosERPDB';
 const IDB_STORE = 'sqlite_store';
 const IDB_KEY = 'main_db';
+
+/**
+ * Cópia de segurança da base deste navegador, feita antes de «Receber tudo de novo da nuvem». Se a recepção não
+ * trouxer os dados (ex.: alterações que nunca chegaram à nuvem), a cópia anterior pode ser reposta.
+ */
+const IDB_BACKUP_NAME = `${IDB_NAME}_CopiaAnterior`;
+export const REPLICA_BACKUP_AT_KEY = 'tango_replica_backup_at_v1';
+export const RESTORE_REPLICA_FLAG = 'tango_restore_replica_v1';
 
 const deleteIdb = (name: string) => new Promise<void>(resolve => {
     const request = indexedDB.deleteDatabase(name);
@@ -29,9 +38,9 @@ export type SqlTransactionStatement = {
     expectChanges?: number;
 };
 
-const loadFromIDB = (): Promise<Uint8Array | null> => {
+const loadFromIDB = (name = IDB_NAME): Promise<Uint8Array | null> => {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = (e: any) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
@@ -56,9 +65,9 @@ const loadFromIDB = (): Promise<Uint8Array | null> => {
     });
 };
 
-const saveToIDB = (data: Uint8Array): Promise<void> => {
+const saveToIDB = (data: Uint8Array, name = IDB_NAME): Promise<void> => {
     return new Promise((resolve, reject) => {
-        const req = indexedDB.open(IDB_NAME, 1);
+        const req = indexedDB.open(name, 1);
         req.onupgradeneeded = (e: any) => {
             const db = e.target.result;
             if (!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE);
@@ -106,8 +115,19 @@ const initDB = async (): Promise<Database> => {
         }
         // 2. Verificar IndexedDB
         else {
-            if (localStorage.getItem(REBUILD_REPLICA_FLAG)) {
+            if (localStorage.getItem(RESTORE_REPLICA_FLAG)) {
+                // Repor a cópia anterior à reconstrução (os dados mais recentes da nuvem voltam a chegar por cima).
+                localStorage.removeItem(RESTORE_REPLICA_FLAG);
+                const backup = await loadFromIDB(IDB_BACKUP_NAME).catch(() => null);
+                if (backup) await saveToIDB(backup);
+            } else if (localStorage.getItem(REBUILD_REPLICA_FLAG)) {
                 localStorage.removeItem(REBUILD_REPLICA_FLAG);
+                // Nunca se apaga sem guardar: a cópia actual fica como «cópia anterior» (a última reconstrução).
+                const current = await loadFromIDB().catch(() => null);
+                if (current) {
+                    await saveToIDB(current, IDB_BACKUP_NAME);
+                    localStorage.setItem(REPLICA_BACKUP_AT_KEY, new Date().toISOString());
+                }
                 await deleteIdb(IDB_NAME);
                 await deleteIdb('TangoCloudSyncQueue');
             }
@@ -382,7 +402,17 @@ const createTables = async () => {
             spouseConsentAt TEXT,
             spouseConsentBy TEXT,
             legalRepresentative TEXT,
-            legalRepRole TEXT
+            legalRepRole TEXT,
+            birthPlace TEXT,
+            province TEXT,
+            municipality TEXT,
+            neighborhood TEXT,
+            zone TEXT,
+            spouseBirthPlace TEXT,
+            spouseProvince TEXT,
+            spouseMunicipality TEXT,
+            spouseNeighborhood TEXT,
+            spouseZone TEXT
         );
 
         CREATE TABLE IF NOT EXISTS credits (
@@ -689,10 +719,12 @@ const createTables = async () => {
         CREATE INDEX IF NOT EXISTS idx_payments_credit_date ON payments(creditId, paymentDate);
         CREATE INDEX IF NOT EXISTS idx_audit_user_timestamp ON audit_logs(userId, timestamp);
 
-        -- Índices Parciais para Unicidade com Soft Delete
+        -- NIF e telefone: o registo de clientes recusa repetidos; a base aceita-os para que nenhum cliente vindo de
+        -- outro dispositivo fique de fora (ver fusao-clientes.ts).
         DROP INDEX IF EXISTS idx_clients_nif_active;
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO';
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL;
+        DROP INDEX IF EXISTS idx_clients_phone_active;
+        CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif);
+        CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone);
 
         CREATE TABLE IF NOT EXISTS message_templates (
             id TEXT PRIMARY KEY,
@@ -1188,6 +1220,57 @@ const createTables = async () => {
     await applyMigration(2026102305, 'rh-fase5-portal-do-funcionario', async () => {
         await safeAddColumn('rh_plano_ferias', 'pedido_funcionario', 'INTEGER NOT NULL DEFAULT 0');
     });
+    // Livro de ponto v2: marcações individuais (nunca apagadas), períodos mensais com fecho e colunas do resumo do dia.
+    await applyMigration(2026111801, 'rh-ponto-v2-marcacoes-e-periodos', async () => {
+        for (const statement of RH_PONTO_V2_SQL) await executeSql(statement);
+        for (const [tabela, coluna, definicao] of RH_PONTO_V2_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const seed of rhSeedPontoStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
+
+    await applyMigration(2026111901, 'rh-ponto-v3-escalas-banco-de-horas', async () => {
+        for (const statement of RH_PONTO_V3_SQL) await executeSql(statement);
+        for (const [tabela, coluna, definicao] of RH_PONTO_V3_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const seed of rhSeedPontoV3Statements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
+    // Folha de salário no modelo «Remunerações para Conferência»: enquadramento do funcionário e abonos habituais.
+    await applyMigration(2026111902, 'rh-folha-modelo-conferencia', async () => {
+        for (const [tabela, coluna, definicao] of RH_FOLHA_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const seed of rhSeedFolhaStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
+    // Processamento mês a mês: valor de cada falta configurável (a tabela dos valores do mês vem do esquema protegido).
+    await applyMigration(2026111903, 'rh-processamento-valor-falta', async () => {
+        for (const seed of rhSeedFaltaStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
+    // Cadastro de funcionários: nacionalidade, contactos, província/município, chefe directo, carreiras e período experimental.
+    await applyMigration(2026111904, 'rh-cadastro-funcionario-v2', async () => {
+        for (const [tabela, coluna, definicao] of RH_CADASTRO_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const seed of rhSeedCadastroStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
+    // Catálogo de subsídios e abonos: campos novos nas rubricas (idempotente: só preenche a classe que falta).
+    await applyMigration(2026111905, 'rh-catalogo-subsidios', async () => {
+        for (const [tabela, coluna, definicao] of RH_CATALOGO_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const statement of RH_CATALOGO_MIGRACAO_SQL) await executeSql(statement);
+    });
+    // Gestão documental: pastas, versões, anulados e auditoria (os documentos actuais ficam nas subpastas pela categoria).
+    await applyMigration(2026111906, 'rh-gestao-documental', async () => {
+        for (const statement of RH_DOCS_SQL) await executeSql(statement);
+        for (const [tabela, coluna, definicao] of RH_DOCS_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const seed of rhSeedDocsStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
+    });
+    // Relatórios pessoais: modelos de declaração editáveis (com o modelo inicial da declaração de serviço).
+    await applyMigration(2026111907, 'rh-modelos-declaracao', async () => {
+        for (const statement of RH_MODELOS_SQL) await executeSql(statement);
+        await runSql(RH_SEED_MODELO_SQL, ['modelo-declaracao-servico', 'Declaração de serviço', 'DECLARAÇÃO DE SERVIÇO E SALÁRIO', MODELO_DECLARACAO_SERVICO, new Date().toISOString()]);
+    });
+    // Portal do funcionário: outros pedidos (subsídio de férias) e correio interno com o RH.
+    await applyMigration(2026112001, 'rh-portal-pedidos-correio', async () => {
+        for (const statement of RH_PORTAL_V2_SQL) await executeSql(statement);
+    });
+    // Hierarquia: secções dos departamentos, nível dos cargos e secção de cada funcionário.
+    await applyMigration(2026112002, "rh-hierarquia-seccoes", async () => {
+        for (const statement of RH_HIERARQUIA_SQL) await executeSql(statement);
+        for (const [tabela, coluna, definicao] of RH_HIERARQUIA_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+    });
 
     // safeAddColumns for migrations
     await safeAddColumn("users", "permissionExceptions", "TEXT");
@@ -1199,6 +1282,9 @@ const createTables = async () => {
     await safeAddColumn("users", "mustChangePassword", "INTEGER DEFAULT 0");
     await safeAddColumn("users", "status", "TEXT DEFAULT 'active'");
     await safeAddColumn("users", "lastSeen", "TEXT");
+    // Chat: ficheiros enviados e ficha de cliente partilhada (JSON).
+    await safeAddColumn("internal_messages", "attachments", "TEXT");
+    await safeAddColumn("internal_messages", "clientCard", "TEXT");
     await safeAddColumn("users", "permissions", "TEXT");
     await safeAddColumn("users", "username", "TEXT");
     await safeAddColumn("users", "failedAttempts", "INTEGER DEFAULT 0");
@@ -1230,9 +1316,11 @@ const createTables = async () => {
     await safeAddColumn("clients", "restoredAt", "TEXT");
     await safeAddColumn("clients", "originalState", "TEXT");
     
+    // Sem unicidade na base (o registo de clientes verifica): um cliente vindo de outro dispositivo nunca fica de fora.
     await executeSql("DROP INDEX IF EXISTS idx_clients_nif_active");
-    await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'");
-    await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL");
+    await executeSql("DROP INDEX IF EXISTS idx_clients_phone_active");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif)");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone)");
 
     try {
         await executeSql("UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'");
@@ -1410,6 +1498,34 @@ const createTables = async () => {
     await safeAddColumn("clients", "spouseConsentBy", "TEXT");
     await safeAddColumn("clients", "legalRepresentative", "TEXT");
     await safeAddColumn("clients", "legalRepRole", "TEXT");
+    // Naturalidade e morada (província, município, bairro, zona) do cliente e do cônjuge.
+    // Carteira e documento do cliente: sem estas colunas perdiam-se ao gravar e todos voltavam a «comum».
+    await safeAddColumn("clients", "clientCategory", "TEXT");
+    await safeAddColumn("clients", "clientType", "TEXT");
+    await safeAddColumn("clients", "documentType", "TEXT");
+    await safeAddColumn("clients", "countryCode", "TEXT");
+    await safeAddColumn("clients", "nationality", "TEXT");
+    await safeAddColumn("clients", "passportFormatValidated", "INTEGER");
+    // Dados de pessoa colectiva: sem estas colunas perdiam-se ao gravar.
+    await safeAddColumn("clients", "foundationDate", "TEXT");
+    await safeAddColumn("clients", "legalForm", "TEXT");
+    await safeAddColumn("clients", "businessSector", "TEXT");
+    await safeAddColumn("clients", "commercialRegistry", "TEXT");
+    // Local de trabalho do particular: sector, ministério, NIF da empresa e cargo.
+    await safeAddColumn("clients", "employmentSector", "TEXT");
+    await safeAddColumn("clients", "ministry", "TEXT");
+    await safeAddColumn("clients", "employerNif", "TEXT");
+    await safeAddColumn("clients", "workPosition", "TEXT");
+    await safeAddColumn("clients", "birthPlace", "TEXT");
+    await safeAddColumn("clients", "province", "TEXT");
+    await safeAddColumn("clients", "municipality", "TEXT");
+    await safeAddColumn("clients", "neighborhood", "TEXT");
+    await safeAddColumn("clients", "zone", "TEXT");
+    await safeAddColumn("clients", "spouseBirthPlace", "TEXT");
+    await safeAddColumn("clients", "spouseProvince", "TEXT");
+    await safeAddColumn("clients", "spouseMunicipality", "TEXT");
+    await safeAddColumn("clients", "spouseNeighborhood", "TEXT");
+    await safeAddColumn("clients", "spouseZone", "TEXT");
 
     const multiTenancyTables = ["clients", "credits", "payments", "contracts", "warranties", "legal_cases", "payment_references", "accounting_entries"];
     for (const table of multiTenancyTables) {

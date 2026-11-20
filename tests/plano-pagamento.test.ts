@@ -49,7 +49,7 @@ test('divisões inexactas fecham ao cêntimo e o saldo termina em zero', () => {
 
 test('as opções seguem a tabela de taxas e os valores inválidos são recusados', () => {
     const options = planOptionsFromTiers(5_000_000, DEFAULT_INTEREST_TIERS, '2026-10-03T00:00:00Z');
-    assert.deepEqual(options.map(option => [option.plan.months, option.plan.ratePercent]), [[1, 35], [2, 50], [3, 60], [5, 70], [8, 80], [10, 100]]);
+    assert.deepEqual(options.map(option => [option.plan.months, option.plan.ratePercent]), [[1, 35], [2, 50], [3, 60], [5, 70], [8, 80], [10, 100], [11, 110], [12, 120]]);
     assert.throws(() => buildPaymentPlan({ principalMinor: 0, ratePercent: 10, months: 1, startDate: new Date() }), /valor concedido/);
     assert.throws(() => buildPaymentPlan({ principalMinor: 100, ratePercent: 10, months: 0, startDate: new Date() }), /prazo/);
 });

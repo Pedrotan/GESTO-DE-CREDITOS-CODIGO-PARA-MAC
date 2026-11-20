@@ -1,5 +1,7 @@
 import { Client } from '@/tipos/credito';
 import { RepositorioCliente } from '@/repositorios/RepositorioCliente';
+import { db } from '@/bibliotecas/bd';
+import { clientCategoryOf } from '@/bibliotecas/carteira-cliente';
 
 export class ServicoCliente {
     private static safeStr(val: any): string {
@@ -19,6 +21,12 @@ export class ServicoCliente {
     private static mapRowToClient(c: any): Client {
         return {
             ...c,
+            clientCategory: clientCategoryOf(c),
+            clientType: c.clientType || undefined,
+            documentType: c.documentType || undefined,
+            countryCode: c.countryCode || undefined,
+            nationality: c.nationality || undefined,
+            passportFormatValidated: Boolean(c.passportFormatValidated),
             createdAt: new Date(c.createdAt),
             deletedAt: c.deletedAt ? new Date(c.deletedAt) : undefined,
             restoredAt: c.restoredAt ? new Date(c.restoredAt) : undefined,
@@ -35,6 +43,15 @@ export class ServicoCliente {
 
     static async update(id: string, updates: Partial<Client>): Promise<void> {
         await RepositorioCliente.update(id, updates);
+    }
+
+    /**
+     * Crédito usado, disponível e estado recalculados a partir dos créditos e pagamentos deste dispositivo: gravados só
+     * aqui. Cada dispositivo calcula os seus; a sincronização leva os créditos e os pagamentos, não estes totais.
+     */
+    static async updateDerived(id: string, derived: Pick<Client, 'usedCredit' | 'availableCredit' | 'status'>): Promise<void> {
+        await db.runLocal('UPDATE clients SET usedCredit = ?, availableCredit = ?, status = ? WHERE id = ?',
+            [Number(derived.usedCredit) || 0, Number(derived.availableCredit) || 0, derived.status, id]);
     }
 
     static async delete(id: string, userId: string, withCredits = true): Promise<void> {

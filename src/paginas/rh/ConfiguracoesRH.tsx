@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/componentes/ui/tabs';
 import { Button } from '@/componentes/ui/button';
@@ -9,7 +10,9 @@ import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { Edit, Plus, Trash2 } from 'lucide-react';
-import { ServicoRH, type ActorRH, type Cargo, type Departamento, type Rubrica } from '@/servicos/rh/ServicoRH';
+import { ServicoRH, type ActorRH, type Cargo, type Departamento, type Rubrica, type Seccao } from '@/servicos/rh/ServicoRH';
+import { NIVEIS_CARGO, nomeNivel } from '@/bibliotecas/rh/hierarquia-rh';
+import { OrganogramaRH } from '@/componentes/rh/OrganogramaRH';
 import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
 import type { TipoAusencia } from '@/bibliotecas/rh/ponto';
 import { parametroEmVigor, tabelaIrtEmVigor, type IrtEscalao, type ParametroRH } from '@/bibliotecas/rh/parametros-rh';
@@ -17,6 +20,10 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { NavegacaoRH, dataPt, executar, kz, paraMinor, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { useBaseRH } from './FuncionariosRH';
+import { CatalogoSubsidios } from '@/componentes/rh/CatalogoSubsidios';
+import { ModelosDeclaracao } from '@/componentes/rh/ModelosDeclaracao';
+import { type FuncionarioRubrica } from '@/servicos/rh/ServicoRH';
+import { CalendarDays } from 'lucide-react';
 
 const NENHUM = '__nenhum__';
 const pct = (valor: number) => `${(valor * 100).toLocaleString('pt-PT', { maximumFractionDigits: 2 })}%`;
@@ -25,33 +32,53 @@ export default function ConfiguracoesRH() {
     const { actor, configurar, gerir } = useActorRH();
     const base = useBaseRH();
     const irt = useCarregar(async () => ({ tabelas: await ServicoRH.tabelasIrt(), escaloes: await ServicoRH.escaloesIrt() }), { tabelas: [], escaloes: [] as IrtEscalao[] });
-    const { parametros, rubricas, departamentos, cargos } = base.dados;
+    const { parametros, rubricas, departamentos, cargos, seccoes } = base.dados;
     const hoje = luandaTodayKey();
     const [parametro, setParametro] = useState<ParametroRH | null>(null);
     const [novaTabela, setNovaTabela] = useState(false);
     const [rubrica, setRubrica] = useState<Partial<Rubrica> | null>(null);
     const [departamento, setDepartamento] = useState<Partial<Departamento> | null>(null);
     const [cargo, setCargo] = useState<Partial<Cargo> | null>(null);
+    const [seccaoEd, setSeccaoEd] = useState<Partial<Seccao> | null>(null);
     const tiposAusencia = useCarregar(() => ServicoTempoRH.tiposAusencia(), [] as TipoAusencia[]);
     const [tipoAusencia, setTipoAusencia] = useState<Partial<TipoAusencia> | null>(null);
 
     const chaves = useMemo(() => [...new Set(parametros.map(p => p.chave))], [parametros]);
+    const atribuicoes = useCarregar(() => ServicoRH.todasRubricasFuncionarios(), [] as FuncionarioRubrica[]);
+    // Secção aberta na URL (?seccao=…), para os atalhos «Gerir catálogo →» abrirem já em Subsídios e abonos.
+    const [url, setUrl] = useSearchParams();
+    const seccao = url.get('seccao') || 'estrutura';
+    const irSeccao = (v: string) => setUrl(p => { const n = new URLSearchParams(p); n.set('seccao', v); return n; }, { replace: true });
+    const item = 'w-full justify-start rounded-lg px-3 py-2 text-left text-sm font-medium text-slate-700 data-[state=active]:bg-indigo-50 data-[state=active]:font-bold data-[state=active]:text-indigo-900 data-[state=active]:shadow-none dark:text-slate-300 dark:data-[state=active]:bg-slate-800 dark:data-[state=active]:text-white';
     const tabelaActual = tabelaIrtEmVigor(irt.dados.tabelas, hoje);
 
     return (
         <MainLayout title="Configurações de RH" subtitle="Parâmetros legais com vigência, tabela do IRT, rubricas e estrutura da empresa">
             <NavegacaoRH />
             {!configurar && <p className="mb-3 rounded-xl bg-amber-50 px-4 py-2 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">Só consulta: alterar parâmetros, tabela do IRT e rubricas exige a permissão «RH: Configurações legais».</p>}
-            <Tabs defaultValue="parametros">
-                <TabsList className="flex-wrap">
-                    <TabsTrigger value="parametros">Parâmetros legais</TabsTrigger>
-                    <TabsTrigger value="irt">Tabela do IRT</TabsTrigger>
-                    <TabsTrigger value="rubricas">Rubricas</TabsTrigger>
-                    <TabsTrigger value="ausencias">Tipos de ausência</TabsTrigger>
-                    <TabsTrigger value="estrutura">Departamentos e cargos</TabsTrigger>
+            <Tabs value={seccao} onValueChange={irSeccao} orientation="vertical" className="flex flex-wrap items-start gap-5">
+                <TabsList aria-label="Secções das configurações" className="flex h-auto w-full flex-col items-stretch gap-0.5 rounded-xl border border-rh-border bg-white p-2 sm:w-[240px] dark:border-slate-800 dark:bg-slate-900">
+                    <TabsTrigger className={item} value="estrutura">Departamentos e cargos</TabsTrigger>
+                    <TabsTrigger className={item} value="organograma">Hierarquia (organograma)</TabsTrigger>
+                    <Link to="/rh/calendario" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"><CalendarDays className="h-4 w-4" aria-hidden="true" /> Horários e calendário</Link>
+                    <TabsTrigger className={item} value="subsidios">Subsídios e abonos</TabsTrigger>
+                    <TabsTrigger className={item} value="rubricas">Descontos e rubricas do sistema</TabsTrigger>
+                    <TabsTrigger className={item} value="parametros">Parâmetros legais</TabsTrigger>
+                    <TabsTrigger className={item} value="irt">Tabela do IRT</TabsTrigger>
+                    <TabsTrigger className={item} value="ausencias">Tipos de ausência</TabsTrigger>
+                    <TabsTrigger className={item} value="modelos">Modelos de declaração</TabsTrigger>
                 </TabsList>
+                <div className="min-w-0 flex-[999_1_640px]">
 
-                <TabsContent value="parametros">
+                <TabsContent value="modelos" className="mt-0">
+                    <ModelosDeclaracao actor={actor} podeEditar={configurar} />
+                </TabsContent>
+
+                <TabsContent value="subsidios" className="mt-0">
+                    <CatalogoSubsidios rubricas={rubricas} atribuicoes={atribuicoes.dados} actor={actor} podeEditar={configurar} onChange={() => { void base.recarregar(); void atribuicoes.recarregar(); }} />
+                </TabsContent>
+
+                <TabsContent value="parametros" className="mt-0">
                     <p className="mb-3 text-xs text-slate-500">Cada valor tem data de início de vigência. Um novo valor não altera o anterior: os processamentos já feitos continuam a usar a taxa do seu mês. Valide estes valores com um contabilista certificado.</p>
                     <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
                         <table className="w-full text-sm">
@@ -75,7 +102,7 @@ export default function ConfiguracoesRH() {
                     </div>
                 </TabsContent>
 
-                <TabsContent value="irt" className="space-y-4">
+                <TabsContent value="irt" className="mt-0 space-y-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <p className="text-xs text-slate-500">IRT do Grupo A (trabalho por conta de outrem). Quando sair um novo OGE, crie uma nova versão: os recibos antigos mantêm a tabela do seu ano.</p>
                         {configurar && <Button size="sm" onClick={() => setNovaTabela(true)}><Plus className="mr-1.5 h-4 w-4" /> Nova versão da tabela</Button>}
@@ -100,15 +127,15 @@ export default function ConfiguracoesRH() {
                     ))}
                 </TabsContent>
 
-                <TabsContent value="rubricas" className="space-y-3">
+                <TabsContent value="rubricas" className="mt-0 space-y-3">
                     <div className="flex items-center justify-between">
-                        <p className="text-xs text-slate-500">Cada linha do recibo é uma rubrica: diz se incide INSS, se incide IRT e a parte isenta de IRT. As de sistema são usadas pelo motor de cálculo.</p>
-                        {configurar && <Button size="sm" onClick={() => setRubrica({ tipo: 'abono', forma: 'fixo', incide_inss: 1, incide_irt: 1, ordem_no_recibo: 100, activo: 1 })}><Plus className="mr-1.5 h-4 w-4" /> Nova rubrica</Button>}
+                        <p className="text-xs text-slate-500">Descontos fixos (adiantamentos, quotas, créditos internos) e as rubricas de sistema usadas pelo motor de cálculo. Os subsídios e abonos estão em «Subsídios e abonos».</p>
+                        {configurar && <Button size="sm" onClick={() => setRubrica({ tipo: 'desconto', forma: 'fixo', incide_inss: 0, incide_irt: 0, ordem_no_recibo: 200, activo: 1 })}><Plus className="mr-1.5 h-4 w-4" /> Novo desconto</Button>}
                     </div>
                     <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
                         <table className="w-full text-sm">
                             <thead className="bg-slate-50 text-left text-[11px] uppercase text-slate-500 dark:bg-slate-900"><tr><th className="px-3 py-2">Código</th><th className="px-3 py-2">Nome</th><th className="px-3 py-2">Tipo</th><th className="px-3 py-2">INSS</th><th className="px-3 py-2">IRT</th><th className="px-3 py-2">Isento de IRT</th><th className="px-3 py-2">Conta</th><th /></tr></thead>
-                            <tbody>{rubricas.map(r => (
+                            <tbody>{rubricas.filter(r => r.sistema || r.tipo === 'desconto').map(r => (
                                 <tr key={r.id} className={`border-t border-slate-100 dark:border-slate-800 ${r.activo ? '' : 'opacity-50'}`}>
                                     <td className="px-3 py-2 font-mono text-xs">{r.codigo}{r.sistema ? <span className="ml-1 rounded bg-slate-100 px-1 text-[10px] text-slate-500 dark:bg-slate-800">sistema</span> : null}</td>
                                     <td className="px-3 py-2 font-semibold">{r.nome}</td><td className="px-3 py-2 capitalize">{r.tipo}</td>
@@ -122,7 +149,7 @@ export default function ConfiguracoesRH() {
                     </div>
                 </TabsContent>
 
-                <TabsContent value="ausencias" className="space-y-3">
+                <TabsContent value="ausencias" className="mt-0 space-y-3">
                     <div className="flex items-center justify-between">
                         <p className="text-xs text-slate-500">Tipos de falta e licença. Confirme os dias e a remuneração de cada licença na Lei Geral do Trabalho em vigor.</p>
                         {configurar && <Button size="sm" onClick={() => setTipoAusencia({ justificada: 1, remunerada: 1, desconta_salario: 0 })}><Plus className="mr-1.5 h-4 w-4" /> Novo tipo</Button>}
@@ -142,14 +169,30 @@ export default function ConfiguracoesRH() {
                     </div>
                 </TabsContent>
 
-                <TabsContent value="estrutura" className="grid gap-4 lg:grid-cols-2">
+                <TabsContent value="estrutura" className="mt-0 grid gap-4 lg:grid-cols-2">
                     <div className="space-y-2">
                         <div className="flex items-center justify-between"><h3 className="font-black">Departamentos</h3>{gerir && <Button size="sm" onClick={() => setDepartamento({ nome: '' })}><Plus className="mr-1.5 h-4 w-4" /> Novo</Button>}</div>
                         {departamentos.length === 0 ? <Vazio>Sem departamentos.</Vazio> : departamentos.map(d => (
-                            <div key={d.id} className={`flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800 ${d.activo ? '' : 'opacity-50'}`}>
-                                <span><b>{d.nome}</b> · {base.dados.funcionarios.filter(f => f.departamento_id === d.id && f.estado === 'activo').length} activo(s)
-                                    {d.responsavel_id ? ` · responsável: ${base.dados.funcionarios.find(f => f.id === d.responsavel_id)?.nome || '—'}` : ''}</span>
-                                {gerir && <Button size="icon" variant="ghost" onClick={() => setDepartamento(d)}><Edit className="h-4 w-4" /></Button>}
+                            <div key={d.id} className={`rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800 ${d.activo ? '' : 'opacity-50'}`}>
+                                <div className="flex items-center justify-between gap-2">
+                                    <span><b>{d.nome}</b> · {base.dados.funcionarios.filter(f => f.departamento_id === d.id && f.estado === 'activo').length} activo(s)
+                                        {d.responsavel_id ? ` · responsável: ${base.dados.funcionarios.find(f => f.id === d.responsavel_id)?.nome || '—'}` : ''}</span>
+                                    {gerir && <div className="flex shrink-0 items-center">
+                                        <Button size="sm" variant="ghost" className="h-8 px-2 text-xs" onClick={() => setSeccaoEd({ departamento_id: d.id, nome: '' })}><Plus className="mr-1 h-3.5 w-3.5" /> Secção</Button>
+                                        <Button size="icon" variant="ghost" aria-label={`Editar ${d.nome}`} onClick={() => setDepartamento(d)}><Edit className="h-4 w-4" /></Button>
+                                    </div>}
+                                </div>
+                                {seccoes.filter(s => s.departamento_id === d.id).length > 0 && (
+                                    <ul className="mt-1.5 space-y-1 border-l-2 border-slate-200 pl-3 dark:border-slate-700">
+                                        {seccoes.filter(s => s.departamento_id === d.id).map(s => (
+                                            <li key={s.id} className={`flex items-center justify-between gap-2 text-xs ${s.activo ? '' : 'opacity-50'}`}>
+                                                <span><b>Secção {s.nome}</b> · {base.dados.funcionarios.filter(f => f.seccao_id === s.id && f.estado === 'activo').length} activo(s)
+                                                    {s.responsavel_id ? ` · chefe: ${base.dados.funcionarios.find(f => f.id === s.responsavel_id)?.nome || '—'}` : ' · sem chefe'}</span>
+                                                {gerir && <Button size="icon" variant="ghost" className="h-7 w-7" aria-label={`Editar a secção ${s.nome}`} onClick={() => setSeccaoEd(s)}><Edit className="h-3.5 w-3.5" /></Button>}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                )}
                             </div>
                         ))}
                     </div>
@@ -157,12 +200,19 @@ export default function ConfiguracoesRH() {
                         <div className="flex items-center justify-between"><h3 className="font-black">Cargos</h3>{gerir && <Button size="sm" onClick={() => setCargo({ nome: '', salario_referencia_minor: 0 })}><Plus className="mr-1.5 h-4 w-4" /> Novo</Button>}</div>
                         {cargos.length === 0 ? <Vazio>Sem cargos.</Vazio> : cargos.map(c => (
                             <div key={c.id} className={`flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800 ${c.activo ? '' : 'opacity-50'}`}>
-                                <span><b>{c.nome}</b> · {departamentos.find(d => d.id === c.departamento_id)?.nome || 'sem departamento'} · referência {kz(c.salario_referencia_minor)}</span>
+                                <span><b>{c.nome}</b> · {nomeNivel(c.nivel)} · {departamentos.find(d => d.id === c.departamento_id)?.nome || 'sem departamento'} · referência {kz(c.salario_referencia_minor)}</span>
                                 {gerir && <Button size="icon" variant="ghost" onClick={() => setCargo(c)}><Edit className="h-4 w-4" /></Button>}
                             </div>
                         ))}
                     </div>
                 </TabsContent>
+
+                <TabsContent value="organograma" className="mt-0 space-y-3">
+                    <p className="text-xs text-slate-500">Cada funcionário responde ao seu chefe directo: o escolhido na ficha ou, sem escolha, o chefe da secção e depois o responsável do departamento.
+                        O chefe directo recebe os pedidos do portal da sua equipa. A ordem segue o nível do cargo (Direcção, Chefia, Coordenação, Técnico, Apoio).</p>
+                    <OrganogramaRH departamentos={departamentos} seccoes={seccoes} cargos={cargos} funcionarios={base.dados.funcionarios} />
+                </TabsContent>
+                </div>
             </Tabs>
 
             {actor && parametro && <DialogoParametro parametro={parametro} actor={actor} onClose={() => setParametro(null)} onSaved={() => void base.recarregar()} />}
@@ -170,6 +220,7 @@ export default function ConfiguracoesRH() {
             {actor && rubrica && <DialogoRubrica rubrica={rubrica} actor={actor} onClose={() => setRubrica(null)} onSaved={() => void base.recarregar()} />}
             {actor && departamento && <DialogoDepartamento departamento={departamento} funcionarios={base.dados.funcionarios} actor={actor} onClose={() => setDepartamento(null)} onSaved={() => void base.recarregar()} />}
             {actor && tipoAusencia && <DialogoTipoAusencia tipo={tipoAusencia} actor={actor} onClose={() => setTipoAusencia(null)} onSaved={() => void tiposAusencia.recarregar()} />}
+            {actor && seccaoEd && <DialogoSeccao seccao={seccaoEd} departamentos={departamentos} funcionarios={base.dados.funcionarios.filter(f => f.estado !== 'cessado')} actor={actor} onClose={() => setSeccaoEd(null)} onSaved={() => void base.recarregar()} />}
             {actor && cargo && <DialogoCargo cargo={cargo} departamentos={departamentos} actor={actor} onClose={() => setCargo(null)} onSaved={() => void base.recarregar()} />}
         </MainLayout>
     );
@@ -306,7 +357,7 @@ function DialogoCargo({ cargo, departamentos, actor, onClose, onSaved }: Base & 
     const [c, setC] = useState(cargo);
     return (
         <Moldura titulo={c.id ? 'Editar cargo' : 'Novo cargo'} onClose={onClose}
-            onConfirm={async () => { const ok = await executar(() => ServicoRH.guardarCargo({ id: c.id, nome: c.nome || '', departamento_id: c.departamento_id, salario_referencia_minor: c.salario_referencia_minor, activo: c.activo !== 0 }, actor), 'Cargo guardado'); if (ok) onSaved(); return ok; }}>
+            onConfirm={async () => { const ok = await executar(() => ServicoRH.guardarCargo({ id: c.id, nome: c.nome || '', departamento_id: c.departamento_id, salario_referencia_minor: c.salario_referencia_minor, activo: c.activo !== 0, nivel: c.nivel ?? null }, actor), 'Cargo guardado'); if (ok) onSaved(); return ok; }}>
             <div className="grid gap-3">
                 <Campo label="Nome"><Input value={c.nome || ''} onChange={e => setC(p => ({ ...p, nome: e.target.value }))} /></Campo>
                 <Campo label="Departamento">
@@ -315,8 +366,40 @@ function DialogoCargo({ cargo, departamentos, actor, onClose, onSaved }: Base & 
                         <SelectContent><SelectItem value={NENHUM}>—</SelectItem>{departamentos.map(d => <SelectItem key={d.id} value={d.id}>{d.nome}</SelectItem>)}</SelectContent>
                     </Select>
                 </Campo>
+                <Campo label="Nível na hierarquia">
+                    <Select value={c.nivel ? String(c.nivel) : NENHUM} onValueChange={v => setC(p => ({ ...p, nivel: v === NENHUM ? null : Number(v) }))}>
+                        <SelectTrigger aria-label="Nível na hierarquia"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value={NENHUM}>Sem nível</SelectItem>{NIVEIS_CARGO.map(n => <SelectItem key={n.nivel} value={String(n.nivel)}>{n.nivel}. {n.nome} — {n.descricao}</SelectItem>)}</SelectContent>
+                    </Select>
+                </Campo>
                 <Campo label="Salário de referência"><CurrencyInput value={(c.salario_referencia_minor || 0) / 100} onValueChange={v => setC(p => ({ ...p, salario_referencia_minor: paraMinor(v) }))} /></Campo>
                 {c.id && <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={c.activo !== 0} onCheckedChange={v => setC(p => ({ ...p, activo: v ? 1 : 0 }))} /> Activo</label>}
+            </div>
+        </Moldura>
+    );
+}
+
+function DialogoSeccao({ seccao, departamentos, funcionarios, actor, onClose, onSaved }: Base & { seccao: Partial<Seccao>; departamentos: Departamento[]; funcionarios: { id: string; nome: string; departamento_id: string | null }[] }) {
+    const [s, setS] = useState(seccao);
+    const doDepartamento = funcionarios.filter(f => f.departamento_id === s.departamento_id);
+    return (
+        <Moldura titulo={s.id ? 'Editar secção' : 'Nova secção'} descricao="O chefe da secção é o chefe directo sugerido de quem estiver nela (pode mudar-se na ficha de cada funcionário)." onClose={onClose}
+            onConfirm={async () => { const ok = await executar(() => ServicoRH.guardarSeccao({ id: s.id, departamento_id: s.departamento_id || '', nome: s.nome || '', responsavel_id: s.responsavel_id, activo: s.activo !== 0 }, actor), 'Secção guardada'); if (ok) onSaved(); return ok; }}>
+            <div className="grid gap-3">
+                <Campo label="Departamento">
+                    <Select value={s.departamento_id || NENHUM} onValueChange={v => setS(p => ({ ...p, departamento_id: v === NENHUM ? undefined : v }))}>
+                        <SelectTrigger aria-label="Departamento"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value={NENHUM}>—</SelectItem>{departamentos.map(d => <SelectItem key={d.id} value={d.id}>{d.nome}</SelectItem>)}</SelectContent>
+                    </Select>
+                </Campo>
+                <Campo label="Nome da secção"><Input aria-label="Nome da secção" value={s.nome || ''} placeholder="Ex.: Contabilidade, Tesouraria" onChange={e => setS(p => ({ ...p, nome: e.target.value }))} /></Campo>
+                <Campo label="Chefe da secção">
+                    <Select value={s.responsavel_id || NENHUM} onValueChange={v => setS(p => ({ ...p, responsavel_id: v === NENHUM ? null : v }))}>
+                        <SelectTrigger aria-label="Chefe da secção"><SelectValue /></SelectTrigger>
+                        <SelectContent><SelectItem value={NENHUM}>—</SelectItem>{(doDepartamento.length ? doDepartamento : funcionarios).map(f => <SelectItem key={f.id} value={f.id}>{f.nome}</SelectItem>)}</SelectContent>
+                    </Select>
+                </Campo>
+                {s.id && <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={s.activo !== 0} onCheckedChange={v => setS(p => ({ ...p, activo: v ? 1 : 0 }))} /> Activa</label>}
             </div>
         </Moldura>
     );

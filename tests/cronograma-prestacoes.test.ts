@@ -23,3 +23,11 @@ test('cronograma recusa montantes e prazos inválidos', () => {
     assert.throws(() => buildInstallmentSchedule({ principalMinor: 1.5, installments: 2, startDate: new Date(), method: 'SAC' }), /inteiro/);
     assert.throws(() => buildInstallmentSchedule({ principalMinor: 100, installments: 0, startDate: new Date(), method: 'PRICE' }), /prestações/);
 });
+
+test('cronograma com as datas da simulação (dia escolhido e dias úteis) e recusa de datas fora de ordem', () => {
+    const dueDates = ['2027-01-28T00:00:00.000Z', '2027-03-01T00:00:00.000Z', '2027-03-29T00:00:00.000Z'];
+    const schedule = buildInstallmentSchedule({ principalMinor: 300_000, installments: 3, startDate: '2026-10-15T11:00:00.000Z', method: 'FLAT', flatInterestMinor: 300_000, dueDates });
+    assert.deepEqual(schedule.map(item => item.dueDate), dueDates);
+    assert.throws(() => buildInstallmentSchedule({ principalMinor: 300_000, installments: 3, startDate: '2026-10-15T11:00:00.000Z', method: 'FLAT', dueDates: dueDates.slice(0, 2) }), /datas de vencimento/);
+    assert.throws(() => buildInstallmentSchedule({ principalMinor: 300_000, installments: 3, startDate: '2027-02-01T11:00:00.000Z', method: 'FLAT', dueDates }), /datas de vencimento/);
+});

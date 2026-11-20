@@ -19,6 +19,7 @@ import { useData } from '@/contextos/ContextoDados';
 import { evaluateAccess, formatAccessMoment } from '@/bibliotecas/horario-acesso';
 import { HorarioAcessoPanel } from '@/componentes/sessoes/HorarioAcessoPanel';
 import { ServicoControloAcesso, SessaoDispositivo } from '@/servicos/ServicoControloAcesso';
+import { ServicoPresenca, type RemotePresence } from '@/servicos/ServicoPresenca';
 
 /** Sem sinal há mais de 5 minutos, considera-se a sessão terminada. */
 const JANELA_ONLINE_MS = 5 * 60 * 1000;
@@ -58,26 +59,46 @@ export default function Sessoes() {
 
     const [confirmarRevogarTodos, setConfirmarRevogarTodos] = useState(false);
 
+    // Presença de todos os dispositivos da empresa (computadores e navegadores), recebida da nuvem a cada minuto.
+    const [remota, setRemota] = useState<Map<string, RemotePresence> | null>(null);
+    useEffect(() => {
+        let activo = true;
+        const actualizar = () => { void ServicoPresenca.resolve(users.map(u => u.id)).then(mapa => { if (activo) setRemota(mapa); }); };
+        actualizar();
+        void ServicoPresenca.refresh();
+        const sair = ServicoPresenca.subscribe(actualizar);
+        const intervalo = setInterval(() => void ServicoPresenca.refresh(), 30_000);
+        return () => { activo = false; sair(); clearInterval(intervalo); };
+    }, [users]);
+
     const sessoes = useMemo(() => {
         const agora = Date.now();
         return users
             .map((u) => {
                 const proprio = u.id === user?.id;
-                // O operador desta sessão conectada está ativamente online agora
-                const visto = proprio ? agora : (u.lastSeen ? new Date(u.lastSeen).getTime() : 0);
-                const online = proprio || (u.status === 'active' && visto > 0 && agora - visto < JANELA_ONLINE_MS);
+                const presenca = remota?.get(u.id);
+                // Online: esta sessão, o sinal da nuvem (qualquer dispositivo) ou, sem nuvem, a actividade neste dispositivo.
+                const vistoLocal = u.lastSeen ? new Date(u.lastSeen).getTime() : 0;
+                const vistoRemoto = presenca?.lastSeen ? new Date(presenca.lastSeen).getTime() : 0;
+                const visto = proprio ? agora : Math.max(vistoLocal, vistoRemoto);
+                const online = proprio || Boolean(presenca?.online)
+                    || (!remota && u.status === 'active' && vistoLocal > 0 && agora - vistoLocal < JANELA_ONLINE_MS);
+                const dispositivos = presenca?.platforms || [];
                 const ipFinal = proprio ? (u.ip || user?.ip || 'Local (Esta Estação)') : (u.ip || '—');
 
                 return {
                     ...u,
+                    lastSeen: visto ? new Date(visto).toISOString() : u.lastSeen,
                     online,
                     visto,
                     ipFinal,
-                    proprio
+                    proprio,
+                    dispositivos,
+                    numDispositivos: presenca?.devices || 0,
                 };
             })
             .sort((a, b) => Number(b.online) - Number(a.online) || b.visto - a.visto);
-    }, [users, user?.id, user?.ip]);
+    }, [users, user?.id, user?.ip, remota]);
 
     const online = sessoes.filter((s) => s.online).length;
 
@@ -283,7 +304,9 @@ export default function Sessoes() {
                                 Operadores Ligados ao Sistema
                             </h3>
                             <p className="text-xs text-muted-foreground">
-                                Estado em tempo real de todos os colaboradores autorizados
+                                {remota
+                                    ? 'Estado em tempo real em todos os computadores e navegadores da empresa (actualiza a cada minuto)'
+                                    : 'Só este dispositivo: ligue a empresa à nuvem para ver quem está ligado noutros computadores'}
                             </p>
                         </div>
                         <div className="flex items-center gap-2">
@@ -337,6 +360,13 @@ export default function Sessoes() {
                                                         {proprio && (
                                                             <Badge variant="outline" className="text-[10px] bg-primary/10 text-primary border-primary/20">esta sessão</Badge>
                                                         )}
+                                                        {s.online && s.dispositivos.map(plataforma => (
+                                                            <Badge key={plataforma} variant="outline" className="gap-1 text-[10px]">
+                                                                {plataforma === 'pc' ? <Laptop className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
+                                                                {plataforma === 'pc' ? 'Computador' : 'Web'}
+                                                            </Badge>
+                                                        ))}
+                                                        {s.numDispositivos > 1 && <span className="text-[10px] text-muted-foreground">{s.numDispositivos} dispositivos</span>}
                                                     </div>
                                                     <p className="text-xs font-normal text-muted-foreground">{s.email}</p>
                                                 </TableCell>
@@ -350,7 +380,7 @@ export default function Sessoes() {
                                                     {s.ipFinal}
                                                 </TableCell>
                                                 <TableCell className="text-xs">
-                                                    {proprio ? (
+                                                    {proprio || s.online ? (
                                                         <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-700 dark:text-emerald-400">
                                                             <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
                                                             Activo agora

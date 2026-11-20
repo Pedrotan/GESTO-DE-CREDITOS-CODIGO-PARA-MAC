@@ -55,3 +55,9 @@ public_key.json
 .env.*
 !.env.production.example
 !.env.example
+
+# Chaves da facturação electrónica AGT (nunca versionar)
+dados-agt/
+
+# Instaladores das actualizações (só na VPS, nunca no repositório)
+dados-actualizacoes/

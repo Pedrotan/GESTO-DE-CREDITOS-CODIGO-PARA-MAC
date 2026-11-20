@@ -58,6 +58,14 @@ export const db = {
         if (state.adapter === sqlite) await enqueueSyncOperation(query, params || []);
         return result;
     },
+    /**
+     * Gravação só neste dispositivo (não vai para a nuvem): para valores que cada dispositivo calcula a partir dos seus
+     * próprios dados (crédito usado, disponível e estado do cliente). Enviá-los fazia dois dispositivos com dados
+     * diferentes regravarem o valor um do outro sem parar.
+     */
+    runLocal: async (query: string, params?: any[]): Promise<DBResult> => {
+        return await (state.adapter as any).run(query, params) as DBResult;
+    },
     transaction: async (statements: SqlTransactionStatement[]): Promise<any[]> => {
         const adapter = state.adapter as any;
         if (adapter.transaction) {

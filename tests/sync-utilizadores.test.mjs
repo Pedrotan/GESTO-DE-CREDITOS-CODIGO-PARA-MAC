@@ -26,10 +26,19 @@ globalThis.__neonQuery = async (text, params = []) => {
     if (/^\s*(CREATE|ALTER)/i.test(text)) return [];
     if (/api_rate_limits/.test(text)) return [{ request_count: 1, reset_epoch: Math.floor(Date.now() / 1000) + 60 }];
     if (/security_lockouts|security_events/.test(text)) return [];
-    if (/SELECT key_hash, status, expires_at, access_code FROM tango_tenants/.test(text)) {
+    if (/SELECT key_hash, status, expires_at, access_code(, tenant_hash)? FROM tango_tenants/.test(text)) {
+        // A empresa registada guarda o hash do NIF tal como foi registado (em maiúsculas).
         return String(params[0]).toUpperCase() === TENANT
-            ? [{ key_hash: sha256('TGABCDEFGH'), status: 'active', expires_at: null, access_code: SERVER_CODE }]
+            ? [{ key_hash: sha256('TGABCDEFGH'), status: 'active', expires_at: null, access_code: SERVER_CODE, tenant_hash: sha256(TENANT) }]
             : [];
+    }
+    if (/SELECT 1 AS found FROM tango_sync_operations WHERE tenant_hash = \$1 LIMIT 1/.test(text)) {
+        return server.ops.some(op => op.tenant_hash === params[0]) ? [{ found: 1 }] : [];
+    }
+    if (/INSERT INTO tango_sync_operations \(tenant_hash, operation_id, device_id, payload, created_at\)/.test(text)) {
+        const moved = server.ops.filter(op => op.tenant_hash === params[1]).sort((a, b) => a.seq - b.seq);
+        for (const op of moved) if (!server.ops.some(o => o.tenant_hash === params[0] && o.operation_id === op.operation_id)) server.ops.push({ ...op, seq: ++server.seq, tenant_hash: params[0] });
+        return [];
     }
     if (/^\s*UPDATE tango_tenants/i.test(text)) return [];
     if (/INSERT INTO tango_sync_operations/.test(text)) {
@@ -99,7 +108,9 @@ const cloud = await bundle('src/servicos/ServicoSincronizacaoCloud.ts', {
         export const scopedStorageKey = key => key + ':default';
         export const getScopedLocalStorageItem = key => localStorage.getItem(key + ':default');`,
     '@/bibliotecas/ligacao-financeira': 'export const setFinancialConnectionProbe = () => {};',
-    '@/bibliotecas/adaptador-sqlite': `export const sqlite = {
+    '@/bibliotecas/adaptador-sqlite': `export const REPLICA_BACKUP_AT_KEY = 'tango_replica_backup_at_v1';
+    export const RESTORE_REPLICA_FLAG = 'tango_restore_replica_v1';
+    export const sqlite = {
         all: (sql, params) => globalThis.__sqlite.all(sql, params),
         run: (sql, params) => globalThis.__sqlite.run(sql, params),
         transaction: statements => globalThis.__sqlite.transaction(statements),
@@ -407,10 +418,11 @@ test('carga ilegível fica retida após avançar o cursor e recupera com a chave
     try {
         const first = await cloud.syncCloudNow();
         assert.equal(first.skipped, 1);
-        // Guardada para recuperação, mas não deixa o estado pendente para sempre (o cabeçalho mostra "Sincronizado").
-        assert.equal(cloud.getLastCloudSyncStatus().state, 'synced');
+        // Guardada para recuperação; o ícone não diz «Sincronizado» enquanto houver algo ilegível: fica «Verificar».
+        assert.equal(cloud.getLastCloudSyncStatus().state, 'attention');
         assert.equal(cloud.getLastCloudSyncStatus().skipped, 1);
-        assert.match(cloud.getLastCloudSyncStatus().message, /guardadas para recuperação/);
+        assert.match(cloud.getLastCloudSyncStatus().message, /1 alteração ilegível/);
+        assert.deepEqual(cloud.getLastCloudSyncStatus().issues.map(issue => issue.kind), ['unreadable']);
         const again = await cloud.syncCloudNow();
         assert.equal(again.skipped, 1, 'a operação não desaparece quando o servidor já não a devolve');
         cloud.stopCloudSync();
@@ -420,4 +432,301 @@ test('carga ilegível fica retida após avançar o cursor e recupera com a chave
     } finally {
         cloud.stopCloudSync();
     }
+});
+
+test('ilegível antiga de um dispositivo que já cifra com o código actual sai sozinha da lista («Sincronizado»)', async () => {
+    server.ops = [];
+    server.rosters.clear();
+    const source = useDevice({ electronAPI: desktopApi });
+    source.run(`INSERT INTO users (id, name, email, password, role, createdAt)
+        VALUES ('antigo', 'Antigo', 'antigo@empresa.ao', 'hash', 'admin', '2026-01-01')`);
+    const old = await desktopApi(source).syncUsersPayload({ apiKey: 'TG-ZZZZ-YYYY', tenantId: TENANT, deviceId: 'pc-antigo', knownIds: [] });
+    server.ops.push({ seq: ++server.seq, tenant_hash: sha256(TENANT), operation_id: old.id, device_id: 'pc-antigo', payload: old.payload });
+    useDevice({ electronAPI: desktopApi });
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    try {
+        assert.equal((await cloud.syncCloudNow()).skipped, 1);
+        assert.equal(cloud.getLastCloudSyncStatus().state, 'attention', 'enquanto o dispositivo só enviou com a chave antiga, fica «Verificar»');
+        // O mesmo computador passou a usar o código actual: as alterações novas dele lêem-se aqui.
+        source.run(`UPDATE users SET name = 'Antigo Actualizado' WHERE id = 'antigo'`);
+        const current = await desktopApi(source).syncUsersPayload({ apiKey: SERVER_CODE, tenantId: TENANT, deviceId: 'pc-antigo', knownIds: [] });
+        server.ops.push({ seq: ++server.seq, tenant_hash: sha256(TENANT), operation_id: current.id, device_id: 'pc-antigo', payload: current.payload });
+        assert.equal((await cloud.syncCloudNow()).success, true);
+        const status = cloud.getLastCloudSyncStatus();
+        assert.equal(status.skipped, 0, 'a ilegível antiga foi arquivada neste dispositivo');
+        assert.ok(!status.issues.some(issue => issue.kind === 'unreadable'));
+        assert.notEqual(status.state, 'attention');
+    } finally {
+        cloud.stopCloudSync();
+    }
+});
+
+test('servidor aceita um lote grande (100 alterações + utilizadores + resto da transacção) em vez de bloquear o dispositivo', async () => {
+    server.ops = [];
+    const operations = Array.from({ length: 150 }, (_, index) => ({ id: nodeCrypto.randomUUID(), deviceId: 'pc-lote', payload: `cifrado-${index}` }));
+    const res = {
+        statusCode: 200, headers: {},
+        status(code) { this.statusCode = code; return this; },
+        setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+        json(body) { this.body = body; return this; },
+    };
+    await syncHandler({ method: 'POST', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-lote', cursor: 0, operations } }, res);
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.equal(res.body.success, true);
+    assert.equal(server.ops.length, 150);
+});
+
+// ── Ponto 0: envios recusados por tamanho nunca se perdem nem bloqueiam a fila ──────────────────────────────────
+const fakeRes = () => ({
+    statusCode: 200, headers: {},
+    status(code) { this.statusCode = code; return this; },
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+    json(body) { this.body = body; return this; },
+});
+
+test('servidor: alteração acima do limite é recusada com o identificador e nada é gravado', async () => {
+    server.ops = [];
+    const grande = { id: nodeCrypto.randomUUID(), deviceId: 'pc-grande', payload: 'x'.repeat(12_000_001) };
+    const normal = { id: nodeCrypto.randomUUID(), deviceId: 'pc-grande', payload: 'cifrado' };
+    const res = fakeRes();
+    await syncHandler({ method: 'POST', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-grande', cursor: 0, operations: [normal, grande] } }, res);
+    assert.equal(res.statusCode, 413);
+    assert.equal(res.body.code, 'OPERATION_TOO_LARGE');
+    assert.deepEqual(res.body.operationIds, [grande.id]);
+    assert.equal(server.ops.length, 0, 'o pedido não é gravado a meio');
+    // Uma alteração com 11 MB (cliente com documentos) já é aceite.
+    const media = { id: nodeCrypto.randomUUID(), deviceId: 'pc-grande', payload: 'y'.repeat(11_000_000) };
+    const aceite = fakeRes();
+    await syncHandler({ method: 'POST', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-grande', cursor: 0, operations: [media] } }, aceite);
+    assert.equal(aceite.statusCode, 200, JSON.stringify(aceite.body));
+});
+
+const withFetch = async (wrapper, run) => {
+    const previous = globalThis.fetch;
+    globalThis.fetch = wrapper(previous);
+    try { return await run(); } finally { globalThis.fetch = previous; }
+};
+
+test('PC: lote recusado por tamanho volta a seguir em lotes menores, sem perder nada', async () => {
+    server.ops = [];
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    for (let index = 0; index < 12; index++) database.run(`INSERT INTO clients VALUES ('c${index}', 'Cliente ${index}')`);
+    let refused = 0;
+    const result = await withFetch(previous => async (url, init) => {
+        const body = JSON.parse(init.body);
+        // Proxy com limite apertado: recusa qualquer pedido com mais de 3 alterações (sem dizer quais).
+        if (body.operations.length > 3) { refused += 1; return { ok: false, status: 413, json: async () => ({ success: false, code: 'BODY_TOO_LARGE' }) }; }
+        return previous(url, init);
+    }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try { return await cloud.syncCloudNow(); } finally { cloud.stopCloudSync(); }
+    });
+    assert.equal(result.success, true, result.message);
+    assert.ok(refused > 0, 'houve recusas');
+    assert.equal(server.ops.length, 12, 'todos os registos chegaram ao servidor');
+    assert.equal(await cloud.getPendingSyncCount(), 0);
+});
+
+test('PC: alteração que o servidor não aceita fica de parte, guardada, e as outras seguem', async () => {
+    server.ops = [];
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    for (let index = 0; index < 4; index++) database.run(`INSERT INTO clients VALUES ('c${index}', 'Cliente ${index}')`);
+    let rejectedId = null;
+    const result = await withFetch(previous => async (url, init) => {
+        const body = JSON.parse(init.body);
+        if (!rejectedId && body.operations.length) rejectedId = body.operations[0].id;
+        if (body.operations.some(operation => operation.id === rejectedId)) {
+            return { ok: false, status: 413, json: async () => ({ success: false, code: 'OPERATION_TOO_LARGE', operationIds: [rejectedId] }) };
+        }
+        return previous(url, init);
+    }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try { return await cloud.syncCloudNow(); } finally { cloud.stopCloudSync(); }
+    });
+    assert.equal(result.success, true, result.message);
+    assert.equal(server.ops.length, 3, 'as outras três chegaram');
+    assert.equal(await cloud.getPendingSyncCount(), 1, 'a recusada continua guardada neste dispositivo');
+    assert.equal(await cloud.getOversizedCount(), 1);
+});
+
+test('PC envia o diagnóstico (versão, contagens, hora) na primeira volta de cada sincronização', async () => {
+    server.ops = [];
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    const seen = [];
+    await withFetch(previous => async (url, init) => { seen.push(JSON.parse(init.body)); return previous(url, init); }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try { return await cloud.syncCloudNow(); } finally { cloud.stopCloudSync(); }
+    });
+    const diagnostics = seen[0]?.diagnostics;
+    assert.equal(diagnostics?.platform, 'web');
+    assert.equal(typeof diagnostics?.appVersion, 'string');
+    assert.equal(typeof diagnostics?.clientTime, 'number');
+    assert.equal(diagnostics?.rejected413, 0);
+    assert.ok(['pending', 'conflicts', 'unreadable', 'otherVersion'].every(key => typeof diagnostics[key] === 'number'));
+    assert.ok(!JSON.stringify(diagnostics).includes('clients'), 'sem dados da empresa');
+});
+
+test('mesma pessoa criada em dois dispositivos com IDs diferentes: o choque fica registado e o ícone pede verificação', async () => {
+    server.ops = [];
+    server.rosters.clear();
+    const hash = bcrypt.hashSync(PASSWORD, 10);
+    // Computador: o Osvaldo com o ID do computador.
+    useDevice({ electronAPI: desktopApi }).run('INSERT INTO users (id, name, email, password, role, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+        ['osvaldo-pc', 'Osvaldo', 'osvaldo@empresa.ao', hash, 'admin', '2026-10-01']);
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    assert.equal((await cloud.syncCloudNow()).success, true);
+    cloud.stopCloudSync();
+
+    // Navegador: o mesmo Osvaldo criado aqui em separado, com outro ID.
+    const web = useDevice();
+    web.run('INSERT INTO users (id, name, email, password, role, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+        ['osvaldo-web', 'Osvaldo', 'osvaldo@empresa.ao', hash, 'admin', '2026-10-02']);
+    const seen = [];
+    const status = await withFetch(previous => async (url, init) => { seen.push(JSON.parse(init.body)); return previous(url, init); }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try { await cloud.syncCloudNow(); await cloud.syncCloudNow(); return cloud.getLastCloudSyncStatus(); } finally { cloud.stopCloudSync(); }
+    });
+    const clashes = await cloud.getUserIdClashes();
+    assert.deepEqual(clashes.map(clash => [clash.email, clash.localId, clash.remoteId]), [['osvaldo@empresa.ao', 'osvaldo-web', 'osvaldo-pc']]);
+    assert.equal((await sqliteFor(web).all("SELECT id FROM users WHERE email = 'osvaldo@empresa.ao'")).length, 1, 'não se sobrepõe nem duplica');
+    assert.equal(status.state, 'attention');
+    assert.ok(status.issues.some(issue => issue.kind === 'userClashes'));
+    // O diagnóstico leva o número e as impressões (hash do email + ID), nunca o email.
+    const diagnostics = seen.at(-1).diagnostics;
+    assert.equal(diagnostics.userClashes, 1);
+    assert.ok(diagnostics.users.some(([, id]) => id === 'osvaldo-web'));
+    assert.ok(!JSON.stringify(diagnostics.users).includes('osvaldo@'));
+});
+
+test('tempo real: quem envia alterações avisa os outros dispositivos ligados da empresa (não a si próprio)', async () => {
+    server.ops = [];
+    const { EventEmitter } = await import('node:events');
+    const openChannel = async (deviceId, passkey = SERVER_CODE) => {
+        const req = Object.assign(new EventEmitter(), {
+            method: 'GET', url: `/api/sync/events?tenantId=${encodeURIComponent(TENANT)}&deviceId=${deviceId}`,
+            headers: { 'x-sync-passkey': passkey }, socket: { remoteAddress: '127.0.0.1' },
+        });
+        const res = Object.assign(new EventEmitter(), {
+            statusCode: 200, headers: {}, chunks: [], writableEnded: false,
+            status(code) { this.statusCode = code; return this; },
+            setHeader(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+            writeHead(code, headers) { this.statusCode = code; for (const [name, value] of Object.entries(headers || {})) this.headers[name.toLowerCase()] = value; return this; },
+            write(chunk) { this.chunks.push(String(chunk)); return true; },
+            json(body) { this.body = body; return this; },
+            end(chunk) { if (chunk) this.chunks.push(String(chunk)); this.writableEnded = true; return this; },
+        });
+        await syncHandler(req, res);
+        return { req, res, events: () => res.chunks.join('').match(/"type":"sync\.changed"/g)?.length || 0 };
+    };
+    const pcBenguela = await openChannel('pc-benguela');
+    const pcLuanda = await openChannel('pc-luanda');
+    assert.equal(pcBenguela.res.statusCode, 200);
+    assert.equal(pcBenguela.res.headers['content-type'], 'text/event-stream; charset=utf-8');
+    assert.equal(pcBenguela.res.headers['x-accel-buffering'], 'no', 'o nginx entrega logo');
+    const intruso = await openChannel('pc-intruso', 'TG-ERRADO-0000');
+    assert.equal(intruso.res.statusCode, 401, 'sem o código da empresa não há canal');
+
+    const res = fakeRes();
+    await syncHandler({ method: 'POST', url: '/api/sync', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-luanda', cursor: 0, operations: [{ id: nodeCrypto.randomUUID(), deviceId: 'pc-luanda', payload: 'cifrado' }] } }, res);
+    assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+    assert.equal(pcBenguela.events(), 1, 'Benguela é avisado');
+    assert.equal(pcLuanda.events(), 0, 'quem enviou não é avisado');
+    // Sem alterações novas não há aviso.
+    await syncHandler({ method: 'POST', url: '/api/sync', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+        body: { tenantId: TENANT, deviceId: 'pc-luanda', cursor: 0, operations: [] } }, fakeRes());
+    assert.equal(pcBenguela.events(), 1);
+    pcBenguela.req.emit('close');
+    pcLuanda.req.emit('close');
+});
+
+test('tempo real no PC: um aviso faz sincronizar logo e desligar fecha o canal', async () => {
+    server.ops = [];
+    useDevice();
+    globalThis.document = {};
+    let streamController = null;
+    let aborted = false;
+    const posts = [];
+    try {
+        await withFetch(previous => async (url, init = {}) => {
+            if (String(url).includes('/api/sync/events')) {
+                assert.equal(init.headers?.['x-sync-passkey'], SERVER_CODE, 'o canal leva o código da empresa');
+                init.signal?.addEventListener('abort', () => { aborted = true; try { streamController?.error(new Error('fechado')); } catch { /* já fechado */ } });
+                const body = new ReadableStream({ start(controller) { streamController = controller; controller.enqueue(new TextEncoder().encode('retry: 5000\ndata: {"type":"connected"}\n\n')); } });
+                return { ok: true, status: 200, body };
+            }
+            posts.push(Date.now());
+            return previous(url, init);
+        }, async () => {
+            cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+            const waitFor = async (check, ms = 3000) => { const end = Date.now() + ms; while (!check() && Date.now() < end) await new Promise(r => setTimeout(r, 20)); return check(); };
+            assert.ok(await waitFor(() => cloud.isRealtimeConnected()), 'canal ligado');
+            await waitFor(() => posts.length >= 1);
+            await new Promise(r => setTimeout(r, 300));
+            const before = posts.length;
+            streamController.enqueue(new TextEncoder().encode('data: {"type":"sync.changed","at":"2026-10-27T12:00:00Z"}\n\n'));
+            assert.ok(await waitFor(() => posts.length > before, 2000), 'o aviso provoca uma sincronização em menos de 2 s');
+            cloud.stopCloudSync();
+            assert.ok(await waitFor(() => aborted), 'desligar fecha o canal');
+            assert.equal(cloud.isRealtimeConnected(), false);
+        });
+    } finally {
+        cloud.stopCloudSync();
+        delete globalThis.document;
+    }
+});
+
+test('servidor entrega cada alteração com o número de ordem (a ordem real, usada pela autocura)', async () => {
+    server.ops = [];
+    const send = async (deviceId, operations, cursor = 0) => {
+        const res = fakeRes();
+        await syncHandler({ method: 'POST', url: '/api/sync', headers: { 'x-sync-passkey': SERVER_CODE }, socket: { remoteAddress: '127.0.0.1' },
+            body: { tenantId: TENANT, deviceId, cursor, operations } }, res);
+        return res.body;
+    };
+    await send('pc-a', [{ id: nodeCrypto.randomUUID(), deviceId: 'pc-a', payload: 'p1' }, { id: nodeCrypto.randomUUID(), deviceId: 'pc-a', payload: 'p2' }]);
+    const received = await send('pc-b', []);
+    const seqs = received.operations.map(operation => operation.seq);
+    assert.equal(seqs.length, 2);
+    assert.ok(seqs.every(Number.isSafeInteger) && seqs[1] > seqs[0], 'números crescentes do servidor');
+    assert.equal(received.cursor, seqs[1]);
+});
+
+test('integridade no PC: a pedido do servidor reenvia a cópia dos registos dos grupos pedidos e mostra o estado', async () => {
+    server.ops = [];
+    const database = useDevice();
+    database.run('CREATE TABLE clients (id TEXT PRIMARY KEY, name TEXT)');
+    for (let index = 0; index < 6; index++) database.run(`INSERT INTO clients VALUES ('c${index}', 'Cliente ${index}')`);
+    // Sem cópia completa inicial: só a reparação pode enviar estes registos.
+    for (const key of ['cloud_sync_bootstrap_v3', 'cloud_sync_repair_snapshot_v4', 'cloud_sync_heal_snapshot_v1']) localStorage.setItem(`${key}:default`, 'true');
+    let asked = false;
+    const result = await withFetch(previous => async (url, init) => {
+        const response = await previous(url, init);
+        const body = await response.json();
+        if (!asked && JSON.parse(init.body).diagnostics) {
+            asked = true;
+            body.integrity = { missingTables: 1, contentTables: 0, missing: [{ table: 'clients', buckets: [0] }],
+                repairRequests: [{ table: 'clients', buckets: Array.from({ length: 16 }, (_, index) => index) }] };
+        }
+        return { ...response, json: async () => body };
+    }, async () => {
+        cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+        try {
+            // A primeira chamada pode juntar-se a uma sincronização ainda a terminar: repete até os registos chegarem.
+            let last;
+            for (let attempt = 0; attempt < 5 && server.ops.length < 6; attempt++) last = await cloud.syncCloudNow();
+            return { second: last, status: cloud.getLastCloudSyncStatus() };
+        } finally { cloud.stopCloudSync(); }
+    });
+    assert.ok(asked);
+    assert.equal(result.second.success, true, JSON.stringify(result.second));
+    assert.equal(server.ops.length, 6, 'os 6 registos foram reenviados como cópias');
+    assert.equal(cloud.getLastIntegrity()?.missingTables, 1);
+    assert.ok(result.status.issues.some(issue => issue.kind === 'integrityMissing'));
 });

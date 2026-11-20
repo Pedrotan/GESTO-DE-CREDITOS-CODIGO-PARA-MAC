@@ -18,6 +18,11 @@ export default {
         display: ['system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'sans-serif'],
       },
       colors: {
+        rh: {
+          navy: "#0F1B3D", "navy-2": "#16244D", bg: "#F4F5F7", card: "#FFFFFF", border: "#E4E7EC", "input-border": "#D0D5DD",
+          text: "#101828", muted: "#5B6474", "success-bg": "#ECFDF3", success: "#067647", "warn-bg": "#FFFAEB", warn: "#B54708",
+          danger: "#B42318", link: "#1D4ED8",
+        },
         border: "hsl(var(--border))",
         input: "hsl(var(--input))",
         ring: "hsl(var(--ring))",

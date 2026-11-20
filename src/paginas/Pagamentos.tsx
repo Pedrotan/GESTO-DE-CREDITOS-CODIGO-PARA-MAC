@@ -307,6 +307,7 @@ export default function Payments() {
                 open={wizard.open} onOpenChange={open => setWizard(previous => ({ ...previous, open }))} initialCreditId={wizard.creditId}
                 credits={data.credits} clients={data.clients} rows={data.rows} numbers={data.numbers} actor={actor}
                 onRegisterConfirmed={payment => addPayment(payment, { id: actor.id, name: actor.name })}
+                onCreditChanged={() => { data.reload(); void refreshData(); }}
                 onDone={({ payment, pending }) => {
                     setWizard({ open: false });
                     toast({ title: pending ? 'Pagamento registado como pendente' : 'Pagamento registado', description: pending ? 'Fica pendente de validação até alguém confirmar a entrada no banco.' : `Recibo emitido para ${payment.clientName}.` });

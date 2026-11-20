@@ -128,6 +128,20 @@ export class ServicoAutoBackup {
         return false;
     }
 
+    /** Versão web: descarrega no navegador os bytes reais da base local. */
+    static async downloadWebBackup(fileName: string): Promise<{ filePath: string; size: number }> {
+        const data = await sqlite.export();
+        if (!data?.byteLength) throw new Error('A base de dados exportada está vazia.');
+        const blob = new Blob([data as BlobPart], { type: 'application/vnd.sqlite3' });
+        const href = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = href;
+        anchor.download = fileName;
+        anchor.click();
+        URL.revokeObjectURL(href);
+        return { filePath: fileName, size: data.byteLength };
+    }
+
     /**
      * Executa o backup automático do sistema (Electron ou Web).
      */
@@ -149,17 +163,7 @@ export class ServicoAutoBackup {
                 ({ filePath, size } = requireCompletedBackup(exportRes));
             } else {
                 // 2. Em ambiente Web / Navegador: exporta bytes reais da base local.
-                const data = await sqlite.export();
-                if (!data?.byteLength) throw new Error('A base de dados exportada está vazia.');
-                filePath = `backup_automatico_web_${todayStr}.sqlite`;
-                size = data.byteLength;
-                const blob = new Blob([data as BlobPart], { type: 'application/vnd.sqlite3' });
-                const href = URL.createObjectURL(blob);
-                const anchor = document.createElement('a');
-                anchor.href = href;
-                anchor.download = filePath;
-                anchor.click();
-                URL.revokeObjectURL(href);
+                ({ filePath, size } = await this.downloadWebBackup(`backup_automatico_web_${todayStr}.sqlite`));
             }
 
             // Atualizar configuração com a data de sucesso

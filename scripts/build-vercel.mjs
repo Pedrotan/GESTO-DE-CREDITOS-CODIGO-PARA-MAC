@@ -37,7 +37,9 @@ if (savedVercelLink) {
 // pedida. A VPS (server.mjs) continua a usar vercel-api/ directamente, rota a rota.
 const routesDir = join(outputDir, 'api', '_rotas');
 cpSync(apiSourceDir, routesDir, { recursive: true });
-const routeNames = readdirSync(apiSourceDir).filter(file => file.endsWith('.js') && !file.startsWith('_')).map(file => file.slice(0, -3)).sort();
+const routeNames = readdirSync(apiSourceDir).filter(file => file.endsWith('.js') && !file.startsWith('_') && file !== 'whatsapp-webhook.js').map(file => file.slice(0, -3)).sort();
+// Webhooks exigem os bytes originais: não passam pelo encaminhador que recebe JSON já analisado.
+writeFileSync(join(outputDir, 'api', 'whatsapp-webhook.js'), "import handler from './_rotas/whatsapp-webhook.js';\nexport const config = { api: { bodyParser: false } };\nexport default handler;\n", 'utf8');
 if (!routeNames.length) throw new Error('vercel-api sem rotas: a publicação foi interrompida.');
 writeFileSync(join(outputDir, 'api', 'encaminhar.js'), [
   '// Gerado por scripts/build-vercel.mjs: uma só função para todas as rotas da API (limite do plano Hobby).',
@@ -115,6 +117,11 @@ const vercelConfig = {
     {
       source: '/index.html',
       headers: [{ key: 'Cache-Control', value: 'no-cache, must-revalidate' }]
+    },
+    {
+      // Versão da build: os separadores abertos lêem-na para avisar que há versão nova.
+      source: '/version.json',
+      headers: [{ key: 'Cache-Control', value: 'no-store, max-age=0' }]
     },
     {
       source: '/sql-wasm.wasm',

@@ -121,6 +121,7 @@ import { ConfiguracaoSimulador } from '@/componentes/simulador/ConfiguracaoSimul
 import { TabelaTaxasDialog } from '@/componentes/creditos/TabelaTaxasDialog';
 import { canManageInterestTiers } from '@/bibliotecas/taxas-juro';
 import { assertLocalServerAccess, canHostLocalServer } from '@/bibliotecas/intranet-policy';
+import { PainelActualizacoes } from '@/componentes/layout/AvisoActualizacao';
 
 const SUPPORT_PHONE = "+244 941537486";
 const SYSTEM_NAME = "Tango Gestão de Créditos";
@@ -1013,18 +1014,11 @@ export default function Settings() {
     };
 
     const handleBackupExport = async () => {
-        if (!(window as any).electronAPI?.backupDatabase) {
-            setAlertConfig({
-                isOpen: true,
-                title: "Erro de Versão",
-                description: "Ambiente não suporta exportação.",
-                type: "error"
-            });
-            return;
-        }
-
         try {
-            const result = await (window as any).electronAPI.backupDatabase();
+            // Na web o ficheiro é descarregado pelo navegador; conta como backup para todos os dispositivos.
+            const result = (window as any).electronAPI?.backupDatabase
+                ? await (window as any).electronAPI.backupDatabase()
+                : { success: true, ...await ServicoAutoBackup.downloadWebBackup(`backup_web_${new Date().toISOString().slice(0, 10)}.sqlite`) };
 
             if (!result?.success) {
                 if (result?.canceled) return;
@@ -3324,12 +3318,13 @@ export default function Settings() {
                             )}
                         </CardFooter>
                     </Card>
-                    <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
                 </TabsContent>
 
-                {/* Conflitos de Sincronização */}
+                {/* Correcções da sincronização: consulta técnica, só para o Super Administrador */}
                 <TabsContent value="conflicts" className="mt-6 space-y-6">
-                    <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
+                    {user?.role === 'super_admin'
+                        ? <ConflictReview actorId={user?.id} actorName={user?.name} canManage={isAdmin} />
+                        : <p className="rounded-xl border bg-muted/40 p-4 text-sm text-muted-foreground">A sincronização corrige sozinha as alterações retidas. Esta consulta técnica é reservada ao Super Administrador.</p>}
                 </TabsContent>
 
                 {/* Assinaturas */}
@@ -3476,7 +3471,7 @@ export default function Settings() {
                                 <Building2 className="h-12 w-12 text-primary" />
                             </div>
                             <CardTitle className="text-3xl font-black tracking-tighter">Tango Gestão de Créditos</CardTitle>
-                            <CardDescription className="text-primary font-bold">Versão 3.0.0 "Professional Edition"</CardDescription>
+                            <CardDescription className="text-primary font-bold">Versão {__TANGO_APP_VERSION__} "Professional Edition"</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-8 p-8">
                             <div className="grid md:grid-cols-2 gap-8">
@@ -3509,6 +3504,7 @@ export default function Settings() {
                                     </div>
                                 </div>
                             </div>
+                            <PainelActualizacoes />
                         </CardContent>
                     </Card>
                 </TabsContent>

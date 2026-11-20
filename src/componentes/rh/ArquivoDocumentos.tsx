@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
@@ -17,12 +17,16 @@ const nomeCategoria = (id: string) => CATEGORIAS_DOCUMENTO.find(c => c.id === id
 type Props = {
     documentos: DocumentoRH[]; funcionarios: Funcionario[]; actor: ActorRH | null; podeGerir: boolean; podeConfidencial: boolean;
     maxMb: number; onChange: () => void; funcionarioFixo?: string; mostrarFuncionario?: boolean;
+    /** Mostra a zona de arrastar e largar (ficha do funcionário): o ficheiro largado abre o carregamento já escolhido. */
+    zonaLargar?: boolean;
 };
 
 /** Lista e carregamento de documentos (ficha do funcionário e página Documentos). */
-export function ArquivoDocumentos({ documentos, funcionarios, actor, podeGerir, podeConfidencial, maxMb, onChange, funcionarioFixo, mostrarFuncionario }: Props) {
+export function ArquivoDocumentos({ documentos, funcionarios, actor, podeGerir, podeConfidencial, maxMb, onChange, funcionarioFixo, mostrarFuncionario, zonaLargar }: Props) {
     const [mostrarHistorico, setMostrarHistorico] = useState(false);
-    const [novo, setNovo] = useState<null | { substitui?: DocumentoRH }>(null);
+    const [novo, setNovo] = useState<null | { substitui?: DocumentoRH; ficheiro?: File }>(null);
+    const [porCima, setPorCima] = useState(false);
+    const escolher = useRef<HTMLInputElement>(null);
     const hoje = luandaTodayKey();
     const nomes = useMemo(() => new Map(funcionarios.map(f => [f.id, f.nome])), [funcionarios]);
     const visiveis = documentos.filter(d => (mostrarHistorico || d.estado === 'activo') && (podeConfidencial || !d.confidencial));
@@ -42,6 +46,16 @@ export function ArquivoDocumentos({ documentos, funcionarios, actor, podeGerir, 
                 </label>
                 {podeGerir && funcionarioFixo && <Button size="sm" onClick={() => setNovo({})}><FileUp className="mr-1.5 h-4 w-4" /> Carregar documento</Button>}
             </div>
+            {zonaLargar && podeGerir && funcionarioFixo && (
+                <div onDragOver={e => { e.preventDefault(); setPorCima(true); }} onDragLeave={() => setPorCima(false)}
+                    onDrop={e => { e.preventDefault(); setPorCima(false); const f = e.dataTransfer.files?.[0]; if (f) setNovo({ ficheiro: f }); }}
+                    className={`rounded-xl border-2 border-dashed p-6 text-center text-sm transition-colors ${porCima ? 'border-rh-link bg-blue-50 text-rh-link dark:bg-blue-950/30' : 'border-rh-input-border text-rh-muted dark:border-slate-700 dark:text-slate-400'}`}>
+                    Arraste ficheiros para aqui ou{' '}
+                    <button type="button" className="font-semibold text-rh-link hover:underline" onClick={() => escolher.current?.click()}>escolha do computador</button>.
+                    {' '}Ficam guardados na pasta pessoal do funcionário.
+                    <input ref={escolher} type="file" className="hidden" accept=".pdf,.png,.jpg,.jpeg,.docx" onChange={e => { const f = e.target.files?.[0]; if (f) setNovo({ ficheiro: f }); e.target.value = ''; }} />
+                </div>
+            )}
             {ocultos > 0 && <p className="flex items-center gap-1.5 text-xs text-slate-500"><Lock className="h-3.5 w-3.5" /> {ocultos} documento(s) confidencial(is) não mostrado(s): exigem a permissão «RH: Documentos confidenciais».</p>}
             {visiveis.length === 0 ? <Vazio>Sem documentos.</Vazio> : (
                 <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-slate-800">
@@ -79,22 +93,22 @@ export function ArquivoDocumentos({ documentos, funcionarios, actor, podeGerir, 
                 </div>
             )}
             {novo && actor && (
-                <CarregarDocumento funcionarioId={funcionarioFixo || novo.substitui!.funcionario_id} substitui={novo.substitui} actor={actor} maxMb={maxMb}
+                <CarregarDocumento funcionarioId={funcionarioFixo || novo.substitui!.funcionario_id} substitui={novo.substitui} ficheiroInicial={novo.ficheiro} actor={actor} maxMb={maxMb}
                     podeConfidencial={podeConfidencial} onClose={() => setNovo(null)} onSaved={onChange} />
             )}
         </div>
     );
 }
 
-function CarregarDocumento({ funcionarioId, substitui, actor, maxMb, podeConfidencial, onClose, onSaved }: {
-    funcionarioId: string; substitui?: DocumentoRH; actor: ActorRH; maxMb: number; podeConfidencial: boolean; onClose: () => void; onSaved: () => void;
+function CarregarDocumento({ funcionarioId, substitui, ficheiroInicial, actor, maxMb, podeConfidencial, onClose, onSaved }: {
+    funcionarioId: string; substitui?: DocumentoRH; ficheiroInicial?: File; actor: ActorRH; maxMb: number; podeConfidencial: boolean; onClose: () => void; onSaved: () => void;
 }) {
     const [categoria, setCategoria] = useState<CategoriaDocumento>(substitui?.categoria || 'identificacao');
-    const [nome, setNome] = useState(substitui?.nome || '');
+    const [nome, setNome] = useState(substitui?.nome || ficheiroInicial?.name.replace(/\.[^.]+$/u, '') || '');
     const [emissao, setEmissao] = useState('');
     const [validade, setValidade] = useState('');
     const [confidencial, setConfidencial] = useState(Boolean(substitui?.confidencial));
-    const [ficheiro, setFicheiro] = useState<File | null>(null);
+    const [ficheiro, setFicheiro] = useState<File | null>(ficheiroInicial || null);
     const [aGuardar, setAGuardar] = useState(false);
     const def = CATEGORIAS_DOCUMENTO.find(c => c.id === categoria)!;
     const categorias = CATEGORIAS_DOCUMENTO.filter(c => podeConfidencial || !CATEGORIAS_CONFIDENCIAIS.has(c.id));
@@ -130,7 +144,7 @@ function CarregarDocumento({ funcionarioId, substitui, actor, maxMb, podeConfide
                     <div><Label className="text-xs font-bold">Nome</Label><Input className="mt-1" value={nome} placeholder="Ex.: Bilhete de Identidade" onChange={e => setNome(e.target.value)} /></div>
                     <div><Label className="text-xs font-bold">Data de emissão</Label><Input className="mt-1" type="date" value={emissao} onChange={e => setEmissao(e.target.value)} /></div>
                     <div><Label className="text-xs font-bold">Data de validade {def.validade ? '' : '(opcional)'}</Label><Input className="mt-1" type="date" value={validade} onChange={e => setValidade(e.target.value)} /></div>
-                    <div className="sm:col-span-2"><Label className="text-xs font-bold">Ficheiro</Label><Input className="mt-1" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" onChange={e => setFicheiro(e.target.files?.[0] || null)} /></div>
+                    <div className="sm:col-span-2"><Label className="text-xs font-bold">Ficheiro</Label>{ficheiro && <p className="mt-1 text-xs font-semibold text-slate-600">{ficheiro.name} · {(ficheiro.size / 1024).toFixed(0)} KB</p>}<Input className="mt-1" type="file" accept=".pdf,.png,.jpg,.jpeg,.docx" onChange={e => setFicheiro(e.target.files?.[0] || null)} /></div>
                     {!CATEGORIAS_CONFIDENCIAIS.has(categoria) && (
                         <label className="flex items-center gap-2 text-xs font-bold text-slate-600 sm:col-span-2"><Switch checked={confidencial} onCheckedChange={setConfidencial} /> Marcar como confidencial</label>
                     )}

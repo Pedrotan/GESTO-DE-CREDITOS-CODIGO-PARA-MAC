@@ -6,6 +6,9 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH, useModuloRH } from '@/ganchos/usar-modulo-rh';
 import { ServicoAlertasRH } from '@/servicos/rh/ServicoAlertasRH';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
+import { ServicoRH } from '@/servicos/rh/ServicoRH';
+import { configDosParametros } from '@/bibliotecas/rh/ponto-calculo';
+import { notificarSistema } from './ponto/AvisosPontoSistema';
 
 let aCorrer = false;
 export const EVENTO_ALERTAS_RH = 'tango:rh-alertas';
@@ -34,7 +37,11 @@ export function TarefaDiariaRH() {
                 const gerirClientes = ServicoControloAcesso.temPermissao(user, 'manage_clients');
                 const verRH = activo && (ServicoControloAcesso.temPermissao(user, 'hr_view') || gerir);
                 if (!activo && !gerirClientes) return;
-                await ServicoAlertasRH.executar(actor, { gerirRH: activo && gerir, gerirClientes });
+                const novos = await ServicoAlertasRH.executar(actor, { gerirRH: activo && gerir, gerirClientes });
+                // Alertas novos do livro de ponto também como notificação do sistema (se a empresa o permitir).
+                const doPonto = novos.filter(a => a.tipo.startsWith('ponto_'));
+                if (doPonto.length && configDosParametros(await ServicoRH.parametros(), luandaTodayKey()).notificacoes_ambiente)
+                    notificarSistema(`Livro de ponto: ${doPonto.length} alerta(s)`, doPonto.slice(0, 3).map(a => a.mensagem).join(' · '), `ponto-rh-${luandaTodayKey()}`);
                 window.dispatchEvent(new Event(EVENTO_ALERTAS_RH));
                 const abertos = await ServicoAlertasRH.abertos();
                 const hoje = luandaTodayKey();

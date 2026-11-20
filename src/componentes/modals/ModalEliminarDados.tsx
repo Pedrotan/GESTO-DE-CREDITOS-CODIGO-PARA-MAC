@@ -27,11 +27,11 @@ export function ModalEliminarDados({ open, onOpenChange, kind, name, activeCredi
     const items: Item[] = kind === 'client' ? [
         { key: 'record', page: 'Clientes', detail: 'Cadastro do cliente, documentos e garantias.', fixed: true },
         { key: 'credits', page: 'Créditos, Contratos e Pagamentos', detail: 'Todos os créditos e contratos do cliente, os planos de pagamento, os pagamentos e os recibos (estão ligados: saem juntos).' },
-        { key: 'accounting', page: 'Contabilidade e Relatórios', detail: 'Os lançamentos do cliente deixam de aparecer no diário, no balancete e nos relatórios.' },
+        { key: 'accounting', page: 'Contabilidade', detail: 'O desembolso dos créditos é estornado: o capital ainda em dívida volta a Caixa/Bancos e os juros por receber são anulados.', fixed: true },
         { key: 'purge', page: 'Lixeira', detail: 'Apagar já definitivamente, sem passar pela lixeira. Não pode ser restaurado.' },
     ] : [
         { key: 'record', page: 'Contratos e Créditos', detail: 'O contrato e o crédito (mesmo registo), o plano de pagamento, os pagamentos e os recibos.', fixed: true },
-        { key: 'accounting', page: 'Contabilidade e Relatórios', detail: 'Os lançamentos deste contrato deixam de aparecer no diário, no balancete e nos relatórios.' },
+        { key: 'accounting', page: 'Contabilidade', detail: 'O desembolso é estornado: o capital ainda em dívida volta a Caixa/Bancos e os juros por receber são anulados.', fixed: true },
         { key: 'purge', page: 'Lixeira', detail: 'Apagar já definitivamente, sem passar pela lixeira. Não pode ser restaurado.' },
     ];
     const isChecked = (item: Item) => item.fixed || (item.key === 'credits' && selected.purge) || Boolean(selected[item.key as keyof typeof selected]);
@@ -70,12 +70,10 @@ export function ModalEliminarDados({ open, onOpenChange, kind, name, activeCredi
                             {activeCredits === 1 ? 'Há 1 crédito ainda por pagar' : `Há ${activeCredits} créditos ainda por pagar`} que também {activeCredits === 1 ? 'será eliminado' : 'serão eliminados'}. Use só para dados errados ou de teste.
                         </p>
                     )}
-                    {selected.accounting && (
-                        <p className="text-[11px] text-muted-foreground">
-                            Os lançamentos ficam guardados de forma segura (a contabilidade não permite apagar linhas), mas deixam de contar em todas as
-                            páginas e relatórios. Ao restaurar da lixeira, voltam a aparecer.
-                        </p>
-                    )}
+                    <p className="text-[11px] text-muted-foreground">
+                        Nenhum dinheiro sai da contabilidade sem registo: os lançamentos originais e o estorno ficam no diário (a contabilidade não
+                        permite apagar linhas). Ao restaurar da lixeira, o desembolso volta a ser lançado e exige saldo em Caixa e Bancos.
+                    </p>
                 </div>
                 <DialogFooter className="gap-2">
                     <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>Cancelar</Button>

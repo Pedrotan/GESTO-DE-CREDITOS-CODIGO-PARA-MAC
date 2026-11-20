@@ -1,7 +1,16 @@
 // Regras do livro de ponto: horas trabalhadas, atrasos, horas extra, dias úteis e resumo mensal que alimenta o
 // processamento salarial. Funções puras (datas aaaa-mm-dd, horas HH:MM), testadas sem base de dados.
 
-export type Horario = { id: string; nome: string; entrada: string; saida: string; intervalo_min: number; dias_semana: string; tolerancia_min: number; activo?: number };
+export type TipoHorario = 'fixo' | 'rotativo' | 'flexivel' | 'noturno';
+export type Horario = {
+    id: string; nome: string; entrada: string; saida: string; intervalo_min: number; dias_semana: string; tolerancia_min: number; activo?: number;
+    /** fixo (o habitual), rotativo (ciclo de N dias), flexível (mínimo diário com faixa obrigatória) ou nocturno (sai no dia seguinte). */
+    tipo?: TipoHorario | null;
+    /** Rotativo: JSON com o id do horário de cada dia do ciclo ("" = folga), a contar de ciclo_inicio. */
+    ciclo?: string | null; ciclo_inicio?: string | null;
+    /** Flexível: minutos mínimos por dia e faixa obrigatória (atraso conta depois do início; saída antecipada antes do fim). */
+    minimo_diario_min?: number | null; faixa_inicio?: string | null; faixa_fim?: string | null;
+};
 export type Feriado = { id: string; data: string; nome: string; tipo: 'nacional' | 'empresa'; recorrente: number; activo?: number };
 export type RegistoPonto = { id?: string; funcionario_id: string; data: string; entrada: string | null; saida: string | null; horas_trabalhadas: number; horas_extra: number; minutos_atraso: number };
 export type TipoAusencia = { id: string; codigo: string; nome: string; justificada: number; remunerada: number; desconta_salario: number; desconta_ferias: number; exige_documento: number; sistema?: number; activo?: number };

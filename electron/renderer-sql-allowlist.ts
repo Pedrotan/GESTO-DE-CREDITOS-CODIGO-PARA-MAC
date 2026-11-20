@@ -25,6 +25,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_clients_createdAt ON clients(createdAt)",
   "CREATE INDEX IF NOT EXISTS idx_clients_email ON clients(email)",
   "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)",
+  "CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif)",
+  "CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone)",
   "CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)",
   "CREATE INDEX IF NOT EXISTS idx_clients_usuario ON clients(usuario_id)",
   "CREATE INDEX IF NOT EXISTS idx_collection_credit ON collection_events(creditId, createdAt)",
@@ -43,6 +45,14 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_credits_status ON credits(status)",
   "CREATE INDEX IF NOT EXISTS idx_credits_status_dueDate ON credits(status, dueDate)",
   "CREATE INDEX IF NOT EXISTS idx_credits_usuario ON credits(usuario_id)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_agt_requests_created ON fiscal_agt_requests(createdAt)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_agt ON fiscal_documents(agtStatus, agtNextAttemptAt)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_date ON fiscal_documents(documentDate)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_payment ON fiscal_documents(paymentId)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_request ON fiscal_documents(agtRequestId)",
+  "CREATE INDEX IF NOT EXISTS idx_fiscal_series_lookup ON fiscal_series(deviceId, documentType, seriesYear, contingency, status)",
+  "CREATE INDEX IF NOT EXISTS idx_hub_events_client ON hub_collection_events(clientId, createdAt)",
+  "CREATE INDEX IF NOT EXISTS idx_late_interest_adjustments_credit ON late_interest_adjustments(creditId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_lines_transaction ON ledger_lines(transactionId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_source ON ledger_transactions(sourceType, sourceId)",
   "CREATE INDEX IF NOT EXISTS idx_ledger_transactions_timestamp ON ledger_transactions(timestamp)",
@@ -61,14 +71,27 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE INDEX IF NOT EXISTS idx_report_history_generatedAt ON report_history(generatedAt)",
   "CREATE INDEX IF NOT EXISTS idx_rh_alerta_estado ON rh_alerta(estado, destinatario_perfil)",
   "CREATE INDEX IF NOT EXISTS idx_rh_ausencia_funcionario ON rh_ausencia(funcionario_id, data_inicio)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_banco_horas_func ON rh_banco_horas(funcionario_id, data)",
   "CREATE INDEX IF NOT EXISTS idx_rh_contrato_funcionario ON rh_contrato(funcionario_id, estado)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_correio_funcionario ON rh_correio(funcionario_id, criado_em)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_doc_auditoria_documento ON rh_doc_auditoria(documento_id, criado_em)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_doc_pasta_funcionario ON rh_doc_pasta(funcionario_id)",
   "CREATE INDEX IF NOT EXISTS idx_rh_documento_funcionario ON rh_documento(funcionario_id, categoria)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_escala_data ON rh_escala(data)",
   "CREATE INDEX IF NOT EXISTS idx_rh_funcionario_rubrica ON rh_funcionario_rubrica(funcionario_id)",
   "CREATE INDEX IF NOT EXISTS idx_rh_historico_funcionario ON rh_historico_salarial(funcionario_id, data_efeito)",
   "CREATE INDEX IF NOT EXISTS idx_rh_irt_escalao_tabela ON rh_irt_escalao(tabela_id, ordem)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_justificacao_funcionario ON rh_justificacao(funcionario_id, estado)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_marcacao_data ON rh_marcacao(data)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_marcacao_dia ON rh_marcacao(funcionario_id, data)",
   "CREATE INDEX IF NOT EXISTS idx_rh_parametro_chave ON rh_parametro(chave, vigencia_inicio)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_pedido_estado ON rh_pedido(estado, criado_em)",
   "CREATE INDEX IF NOT EXISTS idx_rh_plano_ferias_funcionario ON rh_plano_ferias(funcionario_id, ano)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_ponto_periodo_mes ON rh_ponto_periodo(ano, mes)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_recebimento_processamento ON rh_recebimento(processamento_id)",
   "CREATE INDEX IF NOT EXISTS idx_rh_recibo_linha_recibo ON rh_recibo_linha(recibo_id)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_reclamacao_processamento ON rh_reclamacao(processamento_id, estado)",
+  "CREATE INDEX IF NOT EXISTS idx_rh_seccao_departamento ON rh_seccao(departamento_id)",
   "CREATE INDEX IF NOT EXISTS idx_simulations_amount ON simulations(amount)",
   "CREATE INDEX IF NOT EXISTS idx_simulations_clientName ON simulations(clientName)",
   "CREATE INDEX IF NOT EXISTS idx_simulations_createdAt ON simulations(createdAt)",
@@ -96,7 +119,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS audit_logs ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, userId TEXT, userName TEXT, action TEXT NOT NULL, entity TEXT NOT NULL, details TEXT, previousState TEXT, newState TEXT, metadata TEXT )",
   "CREATE TABLE IF NOT EXISTS calendar_tasks ( id TEXT PRIMARY KEY, title TEXT NOT NULL, description TEXT, date TEXT NOT NULL, done INTEGER DEFAULT 0, createdAt TEXT DEFAULT (datetime('now')), usuario_id TEXT )",
   "CREATE TABLE IF NOT EXISTS chat_messages ( id TEXT PRIMARY KEY, role TEXT, content TEXT, timestamp TEXT, userId TEXT )",
-  "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, spouseBirthDate TEXT, spouseOccupation TEXT, spouseIncome REAL, spouseDataRefused INTEGER DEFAULT 0, spouseDataRefusedAt TEXT, spouseDataRefusedBy TEXT, spouseConsentAt TEXT, spouseConsentBy TEXT, legalRepresentative TEXT, legalRepRole TEXT )",
+  "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, spouseBirthDate TEXT, spouseOccupation TEXT, spouseIncome REAL, spouseDataRefused INTEGER DEFAULT 0, spouseDataRefusedAt TEXT, spouseDataRefusedBy TEXT, spouseConsentAt TEXT, spouseConsentBy TEXT, legalRepresentative TEXT, legalRepRole TEXT, birthPlace TEXT, province TEXT, municipality TEXT, neighborhood TEXT, zone TEXT, spouseBirthPlace TEXT, spouseProvince TEXT, spouseMunicipality TEXT, spouseNeighborhood TEXT, spouseZone TEXT )",
   "CREATE TABLE IF NOT EXISTS closed_months ( id TEXT PRIMARY KEY, month INTEGER NOT NULL, year INTEGER NOT NULL, capitalApplied REAL NOT NULL, projectedProfit REAL NOT NULL, realizedProfit REAL NOT NULL, overdueAmount REAL NOT NULL, liquidationRate REAL NOT NULL, closedAt TEXT NOT NULL, closedBy TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS collection_events ( id TEXT PRIMARY KEY, creditId TEXT, kind TEXT NOT NULL CHECK(kind IN ('contact','promise','promise_kept','promise_broken','assignment','target')), agentId TEXT, agentName TEXT, monthKey TEXT, amountMinor INTEGER CHECK(amountMinor IS NULL OR (typeof(amountMinor) = 'integer' AND amountMinor >= 0)), promisedDate TEXT, relatedId TEXT, notes TEXT NOT NULL CHECK(length(trim(notes)) >= 5), actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL, CHECK((kind NOT IN ('contact','promise','promise_kept','promise_broken','assignment')) OR creditId IS NOT NULL), CHECK(kind <> 'promise' OR (amountMinor > 0 AND promisedDate IS NOT NULL)), CHECK(kind <> 'target' OR (agentId IS NOT NULL AND monthKey IS NOT NULL AND amountMinor IS NOT NULL)), CHECK(kind <> 'assignment' OR agentId IS NOT NULL), CHECK(kind NOT IN ('promise_kept','promise_broken') OR relatedId IS NOT NULL) )",
   "CREATE TABLE IF NOT EXISTS collection_messages ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, creditIds TEXT NOT NULL, channel TEXT NOT NULL, message TEXT NOT NULL, attemptNumber INTEGER DEFAULT 1, totalDue REAL DEFAULT 0, sentAt TEXT NOT NULL, sentBy TEXT, legalTriggered INTEGER DEFAULT 0 )",
@@ -114,7 +137,17 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS credit_writeoffs ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL UNIQUE, principalMinor INTEGER NOT NULL CHECK(principalMinor >= 0), interestMinor INTEGER NOT NULL DEFAULT 0 CHECK(interestMinor >= 0), provisionUsedMinor INTEGER NOT NULL DEFAULT 0 CHECK(provisionUsedMinor >= 0), lossMinor INTEGER NOT NULL DEFAULT 0 CHECK(lossMinor >= 0), reason TEXT NOT NULL CHECK(length(trim(reason)) >= 10), requestedBy TEXT NOT NULL, requestedById TEXT NOT NULL, approvedBy TEXT NOT NULL, approvedById TEXT NOT NULL, entryId TEXT NOT NULL, createdAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS credits ( id TEXT PRIMARY KEY, clientId TEXT NOT NULL, clientName TEXT NOT NULL, principalAmount REAL NOT NULL, principalAmountMinor INTEGER, interestRate REAL NOT NULL, lateInterestRate REAL NOT NULL, installments INTEGER NOT NULL, paidInstallments INTEGER DEFAULT 0, currentBalance REAL NOT NULL, currentBalanceMinor INTEGER, startDate TEXT, accruedInterest REAL DEFAULT 0, accruedInterestMinor INTEGER, lateInterest REAL DEFAULT 0, lateInterestMinor INTEGER, totalDue REAL NOT NULL, totalDueMinor INTEGER, version INTEGER NOT NULL DEFAULT 0, dueDate TEXT NOT NULL, daysOverdue INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'paid', 'overdue', 'defaulted', 'cancelled', 'renegotiated', 'pending_approval', 'rejected')), creditNumber INTEGER DEFAULT 1, paidAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, targetMonthId TEXT, productId TEXT, amortizationMethod TEXT DEFAULT 'FLAT', requestedBy TEXT, requestedAt TEXT, approvedBy TEXT, approvalNotes TEXT, supplierId TEXT, supplierProfitRate REAL, reinforcedAmount REAL DEFAULT 0, FOREIGN KEY(clientId) REFERENCES clients(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )",
+  "CREATE TABLE IF NOT EXISTS fiscal_agt_requests ( id TEXT PRIMARY KEY, service TEXT NOT NULL, requestId TEXT, documentNos TEXT NOT NULL DEFAULT '[]', httpStatus INTEGER, resultCode TEXT, durationMs INTEGER, error TEXT, deviceId TEXT, createdAt TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS fiscal_documents ( id TEXT PRIMARY KEY, idempotencyKey TEXT NOT NULL UNIQUE, documentNo TEXT NOT NULL UNIQUE, documentType TEXT NOT NULL, seriesId TEXT NOT NULL, sequenceNumber INTEGER NOT NULL, documentStatus TEXT NOT NULL DEFAULT 'N' CHECK(documentStatus IN ('N','C')), rejectedDocumentNo TEXT, referenceDocumentNo TEXT, documentDate TEXT NOT NULL, systemEntryDate TEXT NOT NULL, clientId TEXT, customerTaxId TEXT NOT NULL, customerCountry TEXT NOT NULL DEFAULT 'AO', customerName TEXT NOT NULL, customerAddress TEXT, creditId TEXT, paymentId TEXT, netTotalMinor INTEGER NOT NULL, taxPayableMinor INTEGER NOT NULL, grossTotalMinor INTEGER NOT NULL, withholdingMinor INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL, jwsSignature TEXT NOT NULL, saftHash TEXT NOT NULL, saftHashControl TEXT NOT NULL DEFAULT '1', deviceId TEXT NOT NULL, agtStatus TEXT NOT NULL DEFAULT 'pendente' CHECK(agtStatus IN ('pendente','enviado','em_validacao','valido','valido_penal','invalido','erro_envio','simulado','anulado')), agtRequestId TEXT, agtErrors TEXT NOT NULL DEFAULT '[]', agtAttempts INTEGER NOT NULL DEFAULT 0, agtLastAttemptAt TEXT, agtNextAttemptAt TEXT, agtValidatedAt TEXT, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL, UNIQUE(seriesId, sequenceNumber) )",
+  "CREATE TABLE IF NOT EXISTS fiscal_saft_exports ( id TEXT PRIMARY KEY, fiscalYear INTEGER NOT NULL, startDate TEXT NOT NULL, endDate TEXT NOT NULL, basis TEXT NOT NULL, fileName TEXT NOT NULL, fileSize INTEGER NOT NULL, sha256 TEXT NOT NULL, invoicesCount INTEGER NOT NULL DEFAULT 0, paymentsCount INTEGER NOT NULL DEFAULT 0, totalDebitMinor INTEGER NOT NULL DEFAULT 0, totalCreditMinor INTEGER NOT NULL DEFAULT 0, warnings INTEGER NOT NULL DEFAULT 0, xml TEXT NOT NULL, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS fiscal_series ( id TEXT PRIMARY KEY, seriesCode TEXT NOT NULL UNIQUE, seriesYear INTEGER NOT NULL, documentType TEXT NOT NULL, establishment TEXT NOT NULL DEFAULT 'SEDE', contingency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'A' CHECK(status IN ('A','U','F')), firstNumber INTEGER NOT NULL DEFAULT 1, lastNumber INTEGER NOT NULL, nextNumber INTEGER NOT NULL DEFAULT 1, deviceId TEXT NOT NULL, simulated INTEGER NOT NULL DEFAULT 0, agtSyncedAt TEXT, createdAt TEXT NOT NULL, CHECK(nextNumber >= firstNumber) )",
+  "CREATE TABLE IF NOT EXISTS fiscal_settings ( id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )",
+  "CREATE TABLE IF NOT EXISTS hub_collection_campaigns (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS hub_collection_clients (clientId TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS hub_collection_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, creditId TEXT, kind TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, metadata TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL)",
+  "CREATE TABLE IF NOT EXISTS hub_collection_settings (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)",
   "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )",
+  "CREATE TABLE IF NOT EXISTS late_interest_adjustments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('forgive','renegotiate')), amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), agreedMinor INTEGER NOT NULL DEFAULT 0, installments INTEGER NOT NULL DEFAULT 0, effectiveDate TEXT NOT NULL, reason TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS ledger_lines ( id TEXT PRIMARY KEY, transactionId TEXT NOT NULL, account TEXT NOT NULL, side TEXT NOT NULL CHECK(side IN ('debit', 'credit')), component TEXT NOT NULL, amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), FOREIGN KEY(transactionId) REFERENCES ledger_transactions(id) ON DELETE RESTRICT )",
   "CREATE TABLE IF NOT EXISTS ledger_transactions ( id TEXT PRIMARY KEY, timestamp TEXT NOT NULL, type TEXT NOT NULL, sourceType TEXT NOT NULL, sourceId TEXT NOT NULL, description TEXT, totalDebitMinor INTEGER NOT NULL CHECK(totalDebitMinor > 0), totalCreditMinor INTEGER NOT NULL CHECK(totalCreditMinor > 0), integrityHash TEXT NOT NULL, previousHash TEXT NOT NULL, hashVersion INTEGER NOT NULL DEFAULT 2, usuario_id TEXT, CHECK(totalDebitMinor = totalCreditMinor) )",
   "CREATE TABLE IF NOT EXISTS legal_cases ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, clientId TEXT NOT NULL, stage TEXT DEFAULT 'interpellated', priority TEXT DEFAULT 'normal', assignedLawyer TEXT, notes TEXT, history TEXT DEFAULT '[]', lastActionDate TEXT, debtAmount REAL, lastAction TEXT, updatedAt TEXT, closedAt TEXT, createdAt TEXT NOT NULL, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT )",
@@ -136,13 +169,18 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS report_schedules ( id TEXT PRIMARY KEY, reportType TEXT NOT NULL, recipients TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1, lastRunMonth TEXT, lastRunAt TEXT, lastError TEXT, createdAt TEXT NOT NULL, createdBy TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_alerta ( id TEXT PRIMARY KEY, tipo TEXT NOT NULL, referencia_id TEXT, funcionario_id TEXT, mensagem TEXT NOT NULL, data_alerta TEXT NOT NULL, destinatario_perfil TEXT NOT NULL DEFAULT 'rh', prioridade INTEGER NOT NULL DEFAULT 2, accao TEXT, estado TEXT NOT NULL DEFAULT 'novo' CHECK(estado IN ('novo', 'lido', 'resolvido')), lido_por TEXT, lido_em TEXT, resolvido_por TEXT, resolvido_em TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_ausencia ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL, dias REAL NOT NULL DEFAULT 0, horas REAL NOT NULL DEFAULT 0, motivo TEXT, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'anulada')), pedido_dispensa INTEGER NOT NULL DEFAULT 0, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, anulado_por TEXT, anulado_por_nome TEXT, anulado_em TEXT, motivo_anulacao TEXT, documento_emitido_id TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_banco_horas ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, minutos INTEGER NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('extra', 'saida_antecipada', 'folga', 'ajuste')), tipo_extra TEXT, origem TEXT NOT NULL DEFAULT 'manual', descricao TEXT, anulado INTEGER NOT NULL DEFAULT 0, motivo_anulacao TEXT, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_cargo ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, departamento_id TEXT, salario_referencia_minor INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_contrato ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('indeterminado', 'determinado')), inicio TEXT NOT NULL, fim TEXT, periodo_experiencia_fim TEXT, salario_base_minor INTEGER NOT NULL CHECK(salario_base_minor >= 0), horas_semanais REAL NOT NULL DEFAULT 40, dias_ferias INTEGER NOT NULL DEFAULT 22, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'terminado')), motivo_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_correio ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, sentido TEXT NOT NULL CHECK(sentido IN ('para_rh', 'para_funcionario')), assunto TEXT NOT NULL, corpo TEXT NOT NULL, de_id TEXT, de_nome TEXT, lida INTEGER NOT NULL DEFAULT 0, resposta_a TEXT, criado_em TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS rh_departamento ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, responsavel_id TEXT, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_dependente ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, parentesco TEXT, data_nascimento TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_doc_auditoria ( id TEXT PRIMARY KEY, documento_id TEXT NOT NULL, accao TEXT NOT NULL, detalhe TEXT, utilizador_id TEXT, utilizador_nome TEXT, criado_em TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS rh_doc_pasta ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_documento ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, categoria TEXT NOT NULL, nome TEXT NOT NULL, ficheiro_nome TEXT NOT NULL, mime TEXT NOT NULL, tamanho INTEGER NOT NULL DEFAULT 0, data_emissao TEXT, data_validade TEXT, confidencial INTEGER NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'substituido', 'arquivado')), substituido_por TEXT, carregado_por TEXT, carregado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_documento_emitido ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, modelo TEXT NOT NULL, ano INTEGER NOT NULL, sequencia INTEGER NOT NULL, numero TEXT NOT NULL, dados_json TEXT NOT NULL, emitido_por TEXT, emitido_por_nome TEXT, emitido_em TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS rh_documento_ficheiro ( documento_id TEXT PRIMARY KEY, data_url TEXT NOT NULL )",
+  "CREATE TABLE IF NOT EXISTS rh_escala ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, horario_id TEXT, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_feriado ( id TEXT PRIMARY KEY, data TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL DEFAULT 'nacional' CHECK(tipo IN ('nacional', 'empresa')), recorrente INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_funcionario ( id TEXT PRIMARY KEY, numero_mecanografico TEXT NOT NULL, nome TEXT NOT NULL, data_nascimento TEXT, sexo TEXT, estado_civil TEXT, nif TEXT, bi_numero TEXT, bi_emissao TEXT, bi_validade TEXT, numero_inss TEXT, morada TEXT, telefone TEXT, email TEXT, iban TEXT, banco TEXT, data_admissao TEXT NOT NULL, data_saida TEXT, cargo_id TEXT, departamento_id TEXT, horario_id TEXT, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'suspenso', 'cessado')), foto_url TEXT, utilizador_id TEXT, reformado INTEGER NOT NULL DEFAULT 0, observacoes TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_funcionario_rubrica ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, rubrica_id TEXT NOT NULL, valor_minor INTEGER NOT NULL DEFAULT 0, quantidade REAL NOT NULL DEFAULT 1, inicio TEXT NOT NULL, fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
@@ -150,14 +188,23 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE IF NOT EXISTS rh_horario ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, entrada TEXT NOT NULL, saida TEXT NOT NULL, intervalo_min INTEGER NOT NULL DEFAULT 60, dias_semana TEXT NOT NULL DEFAULT '1,2,3,4,5', tolerancia_min INTEGER NOT NULL DEFAULT 10, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_irt_escalao ( id TEXT PRIMARY KEY, tabela_id TEXT NOT NULL, ordem INTEGER NOT NULL, limite_inferior_minor INTEGER NOT NULL, limite_superior_minor INTEGER, parcela_fixa_minor INTEGER NOT NULL DEFAULT 0, taxa REAL NOT NULL DEFAULT 0 )",
   "CREATE TABLE IF NOT EXISTS rh_irt_tabela ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, lei_referencia TEXT NOT NULL, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_justificacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL, ausencia_id TEXT, motivo_codigo TEXT NOT NULL, motivo TEXT NOT NULL, anexo_nome TEXT, anexo_mime TEXT, anexo_data_url TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'rejeitada')), comentario TEXT, decidido_por TEXT, decidido_por_nome TEXT, decidido_em TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_marcacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, data_hora TEXT NOT NULL, tipo TEXT CHECK(tipo IS NULL OR tipo IN ('entrada', 'saida', 'inicio_pausa', 'fim_pausa')), origem TEXT NOT NULL CHECK(origem IN ('manual', 'csv', 'relogio', 'app', 'quiosque')), dispositivo_id TEXT, latitude REAL, longitude REAL, foto_data_url TEXT, pendente_validacao INTEGER NOT NULL DEFAULT 0, motivo TEXT, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0, motivo_anulacao TEXT, anulada_por TEXT, anulada_por_nome TEXT, anulada_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_modelo ( id TEXT PRIMARY KEY, tipo TEXT NOT NULL CHECK(tipo IN ('declaracao', 'relatorio')), nome TEXT NOT NULL, titulo TEXT, conteudo TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1, sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_parametro ( id TEXT PRIMARY KEY, chave TEXT NOT NULL, valor TEXT NOT NULL, descricao TEXT, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_pedido ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('subsidio_ferias', 'declaracao', 'outro')), ano INTEGER, assunto TEXT NOT NULL, descricao TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovado', 'recusado')), resposta TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, respondido_em TEXT, respondido_por TEXT, respondido_por_nome TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_plano_ferias ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, ano INTEGER NOT NULL, mes_previsto INTEGER CHECK(mes_previsto BETWEEN 1 AND 12), data_inicio TEXT, data_fim TEXT, dias REAL NOT NULL DEFAULT 0, estado TEXT NOT NULL DEFAULT 'planeado' CHECK(estado IN ('planeado', 'aprovado', 'em_gozo', 'gozado', 'anulado')), subsidio_processado INTEGER NOT NULL DEFAULT 0, processamento_id TEXT, ausencia_id TEXT, guia_id TEXT, observacoes TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_ponto ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, entrada TEXT, saida TEXT, horas_trabalhadas REAL NOT NULL DEFAULT 0, horas_extra REAL NOT NULL DEFAULT 0, minutos_atraso INTEGER NOT NULL DEFAULT 0, origem TEXT NOT NULL DEFAULT 'manual' CHECK(origem IN ('manual', 'importado', 'app')), observacoes TEXT, registado_por TEXT, registado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_ponto_periodo ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, mes INTEGER NOT NULL, departamento_id TEXT, estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'em_validacao', 'validado', 'fechado')), validado_por TEXT, validado_por_nome TEXT, validado_em TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, fechado_por TEXT, fechado_por_nome TEXT, fechado_em TEXT, reaberto_por TEXT, reaberto_por_nome TEXT, reaberto_em TEXT, motivo_reabertura TEXT, resumo_json TEXT, processamento_desactualizado INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_processamento ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, mes INTEGER NOT NULL CHECK(mes BETWEEN 1 AND 12), tipo TEXT NOT NULL CHECK(tipo IN ('normal', 'ferias', 'natal', 'acerto')), estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'calculado', 'aprovado', 'pago', 'fechado')), descricao TEXT, funcionarios_json TEXT, irt_tabela_id TEXT, parametros_json TEXT, total_bruto_minor INTEGER NOT NULL DEFAULT 0, total_liquido_minor INTEGER NOT NULL DEFAULT 0, total_inss_trab_minor INTEGER NOT NULL DEFAULT 0, total_inss_emp_minor INTEGER NOT NULL DEFAULT 0, total_irt_minor INTEGER NOT NULL DEFAULT 0, total_outros_minor INTEGER NOT NULL DEFAULT 0, num_recibos INTEGER NOT NULL DEFAULT 0, calculado_por TEXT, calculado_por_nome TEXT, calculado_em TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, pago_por TEXT, pago_por_nome TEXT, pago_em TEXT, conta_pagamento TEXT, fechado_por TEXT, fechado_por_nome TEXT, fechado_em TEXT, lancamentos_json TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_processamento_entrada ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, salario_base_minor INTEGER CHECK(salario_base_minor IS NULL OR salario_base_minor >= 0), faltas REAL CHECK(faltas IS NULL OR (faltas >= 0 AND faltas <= 31)), actualizado_em TEXT NOT NULL, actualizado_por TEXT, actualizado_por_nome TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_recebimento ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, recibo_id TEXT NOT NULL, processamento_id TEXT NOT NULL, estado TEXT NOT NULL CHECK(estado IN ('recebido', 'nao_recebido')), observacao TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_recibo ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, numero_recibo TEXT NOT NULL, nome TEXT NOT NULL, numero_mecanografico TEXT, cargo TEXT, departamento TEXT, nif TEXT, numero_inss TEXT, iban TEXT, banco TEXT, salario_base_minor INTEGER NOT NULL DEFAULT 0, dias_trabalhados REAL NOT NULL DEFAULT 0, valor_dia_minor INTEGER NOT NULL DEFAULT 0, valor_hora_minor INTEGER NOT NULL DEFAULT 0, total_abonos_minor INTEGER NOT NULL DEFAULT 0, total_descontos_minor INTEGER NOT NULL DEFAULT 0, bruto_minor INTEGER NOT NULL DEFAULT 0, base_inss_minor INTEGER NOT NULL DEFAULT 0, inss_minor INTEGER NOT NULL DEFAULT 0, inss_emp_minor INTEGER NOT NULL DEFAULT 0, isento_irt_minor INTEGER NOT NULL DEFAULT 0, base_irt_minor INTEGER NOT NULL DEFAULT 0, irt_minor INTEGER NOT NULL DEFAULT 0, escalao_irt INTEGER, outros_descontos_minor INTEGER NOT NULL DEFAULT 0, liquido_minor INTEGER NOT NULL DEFAULT 0, custo_empresa_minor INTEGER NOT NULL DEFAULT 0, avisos_json TEXT, resumo_json TEXT, criado_em TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS rh_recibo_linha ( id TEXT PRIMARY KEY, recibo_id TEXT NOT NULL, rubrica_id TEXT, codigo TEXT NOT NULL, descricao TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')), quantidade REAL NOT NULL DEFAULT 1, valor_unitario_minor INTEGER NOT NULL DEFAULT 0, valor_minor INTEGER NOT NULL, incide_inss INTEGER NOT NULL DEFAULT 0, incide_irt INTEGER NOT NULL DEFAULT 0, isento_irt_minor INTEGER NOT NULL DEFAULT 0, ordem INTEGER NOT NULL DEFAULT 100 )",
+  "CREATE TABLE IF NOT EXISTS rh_reclamacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, processamento_id TEXT NOT NULL, recibo_id TEXT, codigo TEXT, descricao TEXT, valor_minor INTEGER NOT NULL DEFAULT 0, motivo TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aceite', 'recusada')), resposta TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, respondido_em TEXT, respondido_por TEXT, respondido_por_nome TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_rubrica ( id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')), forma TEXT NOT NULL DEFAULT 'fixo' CHECK(forma IN ('fixo', 'percentagem', 'quantidade')), percentagem REAL NOT NULL DEFAULT 0, incide_inss INTEGER NOT NULL DEFAULT 1, incide_irt INTEGER NOT NULL DEFAULT 1, limite_isento_irt_minor INTEGER NOT NULL DEFAULT 0, limite_isento_irt_pct REAL NOT NULL DEFAULT 0, conta_contabilistica TEXT, ordem_no_recibo INTEGER NOT NULL DEFAULT 100, sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_rubrica_pontual ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, rubrica_id TEXT NOT NULL, quantidade REAL NOT NULL DEFAULT 1, valor_minor INTEGER NOT NULL, descricao TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )",
+  "CREATE TABLE IF NOT EXISTS rh_seccao ( id TEXT PRIMARY KEY, departamento_id TEXT NOT NULL, nome TEXT NOT NULL, responsavel_id TEXT, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS rh_tipo_ausencia ( id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, justificada INTEGER NOT NULL DEFAULT 0, remunerada INTEGER NOT NULL DEFAULT 0, desconta_salario INTEGER NOT NULL DEFAULT 1, desconta_ferias INTEGER NOT NULL DEFAULT 0, exige_documento INTEGER NOT NULL DEFAULT 0, sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )",
   "CREATE TABLE IF NOT EXISTS schema_migrations ( version INTEGER PRIMARY KEY, name TEXT NOT NULL, appliedAt TEXT NOT NULL )",
   "CREATE TABLE IF NOT EXISTS shared_settings ( key TEXT PRIMARY KEY, value TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )",
@@ -173,12 +220,12 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TABLE simulations_flat_v2 ( id TEXT PRIMARY KEY, reference TEXT, date TEXT NOT NULL, clientName TEXT, clientIncome REAL DEFAULT 0, amount REAL DEFAULT 0, term INTEGER DEFAULT 0, interestRate REAL DEFAULT 0, method TEXT CHECK(method IN ('price', 'sac', 'flat')), riskProfile TEXT CHECK(riskProfile IN ('low', 'medium', 'high')), totalPayment REAL DEFAULT 0, monthlyPayment REAL DEFAULT 0, aiAnalysis TEXT, usuario_id TEXT, createdAt TEXT NOT NULL, status TEXT DEFAULT 'simulated', clientId TEXT, productId TEXT, verificationCode TEXT, expiresAt TEXT, details TEXT, convertedCreditId TEXT, updatedAt TEXT )",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_delete BEFORE DELETE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_update BEFORE UPDATE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')",
-  "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period_v2 BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) AND NOT EXISTS (SELECT 1 FROM accounting_entries WHERE id = NEW.id) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_daily_closes_immutable_delete BEFORE DELETE ON accounting_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_daily_closes_immutable_update BEFORE UPDATE ON accounting_daily_closes BEGIN SELECT RAISE(ABORT, 'Os fechos diários são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_delete BEFORE DELETE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_update BEFORE UPDATE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis')",
-  "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')",
+  "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique_v2 BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' AND id <> NEW.id ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entry_seals_delete BEFORE DELETE ON accounting_entry_seals BEGIN SELECT RAISE(ABORT, 'Os selos contabilísticos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_entry_seals_update BEFORE UPDATE ON accounting_entry_seals BEGIN SELECT RAISE(ABORT, 'Os selos contabilísticos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_accounting_requests_decided BEFORE UPDATE ON accounting_requests WHEN OLD.status <> 'pending' BEGIN SELECT RAISE(ABORT, 'Pedido já decidido: não pode ser alterado')",
@@ -200,6 +247,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_cash_session_closed_update BEFORE UPDATE ON accounting_cash_sessions WHEN OLD.status = 'closed' BEGIN SELECT RAISE(ABORT, 'Fecho de caixa imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_cash_session_delete BEFORE DELETE ON accounting_cash_sessions BEGIN SELECT RAISE(ABORT, 'O histórico de caixa é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_collection_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_collection_one_pending_promise BEFORE INSERT ON collection_events WHEN NEW.kind = 'promise' AND EXISTS (SELECT 1 FROM collection_events p WHERE p.creditId = NEW.creditId AND p.kind = 'promise' AND NOT EXISTS (SELECT 1 FROM collection_events d WHERE d.relatedId = p.id AND d.kind IN ('promise_kept','promise_broken'))) BEGIN SELECT RAISE(ABORT, 'Este crédito já tem uma promessa em aberto')",
   "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_credit_documents_delete BEFORE DELETE ON credit_documents BEGIN SELECT RAISE(ABORT, 'Os documentos do crédito não podem ser apagados (só arquivados)')",
   "CREATE TRIGGER IF NOT EXISTS trg_credit_manager_transfers_delete BEFORE DELETE ON credit_manager_transfers BEGIN SELECT RAISE(ABORT, 'O histórico de transferências é imutável')",
@@ -212,6 +260,13 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_credit_writeoffs_immutable_update BEFORE UPDATE ON credit_writeoffs BEGIN SELECT RAISE(ABORT, 'Os abates de créditos são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_delete BEFORE DELETE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_update BEFORE UPDATE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_immutable BEFORE UPDATE OF documentNo, documentType, seriesId, sequenceNumber, documentDate, systemEntryDate, customerTaxId, customerName, netTotalMinor, taxPayableMinor, grossTotalMinor, payload, jwsSignature, saftHash ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documento fiscal imutável: use uma nota de crédito ou uma correcção')",
+  "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_no_delete BEFORE DELETE ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documentos fiscais não podem ser apagados')",
+  "CREATE TRIGGER IF NOT EXISTS trg_fiscal_saft_exports_immutable BEFORE UPDATE ON fiscal_saft_exports BEGIN SELECT RAISE(ABORT, 'Exportações SAF-T são imutáveis')",
+  "CREATE TRIGGER IF NOT EXISTS trg_hub_events_delete BEFORE DELETE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_hub_events_update BEFORE UPDATE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_delete BEFORE DELETE ON late_interest_adjustments BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_update BEFORE UPDATE ON late_interest_adjustments BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_delete BEFORE DELETE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_lines_immutable_update BEFORE UPDATE ON ledger_lines BEGIN SELECT RAISE(ABORT, 'As linhas do ledger são imutáveis')",
   "CREATE TRIGGER IF NOT EXISTS trg_ledger_transactions_immutable_delete BEFORE DELETE ON ledger_transactions BEGIN SELECT RAISE(ABORT, 'As transações do ledger são imutáveis')",
@@ -230,25 +285,33 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "CREATE TRIGGER IF NOT EXISTS trg_limit_versions_immutable BEFORE UPDATE ON limit_policy_versions WHEN OLD.status <> 'pending' OR NEW.policy <> OLD.policy OR NEW.version <> OLD.version OR NEW.createdBy <> OLD.createdBy OR NEW.effectiveFrom <> OLD.effectiveFrom OR NEW.reason <> OLD.reason OR NEW.requiresSecondApproval <> OLD.requiresSecondApproval BEGIN SELECT RAISE(ABORT, 'Uma versão dos limites já decidida não pode ser alterada')",
   "CREATE TRIGGER IF NOT EXISTS trg_receipt_delete BEFORE DELETE ON accounting_receipts BEGIN SELECT RAISE(ABORT,'O comprovativo contabilístico é imutável')",
   "CREATE TRIGGER IF NOT EXISTS trg_receipt_update BEFORE UPDATE ON accounting_receipts BEGIN SELECT RAISE(ABORT,'O comprovativo contabilístico é imutável')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_marcacao_delete BEFORE DELETE ON rh_marcacao BEGIN SELECT RAISE(ABORT, 'As marcações de ponto não se apagam: anulam-se com motivo')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_marcacao_imutavel BEFORE UPDATE ON rh_marcacao WHEN OLD.anulada = 1 OR NEW.data_hora <> OLD.data_hora OR COALESCE(NEW.tipo, '') <> COALESCE(OLD.tipo, '') OR NEW.funcionario_id <> OLD.funcionario_id OR NEW.data <> OLD.data BEGIN SELECT RAISE(ABORT, 'Uma marcação de ponto não se altera: anula-se e regista-se outra')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_delete BEFORE DELETE ON rh_processamento WHEN OLD.estado <> 'aberto' BEGIN SELECT RAISE(ABORT, 'Só se apaga um processamento ainda aberto')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_delete BEFORE DELETE ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_insert BEFORE INSERT ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_update BEFORE UPDATE ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_fechado_update BEFORE UPDATE ON rh_processamento WHEN OLD.estado = 'fechado' BEGIN SELECT RAISE(ABORT, 'Um processamento salarial fechado não pode ser alterado (faça um acerto no mês seguinte)')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_recebimento_imutavel BEFORE UPDATE ON rh_recebimento BEGIN SELECT RAISE(ABORT, 'A confirmação da recepção não se altera: registe uma nova')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_recebimento_insert BEFORE INSERT ON rh_recebimento WHEN COALESCE((SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id), '') NOT IN ('pago', 'fechado') OR COALESCE((SELECT funcionario_id FROM rh_recibo WHERE id = NEW.recibo_id AND processamento_id = NEW.processamento_id), '') <> NEW.funcionario_id BEGIN SELECT RAISE(ABORT, 'Só se confirma a recepção do seu próprio salário, depois de pago')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_recibo_delete BEFORE DELETE ON rh_recibo WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os recibos não mudam')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_recibo_insert BEFORE INSERT ON rh_recibo WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os recibos não mudam')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_recibo_linha_delete BEFORE DELETE ON rh_recibo_linha WHEN (SELECT p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id WHERE r.id = OLD.recibo_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os recibos não mudam')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_recibo_linha_update BEFORE UPDATE ON rh_recibo_linha BEGIN SELECT RAISE(ABORT, 'As linhas do recibo não se alteram: recalcule o processamento')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_recibo_update BEFORE UPDATE ON rh_recibo WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os recibos não mudam')",
+  "CREATE TRIGGER IF NOT EXISTS trg_rh_reclamacao_insert BEFORE INSERT ON rh_reclamacao WHEN COALESCE((SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id), '') <> 'calculado' OR (NEW.recibo_id IS NOT NULL AND COALESCE((SELECT funcionario_id FROM rh_recibo WHERE id = NEW.recibo_id AND processamento_id = NEW.processamento_id), '') <> NEW.funcionario_id) BEGIN SELECT RAISE(ABORT, 'Só se reclama da sua folha de correcção, antes da aprovação')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_rubrica_pontual_delete BEFORE DELETE ON rh_rubrica_pontual WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado')",
   "CREATE TRIGGER IF NOT EXISTS trg_rh_rubrica_pontual_insert BEFORE INSERT ON rh_rubrica_pontual WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado')",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_requests_pending ON accounting_requests(kind, targetId) WHERE status = 'pending'",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'",
-  "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_promise_decision ON collection_events(relatedId) WHERE kind IN ('promise_kept','promise_broken')",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_credit_reinforcement_idempotency ON credit_reinforcements(idempotencyKey)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_idempotency ON payments(idempotencyKey) WHERE idempotencyKey IS NOT NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_payments_receipt ON payments(receiptYear, receiptSeq) WHERE receiptSeq IS NOT NULL",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_documento_emitido_numero ON rh_documento_emitido(modelo, ano, sequencia)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_escala_func_data ON rh_escala(funcionario_id, data)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_funcionario_numero ON rh_funcionario(numero_mecanografico)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_ponto_dia ON rh_ponto(funcionario_id, data)",
+  "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_processamento_entrada ON rh_processamento_entrada(processamento_id, funcionario_id)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_processamento_normal ON rh_processamento(ano, mes) WHERE tipo = 'normal'",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_recibo_funcionario ON rh_recibo(processamento_id, funcionario_id)",
   "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_rubrica_codigo ON rh_rubrica(codigo)",
@@ -267,6 +330,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM notifications",
   "DELETE FROM notifications WHERE id = ?",
   "DELETE FROM notifications WHERE source = ?",
+  "DELETE FROM notifications WHERE title LIKE 'Alerta de segurança: Tentativa de acção sem permissão%' AND message LIKE '%A decisão exige o responsável autenticado e diferente do solicitante%' AND timestamp >= '2026-10-28'",
   "DELETE FROM payment_gateways",
   "DELETE FROM payment_gateways WHERE id = ?",
   "DELETE FROM payment_references",
@@ -274,6 +338,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM payments",
   "DELETE FROM report_schedules WHERE id = ?",
   "DELETE FROM rh_dependente WHERE id = ? AND funcionario_id = ?",
+  "DELETE FROM rh_documento WHERE id = ? AND estado = 'arquivado'",
+  "DELETE FROM rh_documento_ficheiro WHERE documento_id = ?",
+  "DELETE FROM rh_escala WHERE funcionario_id = ? AND data = ?",
   "DELETE FROM rh_ponto WHERE id = ?",
   "DELETE FROM rh_processamento WHERE id = ? AND estado = 'aberto'",
   "DELETE FROM rh_recibo WHERE processamento_id = ?",
@@ -285,17 +352,21 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "DELETE FROM users WHERE id = ?",
   "DELETE FROM warranties WHERE id = ?",
   "DROP INDEX IF EXISTS idx_clients_nif_active",
+  "DROP INDEX IF EXISTS idx_clients_phone_active",
   "DROP TABLE credit_writeoffs_old",
   "DROP TABLE credits_old",
   "DROP TABLE dictionary_old",
   "DROP TABLE payments_old",
   "DROP TABLE simulations",
+  "DROP TRIGGER IF EXISTS trg_accounting_closed_period",
   "DROP TRIGGER IF EXISTS trg_accounting_entries_chain",
+  "DROP TRIGGER IF EXISTS trg_accounting_entries_payment_unique",
   "DROP TRIGGER IF EXISTS trg_accounting_requests_segregation",
   "DROP TRIGGER IF EXISTS trg_audit_alerts_self_close",
   "DROP TRIGGER IF EXISTS trg_credit_restructurings_four_eyes",
   "DROP TRIGGER IF EXISTS trg_limit_exceptions_four_eyes",
   "DROP TRIGGER IF EXISTS trg_limit_versions_four_eyes",
+  "Delete",
   "INSERT INTO accounting_audit_runs (id, kind, startedAt, finishedAt, userId, userName, status, criticalCount, highCount, mediumCount, lowCount, headEntryId, headHash, sealStatus, summary, findings) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO accounting_cash_sessions (id, operatorId, operatorName, sessionDate, openedAt, openingMinor, status) VALUES (?,?,?,?,?,?,?)",
   "INSERT INTO accounting_daily_closes (day, headEntryId, headHash, entryCount, debitMinor, creditMinor, liquidMinor, portfolioMinor, auditRunId, sealStatus, closedAt, closedBy, closedById) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -327,9 +398,8 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO audit_logs (id,timestamp,userId,userName,action,entity,details,metadata) VALUES (?,?,?,?,?,?,?,?)",
   "INSERT INTO calendar_tasks (id, title, description, date, done, createdAt, usuario_id) VALUES (?,?,?,?,?,?,?)",
-  "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone, employmentSector, ministry, employerNif, workPosition, clientCategory, clientType, documentType, countryCode, nationality, passportFormatValidated, foundationDate, legalForm, businessSector, commercialRegistry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-  "INSERT INTO collection_messages (id, clientId, clientName, creditIds, channel, message, attemptNumber, totalDue, sentAt, sentBy, legalTriggered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, terms, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_approvals (id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credit_documents (id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedBy, uploadedByName) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -342,7 +412,17 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) SELECT id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt FROM credit_writeoffs_old",
   "INSERT INTO credit_writeoffs (id, creditId, principalMinor, interestMinor, provisionUsedMinor, lossMinor, reason, requestedBy, requestedById, approvedBy, approvedById, entryId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate, productId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO fiscal_agt_requests (id, service, requestId, documentNos, httpStatus, resultCode, durationMs, error, deviceId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO fiscal_documents (id, idempotencyKey, documentNo, documentType, seriesId, sequenceNumber, documentStatus, rejectedDocumentNo, referenceDocumentNo, documentDate, systemEntryDate, clientId, customerTaxId, customerCountry, customerName, customerAddress, creditId, paymentId, netTotalMinor, taxPayableMinor, grossTotalMinor, withholdingMinor, payload, jwsSignature, saftHash, saftHashControl, deviceId, agtStatus, agtErrors, agtAttempts, agtNextAttemptAt, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO fiscal_saft_exports (id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, totalDebitMinor, totalCreditMinor, warnings, xml, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO fiscal_series (id, seriesCode, seriesYear, documentType, establishment, contingency, status, firstNumber, lastNumber, nextNumber, deviceId, simulated, agtSyncedAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO fiscal_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
+  "INSERT INTO hub_collection_campaigns (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
+  "INSERT INTO hub_collection_clients (clientId, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(clientId) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
+  "INSERT INTO hub_collection_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy",
   "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)",
+  "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read, attachments, clientCard) VALUES (?,?,?,?,?,?,?,?,?,?)",
+  "INSERT INTO late_interest_adjustments (id, creditId, kind, amountMinor, agreedMinor, installments, effectiveDate, reason, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO ledger_lines (id, transactionId, account, side, component, amountMinor) VALUES (?,?,?,?,?,?)",
   "INSERT INTO ledger_transactions (id, timestamp, type, sourceType, sourceId, description, totalDebitMinor, totalCreditMinor, integrityHash, previousHash, hashVersion, usuario_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
   "INSERT INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -370,57 +450,85 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO report_history (id, reportType, title, format, filters, fileName, fileData, generatedAt, generatedBy, generatedById) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO report_schedules (id, reportType, recipients, enabled, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET reportType = excluded.reportType, recipients = excluded.recipients, enabled = excluded.enabled",
   "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome, meio_dia) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aprovada', 0, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, estado, pedido_dispensa, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', 1, ?, ?, ?)",
+  "INSERT INTO rh_banco_horas (id, funcionario_id, data, minutos, tipo, tipo_extra, origem, descricao, anulado, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET minutos = excluded.minutos, tipo_extra = excluded.tipo_extra, origem = excluded.origem, descricao = excluded.descricao, anulado = 0, motivo_anulacao = NULL, actualizado_em = excluded.criado_em",
   "INSERT INTO rh_cargo (id, nome, departamento_id, salario_referencia_minor, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_contrato (id, funcionario_id, tipo, inicio, fim, periodo_experiencia_fim, salario_base_minor, horas_semanais, dias_ferias, estado, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)",
+  "INSERT INTO rh_correio (id, funcionario_id, sentido, assunto, corpo, resposta_a, criado_em, de_id, de_nome) VALUES (?, ?, 'para_funcionario', ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_correio (id, funcionario_id, sentido, assunto, corpo, resposta_a, criado_em, de_id, de_nome) VALUES (?, ?, 'para_rh', ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_departamento (id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_dependente (id, funcionario_id, nome, parentesco, data_nascimento, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?)",
-  "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)",
+  "INSERT INTO rh_doc_auditoria (id, documento_id, accao, detalhe, utilizador_id, utilizador_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_doc_pasta (id, funcionario_id, nome, anulada, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, 0, ?, ?, ?)",
+  "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em, pasta_id, origem, versao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_documento_emitido (id, funcionario_id, modelo, ano, sequencia, numero, dados_json, emitido_por, emitido_por_nome, emitido_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_documento_ficheiro (documento_id, data_url) VALUES (?, ?)",
+  "INSERT INTO rh_escala (id, funcionario_id, data, horario_id, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(funcionario_id, data) DO UPDATE SET horario_id = excluded.horario_id, criado_por = excluded.criado_por, criado_por_nome = excluded.criado_por_nome, actualizado_em = excluded.criado_em",
   "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
-  "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, nacionalidade, telefone_alternativo, provincia, municipio, chefe_id, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_funcionario_rubrica (id, funcionario_id, rubrica_id, valor_minor, quantidade, inicio, fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_historico_salarial (id, funcionario_id, contrato_id, salario_anterior_minor, salario_novo_minor, data_efeito, motivo, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)",
+  "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, tipo, ciclo, ciclo_inicio, minimo_diario_min, faixa_inicio, faixa_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_irt_escalao (id, tabela_id, ordem, limite_inferior_minor, limite_superior_minor, parcela_fixa_minor, taxa) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, ?)",
+  "INSERT INTO rh_justificacao (id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, anexo_data_url, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)",
+  "INSERT INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?)",
   "INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)",
+  "INSERT INTO rh_pedido (id, funcionario_id, tipo, ano, assunto, descricao, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)",
   "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, estado, observacoes, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, 'planeado', ?, ?, ?, ?)",
   "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)",
   "INSERT INTO rh_ponto (id, funcionario_id, data, entrada, saida, horas_trabalhadas, horas_extra, minutos_atraso, origem, observacoes, registado_por, registado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET entrada = excluded.entrada, saida = excluded.saida, horas_trabalhadas = excluded.horas_trabalhadas, horas_extra = excluded.horas_extra, minutos_atraso = excluded.minutos_atraso, origem = excluded.origem, observacoes = excluded.observacoes, registado_por = excluded.registado_por, registado_por_nome = excluded.registado_por_nome, actualizado_em = excluded.criado_em",
+  "INSERT INTO rh_ponto (id, funcionario_id, data, entrada, saida, horas_trabalhadas, horas_extra, minutos_atraso, origem, observacoes, registado_por, registado_por_nome, criado_em, estado, minutos_trabalhados, minutos_saida_antecipada, minutos_extra, minutos_noturnos, incompleto, editado_manualmente, primeira_entrada, ultima_saida, recalculado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET entrada = excluded.entrada, saida = excluded.saida, horas_trabalhadas = excluded.horas_trabalhadas, horas_extra = excluded.horas_extra, minutos_atraso = excluded.minutos_atraso, origem = excluded.origem, registado_por = excluded.registado_por, registado_por_nome = excluded.registado_por_nome, actualizado_em = excluded.criado_em, estado = excluded.estado, minutos_trabalhados = excluded.minutos_trabalhados, minutos_saida_antecipada = excluded.minutos_saida_antecipada, minutos_extra = excluded.minutos_extra, minutos_noturnos = excluded.minutos_noturnos, incompleto = excluded.incompleto, editado_manualmente = excluded.editado_manualmente, primeira_entrada = excluded.primeira_entrada, ultima_saida = excluded.ultima_saida, recalculado_em = excluded.recalculado_em",
+  "INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, ?, 'aberto', ?) ON CONFLICT(id) DO NOTHING",
+  "INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, NULL, 'aberto', ?) ON CONFLICT(id) DO NOTHING",
   "INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(processamento_id, funcionario_id) DO UPDATE SET salario_base_minor = excluded.salario_base_minor, faltas = excluded.faltas, actualizado_em = excluded.actualizado_em, actualizado_por = excluded.actualizado_por, actualizado_por_nome = excluded.actualizado_por_nome",
+  "INSERT INTO rh_recebimento (id, funcionario_id, recibo_id, processamento_id, estado, observacao, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_recibo (id, processamento_id, funcionario_id, numero_recibo, nome, numero_mecanografico, cargo, departamento, nif, numero_inss, iban, banco, salario_base_minor, dias_trabalhados, valor_dia_minor, valor_hora_minor, total_abonos_minor, total_descontos_minor, bruto_minor, base_inss_minor, inss_minor, inss_emp_minor, isento_irt_minor, base_irt_minor, irt_minor, escalao_irt, outros_descontos_minor, liquido_minor, custo_empresa_minor, avisos_json, resumo_json, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO rh_recibo_linha (id, recibo_id, rubrica_id, codigo, descricao, tipo, quantidade, valor_unitario_minor, valor_minor, incide_inss, incide_irt, isento_irt_minor, ordem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-  "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
+  "INSERT INTO rh_reclamacao (id, funcionario_id, processamento_id, recibo_id, codigo, descricao, valor_minor, motivo, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)",
+  "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, classe, por_dia, valor_padrao_minor, periodicidade, mes_pagamento, proporcional_faltas, auto_atribuir, descricao, incidencia_confirmada, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
   "INSERT INTO rh_rubrica_pontual (id, processamento_id, funcionario_id, rubrica_id, quantidade, valor_minor, descricao, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO rh_seccao (id, departamento_id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)",
   "INSERT INTO rh_tipo_ausencia (id, codigo, nome, justificada, remunerada, desconta_salario, desconta_ferias, exige_documento, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)",
   "INSERT INTO schema_migrations (version, name, appliedAt) VALUES (?, ?, ?)",
   "INSERT INTO shared_settings (key, value, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy WHERE excluded.updatedAt >= shared_settings.updatedAt",
   "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO simulations_flat_v2 (id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt) SELECT id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt FROM simulations",
   "INSERT INTO suppliers (id, name, phone, email, nif, address, notes, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
-  "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature, mustChangePassword) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, mustChangePassword) VALUES (?, ?, ?, ?, ?, 'employee', ?, ?, ?, 'active', 1)",
   "INSERT INTO warranties (id, clientId, creditId, type, description, marketValue, status, location, photos, documents, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO accounting_bank_imports (id, fileName, movements, actorId, actorName, importedAt) VALUES (?,?,?,?,?,?)",
   "INSERT OR IGNORE INTO audit_alerts (id, alertKey, ruleId, severity, title, description, eventIds, originUserId, originUserName, occurredAt, status, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
   "INSERT OR IGNORE INTO audit_daily_closes (day, lastAuditId, headHash, eventCount, status, brokenSeq, verifiedAt, verifiedBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)",
+  "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'legal', ?, ?)",
   "INSERT OR IGNORE INTO company_settings (id, name, nif) VALUES (1, 'Tango Gestão de Créditos', '000000000')",
   "INSERT OR IGNORE INTO contracts (id, clientId, clientName, title, value, startDate, endDate, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)",
   "INSERT OR IGNORE INTO credit_import_items (batchId, creditId) VALUES (?, ?)",
   "INSERT OR IGNORE INTO credit_installments (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor) VALUES (?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO dictionary (word, language) SELECT word, CASE WHEN language = 'ao' THEN 'pt-AO' WHEN language = 'pt' THEN 'pt-PT' WHEN language IN ('pt-AO', 'pt-PT', 'both') THEN language ELSE 'both' END FROM dictionary_old",
   "INSERT OR IGNORE INTO dictionary (word, language) VALUES (?, ?)",
+  "INSERT OR IGNORE INTO hub_collection_events (id, clientId, creditId, kind, channel, status, message, metadata, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT OR IGNORE INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, updatedAt, usuario_id) VALUES (?, ?, ?, 'interpellated', 'high', ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, 1)",
+  "INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, 'warning', 0, ?)",
   "INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, ?, 0, ?)",
   "INSERT OR IGNORE INTO rh_alerta (id, tipo, referencia_id, funcionario_id, mensagem, data_alerta, destinatario_perfil, prioridade, accao, estado, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?)",
   "INSERT OR IGNORE INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, 'nacional', 1, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES ('horario-normal', 'Horário normal (08:00–17:00)', '08:00', '17:00', 60, '1,2,3,4,5', 10, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_irt_escalao (id, tabela_id, ordem, limite_inferior_minor, limite_superior_minor, parcela_fixa_minor, taxa) VALUES (?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, 'sistema')",
+  "INSERT OR IGNORE INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT OR IGNORE INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, 'declaracao', ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')",
   "INSERT OR IGNORE INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, 'sistema')",
+  "INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, ?, ?)",
+  "INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, NULL, ?)",
   "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, ?, 'sistema')",
+  "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, ?, 0, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO rh_tipo_ausencia (id, codigo, nome, justificada, remunerada, desconta_salario, desconta_ferias, exige_documento, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 'sistema')",
   "INSERT OR IGNORE INTO sync_conflicts (id, entityType, entityId, operation, status, createdAt) VALUES (?, ?, ?, ?, 'pending', ?)",
   "INSERT OR IGNORE INTO user_limits (id, role, maxTransaction, dailyLimit, monthlyLimit, restrictionsEnabled, updatedAt) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -481,6 +589,17 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM credits",
   "SELECT * FROM credits WHERE id = ?",
   "SELECT * FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT * FROM fiscal_agt_requests ORDER BY createdAt DESC LIMIT 300",
+  "SELECT * FROM fiscal_documents WHERE agtRequestId = ?",
+  "SELECT * FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('pendente','erro_envio') AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) ORDER BY systemEntryDate LIMIT 30",
+  "SELECT * FROM fiscal_documents WHERE documentDate >= ? AND documentDate <= ? ORDER BY systemEntryDate DESC",
+  "SELECT * FROM fiscal_documents WHERE documentNo = ?",
+  "SELECT * FROM fiscal_documents WHERE id = ?",
+  "SELECT * FROM fiscal_documents WHERE idempotencyKey = ?",
+  "SELECT * FROM fiscal_series ORDER BY seriesYear DESC, documentType, createdAt",
+  "SELECT * FROM fiscal_series WHERE deviceId = ? AND documentType = ? AND seriesYear = ? AND contingency = ? AND establishment = ? AND status IN ('A','U') AND nextNumber <= lastNumber ORDER BY simulated, createdAt LIMIT 1",
+  "SELECT * FROM hub_collection_events ORDER BY createdAt DESC",
+  "SELECT * FROM hub_collection_events WHERE id = ?",
   "SELECT * FROM internal_messages ORDER BY timestamp ASC",
   "SELECT * FROM ledger_lines ORDER BY rowid",
   "SELECT * FROM ledger_lines WHERE transactionId = ? ORDER BY id",
@@ -517,13 +636,22 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM rh_alerta",
   "SELECT * FROM rh_alerta WHERE estado <> 'resolvido' ORDER BY prioridade, data_alerta",
   "SELECT * FROM rh_ausencia ORDER BY data_inicio DESC, criado_em DESC",
+  "SELECT * FROM rh_banco_horas ORDER BY data, criado_em",
+  "SELECT * FROM rh_banco_horas WHERE funcionario_id = ? ORDER BY data, criado_em",
+  "SELECT * FROM rh_banco_horas WHERE id = ?",
   "SELECT * FROM rh_contrato ORDER BY inicio DESC",
   "SELECT * FROM rh_contrato WHERE funcionario_id = ? AND estado = 'activo'",
   "SELECT * FROM rh_contrato WHERE funcionario_id = ? ORDER BY inicio DESC",
+  "SELECT * FROM rh_correio ORDER BY criado_em DESC",
+  "SELECT * FROM rh_correio WHERE funcionario_id = ? ORDER BY criado_em DESC",
+  "SELECT * FROM rh_doc_auditoria WHERE documento_id = ? ORDER BY criado_em DESC",
+  "SELECT * FROM rh_doc_pasta WHERE anulada = 0 ORDER BY nome",
   "SELECT * FROM rh_documento ORDER BY criado_em DESC",
   "SELECT * FROM rh_documento WHERE funcionario_id = ? ORDER BY criado_em DESC",
+  "SELECT * FROM rh_documento WHERE id = ?",
   "SELECT * FROM rh_documento_emitido ORDER BY emitido_em DESC",
   "SELECT * FROM rh_documento_emitido WHERE funcionario_id = ? ORDER BY emitido_em DESC",
+  "SELECT * FROM rh_escala WHERE data >= ? AND data <= ? ORDER BY data",
   "SELECT * FROM rh_feriado ORDER BY substr(data, 6, 5)",
   "SELECT * FROM rh_funcionario ORDER BY nome",
   "SELECT * FROM rh_funcionario WHERE id = ?",
@@ -534,13 +662,27 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM rh_horario ORDER BY nome",
   "SELECT * FROM rh_irt_escalao ORDER BY tabela_id, ordem",
   "SELECT * FROM rh_irt_escalao WHERE tabela_id = ? ORDER BY ordem",
+  "SELECT * FROM rh_justificacao WHERE id = ?",
+  "SELECT * FROM rh_marcacao WHERE data >= ? AND data <= ?",
+  "SELECT * FROM rh_marcacao WHERE funcionario_id = ? AND data = ? ORDER BY data_hora",
+  "SELECT * FROM rh_modelo ORDER BY tipo, sistema DESC, nome",
+  "SELECT * FROM rh_modelo WHERE tipo = ? ORDER BY sistema DESC, nome",
+  "SELECT * FROM rh_pedido ORDER BY estado = 'pendente' DESC, criado_em DESC",
+  "SELECT * FROM rh_pedido WHERE funcionario_id = ? ORDER BY criado_em DESC",
   "SELECT * FROM rh_plano_ferias ORDER BY data_inicio",
   "SELECT * FROM rh_plano_ferias WHERE ano IN (?, ?) ORDER BY data_inicio",
   "SELECT * FROM rh_ponto WHERE data LIKE ? ORDER BY data",
   "SELECT * FROM rh_ponto WHERE id = ?",
+  "SELECT * FROM rh_ponto_periodo WHERE ano = ? AND mes = ?",
+  "SELECT * FROM rh_ponto_periodo WHERE id = ?",
   "SELECT * FROM rh_processamento ORDER BY ano DESC, mes DESC, criado_em DESC",
+  "SELECT * FROM rh_processamento_entrada WHERE processamento_id = ?",
+  "SELECT * FROM rh_recebimento WHERE funcionario_id = ? ORDER BY criado_em",
+  "SELECT * FROM rh_recebimento WHERE processamento_id = ? ORDER BY criado_em",
   "SELECT * FROM rh_recibo WHERE processamento_id = ? ORDER BY nome",
   "SELECT * FROM rh_recibo_linha WHERE recibo_id = ? ORDER BY ordem, descricao",
+  "SELECT * FROM rh_reclamacao WHERE funcionario_id = ? ORDER BY criado_em DESC",
+  "SELECT * FROM rh_reclamacao WHERE processamento_id = ? ORDER BY estado = 'pendente' DESC, criado_em DESC",
   "SELECT * FROM rh_rubrica ORDER BY ordem_no_recibo, nome",
   "SELECT * FROM rh_rubrica WHERE id = ?",
   "SELECT * FROM rh_rubrica_pontual WHERE processamento_id = ? ORDER BY criado_em",
@@ -559,14 +701,18 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT * FROM warranties WHERE deletedAt IS NOT NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE deletedAt IS NULL ORDER BY createdAt DESC",
   "SELECT * FROM warranties WHERE id = ?",
+  "SELECT 1 AS found FROM accounting_entries WHERE id = ? LIMIT 1",
+  "SELECT 1 AS found FROM rh_processamento WHERE id = ? UNION ALL SELECT 1 FROM rh_recibo WHERE id = ? UNION ALL SELECT 1 FROM rh_processamento_entrada WHERE id = ? UNION ALL SELECT 1 FROM rh_rubrica_pontual WHERE id = ? LIMIT 1",
   "SELECT 1 AS ok",
   "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?",
+  "SELECT COALESCE(SUM(grossTotalMinor), 0) AS total FROM fiscal_documents WHERE documentType = 'NC' AND referenceDocumentNo = ?",
   "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?",
+  "SELECT COUNT(*) AS n FROM rh_reclamacao WHERE processamento_id = ? AND estado = 'pendente'",
   "SELECT COUNT(*) AS n FROM users",
   "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?",
+  "SELECT COUNT(*) AS total FROM notifications WHERE title LIKE 'Alerta de segurança: Tentativa de acção sem permissão%' AND message LIKE '%A decisão exige o responsável autenticado e diferente do solicitante%' AND timestamp >= '2026-10-28'",
   "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?",
   "SELECT COUNT(*) AS total FROM rh_funcionario",
-  "SELECT COUNT(*) AS total FROM sync_conflicts WHERE status = 'pending'",
   "SELECT COUNT(*) AS total FROM users",
   "SELECT COUNT(*) as count FROM dictionary",
   "SELECT COUNT(*) as count FROM legal_cases WHERE priority = ?",
@@ -578,83 +724,140 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT SUM(marketValue) as total FROM warranties WHERE status = ?",
   "SELECT a.* FROM accounting_entries a LEFT JOIN ledger_transactions t ON t.id = a.id WHERE t.id IS NULL ORDER BY a.rowid",
   "SELECT a.* FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE c.auditId IS NULL ORDER BY a.rowid LIMIT 200",
+  "SELECT a.id, a.creditId, a.clientId, a.clientName, a.principalAmount, a.interestRate, a.installments, a.decision, a.reason, a.requestedBy, a.requestedAt, a.decidedBy, a.decidedById, a.decidedAt FROM credit_approvals a WHERE NOT EXISTS (SELECT 1 FROM credits c WHERE c.id = a.creditId AND c.deletedAt IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM clients k WHERE k.id = a.clientId AND k.deletedAt IS NOT NULL) ORDER BY a.decidedAt DESC",
   "SELECT a.id, a.timestamp, a.userId, a.userName, a.action, a.entity, a.details, a.previousState, a.newState, a.metadata, c.seq, c.integrityHash, c.previousHash FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE a.userId = ? ORDER BY a.timestamp DESC LIMIT ?",
+  "SELECT a.type, l.account, l.side, SUM(l.amountMinor) AS total FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId WHERE a.creditId = ? AND a.type IN ('credit_removal', 'credit_restore') GROUP BY a.type, l.account, l.side",
   "SELECT account, component, amountMinor FROM ledger_lines WHERE transactionId = ? AND side = 'credit'",
   "SELECT account, side, SUM(amountMinor) AS total FROM ledger_lines WHERE account IN ('cash', 'bank') GROUP BY account, side",
+  "SELECT agtRequestId, MAX(agtAttempts) AS tentativas FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('enviado','em_validacao') AND agtRequestId IS NOT NULL AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) GROUP BY agtRequestId LIMIT 20",
   "SELECT alertKey FROM audit_alerts",
   "SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE id = ?",
+  "SELECT anexo_nome, anexo_data_url FROM rh_justificacao WHERE id = ?",
   "SELECT auditId, previousHash, integrityHash, seq FROM audit_log_chain ORDER BY seq",
+  "SELECT c.id, c.clientName, c.status, c.currentBalanceMinor, c.currentBalance, c.accruedInterestMinor, c.accruedInterest, c.lateInterestMinor, c.lateInterest, c.totalDueMinor, c.totalDue, SUM(i.principalMinor - i.paidPrincipalMinor) AS duePrincipalMinor, SUM(i.interestMinor - i.paidInterestMinor) AS dueInterestMinor, SUM(i.lateInterestMinor - i.paidLateInterestMinor) AS dueLateInterestMinor FROM credits c JOIN credit_installments i ON i.creditId = c.id AND i.status <> 'cancelled' WHERE c.deletedAt IS NULL GROUP BY c.id",
   "SELECT c.id, c.principalAmount, c.principalAmountMinor, c.createdAt, c.requestedBy, c.usuario_id, cl.riskLevel FROM credits c LEFT JOIN clients cl ON cl.id = c.clientId WHERE c.deletedAt IS NULL AND c.createdAt >= ?",
   "SELECT c.id, c.startDate, c.installments, COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER)) AS principalMinor, MAX(0, COALESCE(c.totalDueMinor, CAST(ROUND(c.totalDue * 100) AS INTEGER)) - COALESCE(c.principalAmountMinor, CAST(ROUND(c.principalAmount * 100) AS INTEGER))) AS interestMinor FROM credits c WHERE NOT EXISTS (SELECT 1 FROM credit_installments i WHERE i.creditId = c.id)",
   "SELECT clientId, SUM(COALESCE(currentBalanceMinor, ROUND(currentBalance * 100))) AS balance FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue','defaulted','renegotiated','pending_approval') GROUP BY clientId",
+  "SELECT clientId, clientName FROM credits WHERE id = ?",
   "SELECT clientId, status, principalAmount, currentBalance, totalDue, createdAt, startDate, deletedAt FROM credits WHERE clientId = ? AND deletedAt IS NULL",
   "SELECT clientId, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT convertedCreditId, productId FROM simulations WHERE convertedCreditId IS NOT NULL AND productId IS NOT NULL",
+  "SELECT credit FROM accounting_entries WHERE creditId = ? AND type = 'disbursement' ORDER BY timestamp LIMIT 1",
   "SELECT creditId FROM credit_import_items WHERE batchId = ?",
   "SELECT creditId FROM credit_writeoffs",
   "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status FROM credit_installments WHERE status <> 'cancelled'",
   "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, paidAt FROM credit_installments WHERE status <> 'cancelled'",
+  "SELECT creditId, effectiveDate, amountMinor FROM late_interest_adjustments",
+  "SELECT creditId, kind, fileName, uploadedAt FROM credit_documents WHERE deletedAt IS NULL",
   "SELECT creditId, stage FROM legal_cases WHERE deletedAt IS NULL AND stage <> 'closed'",
   "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments",
+  "SELECT d.*, s.simulated FROM fiscal_documents d JOIN fiscal_series s ON s.id = d.seriesId WHERE d.documentDate >= ? AND d.documentDate <= ? AND s.simulated = 0 ORDER BY d.documentType, d.seriesId, d.sequenceNumber",
+  "SELECT data FROM fiscal_settings WHERE id = ?",
+  "SELECT data FROM hub_collection_campaigns ORDER BY updatedAt DESC",
+  "SELECT data FROM hub_collection_clients",
+  "SELECT data FROM hub_collection_clients WHERE clientId = ?",
+  "SELECT data FROM hub_collection_settings WHERE id = ?",
   "SELECT data_url FROM rh_documento_ficheiro WHERE documento_id = ?",
   "SELECT day FROM accounting_daily_closes WHERE day = ?",
   "SELECT day, status, brokenSeq, verifiedAt FROM audit_daily_closes ORDER BY day DESC LIMIT 1",
   "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500",
+  "SELECT effectiveDate, amountMinor FROM late_interest_adjustments WHERE creditId = ?",
   "SELECT enableMultiTenant FROM company_settings WHERE id = 1",
   "SELECT entityId FROM limit_escalations WHERE entityType = 'credit' AND status = 'pending'",
+  "SELECT estado FROM rh_ponto_periodo WHERE id = ?",
+  "SELECT estado FROM rh_ponto_periodo WHERE id = ? AND estado = 'fechado'",
   "SELECT estado FROM rh_processamento WHERE ano = ? AND mes = ? AND tipo = 'normal' AND estado <> 'aberto'",
   "SELECT fileName, fileData, format FROM report_history WHERE id = ?",
   "SELECT fileName, mimeType, dataUrl, uploadedAt, uploadedBy FROM payment_proofs WHERE paymentId = ?",
   "SELECT fileName, movements FROM accounting_bank_imports",
+  "SELECT fileName, xml FROM fiscal_saft_exports WHERE id = ?",
   "SELECT fileName,mime,data,digest FROM accounting_receipts WHERE entryId = ?",
+  "SELECT funcionario_id, SUM(COALESCE(minutos_extra, 0)) AS total FROM rh_ponto WHERE data >= ? AND data < ? GROUP BY funcionario_id",
+  "SELECT funcionario_id, data, data_hora, tipo FROM rh_marcacao WHERE anulada = 0 AND data >= ? AND data <= ?",
+  "SELECT funcionario_id, data, entrada, saida, origem, observacoes FROM rh_ponto WHERE data >= ? AND data <= ?",
+  "SELECT funcionario_id, data, horario_id FROM rh_escala WHERE data >= ? AND data <= ?",
+  "SELECT funcionario_id, data_hora, tipo FROM rh_marcacao WHERE anulada = 0 AND data >= ? AND data <= ?",
+  "SELECT funcionario_id, data_inicio, data_fim FROM rh_justificacao WHERE estado = 'pendente'",
   "SELECT i.creditId, c.clientId, c.clientName, i.installmentNumber, i.dueDate, i.principalMinor, i.interestMinor, i.lateInterestMinor, i.paidPrincipalMinor, i.paidInterestMinor, i.paidLateInterestMinor FROM credit_installments i JOIN credits c ON c.id = i.creditId WHERE c.deletedAt IS NULL AND c.status IN ('active', 'overdue', 'defaulted', 'renegotiated', 'paid')",
   "SELECT id FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
+  "SELECT id FROM accounting_entries WHERE id = ?",
   "SELECT id FROM accounting_requests WHERE kind = ? AND targetId = ? AND status = 'pending'",
+  "SELECT id FROM clients WHERE id = ?",
   "SELECT id FROM closed_months",
   "SELECT id FROM credit_writeoffs WHERE creditId = ?",
   "SELECT id FROM credit_writeoffs WHERE creditId = ? LIMIT 1",
   "SELECT id FROM credits WHERE id = ?",
   "SELECT id FROM ledger_transactions WHERE id = ?",
   "SELECT id FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL AND stage <> 'closed'",
+  "SELECT id FROM legal_cases WHERE creditId = ? AND stage <> 'closed' AND deletedAt IS NULL",
   "SELECT id FROM notifications WHERE id = ?",
   "SELECT id FROM payments WHERE idempotencyKey = ?",
+  "SELECT id FROM rh_ausencia WHERE funcionario_id = ? AND estado <> 'anulada' AND data_inicio <= ? AND data_fim >= ?",
   "SELECT id FROM rh_funcionario WHERE numero_mecanografico = ?",
+  "SELECT id FROM rh_funcionario WHERE utilizador_id = ?",
+  "SELECT id FROM rh_justificacao WHERE funcionario_id = ? AND estado = 'pendente' AND data_inicio <= ? AND data_fim >= ?",
   "SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1",
   "SELECT id FROM users WHERE LOWER(email) = ? OR LOWER(username) = ? LIMIT 1",
   "SELECT id FROM users WHERE LOWER(username) = ? AND id <> ? LIMIT 1",
   "SELECT id FROM users WHERE email = ?",
+  "SELECT id FROM users WHERE isOwner = 1",
   "SELECT id FROM users WHERE role IN ('admin','super_admin','credit_director') AND (status IS NULL OR status <> 'blocked')",
   "SELECT id FROM users WHERE role IN ('super_admin', 'internal_auditor') AND (status IS NULL OR status <> 'blocked')",
   "SELECT id, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor, deletedAt, status FROM payments WHERE creditId = ?",
   "SELECT id, ano, lei_referencia, vigencia_inicio, vigencia_fim FROM rh_irt_tabela ORDER BY vigencia_inicio DESC",
+  "SELECT id, ano, mes, estado FROM rh_processamento WHERE tipo = 'normal' AND estado IN ('aberto', 'calculado')",
   "SELECT id, chave, valor, descricao, vigencia_inicio, vigencia_fim FROM rh_parametro ORDER BY chave, vigencia_inicio DESC",
+  "SELECT id, clientId, NULL AS clientName FROM legal_cases",
+  "SELECT id, clientId, NULL AS clientName FROM warranties",
+  "SELECT id, clientId, clientName FROM collection_messages",
+  "SELECT id, clientId, clientName FROM contracts",
+  "SELECT id, clientId, clientName FROM credits",
+  "SELECT id, clientId, clientName FROM simulations",
+  "SELECT id, clientId, clientName, creditNumber, principalAmount, totalDue, currentBalance, installments, paidInstallments, status, createdAt, dueDate, paidAt FROM credits WHERE usuario_id = ? AND deletedAt IS NULL ORDER BY createdAt",
+  "SELECT id, clientId, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, paidInstallments, startDate, dueDate, status, daysOverdue, accruedInterest, lateInterest, totalDue, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, creditNumber, paidAt, usuario_id, targetMonthId, supplierId, supplierProfitRate, principalAmountMinor, currentBalanceMinor, accruedInterestMinor, lateInterestMinor, totalDueMinor, version, amortizationMethod, productId FROM credits WHERE deletedAt IS NULL",
   "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'",
   "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, clientId, clientName, status, version, dueDate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, deletedBy FROM credits WHERE deletedAt IS NOT NULL",
   "SELECT id, clientId, status FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
+  "SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL",
   "SELECT id, createdAt, startDate FROM credits",
-  "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC",
+  "SELECT id, creditId, clientName, amount, paymentDate, method, status FROM payments WHERE usuario_id = ? AND deletedAt IS NULL ORDER BY paymentDate",
   "SELECT id, creditId, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt FROM credit_installments",
   "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC",
   "SELECT id, deletedBy FROM clients WHERE deletedAt IS NOT NULL",
+  "SELECT id, departamento_id, nome, responsavel_id, activo FROM rh_seccao ORDER BY nome",
   "SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, email FROM users",
   "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC",
+  "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending'",
+  "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5",
+  "SELECT id, entityType, operation FROM sync_conflicts WHERE status = 'pending'",
+  "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100",
+  "SELECT id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, estado, comentario, decidido_por_nome, decidido_em, criado_em, criado_por_nome FROM rh_justificacao ORDER BY estado = 'pendente' DESC, criado_em DESC",
+  "SELECT id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, estado, comentario, decidido_por_nome, decidido_em, criado_em, criado_por_nome FROM rh_justificacao WHERE funcionario_id = ? ORDER BY criado_em DESC",
   "SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome",
+  "SELECT id, funcionario_id, tipo_id, data_inicio, data_fim, horas, estado, meio_dia FROM rh_ausencia WHERE data_fim >= ? AND data_inicio <= ?",
   "SELECT id, installmentNumber, dueDate, principalMinor, interestMinor, lateInterestMinor, paidPrincipalMinor, paidInterestMinor, paidLateInterestMinor, status, paidAt, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, installmentNumber, dueDate, status FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
   "SELECT id, lateInterestMinor, version FROM credit_installments WHERE creditId = ?",
   "SELECT id, name, email, username, role, avatar, lastLogin, lastSeen, createdAt, permissions, status, signature, ip FROM users",
   "SELECT id, name, email, username, role, avatar, status, permissions FROM users",
+  "SELECT id, name, nif, createdAt FROM clients WHERE usuario_id = ? AND deletedAt IS NULL ORDER BY createdAt",
+  "SELECT id, name, nif, createdAt, deletedAt, deletedBy FROM clients",
   "SELECT id, name, nif, expiryDate, deletedAt FROM clients WHERE deletedAt IS NULL",
   "SELECT id, name, nif, phone, riskLevel, fatherName, motherName, spouseName, spouseBi, spouseNif, spousePhone, legalRepresentative FROM clients WHERE deletedAt IS NULL",
   "SELECT id, name, role FROM users WHERE LOWER(email) = ?",
   "SELECT id, name, role, branchId FROM users WHERE id = ?",
   "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'",
   "SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome",
+  "SELECT id, nome, departamento_id, salario_referencia_minor, activo, nivel FROM rh_cargo ORDER BY nome",
   "SELECT id, nome, responsavel_id, activo FROM rh_departamento ORDER BY nome",
+  "SELECT id, operation FROM sync_conflicts WHERE status = 'archived' AND entityType = 'clients'",
+  "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)",
   "SELECT id, operation, entityType FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt ASC LIMIT 5000",
   "SELECT id, paymentDate FROM payments WHERE receiptSeq IS NULL AND status = 'confirmed' AND deletedAt IS NULL ORDER BY paymentDate, id",
   "SELECT id, reportType, title, format, filters, fileName, generatedAt, generatedBy, generatedById FROM report_history ORDER BY generatedAt DESC LIMIT 200",
@@ -663,11 +866,17 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT id, status FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT id, status, daysOverdue, clientName FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue')",
   "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber",
+  "SELECT id, status, resolutionNote, operation FROM sync_conflicts WHERE status = 'pending' OR resolutionNote = ?",
+  "SELECT id, timestamp, action, entity, details, metadata, userName FROM audit_logs WHERE userId = ? ORDER BY timestamp",
   "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp",
   "SELECT id, timestamp, userId, userName, action, entity, details, metadata FROM audit_logs WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp DESC LIMIT 50000",
   "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs",
+  "SELECT id, timestamp, userName, action, details FROM audit_logs WHERE details LIKE 'Fiscal:%' ORDER BY timestamp DESC LIMIT 300",
   "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp",
+  "SELECT id, timestamp, userName, action, details, previousState, newState, metadata FROM audit_logs WHERE entity = 'rh' AND metadata LIKE '%\"modulo\":\"ponto\"%' AND timestamp >= ? AND timestamp <= ? AND (? = '' OR metadata LIKE ?) AND (? = '' OR userName = ?) AND (? = '' OR action = ?) ORDER BY timestamp DESC LIMIT 2000",
+  "SELECT id, timestamp, userName, action, details, previousState, newState, metadata FROM audit_logs WHERE entity = 'rh' AND metadata LIKE ? AND metadata LIKE ? ORDER BY timestamp DESC LIMIT 100",
   "SELECT id, timestamp, userName, action, entity, details, metadata FROM audit_logs WHERE details LIKE ? OR metadata LIKE ? ORDER BY timestamp DESC LIMIT 500",
+  "SELECT id, title, message FROM notifications WHERE userId = ? AND read = 0 AND timestamp >= ? ORDER BY timestamp DESC LIMIT 20",
   "SELECT id, totalDueMinor, totalDue, deletedAt FROM credits WHERE id = ?",
   "SELECT id, usuario_id, clientName FROM credits WHERE deletedAt IS NULL",
   "SELECT integrityHash FROM accounting_entries ORDER BY rowid DESC LIMIT 1",
@@ -676,19 +885,24 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT key, value, updatedAt FROM shared_settings WHERE key LIKE ?",
   "SELECT l.* FROM rh_recibo_linha l JOIN rh_recibo r ON r.id = l.recibo_id WHERE r.processamento_id = ? ORDER BY l.ordem",
   "SELECT l.*, t.timestamp, t.sourceId, t.description FROM ledger_lines l LEFT JOIN ledger_transactions t ON t.id = l.transactionId ORDER BY t.timestamp, l.id",
+  "SELECT l.account, l.side, SUM(l.amountMinor) AS total FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId WHERE a.creditId = ? AND l.account IN ('portfolio', 'receivable_interest', 'receivable_late_interest') GROUP BY l.account, l.side",
   "SELECT l.account, l.side, l.amountMinor FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId WHERE a.creditId = ? AND l.account IN ('receivable_interest', 'receivable_late_interest')",
   "SELECT last_insert_rowid() as id",
   "SELECT lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name",
   "SELECT name FROM users WHERE id = ?",
+  "SELECT operation FROM sync_conflicts WHERE status = 'pending'",
+  "SELECT p.id, p.creditId, p.clientName, p.amount, p.paymentDate, p.method, p.status FROM payments p JOIN credits c ON c.id = p.creditId WHERE c.usuario_id = ? AND p.deletedAt IS NULL ORDER BY p.paymentDate",
   "SELECT password FROM users WHERE id = ?",
   "SELECT paymentDate, allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'",
   "SELECT paymentDate, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'",
+  "SELECT paymentId FROM fiscal_documents WHERE paymentId IS NOT NULL",
   "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT principalAmount, principalAmountMinor, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL",
   "SELECT principalAmountMinor, principalAmount FROM credits WHERE id = ?",
   "SELECT r.*, p.ano, p.mes, p.tipo, p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id ORDER BY p.ano, p.mes, r.nome",
   "SELECT r.*, p.ano, p.mes, p.tipo, p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id WHERE r.funcionario_id = ? ORDER BY p.ano DESC, p.mes DESC",
+  "SELECT r.utilizador_id FROM rh_departamento d JOIN rh_funcionario r ON r.id = d.responsavel_id WHERE d.id = ?",
   "SELECT receiptYear, MAX(receiptSeq) AS last FROM payments WHERE receiptSeq IS NOT NULL GROUP BY receiptYear",
   "SELECT receiveMethod FROM clients WHERE id = ?",
   "SELECT recibo_id, codigo, quantidade, valor_minor FROM rh_recibo_linha WHERE codigo IN ('HORAS_EXTRA', 'ATRASOS', 'FALTAS')",
@@ -700,6 +914,9 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "SELECT role, name FROM users WHERE id = ?",
   "SELECT role, name, branchId FROM users WHERE id = ?",
   "SELECT rowid AS ledgerSequence, * FROM accounting_entries ORDER BY rowid ASC",
+  "SELECT saftHash FROM fiscal_documents WHERE seriesId = ? AND sequenceNumber < ? ORDER BY sequenceNumber DESC LIMIT 1",
+  "SELECT saftHash FROM fiscal_documents WHERE seriesId = ? ORDER BY sequenceNumber DESC LIMIT 1",
+  "SELECT service, httpStatus, resultCode, durationMs, error, createdAt FROM fiscal_agt_requests WHERE documentNos LIKE ? ORDER BY createdAt DESC LIMIT 30",
   "SELECT sessionTimeout FROM company_settings WHERE id = 1",
   "SELECT side, SUM(amountMinor) AS total FROM ledger_lines WHERE account = ? GROUP BY side",
   "SELECT sql FROM sqlite_master WHERE type='table' AND name='credit_writeoffs'",
@@ -718,15 +935,20 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE accounting_requests SET status = ?, decidedBy = ?, decidedById = ?, decidedAt = ?, decisionReason = ?, resultEntryId = ? WHERE id = ? AND status = 'pending' AND (requestedById <> ? OR ? = 1)",
   "UPDATE audit_alerts SET status = ?, assignedTo = ?, assignedToName = ?, dueAt = ?, updatedAt = ?, closedBy = ?, closedByName = ?, closedAt = ? WHERE id = ?",
   "UPDATE clients SET biAlertSentAt = ? WHERE id = ?",
+  "UPDATE clients SET deletedAt = ?, deletedBy = ? WHERE id = ?",
   "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
+  "UPDATE clients SET deletedAt = NULL, deletedBy = NULL WHERE id = ?",
   "UPDATE clients SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
-  "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy) WHERE id = ?",
+  "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone), employmentSector = COALESCE(?, employmentSector), ministry = COALESCE(?, ministry), employerNif = COALESCE(?, employerNif), workPosition = COALESCE(?, workPosition), clientCategory = COALESCE(?, clientCategory), clientType = COALESCE(?, clientType), documentType = COALESCE(?, documentType), countryCode = COALESCE(?, countryCode), nationality = COALESCE(?, nationality), passportFormatValidated = COALESCE(?, passportFormatValidated), foundationDate = COALESCE(?, foundationDate), legalForm = COALESCE(?, legalForm), businessSector = COALESCE(?, businessSector), commercialRegistry = COALESCE(?, commercialRegistry) WHERE id = ?",
   "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'",
+  "UPDATE clients SET usedCredit = ?, availableCredit = ?, status = ? WHERE id = ?",
+  "UPDATE collection_messages SET clientId = ? WHERE id = ?",
   "UPDATE company_settings SET installDate = ? WHERE installDate IS NULL",
   "UPDATE company_settings SET name = 'Tango Gestão de Créditos' WHERE name = 'Provisório' OR name = 'Empresa' OR name IS NULL OR name = ''",
   "UPDATE company_settings SET name = ?, nif = ?, logo = COALESCE(?, logo), enableMultiTenant = COALESCE(?, enableMultiTenant) WHERE id = 1",
   "UPDATE company_settings SET rescueKey = NULL WHERE rescueKey = ?",
+  "UPDATE contracts SET clientId = ? WHERE id = ?",
   "UPDATE contracts SET clientId = COALESCE(?, clientId), clientName = COALESCE(?, clientName), title = COALESCE(?, title), value = COALESCE(?, value), startDate = COALESCE(?, startDate), endDate = COALESCE(?, endDate), status = COALESCE(?, status), terms = COALESCE(?, terms), usuario_id = COALESCE(?, usuario_id) WHERE id = ?",
   "UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL",
   "UPDATE contracts SET deletedAt = ?, deletedBy = ? WHERE id = ? AND deletedAt IS NULL",
@@ -751,6 +973,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE credit_restructurings SET status = ?, decidedBy = ?, decidedByName = ?, decidedAt = ?, decisionReason = ? WHERE id = ? AND status = 'pending'",
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, dueDate = ?, status = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
+  "UPDATE credits SET clientId = ? WHERE id = ?",
   "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET deletedAt = ?, deletedBy = ? WHERE clientId = ? AND deletedAt IS NULL",
   "UPDATE credits SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
@@ -758,6 +981,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE clientId = ? AND deletedAt = (SELECT deletedAt FROM clients WHERE id = ?)",
   "UPDATE credits SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL",
+  "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, installments = installments + ?, dueDate = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmount = ?, principalAmountMinor = ?, currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, reinforcedAmount = COALESCE(reinforcedAmount, 0) + ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?",
   "UPDATE credits SET principalAmountMinor = CAST(ROUND(principalAmount * 100) AS INTEGER), currentBalanceMinor = CAST(ROUND(currentBalance * 100) AS INTEGER), accruedInterestMinor = CAST(ROUND(accruedInterest * 100) AS INTEGER), lateInterestMinor = CAST(ROUND(lateInterest * 100) AS INTEGER), totalDueMinor = CAST(ROUND(totalDue * 100) AS INTEGER) WHERE principalAmountMinor IS NULL OR currentBalanceMinor IS NULL OR totalDueMinor IS NULL",
@@ -767,7 +991,18 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE credits SET status = ?, daysOverdue = ? WHERE id = ? AND status = ? AND deletedAt IS NULL",
   "UPDATE credits SET targetMonthId = ?, version = version + 1 WHERE id = ? AND version = ?",
   "UPDATE credits SET usuario_id = ? WHERE id = ? AND deletedAt IS NULL",
+  "UPDATE fiscal_documents SET agtNextAttemptAt = ? WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'em_validacao', agtAttempts = ?, agtNextAttemptAt = ? WHERE agtRequestId = ? AND agtStatus IN ('enviado','em_validacao')",
+  "UPDATE fiscal_documents SET agtStatus = 'enviado', agtRequestId = ?, agtErrors = '[]', agtLastAttemptAt = ?, agtNextAttemptAt = ?, agtAttempts = agtAttempts + 1 WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'erro_envio', agtErrors = ?, agtLastAttemptAt = ?, agtNextAttemptAt = ?, agtAttempts = ? WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'invalido', agtErrors = ?, agtLastAttemptAt = ?, agtNextAttemptAt = NULL, agtAttempts = agtAttempts + 1 WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'invalido', agtErrors = ?, agtNextAttemptAt = NULL WHERE id = ?",
+  "UPDATE fiscal_documents SET agtStatus = 'pendente', agtRequestId = NULL, agtNextAttemptAt = ? WHERE agtRequestId = ?",
+  "UPDATE fiscal_documents SET agtStatus = ?, agtValidatedAt = ?, agtErrors = '[]', agtNextAttemptAt = NULL WHERE id = ?",
+  "UPDATE fiscal_series SET nextNumber = nextNumber + 1, status = 'U' WHERE id = ? AND nextNumber = ?",
+  "UPDATE fiscal_series SET status = ?, lastNumber = ?, agtSyncedAt = ? WHERE id = ?",
   "UPDATE internal_messages SET read = 1 WHERE id = ?",
+  "UPDATE legal_cases SET clientId = ? WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE legal_cases SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "UPDATE limit_escalations SET requiredLevelIndex = ?, requiredLevelId = ?, requiredLevelName = ?, levelSince = ?, escalationCount = escalationCount + 1, lastReminderAt = ? WHERE id = ? AND status = 'pending' AND levelSince = ?",
@@ -809,19 +1044,43 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_ausencia SET estado = 'anulada', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, motivo_anulacao = ?, actualizado_em = ? WHERE id = ? AND estado <> 'anulada'",
   "UPDATE rh_ausencia SET estado = 'aprovada', documento_id = COALESCE(?, documento_id), aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'pendente'",
   "UPDATE rh_ausencia SET tipo_id = ?, documento_id = COALESCE(?, documento_id), motivo = ?, estado = 'aprovada', aprovado_por = COALESCE(aprovado_por, ?), aprovado_por_nome = COALESCE(aprovado_por_nome, ?), aprovado_em = COALESCE(aprovado_em, ?), actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_ausencia SET tipo_id = ?, documento_id = COALESCE(documento_id, ?), motivo = ?, estado = 'aprovada', aprovado_por = COALESCE(aprovado_por, ?), aprovado_por_nome = COALESCE(aprovado_por_nome, ?), aprovado_em = COALESCE(aprovado_em, ?), actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_banco_horas SET anulado = 1, motivo_anulacao = ?, actualizado_em = ? WHERE id = ? AND anulado = 0",
+  "UPDATE rh_banco_horas SET anulado = 1, motivo_anulacao = ?, actualizado_em = ? WHERE origem = 'fecho' AND anulado = 0 AND data >= ? AND data <= ?",
+  "UPDATE rh_cargo SET nivel = ? WHERE id = ?",
   "UPDATE rh_cargo SET nome = ?, departamento_id = ?, salario_referencia_minor = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_contrato SET estado = 'terminado', motivo_fim = ?, actualizado_em = ? WHERE funcionario_id = ? AND estado = 'activo'",
   "UPDATE rh_contrato SET estado = 'terminado', motivo_fim = ?, fim = COALESCE(fim, ?), actualizado_em = ? WHERE funcionario_id = ? AND estado = 'activo'",
+  "UPDATE rh_correio SET lida = 1 WHERE id = ?",
   "UPDATE rh_departamento SET nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?",
-  "UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'",
+  "UPDATE rh_doc_pasta SET anulada = 1, actualizado_em = ? WHERE id = ? AND anulada = 0",
+  "UPDATE rh_doc_pasta SET nome = ?, actualizado_em = ? WHERE id = ? AND anulada = 0",
+  "UPDATE rh_documento SET estado = 'activo', anulado_por = NULL, anulado_por_nome = NULL, anulado_em = NULL, actualizado_em = ? WHERE id = ? AND estado = 'arquivado'",
+  "UPDATE rh_documento SET estado = 'arquivado', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'",
   "UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'",
+  "UPDATE rh_documento SET nome = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_documento SET pasta_id = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_documento SET pasta_id = NULL, actualizado_em = ? WHERE pasta_id = ?",
   "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET banco_horas = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET departamento_id = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET estado = 'cessado', data_saida = ?, actualizado_em = ? WHERE id = ?",
-  "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET estado = ?, actualizado_em = ? WHERE id = ? AND estado <> 'cessado'",
+  "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, nacionalidade = ?, telefone_alternativo = ?, provincia = ?, municipio = ?, chefe_id = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET pin_ponto_hash = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET qr_ponto_hash = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET qr_ponto_hash = NULL, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET seccao_id = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET utilizador_id = ? WHERE id = ?",
   "UPDATE rh_funcionario_rubrica SET fim = ?, actualizado_em = ? WHERE id = ?",
-  "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, tipo = ?, ciclo = ?, ciclo_inicio = ?, minimo_diario_min = ?, faixa_inicio = ?, faixa_fim = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_irt_tabela SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL",
+  "UPDATE rh_justificacao SET estado = ?, comentario = ?, decidido_por = ?, decidido_por_nome = ?, decidido_em = ? WHERE id = ? AND estado = 'pendente'",
+  "UPDATE rh_marcacao SET anulada = 1, motivo_anulacao = ?, anulada_por = ?, anulada_por_nome = ?, anulada_em = ? WHERE id = ? AND anulada = 0",
+  "UPDATE rh_modelo SET nome = ?, titulo = ?, conteudo = ?, activo = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_parametro SET valor = ? WHERE id = ?",
   "UPDATE rh_parametro SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL",
+  "UPDATE rh_pedido SET estado = ?, resposta = ?, respondido_em = ?, respondido_por = ?, respondido_por_nome = ? WHERE id = ? AND estado = 'pendente'",
   "UPDATE rh_plano_ferias SET estado = 'anulado', observacoes = ?, actualizado_em = ? WHERE id = ? AND estado IN ('planeado', 'aprovado')",
   "UPDATE rh_plano_ferias SET estado = 'aprovado', ausencia_id = ?, aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'",
   "UPDATE rh_plano_ferias SET estado = ?, actualizado_em = ? WHERE id = ? AND estado IN ('aprovado', 'em_gozo')",
@@ -829,6 +1088,11 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_plano_ferias SET mes_previsto = ?, data_inicio = ?, data_fim = ?, dias = ?, observacoes = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'",
   "UPDATE rh_plano_ferias SET processamento_id = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_plano_ferias SET subsidio_processado = 1, actualizado_em = ? WHERE id = ? AND subsidio_processado = 0",
+  "UPDATE rh_ponto SET observacoes = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_ponto_periodo SET estado = 'aberto', reaberto_por = ?, reaberto_por_nome = ?, reaberto_em = ?, motivo_reabertura = ?, processamento_desactualizado = ?, actualizado_em = ? WHERE id = ? AND estado = 'fechado'",
+  "UPDATE rh_ponto_periodo SET estado = 'em_validacao', validado_por = ?, validado_por_nome = ?, validado_em = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_ponto_periodo SET estado = 'fechado', fechado_por = ?, fechado_por_nome = ?, fechado_em = ?, resumo_json = ?, processamento_desactualizado = 0, actualizado_em = ? WHERE id = ? AND estado <> 'fechado'",
+  "UPDATE rh_ponto_periodo SET estado = 'validado', aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, validado_por = COALESCE(validado_por, ?), validado_por_nome = COALESCE(validado_por_nome, ?), validado_em = COALESCE(validado_em, ?), actualizado_em = ? WHERE id = ?",
   "UPDATE rh_processamento SET aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, estado = 'aprovado', actualizado_em = ? WHERE id = ? AND estado = 'calculado'",
   "UPDATE rh_processamento SET aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, estado = 'aprovado', actualizado_em = ? WHERE id = ? AND estado = 'calculado' AND calculado_por <> ?",
   "UPDATE rh_processamento SET estado = 'aberto', actualizado_em = ? WHERE id = ? AND estado = 'calculado'",
@@ -836,13 +1100,24 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_processamento SET estado = 'calculado', aprovado_por = NULL, aprovado_por_nome = NULL, aprovado_em = NULL, pago_por = NULL, pago_por_nome = NULL, pago_em = NULL, actualizado_em = ? WHERE id = ? AND estado IN ('aprovado', 'pago')",
   "UPDATE rh_processamento SET estado = 'calculado', irt_tabela_id = ?, parametros_json = ?, total_bruto_minor = ?, total_liquido_minor = ?, total_inss_trab_minor = ?, total_inss_emp_minor = ?, total_irt_minor = ?, total_outros_minor = ?, num_recibos = ?, calculado_por = ?, calculado_por_nome = ?, calculado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'aberto'",
   "UPDATE rh_processamento SET fechado_por = ?, fechado_por_nome = ?, fechado_em = ?, lancamentos_json = ?, estado = 'fechado', actualizado_em = ? WHERE id = ? AND estado = 'pago'",
+  "UPDATE rh_processamento SET id = ? WHERE id = ? AND tipo = 'normal'",
   "UPDATE rh_processamento SET pago_por = ?, pago_por_nome = ?, pago_em = ?, conta_pagamento = ?, estado = 'pago', actualizado_em = ? WHERE id = ? AND estado = 'aprovado'",
-  "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_processamento_entrada SET id = ? || ':' || funcionario_id, processamento_id = ? WHERE processamento_id = ?",
+  "UPDATE rh_recibo SET processamento_id = ? WHERE processamento_id = ?",
+  "UPDATE rh_reclamacao SET estado = ?, resposta = ?, respondido_em = ?, respondido_por = ?, respondido_por_nome = ? WHERE id = ? AND estado = 'pendente'",
+  "UPDATE rh_rubrica SET classe = 'abono' WHERE classe IS NULL AND tipo = 'abono' AND codigo IN ('RENDA_CASA', 'ISOLAMENTO', 'GRATIFICACAO', 'REPRESENTACAO', 'REM_SUPLEMENTAR')",
+  "UPDATE rh_rubrica SET classe = CASE WHEN tipo = 'desconto' THEN 'desconto' ELSE 'abono' END WHERE classe IS NULL",
+  "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, classe = ?, por_dia = ?, valor_padrao_minor = ?, periodicidade = ?, mes_pagamento = ?, proporcional_faltas = ?, auto_atribuir = ?, descricao = ?, incidencia_confirmada = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE rh_rubrica_pontual SET processamento_id = ? WHERE processamento_id = ?",
+  "UPDATE rh_seccao SET departamento_id = ?, nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_tipo_ausencia SET nome = ?, justificada = ?, remunerada = ?, desconta_salario = ?, desconta_ferias = ?, exige_documento = ?, activo = ?, actualizado_em = ? WHERE id = ?",
+  "UPDATE simulations SET clientId = ? WHERE id = ?",
   "UPDATE simulations SET status = ?, convertedCreditId = ?, updatedAt = ? WHERE id = ?",
   "UPDATE suppliers SET deletedAt = datetime('now'), deletedBy = ? WHERE id = ?",
   "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
+  "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND entityType IN ('rh_processamento', 'rh_recibo', 'rh_recibo_linha', 'rh_processamento_entrada', 'rh_rubrica_pontual')",
   "UPDATE sync_conflicts SET status = 'pending', resolutionNote = NULL, resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'rejected' AND resolutionNote LIKE '[ARQUIVADO] %'",
+  "UPDATE sync_conflicts SET status = 'pending', resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'archived'",
   "UPDATE sync_conflicts SET status = 'rejected', resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE sync_conflicts SET status = ?, resolutionNote = ?, resolvedBy = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'",
   "UPDATE user_limits SET maxTransaction = ?, dailyLimit = ?, monthlyLimit = ?, restrictionsEnabled = ?, updatedAt = ? WHERE role = ?",
@@ -853,11 +1128,13 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE users SET lastLogin = ?, lastSeen = ?, status = ?, ip = ? WHERE id = ?",
   "UPDATE users SET lastSeen = ?, status = 'active', ip = COALESCE(NULLIF(ip, ''), ?) WHERE id = ?",
   "UPDATE users SET password = ? WHERE id = ?",
+  "UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?",
   "UPDATE users SET password = ?, status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?",
   "UPDATE users SET status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?",
   "UPDATE users SET status = ? WHERE id = ?",
   "UPDATE users SET twoFactorEnabled = 0, twoFactorSecret = NULL WHERE id = ?",
   "UPDATE users SET twoFactorEnabled = 1, twoFactorSecret = ? WHERE id = ?",
+  "UPDATE warranties SET clientId = ? WHERE id = ?",
   "UPDATE warranties SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?",
   "UPDATE warranties SET deletedAt = NULL, restoredAt = ? WHERE id = ?",
   "VACUUM",
@@ -868,8 +1145,10 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "drop-shadow(0 0 6px rgba(245, 158, 11, 0.55))",
   "insert",
   "select",
-  "select-all-debtors",
-  "update"
+  "select-all break-all rounded bg-slate-100 px-1 dark:bg-slate-800",
+  "select-all rounded bg-slate-100 px-1 dark:bg-slate-800",
+  "update",
+  "update.available"
 ]);
 export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
@@ -973,6 +1252,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_clients_name ON clients(name)"
   ],
   [
+    "e03dd8e0accdde717eea82a0ca97c72d5d236dba20d06b89efddc7962e73b4cd",
+    "CREATE INDEX IF NOT EXISTS idx_clients_nif ON clients(nif)"
+  ],
+  [
+    "fbd6b0585e0c0951af55aa03095120e8b86877f3d461f1e53fcf1266667554da",
+    "CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone)"
+  ],
+  [
     "96299303e3d38664eba27b4f101a4901d150a668c8b152dc6b567652194827f7",
     "CREATE INDEX IF NOT EXISTS idx_clients_status ON clients(status)"
   ],
@@ -1043,6 +1330,38 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "85e8c86491075057c76cb5eb62d22e2f49d62c0902977bac3c0d851db997c67a",
     "CREATE INDEX IF NOT EXISTS idx_credits_usuario ON credits(usuario_id)"
+  ],
+  [
+    "b5c3a92fd17bc5cf379cb3724f2ff80c3d00ae28eda79b54bbd9fc0712f37080",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_agt_requests_created ON fiscal_agt_requests(createdAt)"
+  ],
+  [
+    "62082a4bc989141156a436d0d8779fbed0bdf170d7530a99f072a1d20e2a9aa4",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_agt ON fiscal_documents(agtStatus, agtNextAttemptAt)"
+  ],
+  [
+    "a1e63845ae3594b35e3c808ae35df2d2d5ddcfbc2d1faeff6515000e49ada8a1",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_date ON fiscal_documents(documentDate)"
+  ],
+  [
+    "d07dd84b669cdb9e3e2108d10b6924f279bbe566641e9f097e5ee79f04e4487b",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_payment ON fiscal_documents(paymentId)"
+  ],
+  [
+    "5581fcb47619034d6ff006538bb6502aa675f6e06056c9e0f496fc3fec7ffb58",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_documents_request ON fiscal_documents(agtRequestId)"
+  ],
+  [
+    "d7b3e9e2ef6a0849595bb5ab79c44fdf198a8e0c8a9b2b01fabef3c7511ed4e9",
+    "CREATE INDEX IF NOT EXISTS idx_fiscal_series_lookup ON fiscal_series(deviceId, documentType, seriesYear, contingency, status)"
+  ],
+  [
+    "0a48fe730b64d5afd26c575b43a696901b0cb9bc1867f9a821c818b9ab2d0f5e",
+    "CREATE INDEX IF NOT EXISTS idx_hub_events_client ON hub_collection_events(clientId, createdAt)"
+  ],
+  [
+    "0dd34e4fcaecf2a5a9614d865525f27030acceb440a3788d3e3a11706c667c7e",
+    "CREATE INDEX IF NOT EXISTS idx_late_interest_adjustments_credit ON late_interest_adjustments(creditId)"
   ],
   [
     "e59f5a8d8de9b9b8df0159cfd945c9285585c9e3519cfdd35a701df7c254e60c",
@@ -1117,12 +1436,32 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_rh_ausencia_funcionario ON rh_ausencia(funcionario_id, data_inicio)"
   ],
   [
+    "dee9d848a3b1bcf94220d0df6198a8afd5a72e56860ea557a740905475f5c2ee",
+    "CREATE INDEX IF NOT EXISTS idx_rh_banco_horas_func ON rh_banco_horas(funcionario_id, data)"
+  ],
+  [
     "475c53ab4b4afa352ad6baa3786529c24e4193823321f6180e4b9732113e3df2",
     "CREATE INDEX IF NOT EXISTS idx_rh_contrato_funcionario ON rh_contrato(funcionario_id, estado)"
   ],
   [
+    "2665b741a44d439d892deab205109a2327232112bbeb9ded3b869b67b51582d1",
+    "CREATE INDEX IF NOT EXISTS idx_rh_correio_funcionario ON rh_correio(funcionario_id, criado_em)"
+  ],
+  [
+    "369df1ef24e5da3ba55d45bbb26cf660f58d533efb24e5e620cba6e648adfa97",
+    "CREATE INDEX IF NOT EXISTS idx_rh_doc_auditoria_documento ON rh_doc_auditoria(documento_id, criado_em)"
+  ],
+  [
+    "81141b411ab5146d4214e0347450240d8ced24396459da5bb920f27a5386264c",
+    "CREATE INDEX IF NOT EXISTS idx_rh_doc_pasta_funcionario ON rh_doc_pasta(funcionario_id)"
+  ],
+  [
     "031cd56f2fedcd988e2031964014148df86bd0b7030c586088d679431381ec17",
     "CREATE INDEX IF NOT EXISTS idx_rh_documento_funcionario ON rh_documento(funcionario_id, categoria)"
+  ],
+  [
+    "f729bccff6ea1c2fe28ed8d1b7ab90b1989f8134d1b0a628960ab76d5b59e03a",
+    "CREATE INDEX IF NOT EXISTS idx_rh_escala_data ON rh_escala(data)"
   ],
   [
     "0d08ad02af7320579800c5df2eb21ef62ea5bfdafbd1633d6eb3217ad00780b0",
@@ -1137,16 +1476,48 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_rh_irt_escalao_tabela ON rh_irt_escalao(tabela_id, ordem)"
   ],
   [
+    "edf91f85661e26e068b5a1f2c5b5c1560ea2e0172a5b5f00aea259ac23db6931",
+    "CREATE INDEX IF NOT EXISTS idx_rh_justificacao_funcionario ON rh_justificacao(funcionario_id, estado)"
+  ],
+  [
+    "6bcfa9f449ca9bb2dd06984de069488d7912c72865f5bf05ef6d1184d7da2170",
+    "CREATE INDEX IF NOT EXISTS idx_rh_marcacao_data ON rh_marcacao(data)"
+  ],
+  [
+    "0f7705f049bf12124aab5a95a432115a8d4f33467302e2a70620ea1ed35c901a",
+    "CREATE INDEX IF NOT EXISTS idx_rh_marcacao_dia ON rh_marcacao(funcionario_id, data)"
+  ],
+  [
     "7475f1feef7f44d07f61bc96b95c7fa09552c4e0e324565ac5aaf59f4c66feb0",
     "CREATE INDEX IF NOT EXISTS idx_rh_parametro_chave ON rh_parametro(chave, vigencia_inicio)"
+  ],
+  [
+    "7c9bf2af4b9ccc563f4531d4134b0747d5eed2c5b9c8fac7f5d12cafb28b1da0",
+    "CREATE INDEX IF NOT EXISTS idx_rh_pedido_estado ON rh_pedido(estado, criado_em)"
   ],
   [
     "2db3ce1f0945673de364ad851f57bf898b3cd596c513310036992d101940df3f",
     "CREATE INDEX IF NOT EXISTS idx_rh_plano_ferias_funcionario ON rh_plano_ferias(funcionario_id, ano)"
   ],
   [
+    "56b7b39ad9cd834eeddd36ae668f20fefb55e39810cbbf94790372603335f798",
+    "CREATE INDEX IF NOT EXISTS idx_rh_ponto_periodo_mes ON rh_ponto_periodo(ano, mes)"
+  ],
+  [
+    "637393ea4078455040fd0b40426770984fc717e3c6380f28b896830bfd47bcfd",
+    "CREATE INDEX IF NOT EXISTS idx_rh_recebimento_processamento ON rh_recebimento(processamento_id)"
+  ],
+  [
     "7704d76d2a83609d6e4f0560db77e4e031f7f6c7231616249b90f4d77e5db954",
     "CREATE INDEX IF NOT EXISTS idx_rh_recibo_linha_recibo ON rh_recibo_linha(recibo_id)"
+  ],
+  [
+    "3f1455c05d5d9f4c3215a4bfb864f07d8112707f73a0c0d4c8c074fb45d2e062",
+    "CREATE INDEX IF NOT EXISTS idx_rh_reclamacao_processamento ON rh_reclamacao(processamento_id, estado)"
+  ],
+  [
+    "57f587308f53cd7af49d6c22c7c0af07fa948ddf78481023fcd79c2acfe8cea0",
+    "CREATE INDEX IF NOT EXISTS idx_rh_seccao_departamento ON rh_seccao(departamento_id)"
   ],
   [
     "1bce91b59310c9d40e8e68bca65f950ba49a5b1a7f6a3db725b0e4aab2f6b577",
@@ -1257,8 +1628,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS chat_messages ( id TEXT PRIMARY KEY, role TEXT, content TEXT, timestamp TEXT, userId TEXT )"
   ],
   [
-    "746f5f1073079b3289692b92482991c2b7619b144b1cee5658495e1e0954b115",
-    "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, spouseBirthDate TEXT, spouseOccupation TEXT, spouseIncome REAL, spouseDataRefused INTEGER DEFAULT 0, spouseDataRefusedAt TEXT, spouseDataRefusedBy TEXT, spouseConsentAt TEXT, spouseConsentBy TEXT, legalRepresentative TEXT, legalRepRole TEXT )"
+    "78263d6eb58d4b51a89bc54953f5f0c0bad45d49c0e56bfa1e3901be86bd542d",
+    "CREATE TABLE IF NOT EXISTS clients ( id TEXT PRIMARY KEY, name TEXT NOT NULL, nif TEXT, phone TEXT, email TEXT, address TEXT, birthDate TEXT, age INTEGER, issueDate TEXT, expiryDate TEXT, gender TEXT, maritalStatus TEXT, fatherName TEXT, motherName TEXT, workInstitution TEXT, socialSecurityNumber TEXT, creditLimit REAL DEFAULT 0, usedCredit REAL DEFAULT 0, availableCredit REAL DEFAULT 0, monthlyIncome REAL DEFAULT 0, defaultInterestRate REAL DEFAULT 0, lateInterestRate REAL DEFAULT 0, toleranceDays INTEGER DEFAULT 0, status TEXT DEFAULT 'active' CHECK(status IN ('active', 'inactive', 'blocked')), riskLevel TEXT DEFAULT 'medium' CHECK(riskLevel IN ('low', 'medium', 'high')), whatsappVerified INTEGER DEFAULT 0, documents TEXT, bankCoordinates TEXT, receiveMethod TEXT DEFAULT 'transfer', lastContacted TEXT, createdAt TEXT NOT NULL, updatedAt TEXT, notes TEXT, deletedAt TEXT, deletedBy TEXT, restoredAt TEXT, originalState TEXT, usuario_id TEXT, spouseName TEXT, spouseBi TEXT, spouseNif TEXT, spousePhone TEXT, spouseEmail TEXT, spouseBirthDate TEXT, spouseOccupation TEXT, spouseIncome REAL, spouseDataRefused INTEGER DEFAULT 0, spouseDataRefusedAt TEXT, spouseDataRefusedBy TEXT, spouseConsentAt TEXT, spouseConsentBy TEXT, legalRepresentative TEXT, legalRepRole TEXT, birthPlace TEXT, province TEXT, municipality TEXT, neighborhood TEXT, zone TEXT, spouseBirthPlace TEXT, spouseProvince TEXT, spouseMunicipality TEXT, spouseNeighborhood TEXT, spouseZone TEXT )"
   ],
   [
     "e8f579d0595debb4ef76ec98c407eccb4609897a3aefa6deb24943df1ebd1f07",
@@ -1329,8 +1700,48 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS dictionary ( word TEXT NOT NULL, language TEXT NOT NULL CHECK(language IN ('pt-AO', 'pt-PT', 'both', 'pt', 'ao')), PRIMARY KEY (word, language) )"
   ],
   [
+    "680aa96a04bc33070585de21bfeacd718c2c1a854d0bddefd58161c5bd2e01d3",
+    "CREATE TABLE IF NOT EXISTS fiscal_agt_requests ( id TEXT PRIMARY KEY, service TEXT NOT NULL, requestId TEXT, documentNos TEXT NOT NULL DEFAULT '[]', httpStatus INTEGER, resultCode TEXT, durationMs INTEGER, error TEXT, deviceId TEXT, createdAt TEXT NOT NULL )"
+  ],
+  [
+    "7f99fb023578e21d3dc49c24f86ae5359a6aa1f42b0c126effaceb15728cc18c",
+    "CREATE TABLE IF NOT EXISTS fiscal_documents ( id TEXT PRIMARY KEY, idempotencyKey TEXT NOT NULL UNIQUE, documentNo TEXT NOT NULL UNIQUE, documentType TEXT NOT NULL, seriesId TEXT NOT NULL, sequenceNumber INTEGER NOT NULL, documentStatus TEXT NOT NULL DEFAULT 'N' CHECK(documentStatus IN ('N','C')), rejectedDocumentNo TEXT, referenceDocumentNo TEXT, documentDate TEXT NOT NULL, systemEntryDate TEXT NOT NULL, clientId TEXT, customerTaxId TEXT NOT NULL, customerCountry TEXT NOT NULL DEFAULT 'AO', customerName TEXT NOT NULL, customerAddress TEXT, creditId TEXT, paymentId TEXT, netTotalMinor INTEGER NOT NULL, taxPayableMinor INTEGER NOT NULL, grossTotalMinor INTEGER NOT NULL, withholdingMinor INTEGER NOT NULL DEFAULT 0, payload TEXT NOT NULL, jwsSignature TEXT NOT NULL, saftHash TEXT NOT NULL, saftHashControl TEXT NOT NULL DEFAULT '1', deviceId TEXT NOT NULL, agtStatus TEXT NOT NULL DEFAULT 'pendente' CHECK(agtStatus IN ('pendente','enviado','em_validacao','valido','valido_penal','invalido','erro_envio','simulado','anulado')), agtRequestId TEXT, agtErrors TEXT NOT NULL DEFAULT '[]', agtAttempts INTEGER NOT NULL DEFAULT 0, agtLastAttemptAt TEXT, agtNextAttemptAt TEXT, agtValidatedAt TEXT, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL, UNIQUE(seriesId, sequenceNumber) )"
+  ],
+  [
+    "ad1f30d4fdff8b456a70b006ddca9b7d6d70632d238ee15e1d09114030aad365",
+    "CREATE TABLE IF NOT EXISTS fiscal_saft_exports ( id TEXT PRIMARY KEY, fiscalYear INTEGER NOT NULL, startDate TEXT NOT NULL, endDate TEXT NOT NULL, basis TEXT NOT NULL, fileName TEXT NOT NULL, fileSize INTEGER NOT NULL, sha256 TEXT NOT NULL, invoicesCount INTEGER NOT NULL DEFAULT 0, paymentsCount INTEGER NOT NULL DEFAULT 0, totalDebitMinor INTEGER NOT NULL DEFAULT 0, totalCreditMinor INTEGER NOT NULL DEFAULT 0, warnings INTEGER NOT NULL DEFAULT 0, xml TEXT NOT NULL, createdBy TEXT, createdByName TEXT, createdAt TEXT NOT NULL )"
+  ],
+  [
+    "6f8a22f0004de7aed58cf026fea5dfce324f2dd8b217e5fa62c71a95f0e03b3a",
+    "CREATE TABLE IF NOT EXISTS fiscal_series ( id TEXT PRIMARY KEY, seriesCode TEXT NOT NULL UNIQUE, seriesYear INTEGER NOT NULL, documentType TEXT NOT NULL, establishment TEXT NOT NULL DEFAULT 'SEDE', contingency INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'A' CHECK(status IN ('A','U','F')), firstNumber INTEGER NOT NULL DEFAULT 1, lastNumber INTEGER NOT NULL, nextNumber INTEGER NOT NULL DEFAULT 1, deviceId TEXT NOT NULL, simulated INTEGER NOT NULL DEFAULT 0, agtSyncedAt TEXT, createdAt TEXT NOT NULL, CHECK(nextNumber >= firstNumber) )"
+  ],
+  [
+    "dc3057db3dfe5bcc05a4763060b5885a6e079ae326405bdf2a377933e4feff49",
+    "CREATE TABLE IF NOT EXISTS fiscal_settings ( id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT )"
+  ],
+  [
+    "24b32335a158a3ddaf708520a6924d5db86eca5b0d204feb26a4c13d3774c175",
+    "CREATE TABLE IF NOT EXISTS hub_collection_campaigns (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)"
+  ],
+  [
+    "46ea6c4fbf6546d31821f17779701abd8ccb470cebe8d0538e47ec41105ee3cd",
+    "CREATE TABLE IF NOT EXISTS hub_collection_clients (clientId TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)"
+  ],
+  [
+    "2e09bff41230b29525eb7d97bb2ea9a59db8e801bd3e153838efeb8c5df59988",
+    "CREATE TABLE IF NOT EXISTS hub_collection_events (id TEXT PRIMARY KEY, clientId TEXT NOT NULL, creditId TEXT, kind TEXT NOT NULL, channel TEXT NOT NULL, status TEXT NOT NULL, message TEXT NOT NULL, metadata TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL)"
+  ],
+  [
+    "bf082cc01d892f41cd9d1e4bdc6977cf547f39ae978ac2b42cc519583cfcf180",
+    "CREATE TABLE IF NOT EXISTS hub_collection_settings (id TEXT PRIMARY KEY, data TEXT NOT NULL, updatedAt TEXT NOT NULL, updatedBy TEXT NOT NULL)"
+  ],
+  [
     "fb7e45c39f9b488c3e81075c0d0373560da4bb5ca01ca39229616fab92888fb7",
     "CREATE TABLE IF NOT EXISTS internal_messages ( id TEXT PRIMARY KEY, senderId TEXT NOT NULL, senderName TEXT NOT NULL, receiverId TEXT NOT NULL, receiverName TEXT NOT NULL, content TEXT NOT NULL, timestamp TEXT NOT NULL, read INTEGER DEFAULT 0 )"
+  ],
+  [
+    "03fcfd7fc3a117ff50528700ed932d13257684fa38240ba307aa299f7b112ee9",
+    "CREATE TABLE IF NOT EXISTS late_interest_adjustments ( id TEXT PRIMARY KEY, creditId TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('forgive','renegotiate')), amountMinor INTEGER NOT NULL CHECK(amountMinor > 0), agreedMinor INTEGER NOT NULL DEFAULT 0, installments INTEGER NOT NULL DEFAULT 0, effectiveDate TEXT NOT NULL, reason TEXT NOT NULL, actorId TEXT NOT NULL, actorName TEXT NOT NULL, createdAt TEXT NOT NULL )"
   ],
   [
     "a970f16938d5544b7f24caff55b4e0d12fc811c398f26ea85470fc3367b80f91",
@@ -1417,6 +1828,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_ausencia ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL, dias REAL NOT NULL DEFAULT 0, horas REAL NOT NULL DEFAULT 0, motivo TEXT, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'anulada')), pedido_dispensa INTEGER NOT NULL DEFAULT 0, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, anulado_por TEXT, anulado_por_nome TEXT, anulado_em TEXT, motivo_anulacao TEXT, documento_emitido_id TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )"
   ],
   [
+    "b4912cb72107b11e125aaaa984be6a6fbe9241e5cc8dd80033232d824ef9c67a",
+    "CREATE TABLE IF NOT EXISTS rh_banco_horas ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, minutos INTEGER NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('extra', 'saida_antecipada', 'folga', 'ajuste')), tipo_extra TEXT, origem TEXT NOT NULL DEFAULT 'manual', descricao TEXT, anulado INTEGER NOT NULL DEFAULT 0, motivo_anulacao TEXT, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )"
+  ],
+  [
     "3d6d5e71f38cc2c65c66461df504e4454dbf92adb6af9734fe6ed859d0a0f850",
     "CREATE TABLE IF NOT EXISTS rh_cargo ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, departamento_id TEXT, salario_referencia_minor INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
   ],
@@ -1425,12 +1840,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_contrato ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('indeterminado', 'determinado')), inicio TEXT NOT NULL, fim TEXT, periodo_experiencia_fim TEXT, salario_base_minor INTEGER NOT NULL CHECK(salario_base_minor >= 0), horas_semanais REAL NOT NULL DEFAULT 40, dias_ferias INTEGER NOT NULL DEFAULT 22, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'terminado')), motivo_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
   ],
   [
+    "bdc83e08d13fce887f893946011b88cdad1fd366e48b5f210d822107c832f771",
+    "CREATE TABLE IF NOT EXISTS rh_correio ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, sentido TEXT NOT NULL CHECK(sentido IN ('para_rh', 'para_funcionario')), assunto TEXT NOT NULL, corpo TEXT NOT NULL, de_id TEXT, de_nome TEXT, lida INTEGER NOT NULL DEFAULT 0, resposta_a TEXT, criado_em TEXT NOT NULL )"
+  ],
+  [
     "8e9c79f2547269ec143d655c66a72314dd5431ed66cf9766547c7aabd75b2e68",
     "CREATE TABLE IF NOT EXISTS rh_departamento ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, responsavel_id TEXT, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
   ],
   [
     "5708fa90ca7067c1ca9c7272c9b09b123079b98d3cb61c559e8c0b1f9d6908d4",
     "CREATE TABLE IF NOT EXISTS rh_dependente ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, parentesco TEXT, data_nascimento TEXT, criado_em TEXT NOT NULL, criado_por TEXT )"
+  ],
+  [
+    "0b8a7b1f2a531ab7942326353aa49ef08224d2b578b238d912bb19e37c14c399",
+    "CREATE TABLE IF NOT EXISTS rh_doc_auditoria ( id TEXT PRIMARY KEY, documento_id TEXT NOT NULL, accao TEXT NOT NULL, detalhe TEXT, utilizador_id TEXT, utilizador_nome TEXT, criado_em TEXT NOT NULL )"
+  ],
+  [
+    "e2cc8a5bc2bd5994394e4717b662147d57e824c66906c8aac7a52c854db4a6be",
+    "CREATE TABLE IF NOT EXISTS rh_doc_pasta ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, nome TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )"
   ],
   [
     "59b7ec807896a5f08a70fbd0c443cf7892f40a521e514bd2dc1329c24f30efbd",
@@ -1443,6 +1870,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "4f6bd193231ceec99fec5c11c8ae311b3cb3bac38be9852c66edc6a51dc4e7ad",
     "CREATE TABLE IF NOT EXISTS rh_documento_ficheiro ( documento_id TEXT PRIMARY KEY, data_url TEXT NOT NULL )"
+  ],
+  [
+    "a73a0267631774b28a020c43252ef995d909441f337d1505e0a09f41855b65e5",
+    "CREATE TABLE IF NOT EXISTS rh_escala ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, horario_id TEXT, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )"
   ],
   [
     "c0b9f190de586a06a77289d85848121cc9ae15a906fbff4ae83c0a1b7eeacc3b",
@@ -1473,8 +1904,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_irt_tabela ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, lei_referencia TEXT NOT NULL, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )"
   ],
   [
+    "7a0099870153864cba6f5ed3e7fe28947ca9bf598922940b527e8679921e648b",
+    "CREATE TABLE IF NOT EXISTS rh_justificacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data_inicio TEXT NOT NULL, data_fim TEXT NOT NULL, ausencia_id TEXT, motivo_codigo TEXT NOT NULL, motivo TEXT NOT NULL, anexo_nome TEXT, anexo_mime TEXT, anexo_data_url TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovada', 'rejeitada')), comentario TEXT, decidido_por TEXT, decidido_por_nome TEXT, decidido_em TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )"
+  ],
+  [
+    "a20be549c5cf5c16c39c3ffb320d1864f4992067690dbb9408697a1ddd679bd4",
+    "CREATE TABLE IF NOT EXISTS rh_marcacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, data_hora TEXT NOT NULL, tipo TEXT CHECK(tipo IS NULL OR tipo IN ('entrada', 'saida', 'inicio_pausa', 'fim_pausa')), origem TEXT NOT NULL CHECK(origem IN ('manual', 'csv', 'relogio', 'app', 'quiosque')), dispositivo_id TEXT, latitude REAL, longitude REAL, foto_data_url TEXT, pendente_validacao INTEGER NOT NULL DEFAULT 0, motivo TEXT, criado_por TEXT, criado_por_nome TEXT, criado_em TEXT NOT NULL, anulada INTEGER NOT NULL DEFAULT 0, motivo_anulacao TEXT, anulada_por TEXT, anulada_por_nome TEXT, anulada_em TEXT )"
+  ],
+  [
+    "9b07846b0fbfa9290139af4b132957ebf9f8c6f4bc4528a0bf79399307aaf8cc",
+    "CREATE TABLE IF NOT EXISTS rh_modelo ( id TEXT PRIMARY KEY, tipo TEXT NOT NULL CHECK(tipo IN ('declaracao', 'relatorio')), nome TEXT NOT NULL, titulo TEXT, conteudo TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1, sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )"
+  ],
+  [
     "62206f99801b39e45ad81f7f0ea1de031b72b46ceb183c8be04bc335614fc242",
     "CREATE TABLE IF NOT EXISTS rh_parametro ( id TEXT PRIMARY KEY, chave TEXT NOT NULL, valor TEXT NOT NULL, descricao TEXT, vigencia_inicio TEXT NOT NULL, vigencia_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT )"
+  ],
+  [
+    "ebc51f22f116c2ea626880ea62676f3fec167b98970fa776cbe7e29eb4cfe745",
+    "CREATE TABLE IF NOT EXISTS rh_pedido ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('subsidio_ferias', 'declaracao', 'outro')), ano INTEGER, assunto TEXT NOT NULL, descricao TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovado', 'recusado')), resposta TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, respondido_em TEXT, respondido_por TEXT, respondido_por_nome TEXT )"
   ],
   [
     "23f93532d6a3b62ed0ac725b3659f74e6c8783410072def50f1d90f60e1b913b",
@@ -1485,8 +1932,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_ponto ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, data TEXT NOT NULL, entrada TEXT, saida TEXT, horas_trabalhadas REAL NOT NULL DEFAULT 0, horas_extra REAL NOT NULL DEFAULT 0, minutos_atraso INTEGER NOT NULL DEFAULT 0, origem TEXT NOT NULL DEFAULT 'manual' CHECK(origem IN ('manual', 'importado', 'app')), observacoes TEXT, registado_por TEXT, registado_por_nome TEXT, criado_em TEXT NOT NULL, actualizado_em TEXT )"
   ],
   [
+    "d8b450676a8d918b36aa9c549a57cddd6a85518a68fd0a6aeab8740892e66ade",
+    "CREATE TABLE IF NOT EXISTS rh_ponto_periodo ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, mes INTEGER NOT NULL, departamento_id TEXT, estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'em_validacao', 'validado', 'fechado')), validado_por TEXT, validado_por_nome TEXT, validado_em TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, fechado_por TEXT, fechado_por_nome TEXT, fechado_em TEXT, reaberto_por TEXT, reaberto_por_nome TEXT, reaberto_em TEXT, motivo_reabertura TEXT, resumo_json TEXT, processamento_desactualizado INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, actualizado_em TEXT )"
+  ],
+  [
     "30958b51fb782d3838113222ada6e450067c19ec633a57938c039a149ea3a284",
     "CREATE TABLE IF NOT EXISTS rh_processamento ( id TEXT PRIMARY KEY, ano INTEGER NOT NULL, mes INTEGER NOT NULL CHECK(mes BETWEEN 1 AND 12), tipo TEXT NOT NULL CHECK(tipo IN ('normal', 'ferias', 'natal', 'acerto')), estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'calculado', 'aprovado', 'pago', 'fechado')), descricao TEXT, funcionarios_json TEXT, irt_tabela_id TEXT, parametros_json TEXT, total_bruto_minor INTEGER NOT NULL DEFAULT 0, total_liquido_minor INTEGER NOT NULL DEFAULT 0, total_inss_trab_minor INTEGER NOT NULL DEFAULT 0, total_inss_emp_minor INTEGER NOT NULL DEFAULT 0, total_irt_minor INTEGER NOT NULL DEFAULT 0, total_outros_minor INTEGER NOT NULL DEFAULT 0, num_recibos INTEGER NOT NULL DEFAULT 0, calculado_por TEXT, calculado_por_nome TEXT, calculado_em TEXT, aprovado_por TEXT, aprovado_por_nome TEXT, aprovado_em TEXT, pago_por TEXT, pago_por_nome TEXT, pago_em TEXT, conta_pagamento TEXT, fechado_por TEXT, fechado_por_nome TEXT, fechado_em TEXT, lancamentos_json TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )"
+  ],
+  [
+    "2298d5dd1fac3fc38fecb98d82187e1791bfc8d658609f022c9c36d8505b187c",
+    "CREATE TABLE IF NOT EXISTS rh_processamento_entrada ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, salario_base_minor INTEGER CHECK(salario_base_minor IS NULL OR salario_base_minor >= 0), faltas REAL CHECK(faltas IS NULL OR (faltas >= 0 AND faltas <= 31)), actualizado_em TEXT NOT NULL, actualizado_por TEXT, actualizado_por_nome TEXT )"
+  ],
+  [
+    "b4b1593194479c9e2566f8de37dd71272bdc4dd26606c3440b5d7f501ba2658c",
+    "CREATE TABLE IF NOT EXISTS rh_recebimento ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, recibo_id TEXT NOT NULL, processamento_id TEXT NOT NULL, estado TEXT NOT NULL CHECK(estado IN ('recebido', 'nao_recebido')), observacao TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )"
   ],
   [
     "6d0d8655b20b37e46f49c022c9b252934ba32b4be0e34a04dd61dc5509ac1e84",
@@ -1497,12 +1956,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_recibo_linha ( id TEXT PRIMARY KEY, recibo_id TEXT NOT NULL, rubrica_id TEXT, codigo TEXT NOT NULL, descricao TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')), quantidade REAL NOT NULL DEFAULT 1, valor_unitario_minor INTEGER NOT NULL DEFAULT 0, valor_minor INTEGER NOT NULL, incide_inss INTEGER NOT NULL DEFAULT 0, incide_irt INTEGER NOT NULL DEFAULT 0, isento_irt_minor INTEGER NOT NULL DEFAULT 0, ordem INTEGER NOT NULL DEFAULT 100 )"
   ],
   [
+    "d73652772feb0e38a2a69873949b121be77291826bf6433badc5f99996b976c9",
+    "CREATE TABLE IF NOT EXISTS rh_reclamacao ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, processamento_id TEXT NOT NULL, recibo_id TEXT, codigo TEXT, descricao TEXT, valor_minor INTEGER NOT NULL DEFAULT 0, motivo TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aceite', 'recusada')), resposta TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, respondido_em TEXT, respondido_por TEXT, respondido_por_nome TEXT )"
+  ],
+  [
     "866e573590c683e3bf1da05bfb86523cccafb9228cd880c41fee4dc0c3fb296c",
     "CREATE TABLE IF NOT EXISTS rh_rubrica ( id TEXT PRIMARY KEY, codigo TEXT NOT NULL, nome TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('abono', 'desconto')), forma TEXT NOT NULL DEFAULT 'fixo' CHECK(forma IN ('fixo', 'percentagem', 'quantidade')), percentagem REAL NOT NULL DEFAULT 0, incide_inss INTEGER NOT NULL DEFAULT 1, incide_irt INTEGER NOT NULL DEFAULT 1, limite_isento_irt_minor INTEGER NOT NULL DEFAULT 0, limite_isento_irt_pct REAL NOT NULL DEFAULT 0, conta_contabilistica TEXT, ordem_no_recibo INTEGER NOT NULL DEFAULT 100, sistema INTEGER NOT NULL DEFAULT 0, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
   ],
   [
     "dfcc6c38802f722eeb2c5cf46a7155df4d67ad8f43acae56ed6bd5cd37a4755a",
     "CREATE TABLE IF NOT EXISTS rh_rubrica_pontual ( id TEXT PRIMARY KEY, processamento_id TEXT NOT NULL, funcionario_id TEXT NOT NULL, rubrica_id TEXT NOT NULL, quantidade REAL NOT NULL DEFAULT 1, valor_minor INTEGER NOT NULL, descricao TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )"
+  ],
+  [
+    "ba0a1a216b88c72324dcb01fa799783bd5defb65ebe111e6c84fd00de4c6983a",
+    "CREATE TABLE IF NOT EXISTS rh_seccao ( id TEXT PRIMARY KEY, departamento_id TEXT NOT NULL, nome TEXT NOT NULL, responsavel_id TEXT, activo INTEGER NOT NULL DEFAULT 1, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
   ],
   [
     "7f530f02ff6aebc9087fc72350b4e39895af4b388ffaee882edb6bbf16693bf6",
@@ -1565,8 +2032,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_accounting_audit_runs_immutable_update BEFORE UPDATE ON accounting_audit_runs BEGIN SELECT RAISE(ABORT, 'O histórico de auditorias é imutável')"
   ],
   [
-    "b6df90ca87031a2803a33cfdd969cb06d81f4e4ca69aacf0f8ca408559b1fe43",
-    "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')"
+    "4868f97b71f4ccb11a8807757815eb23eea45ddcdd363641007f35f907f5790d",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_closed_period_v2 BEFORE INSERT ON accounting_entries WHEN EXISTS (SELECT 1 FROM closed_months WHERE id = substr(NEW.timestamp, 1, 7)) AND NOT EXISTS (SELECT 1 FROM accounting_entries WHERE id = NEW.id) BEGIN SELECT RAISE(ABORT, 'Período contabilístico fechado. Reabra-o com autorização e justificação.')"
   ],
   [
     "87c9807850fd739106f771d516096e7ec8df4c42535b810503b7a64091de8f41",
@@ -1585,8 +2052,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_immutable_update BEFORE UPDATE ON accounting_entries BEGIN SELECT RAISE(ABORT, 'Os lançamentos contabilísticos são imutáveis')"
   ],
   [
-    "b60134d5f108909e150202f69308450822503e53f187db23da3c5d0ab20ddcd9",
-    "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')"
+    "6cbd2d9ac8b7fac9fd66ae97dac1e7a9c43ab975c0b4a5370eb282ce89c7729e",
+    "CREATE TRIGGER IF NOT EXISTS trg_accounting_entries_payment_unique_v2 BEFORE INSERT ON accounting_entries WHEN NEW.paymentId IS NOT NULL AND NEW.type = 'payment' AND EXISTS ( SELECT 1 FROM accounting_entries WHERE paymentId = NEW.paymentId AND type = 'payment' AND id <> NEW.id ) BEGIN SELECT RAISE(ABORT, 'Pagamento já registado no ledger')"
   ],
   [
     "1b608049247978e2dbe06f7477ba9e50083eeaf30f9d752889cb6bb099014f2a",
@@ -1673,6 +2140,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_collection_delete BEFORE DELETE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')"
   ],
   [
+    "0cbc413f14e0807c031d1ca4296de0948b8b0a3c6f883ecc7a129e0c4b185e43",
+    "CREATE TRIGGER IF NOT EXISTS trg_collection_one_pending_promise BEFORE INSERT ON collection_events WHEN NEW.kind = 'promise' AND EXISTS (SELECT 1 FROM collection_events p WHERE p.creditId = NEW.creditId AND p.kind = 'promise' AND NOT EXISTS (SELECT 1 FROM collection_events d WHERE d.relatedId = p.id AND d.kind IN ('promise_kept','promise_broken'))) BEGIN SELECT RAISE(ABORT, 'Este crédito já tem uma promessa em aberto')"
+  ],
+  [
     "676134166855a8983159bd9ca52f58bd40bf144cff6fad8d3d035eb54dd2f863",
     "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')"
   ],
@@ -1719,6 +2190,34 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "8543aac3ec3557b02bfa7691d38946b3cf6f038aec82144c91353d46b200bff2",
     "CREATE TRIGGER IF NOT EXISTS trg_divergence_immutable_update BEFORE UPDATE ON accounting_divergence_events BEGIN SELECT RAISE(ABORT, 'Decisões de divergências são imutáveis')"
+  ],
+  [
+    "f529fae7dd7330628be984b4e704f3844cf95963c8032243d317ed41e00e493d",
+    "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_immutable BEFORE UPDATE OF documentNo, documentType, seriesId, sequenceNumber, documentDate, systemEntryDate, customerTaxId, customerName, netTotalMinor, taxPayableMinor, grossTotalMinor, payload, jwsSignature, saftHash ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documento fiscal imutável: use uma nota de crédito ou uma correcção')"
+  ],
+  [
+    "c6022f24abdbbe26d9b41c32a5adb3f2d6bcb6d786f302adc954b169611e9b6c",
+    "CREATE TRIGGER IF NOT EXISTS trg_fiscal_documents_no_delete BEFORE DELETE ON fiscal_documents BEGIN SELECT RAISE(ABORT, 'Documentos fiscais não podem ser apagados')"
+  ],
+  [
+    "0cb46d210ca86b6da1666bc3c80b241aa05dc6d0941bacbeaa3103723afc38b4",
+    "CREATE TRIGGER IF NOT EXISTS trg_fiscal_saft_exports_immutable BEFORE UPDATE ON fiscal_saft_exports BEGIN SELECT RAISE(ABORT, 'Exportações SAF-T são imutáveis')"
+  ],
+  [
+    "86c9d0006bc6b614f8756a79dfa21e3d2d14a13503197237501730fc033c2af9",
+    "CREATE TRIGGER IF NOT EXISTS trg_hub_events_delete BEFORE DELETE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')"
+  ],
+  [
+    "7f1fef115e4630c51013bdd114664c52faa782c92d216ee06fe6095bb3ce7458",
+    "CREATE TRIGGER IF NOT EXISTS trg_hub_events_update BEFORE UPDATE ON hub_collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de contactos é imutável')"
+  ],
+  [
+    "cd109345038068c936301d679ad34e9fc5871db12c8a7a1624fa9d90af5011cc",
+    "CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_delete BEFORE DELETE ON late_interest_adjustments BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável')"
+  ],
+  [
+    "35f8b2e21cea34a91eac9c23fd049b9683bc2eccc00b6547e5b4c16d03a69fc1",
+    "CREATE TRIGGER IF NOT EXISTS trg_late_interest_adjustments_update BEFORE UPDATE ON late_interest_adjustments BEGIN SELECT RAISE(ABORT, 'O histórico de perdões e renegociações de mora é imutável')"
   ],
   [
     "c2c721f2f30495f9ec562c1fe57797d7287d68e3f93f08729552bfdeecd1a1f2",
@@ -1793,12 +2292,40 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_receipt_update BEFORE UPDATE ON accounting_receipts BEGIN SELECT RAISE(ABORT,'O comprovativo contabilístico é imutável')"
   ],
   [
+    "2a54b2873b7b682282861c30d67fcef817e34fe7e1d4284ce3c0170f36fc822e",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_marcacao_delete BEFORE DELETE ON rh_marcacao BEGIN SELECT RAISE(ABORT, 'As marcações de ponto não se apagam: anulam-se com motivo')"
+  ],
+  [
+    "635c7885dc3810cf6a59a38d64a19fb9d71b81d5ed62962c18cc57b55de2447c",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_marcacao_imutavel BEFORE UPDATE ON rh_marcacao WHEN OLD.anulada = 1 OR NEW.data_hora <> OLD.data_hora OR COALESCE(NEW.tipo, '') <> COALESCE(OLD.tipo, '') OR NEW.funcionario_id <> OLD.funcionario_id OR NEW.data <> OLD.data BEGIN SELECT RAISE(ABORT, 'Uma marcação de ponto não se altera: anula-se e regista-se outra')"
+  ],
+  [
     "dc0f65c5b4ee9a6d11de06ce01e624c480ee43798ec17c92e7b3c9fa2ae1b26b",
     "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_delete BEFORE DELETE ON rh_processamento WHEN OLD.estado <> 'aberto' BEGIN SELECT RAISE(ABORT, 'Só se apaga um processamento ainda aberto')"
   ],
   [
+    "517b1dba94c8140fde6cc4961d6459c97863dfe312e7542267762dea8e968acd",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_delete BEFORE DELETE ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')"
+  ],
+  [
+    "3828bd8b229e718f907f919d1ecdff6963b19934763f72b299b4e7c83375faab",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_insert BEFORE INSERT ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')"
+  ],
+  [
+    "73c8cc182d115732877b37dfb12b6f9c285c4f6484ba32847adbe49a6432be4c",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_entrada_update BEFORE UPDATE ON rh_processamento_entrada WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os valores do mês não mudam')"
+  ],
+  [
     "8c91cbeaf3e7b968d3c4bd8c5b9781e8d825682ad31242337507f247d132cde0",
     "CREATE TRIGGER IF NOT EXISTS trg_rh_processamento_fechado_update BEFORE UPDATE ON rh_processamento WHEN OLD.estado = 'fechado' BEGIN SELECT RAISE(ABORT, 'Um processamento salarial fechado não pode ser alterado (faça um acerto no mês seguinte)')"
+  ],
+  [
+    "5c3940557d9e17dc442ad96d530b528ef3b4538c888c778c5f097aa18240ac5a",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_recebimento_imutavel BEFORE UPDATE ON rh_recebimento BEGIN SELECT RAISE(ABORT, 'A confirmação da recepção não se altera: registe uma nova')"
+  ],
+  [
+    "62300fad8788a0901ffd01f33a39e18786d1503f2b351cd12bd82ab1c5fdcc58",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_recebimento_insert BEFORE INSERT ON rh_recebimento WHEN COALESCE((SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id), '') NOT IN ('pago', 'fechado') OR COALESCE((SELECT funcionario_id FROM rh_recibo WHERE id = NEW.recibo_id AND processamento_id = NEW.processamento_id), '') <> NEW.funcionario_id BEGIN SELECT RAISE(ABORT, 'Só se confirma a recepção do seu próprio salário, depois de pago')"
   ],
   [
     "92e16651735eb32fbd1dec3d1999e259c2bf8c4b8d45f4c770f569cf7adea40d",
@@ -1821,6 +2348,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_rh_recibo_update BEFORE UPDATE ON rh_recibo WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado: os recibos não mudam')"
   ],
   [
+    "cea24c9af64b72daa920405acd5e4dbdbeda0261df74ea7811028b75527db25f",
+    "CREATE TRIGGER IF NOT EXISTS trg_rh_reclamacao_insert BEFORE INSERT ON rh_reclamacao WHEN COALESCE((SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id), '') <> 'calculado' OR (NEW.recibo_id IS NOT NULL AND COALESCE((SELECT funcionario_id FROM rh_recibo WHERE id = NEW.recibo_id AND processamento_id = NEW.processamento_id), '') <> NEW.funcionario_id) BEGIN SELECT RAISE(ABORT, 'Só se reclama da sua folha de correcção, antes da aprovação')"
+  ],
+  [
     "38d6093d3fc5f873dc62ca025a14f132602b3ed6e6d4983072111b67bb77af1c",
     "CREATE TRIGGER IF NOT EXISTS trg_rh_rubrica_pontual_delete BEFORE DELETE ON rh_rubrica_pontual WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado') BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado')"
   ],
@@ -1831,14 +2362,6 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "00c65d93dda94eb83eda257732f00f67282057891b8ebffa72b960efeaabcfa2",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_requests_pending ON accounting_requests(kind, targetId) WHERE status = 'pending'"
-  ],
-  [
-    "33729af6d1e203ba1f48414b43bd63b24ba95038d224d5d5f8521d77f65dd7b8",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nif_active ON clients(nif) WHERE deletedAt IS NULL AND nif NOT LIKE 'SEM-%' AND nif != 'SEM IDENTIFICAÇÃO'"
-  ],
-  [
-    "a7a28bc6b5aa5857ac463a89666e101ffb03bc9a5733a4064f49c4aaf5d8dff2",
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_phone_active ON clients(phone) WHERE deletedAt IS NULL"
   ],
   [
     "98ef793ae9c9e227203aa1ea7c9b62ba503858622b98230fb7a106c3e90761ab",
@@ -1861,12 +2384,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_documento_emitido_numero ON rh_documento_emitido(modelo, ano, sequencia)"
   ],
   [
+    "bb1f27d69a5bc3f38afccef6422c832aae8fc491818d02875e7e01819d269a40",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_escala_func_data ON rh_escala(funcionario_id, data)"
+  ],
+  [
     "48923778011da0dee5b4c5eeb286e14beabd5bdfcb29fdf896bb978af24a2273",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_funcionario_numero ON rh_funcionario(numero_mecanografico)"
   ],
   [
     "0b43b96d3c65b4a3b0a539fa00e87472c8ecf742a503d3ef0ad6e2a12e50b43f",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_ponto_dia ON rh_ponto(funcionario_id, data)"
+  ],
+  [
+    "a876f128ca4c8612123cf2c69abec4eec2026b47de4a5915c12c9724015c3fb2",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_rh_processamento_entrada ON rh_processamento_entrada(processamento_id, funcionario_id)"
   ],
   [
     "1919b0450b14bfd3fd435b9b2108fb1bb5c8f72d56046f797cbe1e5452446596",
@@ -1941,6 +2472,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DELETE FROM notifications WHERE source = ?"
   ],
   [
+    "21dcee58d5ce595576a4135f881e2ad40d1bd9c23f286d96da1655b8dce972dd",
+    "DELETE FROM notifications WHERE title LIKE 'Alerta de segurança: Tentativa de acção sem permissão%' AND message LIKE '%A decisão exige o responsável autenticado e diferente do solicitante%' AND timestamp >= '2026-10-28'"
+  ],
+  [
     "7ffc6efd4b85eb2587a25605a0519132ff1062af2074c1eb20d7571792c707fd",
     "DELETE FROM payment_gateways"
   ],
@@ -1967,6 +2502,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "248f2b4d0a324bf8951bb2c8f1e8024e06ae167ce7fbba15ca91aa3389034ee1",
     "DELETE FROM rh_dependente WHERE id = ? AND funcionario_id = ?"
+  ],
+  [
+    "5dbd52cbdc17b1fd3faa32f45a9a8a237d1096cb601590dda8e09e2ca46580f2",
+    "DELETE FROM rh_documento WHERE id = ? AND estado = 'arquivado'"
+  ],
+  [
+    "1ff3d0ee89647e811246e4957573708c40e8b82aa02b893b6688ccff4af42f1b",
+    "DELETE FROM rh_documento_ficheiro WHERE documento_id = ?"
+  ],
+  [
+    "87a61e9ff98830b48d0b0944d78d2180fadf10ed1731e88c39ee704af473d2f4",
+    "DELETE FROM rh_escala WHERE funcionario_id = ? AND data = ?"
   ],
   [
     "730127d136f4cb2e458d6b8517fd344215cbd39eb5a73f94d2f41f78e48dc869",
@@ -2013,6 +2560,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DROP INDEX IF EXISTS idx_clients_nif_active"
   ],
   [
+    "5c4c4174166886c4e9d2f03b83a998dd060185c4ce35d94a4faefdeea22d7546",
+    "DROP INDEX IF EXISTS idx_clients_phone_active"
+  ],
+  [
     "81652dce873daf175c414215ec2a3e118105b451463d13e646d72a9d8e7de881",
     "DROP TABLE credit_writeoffs_old"
   ],
@@ -2033,8 +2584,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DROP TABLE simulations"
   ],
   [
+    "29265ea91d8b7941748eb3535ac3d9babf57c5200cc44047f01c3010165aa4a7",
+    "DROP TRIGGER IF EXISTS trg_accounting_closed_period"
+  ],
+  [
     "ad80615c68c7fc370bec78de78820ceb836baeda98a21a3c89047fe4c9399d45",
     "DROP TRIGGER IF EXISTS trg_accounting_entries_chain"
+  ],
+  [
+    "4663e2984cea00c6c369b6bea25d286a5f986178e6688e8934ac675b6acda8de",
+    "DROP TRIGGER IF EXISTS trg_accounting_entries_payment_unique"
   ],
   [
     "90a6efc0e4431481fdcaf66c4270cdc654a9c19e066a7b9874b70e2dc5bb5b39",
@@ -2055,6 +2614,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "250dc64293158cd70c8568f0d840c642ab6920d3ba4c19a242720b8398df233b",
     "DROP TRIGGER IF EXISTS trg_limit_versions_four_eyes"
+  ],
+  [
+    "e2d0a54968ead24efc0dffa6ac78fc606dceec34a0f586177a74a54cc2272cf8",
+    "Delete"
   ],
   [
     "e6446a01c84187f0cd4f5cdde815542b51f8e5b9fde02bff99949aa94292cbe6",
@@ -2181,16 +2744,12 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO calendar_tasks (id, title, description, date, done, createdAt, usuario_id) VALUES (?,?,?,?,?,?,?)"
   ],
   [
-    "db7e7b429882ef98b78469089e5ce5f76060839e676ca04cf8d258f51b826ca3",
-    "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "6687b7577c363eb9101c6a295a9f4737d4cce03c76ad15ad3d3bef92c428b11e",
+    "INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone, employmentSector, ministry, employerNif, workPosition, clientCategory, clientType, documentType, countryCode, nationality, passportFormatValidated, foundationDate, legalForm, businessSector, commercialRegistry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "91d2d82b3e73e1db642a1f04e9e04604dfde45206bf6c5e24abb531f3752c4e3",
     "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
-  ],
-  [
-    "3638b91193dd13588d45729d26ac146b099ae663265ef201038b28e8247ea227",
-    "INSERT INTO collection_messages (id, clientId, clientName, creditIds, channel, message, attemptNumber, totalDue, sentAt, sentBy, legalTriggered) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "1fef7aba424e6c56360fff4678f06b33ce251c3ad8a123884d6878a94c06edff",
@@ -2241,8 +2800,48 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO credits (id, clientId, clientName, principalAmount, principalAmountMinor, interestRate, lateInterestRate, installments, paidInstallments, currentBalance, currentBalanceMinor, accruedInterest, accruedInterestMinor, lateInterest, lateInterestMinor, totalDue, totalDueMinor, version, amortizationMethod, startDate, dueDate, status, creditNumber, createdAt, requestedBy, requestedAt, approvedBy, approvalNotes, usuario_id, targetMonthId, supplierId, supplierProfitRate, productId) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
+    "e45579f9fc14cb1b28570af5742f16a27c0519bc4d100a60419410300817ae95",
+    "INSERT INTO fiscal_agt_requests (id, service, requestId, documentNos, httpStatus, resultCode, durationMs, error, deviceId, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "a74b65cdd427f2a8fff52dd85acdf1fb622d8387ac55194044590d48850f7b3d",
+    "INSERT INTO fiscal_documents (id, idempotencyKey, documentNo, documentType, seriesId, sequenceNumber, documentStatus, rejectedDocumentNo, referenceDocumentNo, documentDate, systemEntryDate, clientId, customerTaxId, customerCountry, customerName, customerAddress, creditId, paymentId, netTotalMinor, taxPayableMinor, grossTotalMinor, withholdingMinor, payload, jwsSignature, saftHash, saftHashControl, deviceId, agtStatus, agtErrors, agtAttempts, agtNextAttemptAt, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "f520f800531ac24564e634de8ac0a6e1dd7be11f1a4607596ae9b040f8c5e8d6",
+    "INSERT INTO fiscal_saft_exports (id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, totalDebitMinor, totalCreditMinor, warnings, xml, createdBy, createdByName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "8bab43baca8eb66b858b335151365b93661bb61ad23e40a02fb03120a1d63cd4",
+    "INSERT INTO fiscal_series (id, seriesCode, seriesYear, documentType, establishment, contingency, status, firstNumber, lastNumber, nextNumber, deviceId, simulated, agtSyncedAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "2f7e71e6819bb45eed44ca6cb36697c7fa8b2162b1ca13c80b7618e301825f64",
+    "INSERT INTO fiscal_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
+  ],
+  [
+    "d9fe6cb2c234cd1286604ff6020ba9874d43f5243aea4a4386923f7d42d89c4b",
+    "INSERT INTO hub_collection_campaigns (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
+  ],
+  [
+    "255c2e102df5aad99fa30ff57094ccba9bd81797342b54e112558d67968371e6",
+    "INSERT INTO hub_collection_clients (clientId, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(clientId) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
+  ],
+  [
+    "aa5fe092c88e634b556fe52811688abe70a2ad900c544e6f10b358863ee8775f",
+    "INSERT INTO hub_collection_settings (id, data, updatedAt, updatedBy) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data = excluded.data, updatedAt = excluded.updatedAt, updatedBy = excluded.updatedBy"
+  ],
+  [
     "354403cb3fbc65e11a3acb6f2ed18990fe20472096e214c9192ca4884b2e5c20",
     "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read) VALUES (?,?,?,?,?,?,?,?)"
+  ],
+  [
+    "bc6b7358eacb723e7484da411a39cce8605da25501b1f61fce98ead043159997",
+    "INSERT INTO internal_messages (id, senderId, senderName, receiverId, receiverName, content, timestamp, read, attachments, clientCard) VALUES (?,?,?,?,?,?,?,?,?,?)"
+  ],
+  [
+    "0a9e2f2a2c20a7e8d899b30a8ea93efb19bc8f647dcb58602e924283f3fb3839",
+    "INSERT INTO late_interest_adjustments (id, creditId, kind, amountMinor, agreedMinor, installments, effectiveDate, reason, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "23b0bff90f55fe2d4527976c545c0a2660f776eb381c1600fca2c33a46caa541",
@@ -2353,8 +2952,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "5e8b8112047d030a3d15d8180dca64a44948e05d653deaac85be68cc581edf27",
+    "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome, meio_dia) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'aprovada', 0, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "9f5aae0633142175315adb4637a3f5bb6c32b57f039553cf55a96a24f4e44ebd",
     "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, estado, pedido_dispensa, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', 1, ?, ?, ?)"
+  ],
+  [
+    "35b84611022eef3e9ceb617e458a101cdca78c9436d19921c0e2a0c2f76171f6",
+    "INSERT INTO rh_banco_horas (id, funcionario_id, data, minutos, tipo, tipo_extra, origem, descricao, anulado, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET minutos = excluded.minutos, tipo_extra = excluded.tipo_extra, origem = excluded.origem, descricao = excluded.descricao, anulado = 0, motivo_anulacao = NULL, actualizado_em = excluded.criado_em"
   ],
   [
     "88376c21e6f5f7c6fddc5e988e2ff7e6e296fb1269f52e8a6ab62ec780d291de",
@@ -2365,6 +2972,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_contrato (id, funcionario_id, tipo, inicio, fim, periodo_experiencia_fim, salario_base_minor, horas_semanais, dias_ferias, estado, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
   ],
   [
+    "6e3217528e4f8b871eb48f56e963014c7011cef4b2fe80c9acd1479717f591c4",
+    "INSERT INTO rh_correio (id, funcionario_id, sentido, assunto, corpo, resposta_a, criado_em, de_id, de_nome) VALUES (?, ?, 'para_funcionario', ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "a4c98b8bddbc11fda9dab82f7a32997c78d4c7e8d436f82648636938eaca6c9f",
+    "INSERT INTO rh_correio (id, funcionario_id, sentido, assunto, corpo, resposta_a, criado_em, de_id, de_nome) VALUES (?, ?, 'para_rh', ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "5a8fcb6f1341d655471f43203ead73551a797910b9ec994fe35125398f231565",
     "INSERT INTO rh_departamento (id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, 1, ?, ?)"
   ],
@@ -2373,8 +2988,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_dependente (id, funcionario_id, nome, parentesco, data_nascimento, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ],
   [
-    "cd0c588f12979e2c59fe2269a935adf530e4e5bccddeedcd18f08a14b9337baf",
-    "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
+    "cccc8d6c2184c15a578050d8d76f9efebb857b7ba42019819b7c23f2639709a5",
+    "INSERT INTO rh_doc_auditoria (id, documento_id, accao, detalhe, utilizador_id, utilizador_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "c57e7d8626f50f10a6f3725a33a3c47aaf8224b887fa412089356c50b205bab9",
+    "INSERT INTO rh_doc_pasta (id, funcionario_id, nome, anulada, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, 0, ?, ?, ?)"
+  ],
+  [
+    "44feaf02f12e0d82c61db1ee1cf99b870858cc69f9d8dd33b29124307a7d0223",
+    "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em, pasta_id, origem, versao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?)"
   ],
   [
     "3aceab1c4adf3ee92566163b62049a5d34e763c4e1516525c87f42e9e891d560",
@@ -2385,12 +3008,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_documento_ficheiro (documento_id, data_url) VALUES (?, ?)"
   ],
   [
+    "b5ca0159a2be7a81fb94a55d2f485f5cadbbc4fedb7b47b6e80790c80b1ff119",
+    "INSERT INTO rh_escala (id, funcionario_id, data, horario_id, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(funcionario_id, data) DO UPDATE SET horario_id = excluded.horario_id, criado_por = excluded.criado_por, criado_por_nome = excluded.criado_por_nome, actualizado_em = excluded.criado_em"
+  ],
+  [
     "7cd1f6c4a628fd86f2f2690f0bb6b5de78b0cd747b2d4902fad96ad5d8e8b3b1",
     "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)"
   ],
   [
-    "50c7a85dd159988cf3805e7f28f223e3af10359786a402b4991053767e086afa",
-    "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "ca9be5dd425d8be5dfdef45431070b9b98395589e535bcf97f3f185d64af1050",
+    "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, nacionalidade, telefone_alternativo, provincia, municipio, chefe_id, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "3296d55bdf0f2edad5e71508e707c908cce11fb499dd77cb4c7e9920913c7f5a",
@@ -2401,8 +3028,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_historico_salarial (id, funcionario_id, contrato_id, salario_anterior_minor, salario_novo_minor, data_efeito, motivo, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
-    "e446b6625fe19a9cb51cde871d1d9b70c3d4cf2deeec2e5928fb3f626ee48d44",
-    "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)"
+    "c8a6368ab5257be868d4f916b783846919619febd8e3196390824c3c17638f4a",
+    "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, tipo, ciclo, ciclo_inicio, minimo_diario_min, faixa_inicio, faixa_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "9bb5ce95fa09b480b712ad693646b5631725993b6be87b5ac3b219e4e1e2bca0",
@@ -2413,8 +3040,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, ?)"
   ],
   [
+    "18e15a3e95a7670a54cb68e295adc861bfd1d5933383a4a737898cdb4c18b3c4",
+    "INSERT INTO rh_justificacao (id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, anexo_data_url, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)"
+  ],
+  [
+    "d91fd32075b02f18d6a38bd621085783cedf18bf0eea4f2e33d45e8b7b685d79",
+    "INSERT INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "ca870dcb6db4f15e554f6641916da23aa9e5f02fe230813f8269b31d7bc12e19",
+    "INSERT INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?)"
+  ],
+  [
     "2863a257f0cf68449459d165e20aff8f9e039c73b2bda5fb911c2729f128684a",
     "INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)"
+  ],
+  [
+    "d3be0f2a2a794dfd81ad748f2e9d85775cda446487d64e58cd96255cf4fde896",
+    "INSERT INTO rh_pedido (id, funcionario_id, tipo, ano, assunto, descricao, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)"
   ],
   [
     "0ddf99aa8e465ce334d3990eb596a8811afb9e9f9b2a996074cfa049e67c763a",
@@ -2429,8 +3072,28 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_ponto (id, funcionario_id, data, entrada, saida, horas_trabalhadas, horas_extra, minutos_atraso, origem, observacoes, registado_por, registado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET entrada = excluded.entrada, saida = excluded.saida, horas_trabalhadas = excluded.horas_trabalhadas, horas_extra = excluded.horas_extra, minutos_atraso = excluded.minutos_atraso, origem = excluded.origem, observacoes = excluded.observacoes, registado_por = excluded.registado_por, registado_por_nome = excluded.registado_por_nome, actualizado_em = excluded.criado_em"
   ],
   [
+    "a039a32ba59aadf77937c31c7deee47e258a4b1853f9573313d2726732ff782d",
+    "INSERT INTO rh_ponto (id, funcionario_id, data, entrada, saida, horas_trabalhadas, horas_extra, minutos_atraso, origem, observacoes, registado_por, registado_por_nome, criado_em, estado, minutos_trabalhados, minutos_saida_antecipada, minutos_extra, minutos_noturnos, incompleto, editado_manualmente, primeira_entrada, ultima_saida, recalculado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET entrada = excluded.entrada, saida = excluded.saida, horas_trabalhadas = excluded.horas_trabalhadas, horas_extra = excluded.horas_extra, minutos_atraso = excluded.minutos_atraso, origem = excluded.origem, registado_por = excluded.registado_por, registado_por_nome = excluded.registado_por_nome, actualizado_em = excluded.criado_em, estado = excluded.estado, minutos_trabalhados = excluded.minutos_trabalhados, minutos_saida_antecipada = excluded.minutos_saida_antecipada, minutos_extra = excluded.minutos_extra, minutos_noturnos = excluded.minutos_noturnos, incompleto = excluded.incompleto, editado_manualmente = excluded.editado_manualmente, primeira_entrada = excluded.primeira_entrada, ultima_saida = excluded.ultima_saida, recalculado_em = excluded.recalculado_em"
+  ],
+  [
+    "e8b2cfeb8f0d8623816a919a316e5fdb165ca03c7a2b3c0e8a038c3154b9dff0",
+    "INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, ?, 'aberto', ?) ON CONFLICT(id) DO NOTHING"
+  ],
+  [
+    "ad4928798b1cc6b6c071a52be50739bdc49dacd48ebf88453c5b2125d84aab92",
+    "INSERT INTO rh_ponto_periodo (id, ano, mes, departamento_id, estado, criado_em) VALUES (?, ?, ?, NULL, 'aberto', ?) ON CONFLICT(id) DO NOTHING"
+  ],
+  [
     "722a2e06081aa007a7dce95ccbd38a5a3aea293780550971f123975d9643de5e",
     "INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)"
+  ],
+  [
+    "6c01c851355f1e5d191f9d174d78222fb8cc527999e8fbeaac15f5c7a6ac406a",
+    "INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(processamento_id, funcionario_id) DO UPDATE SET salario_base_minor = excluded.salario_base_minor, faltas = excluded.faltas, actualizado_em = excluded.actualizado_em, actualizado_por = excluded.actualizado_por, actualizado_por_nome = excluded.actualizado_por_nome"
+  ],
+  [
+    "89ea37596b241d5fda0f6ae9239313df4f031c84ee17f8882fed0de11cc1edcb",
+    "INSERT INTO rh_recebimento (id, funcionario_id, recibo_id, processamento_id, estado, observacao, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "69f77f725ac42d21d116ce72f7aede14bebd74e55932ce5f98732a6655a87c80",
@@ -2441,12 +3104,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_recibo_linha (id, recibo_id, rubrica_id, codigo, descricao, tipo, quantidade, valor_unitario_minor, valor_minor, incide_inss, incide_irt, isento_irt_minor, ordem) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
-    "e753b4d1e00c94b49eaec9666206484bba190aa089ffd78b326a7df3f1744af2",
-    "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
+    "f0c9f0a8bb0a6fba7993b728da09f50da9c880d4a6fc66480f40dba1141aa346",
+    "INSERT INTO rh_reclamacao (id, funcionario_id, processamento_id, recibo_id, codigo, descricao, valor_minor, motivo, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)"
+  ],
+  [
+    "9986efb2f1a8d2469e1663526600dfdb52b055f94e55f7a432fc1a7a781a92dd",
+    "INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, activo, classe, por_dia, valor_padrao_minor, periodicidade, mes_pagamento, proporcional_faltas, auto_atribuir, descricao, incidencia_confirmada, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)"
   ],
   [
     "ffd3a2c5289e87dc182f0f3cba3c4c6228427110a73db2dc43f8fbbf058c0850",
     "INSERT INTO rh_rubrica_pontual (id, processamento_id, funcionario_id, rubrica_id, quantidade, valor_minor, descricao, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "d76b7316d1324d2aa3ad553ba5eb7a749172199128e93451e94c60598757f390",
+    "INSERT INTO rh_seccao (id, departamento_id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)"
   ],
   [
     "4c8650edb962a7e9a2d9a2f564364a556245b4e9119661543437231a073974e5",
@@ -2473,8 +3144,12 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO suppliers (id, name, phone, email, nif, address, notes, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)"
   ],
   [
-    "cfc731c9be02a2a7d51e20d9a8bca9e76c85319cb6b9747ca1664ed7531b17aa",
-    "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "c90d2c50a1d8b8acd3ea42ab4d28d7e5be9480a5d1bc87cea9f3f28c2e3c6dbc",
+    "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature, mustChangePassword) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "c73eca9923a175493035422c4236db3e5be51f9d2213120177a7d1cec0706a83",
+    "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, mustChangePassword) VALUES (?, ?, ?, ?, ?, 'employee', ?, ?, ?, 'active', 1)"
   ],
   [
     "c637cc14941e8f03adf41ddff99d5fc771ff8c1048acdc83e269e7e2a4b13b2c",
@@ -2495,6 +3170,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "fd742f8d6d18960338ee772bf38085682e3ded58dc6a8b129e27fa60c7e84978",
     "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'accounting_entry', ?, ?)"
+  ],
+  [
+    "092cd4d0987953639d22aad8559c9fa94642a9429f565f9a48540ee05b4897f2",
+    "INSERT OR IGNORE INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata) VALUES (?, ?, ?, ?, 'create', 'legal', ?, ?)"
   ],
   [
     "ccbfe4cd2cec3330b9649b5f5a78bf4da5abcbcee69a46dae6aa481061af3ff0",
@@ -2521,8 +3200,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR IGNORE INTO dictionary (word, language) VALUES (?, ?)"
   ],
   [
+    "ce577cfcb33a2bffc6ab45a51697f314767a8e4942e4b32a4664349c11b964e1",
+    "INSERT OR IGNORE INTO hub_collection_events (id, clientId, creditId, kind, channel, status, message, metadata, actorId, actorName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "ce31cc5a445ebd1db2be40cacb0a5d81814418f0947e259f22773104ca3800da",
+    "INSERT OR IGNORE INTO legal_cases (id, clientId, creditId, stage, priority, debtAmount, lastAction, notes, updatedAt, usuario_id) VALUES (?, ?, ?, 'interpellated', 'high', ?, ?, ?, ?, ?)"
+  ],
+  [
     "8061051673c9849357e501ae700a579e45998cca95222b8407e034a3cc7b65b4",
     "INSERT OR IGNORE INTO message_templates (id, name, type, content, isDefault) VALUES (?, ?, ?, ?, 1)"
+  ],
+  [
+    "9391a16a711bb957494d9ca94ee076d86492762d7b61d809229e06fd2e55f458",
+    "INSERT OR IGNORE INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, 'warning', 0, ?)"
   ],
   [
     "571cadffb5762a85eb3a30adbb2a8bddae421a0bdbe3fd9f2a63ccc63bf4320a",
@@ -2549,12 +3240,32 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR IGNORE INTO rh_irt_tabela (id, ano, lei_referencia, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, NULL, ?, 'sistema')"
   ],
   [
+    "21f9b987b6abaf4b5e641f81d2b9aecb47349f8d94331e4b4d5382bd663d4dcd",
+    "INSERT OR IGNORE INTO rh_marcacao (id, funcionario_id, data, data_hora, tipo, origem, dispositivo_id, latitude, longitude, foto_data_url, pendente_validacao, motivo, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "3870c76be95e41195ee60f2a70099634764e5816e5b7f38537e8cff349f4797c",
+    "INSERT OR IGNORE INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, 'declaracao', ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')"
+  ],
+  [
     "e9a1c09c7e89cac3b8cc46a8ef37c93fa38fb99dd8f5ff8f1cf581037bbcab13",
     "INSERT OR IGNORE INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, 'sistema')"
   ],
   [
+    "23939b5a3d1536535d2ddba15f06f52527755624631217ea2a71785c84dd9b94",
+    "INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, ?, ?)"
+  ],
+  [
+    "e3c7c8dabe7d93b20bb472514f094e994d0cefa368e15956bc28e38800a7572d",
+    "INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, NULL, ?)"
+  ],
+  [
     "e16374e668915efbf27cbce0b5bb7626dade1be79c95d1c48379c271017e4355",
     "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, NULL, ?, ?, 1, ?, 'sistema')"
+  ],
+  [
+    "7c72d2e9ad26758679cdbe9971a13809002f8f6b30eaff394f9edd1364463ed9",
+    "INSERT OR IGNORE INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct, conta_contabilistica, ordem_no_recibo, sistema, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, NULL, ?, 0, 1, ?, 'sistema')"
   ],
   [
     "b6f8c4dcc2041333817ee64d4c82754986d312b734a5f0f3736f0599806513ab",
@@ -2797,6 +3508,50 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "61ce2502d240b71b9e3e1ed42549a767f8b5a77e92c8e683af48d2e123b6f839",
+    "SELECT * FROM fiscal_agt_requests ORDER BY createdAt DESC LIMIT 300"
+  ],
+  [
+    "563096e8b231eb931f283546f8781f7432c0e429c6a1180ef2dc854cd47df42a",
+    "SELECT * FROM fiscal_documents WHERE agtRequestId = ?"
+  ],
+  [
+    "3660cc6492ebe4bb16c18fdaeaf3065eca21c03f71e9ef1456278e0ca494fe07",
+    "SELECT * FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('pendente','erro_envio') AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) ORDER BY systemEntryDate LIMIT 30"
+  ],
+  [
+    "c303511c2c21c3c7df3da150c6a509b97626b8207703d644b0b38168dcd9e7cc",
+    "SELECT * FROM fiscal_documents WHERE documentDate >= ? AND documentDate <= ? ORDER BY systemEntryDate DESC"
+  ],
+  [
+    "d69ee3fce3a74ff9c159aaa37ebfed8243a7572aa162218ec6e3d1712d6d7278",
+    "SELECT * FROM fiscal_documents WHERE documentNo = ?"
+  ],
+  [
+    "c9f22afc9fd885b5d53970ca96dc53ac0fadeecdb28b89b18c8bfd4b6aac4ead",
+    "SELECT * FROM fiscal_documents WHERE id = ?"
+  ],
+  [
+    "fa8795a6acd1fa30da00549d7255b4562383517eed3a96687d73ac00d889fb4b",
+    "SELECT * FROM fiscal_documents WHERE idempotencyKey = ?"
+  ],
+  [
+    "d044e84628a10258a5aeb8b91dd44eb04263e3878a84beaa7872278ca9ff92b0",
+    "SELECT * FROM fiscal_series ORDER BY seriesYear DESC, documentType, createdAt"
+  ],
+  [
+    "2b29bdadbd17875d0041194ecf8951d1909166c5fa3f2b3072b98ca8c655d9f8",
+    "SELECT * FROM fiscal_series WHERE deviceId = ? AND documentType = ? AND seriesYear = ? AND contingency = ? AND establishment = ? AND status IN ('A','U') AND nextNumber <= lastNumber ORDER BY simulated, createdAt LIMIT 1"
+  ],
+  [
+    "0365bf166d09435dd01eab0ac9d947aaa0e2b03f1ead5dfc7778507d3f6cd930",
+    "SELECT * FROM hub_collection_events ORDER BY createdAt DESC"
+  ],
+  [
+    "26f323382d1c1472d3a9d8e9dbebe400bc307e9a702573e69d923e9e18ae35dd",
+    "SELECT * FROM hub_collection_events WHERE id = ?"
+  ],
+  [
     "42597f4fe4167298886486ecbbafd7d8c62f12964e527109a63d7723d92a8d19",
     "SELECT * FROM internal_messages ORDER BY timestamp ASC"
   ],
@@ -2941,6 +3696,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_ausencia ORDER BY data_inicio DESC, criado_em DESC"
   ],
   [
+    "b8f671e1fc088a793c1c62107f0ed256a570252620f1d75cc9683fb7d2cd8c93",
+    "SELECT * FROM rh_banco_horas ORDER BY data, criado_em"
+  ],
+  [
+    "d781abda6d1aaa1a079071e6a0af23349de0d89f11196a7869f4f89fbd7614b6",
+    "SELECT * FROM rh_banco_horas WHERE funcionario_id = ? ORDER BY data, criado_em"
+  ],
+  [
+    "fc21de83926295715ac7536a0515cc2f6c443335685bf7070d39d94ead4117af",
+    "SELECT * FROM rh_banco_horas WHERE id = ?"
+  ],
+  [
     "a491d3b4987818c2d61f751a14de41a92dfb95dbbe4adf3ac0cfa13eca64a03e",
     "SELECT * FROM rh_contrato ORDER BY inicio DESC"
   ],
@@ -2953,6 +3720,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_contrato WHERE funcionario_id = ? ORDER BY inicio DESC"
   ],
   [
+    "25e4b569155bbe2ad4dead3aefa4007d10bbe5e9b99a370493badbb14d881adc",
+    "SELECT * FROM rh_correio ORDER BY criado_em DESC"
+  ],
+  [
+    "9e80c92beba43c6629e191d94b87c77dac2a8c5cb274650c180ef3ea8fc7abbf",
+    "SELECT * FROM rh_correio WHERE funcionario_id = ? ORDER BY criado_em DESC"
+  ],
+  [
+    "eea4851e54b89a0c52c813241c63158d3d1256af94d2af23d30a0e3697b202f0",
+    "SELECT * FROM rh_doc_auditoria WHERE documento_id = ? ORDER BY criado_em DESC"
+  ],
+  [
+    "b3371e7287f42e5cb4bb4bda4a9128fcad500f67a2f423ac45c0661cfad6bc10",
+    "SELECT * FROM rh_doc_pasta WHERE anulada = 0 ORDER BY nome"
+  ],
+  [
     "aa1e133601e56627bacc00253d1e7566984edb10b455be4e07ae19304bb52ac9",
     "SELECT * FROM rh_documento ORDER BY criado_em DESC"
   ],
@@ -2961,12 +3744,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_documento WHERE funcionario_id = ? ORDER BY criado_em DESC"
   ],
   [
+    "11e07648f147a68911a2316a267478557f8478796dba2e7e13c95010c9aeb171",
+    "SELECT * FROM rh_documento WHERE id = ?"
+  ],
+  [
     "6653fa81e92a5d2d603baf1b202fcf63f0decd8d2e29f14aaff66d403dd426da",
     "SELECT * FROM rh_documento_emitido ORDER BY emitido_em DESC"
   ],
   [
     "f6c3d678cce47280cfd3489ce2886effacee038235be3bc237fa86e6fe884239",
     "SELECT * FROM rh_documento_emitido WHERE funcionario_id = ? ORDER BY emitido_em DESC"
+  ],
+  [
+    "a7f04173d5922d2062c77049af1e7c295dea59a067eded7e06b398f46038467d",
+    "SELECT * FROM rh_escala WHERE data >= ? AND data <= ? ORDER BY data"
   ],
   [
     "a4dc26ed93de8b8021e6700095ac53dde56b3447d4b5aa107a4460484d74b703",
@@ -3009,6 +3800,34 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_irt_escalao WHERE tabela_id = ? ORDER BY ordem"
   ],
   [
+    "8241d7dd9838e08b154fc283db471c02372e45db75f79442139be76d268694a8",
+    "SELECT * FROM rh_justificacao WHERE id = ?"
+  ],
+  [
+    "aa3f1e116b727cdd882b12d20e81965e9c0f4e80d83f4c71016089ad7c11cc7b",
+    "SELECT * FROM rh_marcacao WHERE data >= ? AND data <= ?"
+  ],
+  [
+    "0baab848156e0d51d9e68dbd35c305d2ad81e6bde7db9b4ae192340305c5c144",
+    "SELECT * FROM rh_marcacao WHERE funcionario_id = ? AND data = ? ORDER BY data_hora"
+  ],
+  [
+    "3d9aa23fdc7a59324d57f236dd9d94220a3611e29d8888dd0df5155f272b1c5f",
+    "SELECT * FROM rh_modelo ORDER BY tipo, sistema DESC, nome"
+  ],
+  [
+    "0f8e80498d7167343f4b042b7b0ba59f655dde195e9a37a757e69de7d46b4ad4",
+    "SELECT * FROM rh_modelo WHERE tipo = ? ORDER BY sistema DESC, nome"
+  ],
+  [
+    "24d4ce630ba13ae2ce147c44c17eb938fc0e6367e896780e2e76132092bbff99",
+    "SELECT * FROM rh_pedido ORDER BY estado = 'pendente' DESC, criado_em DESC"
+  ],
+  [
+    "e6c0b9682e21b8e68a9fd18e3bccf8262b0f774532841af8a0e9ce0c7bb38281",
+    "SELECT * FROM rh_pedido WHERE funcionario_id = ? ORDER BY criado_em DESC"
+  ],
+  [
     "919dfff0b63cfd1525cc9fd43f79925c65794dc9905952ced5f9dba0fb996d19",
     "SELECT * FROM rh_plano_ferias ORDER BY data_inicio"
   ],
@@ -3025,8 +3844,28 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_ponto WHERE id = ?"
   ],
   [
+    "529cac469d70555383ffeb662f3ae0a0838880b227ecb5399eae5ff09606e6f5",
+    "SELECT * FROM rh_ponto_periodo WHERE ano = ? AND mes = ?"
+  ],
+  [
+    "4f10c919ec93fcce1b49367514eacddfabba8ea99f228b9eb3329635f30415eb",
+    "SELECT * FROM rh_ponto_periodo WHERE id = ?"
+  ],
+  [
     "2f12f897493f9cee769e375daf774ea00b5b2d095be21f5a7347bbd92b3f6a92",
     "SELECT * FROM rh_processamento ORDER BY ano DESC, mes DESC, criado_em DESC"
+  ],
+  [
+    "43e8953f7ff9c75e0bb5ba212118b6f6781c2fe208d7166a2b6e17e4773d476e",
+    "SELECT * FROM rh_processamento_entrada WHERE processamento_id = ?"
+  ],
+  [
+    "c212d80c6e502381c6adf3e762592eaa107e9f36b592f957f951dc8007722c29",
+    "SELECT * FROM rh_recebimento WHERE funcionario_id = ? ORDER BY criado_em"
+  ],
+  [
+    "91b36bd6f26b297d5d4907d13c0430f6920bda585b8bc27a91f9d63f04da7fc3",
+    "SELECT * FROM rh_recebimento WHERE processamento_id = ? ORDER BY criado_em"
   ],
   [
     "d44f5018e96d43589bd8f0b484a2cf4d671a13001670931ee279862e07a9ab61",
@@ -3035,6 +3874,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "e0ab035bc049e48d762c7f5ad7aa92c480c2bac980c5891a9edda1038072bb0c",
     "SELECT * FROM rh_recibo_linha WHERE recibo_id = ? ORDER BY ordem, descricao"
+  ],
+  [
+    "264e4ec20095c534d188c934d58a0e1a2a963fe39979c63b6c5ca779631e91bd",
+    "SELECT * FROM rh_reclamacao WHERE funcionario_id = ? ORDER BY criado_em DESC"
+  ],
+  [
+    "2015306571fb68b7383d920f34ea8892999531cbb80579bf6296c7a3d017b672",
+    "SELECT * FROM rh_reclamacao WHERE processamento_id = ? ORDER BY estado = 'pendente' DESC, criado_em DESC"
   ],
   [
     "78873adf7bd5532f5be085584080fbb07d657ed039abeaa644773fff48825370",
@@ -3109,6 +3956,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM warranties WHERE id = ?"
   ],
   [
+    "6823e64a1ac0800156b11833ff575cd07ac9d15d759f71f00d60a5f9f17a1726",
+    "SELECT 1 AS found FROM accounting_entries WHERE id = ? LIMIT 1"
+  ],
+  [
+    "f7c10f0d19ea00dbf21d309c97659499a89bca361bc598f89088ff7680a9b19c",
+    "SELECT 1 AS found FROM rh_processamento WHERE id = ? UNION ALL SELECT 1 FROM rh_recibo WHERE id = ? UNION ALL SELECT 1 FROM rh_processamento_entrada WHERE id = ? UNION ALL SELECT 1 FROM rh_rubrica_pontual WHERE id = ? LIMIT 1"
+  ],
+  [
     "90ca954a9febd2d81d7a73ecfef56f93ba114d5421d827e9583a919c7538f18d",
     "SELECT 1 AS ok"
   ],
@@ -3117,8 +3972,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) AS net FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = ? AND t.timestamp >= ?"
   ],
   [
+    "a646fb134e62d14655230b245826a7bd21658f4f5d0d298dd7d40d17ef40ddb0",
+    "SELECT COALESCE(SUM(grossTotalMinor), 0) AS total FROM fiscal_documents WHERE documentType = 'NC' AND referenceDocumentNo = ?"
+  ],
+  [
     "e5a42ef884eebe05b3a6108a251c953eface73ad6c2e61447bfb114bbcdb355f",
     "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?"
+  ],
+  [
+    "dd033cb74e44b1fca79280e6835e4329bd1f297a494cd3b8fb5602e871595dd2",
+    "SELECT COUNT(*) AS n FROM rh_reclamacao WHERE processamento_id = ? AND estado = 'pendente'"
   ],
   [
     "1bfab959c14d5d0ff7d8e535a99439ee09672d473c2773905e1394e8de92c32d",
@@ -3129,16 +3992,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?"
   ],
   [
+    "d85e56fee0c80e266645ff915be4b358df59d0dc3e8f842abc25302e36608f4a",
+    "SELECT COUNT(*) AS total FROM notifications WHERE title LIKE 'Alerta de segurança: Tentativa de acção sem permissão%' AND message LIKE '%A decisão exige o responsável autenticado e diferente do solicitante%' AND timestamp >= '2026-10-28'"
+  ],
+  [
     "c8ddff8281e56ce8629e49973eb25d32b0dc191dbe28998bb0b98dd69958c5c5",
     "SELECT COUNT(*) AS total FROM payment_import_batches WHERE number LIKE ?"
   ],
   [
     "5b7e762b18fd49b75a54b7f59d3f36f963b12d0ca5a980b7adef0b4987ea9353",
     "SELECT COUNT(*) AS total FROM rh_funcionario"
-  ],
-  [
-    "e49c62f5e71e40fd3d20bbfc46f50c904c091f8b2831c6c5a6abda582d920f70",
-    "SELECT COUNT(*) AS total FROM sync_conflicts WHERE status = 'pending'"
   ],
   [
     "546fc080b502ec3f405a7152cdd13bacabfba6517b3b553cba8956272fcf915e",
@@ -3185,8 +4048,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT a.* FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE c.auditId IS NULL ORDER BY a.rowid LIMIT 200"
   ],
   [
+    "60bda33122cdfecba26f5d9a29441523cc8905bc3fcdd119b5b848f80c2b647c",
+    "SELECT a.id, a.creditId, a.clientId, a.clientName, a.principalAmount, a.interestRate, a.installments, a.decision, a.reason, a.requestedBy, a.requestedAt, a.decidedBy, a.decidedById, a.decidedAt FROM credit_approvals a WHERE NOT EXISTS (SELECT 1 FROM credits c WHERE c.id = a.creditId AND c.deletedAt IS NOT NULL) AND NOT EXISTS (SELECT 1 FROM clients k WHERE k.id = a.clientId AND k.deletedAt IS NOT NULL) ORDER BY a.decidedAt DESC"
+  ],
+  [
     "404858670e967bc7ae6a78b65257d96f7f9b60424e45128b3db063c3ffcb2559",
     "SELECT a.id, a.timestamp, a.userId, a.userName, a.action, a.entity, a.details, a.previousState, a.newState, a.metadata, c.seq, c.integrityHash, c.previousHash FROM audit_logs a LEFT JOIN audit_log_chain c ON c.auditId = a.id WHERE a.userId = ? ORDER BY a.timestamp DESC LIMIT ?"
+  ],
+  [
+    "ddc24aaa11a87d76543bebc74d542e7e1aac5d8e862b51ec853c082d3c44d557",
+    "SELECT a.type, l.account, l.side, SUM(l.amountMinor) AS total FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId WHERE a.creditId = ? AND a.type IN ('credit_removal', 'credit_restore') GROUP BY a.type, l.account, l.side"
   ],
   [
     "db7cfc87fea8c3db687860b0a65a94575a56a338c0fd10950c26fc696f86bb5e",
@@ -3197,6 +4068,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT account, side, SUM(amountMinor) AS total FROM ledger_lines WHERE account IN ('cash', 'bank') GROUP BY account, side"
   ],
   [
+    "bc585e997ddd923fb32ead7bad2aa615e4e21bd002741480ae58ab8f77c33f6d",
+    "SELECT agtRequestId, MAX(agtAttempts) AS tentativas FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('enviado','em_validacao') AND agtRequestId IS NOT NULL AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) GROUP BY agtRequestId LIMIT 20"
+  ],
+  [
     "93b44992fae09c07597bdccfb6526e1e8fead71048ddb05ee6a8cbe4cab89ef7",
     "SELECT alertKey FROM audit_alerts"
   ],
@@ -3205,8 +4080,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT allocatedToPrincipal, allocatedToPrincipalMinor, allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor FROM payments WHERE id = ?"
   ],
   [
+    "396f9b16c3a965cafa95d8a5b414d9247173dd51659e1ac10990d9e5f04aa5e4",
+    "SELECT anexo_nome, anexo_data_url FROM rh_justificacao WHERE id = ?"
+  ],
+  [
     "e7063397d1756aca147a353a1d010dcdde988d06eb88cff546be75b1c0e8f9ef",
     "SELECT auditId, previousHash, integrityHash, seq FROM audit_log_chain ORDER BY seq"
+  ],
+  [
+    "d70e4dc1c0e021e8860c50f60ac54b2ea3c6dba0da393aebe4265e7bca796a7c",
+    "SELECT c.id, c.clientName, c.status, c.currentBalanceMinor, c.currentBalance, c.accruedInterestMinor, c.accruedInterest, c.lateInterestMinor, c.lateInterest, c.totalDueMinor, c.totalDue, SUM(i.principalMinor - i.paidPrincipalMinor) AS duePrincipalMinor, SUM(i.interestMinor - i.paidInterestMinor) AS dueInterestMinor, SUM(i.lateInterestMinor - i.paidLateInterestMinor) AS dueLateInterestMinor FROM credits c JOIN credit_installments i ON i.creditId = c.id AND i.status <> 'cancelled' WHERE c.deletedAt IS NULL GROUP BY c.id"
   ],
   [
     "c9ebf60c9fe43c0665579afed41fd2cc88b4a3b34649a3a8b099dffbd4ed8cef",
@@ -3221,6 +4104,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT clientId, SUM(COALESCE(currentBalanceMinor, ROUND(currentBalance * 100))) AS balance FROM credits WHERE deletedAt IS NULL AND status IN ('active','overdue','defaulted','renegotiated','pending_approval') GROUP BY clientId"
   ],
   [
+    "8b67accbd91069bdae64e93cc4e9ad2aa5bca3a31360f418861cc753cde454d7",
+    "SELECT clientId, clientName FROM credits WHERE id = ?"
+  ],
+  [
     "a3e8d7fb9fe8e7516af9b6e6eaec79e2c65467719d0679a09f098d4e51563faa",
     "SELECT clientId, status, principalAmount, currentBalance, totalDue, createdAt, startDate, deletedAt FROM credits WHERE clientId = ? AND deletedAt IS NULL"
   ],
@@ -3231,6 +4118,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "00f13408432a1eda6723a565bfc26cfab8b493452a0e3fc7fd1d5b39fd561da4",
     "SELECT convertedCreditId, productId FROM simulations WHERE convertedCreditId IS NOT NULL AND productId IS NOT NULL"
+  ],
+  [
+    "d5edbcc0c079bea086a71c8fe16c45a2cc6e13154f24f24d6386e4059e0399dd",
+    "SELECT credit FROM accounting_entries WHERE creditId = ? AND type = 'disbursement' ORDER BY timestamp LIMIT 1"
   ],
   [
     "b6e27e23d8113b62ac108b7aab6cbc5591b01966cbeced5f4670a91b0f1145e3",
@@ -3249,12 +4140,44 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT creditId, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, paidAt FROM credit_installments WHERE status <> 'cancelled'"
   ],
   [
+    "80ede2cb3ac0d2e5735e04cf761d3df1392b40b3a96b80342a6671338ec58196",
+    "SELECT creditId, effectiveDate, amountMinor FROM late_interest_adjustments"
+  ],
+  [
+    "b76560b7abe676505a018a5fd60d3a872be5cf000f3199b4b219ae9e2fd8cae8",
+    "SELECT creditId, kind, fileName, uploadedAt FROM credit_documents WHERE deletedAt IS NULL"
+  ],
+  [
     "cc45ae6a81a4b79953483f522a09f975265209d485f42d594fa120ae41a65c61",
     "SELECT creditId, stage FROM legal_cases WHERE deletedAt IS NULL AND stage <> 'closed'"
   ],
   [
     "598ee0b5e91f5b81590cb7d54a4dda2e1860dcf9e32ea15a424f72ae174517c6",
     "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments"
+  ],
+  [
+    "c8de5e0d09d6295151cfd5e5d96430e9a51e920e3b538ef73f3148e3d0e842d3",
+    "SELECT d.*, s.simulated FROM fiscal_documents d JOIN fiscal_series s ON s.id = d.seriesId WHERE d.documentDate >= ? AND d.documentDate <= ? AND s.simulated = 0 ORDER BY d.documentType, d.seriesId, d.sequenceNumber"
+  ],
+  [
+    "e865c3abfb2b61f9962b0cb9958b20136f2afd2e7d3c8431c456686255a7685f",
+    "SELECT data FROM fiscal_settings WHERE id = ?"
+  ],
+  [
+    "a6a0882741cecdfe969b33474d56ac5d4aa4739aeec0a5d4b22a3ccdcbf10f83",
+    "SELECT data FROM hub_collection_campaigns ORDER BY updatedAt DESC"
+  ],
+  [
+    "bd1b133e572fc14dbe9948ce9d4234cce036df6e47d8012c04db03c32f329fb8",
+    "SELECT data FROM hub_collection_clients"
+  ],
+  [
+    "ea89d6570cd3fc6b9ce628216ae0a00eed1451311c54b70e8c6a9128014634bf",
+    "SELECT data FROM hub_collection_clients WHERE clientId = ?"
+  ],
+  [
+    "0583d818510eadf218722d67178c227af6dc9dc581518b5773f2436163c4c952",
+    "SELECT data FROM hub_collection_settings WHERE id = ?"
   ],
   [
     "cb2f4cab7cb0f2c54b908b6763633f1490649749afbea38b0913d9a9ae1f794a",
@@ -3273,12 +4196,24 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT details, metadata FROM audit_logs WHERE userId = ? ORDER BY timestamp DESC LIMIT 500"
   ],
   [
+    "c3d49e42d45ffc2c167df66af50a8bfae445319cb3c0a6117253bd7c4fd60672",
+    "SELECT effectiveDate, amountMinor FROM late_interest_adjustments WHERE creditId = ?"
+  ],
+  [
     "955612208855d1e70d25801939d6093432f4766ae3778bb27cd5a97f74d1716a",
     "SELECT enableMultiTenant FROM company_settings WHERE id = 1"
   ],
   [
     "23fa4168af434358e45f29067d31a3e2c8d7105ca30066445be3f164fdb2c491",
     "SELECT entityId FROM limit_escalations WHERE entityType = 'credit' AND status = 'pending'"
+  ],
+  [
+    "f944a39ea1f0dab19a8ac881000f38d2fab92f85c86843532599975ded245e4d",
+    "SELECT estado FROM rh_ponto_periodo WHERE id = ?"
+  ],
+  [
+    "347ab4c37e5bc2fd99af020ed95fc0fcd1a8695b61cbb5d84211c403e2dfd36c",
+    "SELECT estado FROM rh_ponto_periodo WHERE id = ? AND estado = 'fechado'"
   ],
   [
     "c7df52d3221b659e3431812b48fcbfe00a15d0c5b6710d1df3308c0b168e8aeb",
@@ -3297,8 +4232,36 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT fileName, movements FROM accounting_bank_imports"
   ],
   [
+    "49dac65253995df0863e135564c18df4383a19f13115b5f40bdbf6172b65dca0",
+    "SELECT fileName, xml FROM fiscal_saft_exports WHERE id = ?"
+  ],
+  [
     "4bd4bd0a9d5d1caf21761f9d617217f012a9b8995c0f6777f07bec985e660537",
     "SELECT fileName,mime,data,digest FROM accounting_receipts WHERE entryId = ?"
+  ],
+  [
+    "080b2b8369d41243f769671bd5d10f82bfa1d7d28863bcb35c0c454361b98250",
+    "SELECT funcionario_id, SUM(COALESCE(minutos_extra, 0)) AS total FROM rh_ponto WHERE data >= ? AND data < ? GROUP BY funcionario_id"
+  ],
+  [
+    "a5096c0880233286e3c8007d409a1970dc33dd9365ed18ed43970d00d907c917",
+    "SELECT funcionario_id, data, data_hora, tipo FROM rh_marcacao WHERE anulada = 0 AND data >= ? AND data <= ?"
+  ],
+  [
+    "fd4afa13ee75bd604c49f023c5fd535ddbeb6cde0d257058c2f14b27f9c58ec1",
+    "SELECT funcionario_id, data, entrada, saida, origem, observacoes FROM rh_ponto WHERE data >= ? AND data <= ?"
+  ],
+  [
+    "f1942631297ae6c6710c1a17890fd2c26e0c922e6e6970bece984d992b48f4bc",
+    "SELECT funcionario_id, data, horario_id FROM rh_escala WHERE data >= ? AND data <= ?"
+  ],
+  [
+    "ca349fa8bc7a0e464b09d2cd63d981c1358705c5349097ca0303e90fe3bca422",
+    "SELECT funcionario_id, data_hora, tipo FROM rh_marcacao WHERE anulada = 0 AND data >= ? AND data <= ?"
+  ],
+  [
+    "b3007abe9f0735684fea33f98115b63eead8ff7bb9690caeca8b3a74afdaa050",
+    "SELECT funcionario_id, data_inicio, data_fim FROM rh_justificacao WHERE estado = 'pendente'"
   ],
   [
     "1b125175cc9de0b5d4ef63056dd9b014e79b7eae3d739262b8465cee8f64f49a",
@@ -3309,8 +4272,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id FROM accounting_entries ORDER BY rowid DESC LIMIT 1"
   ],
   [
+    "fcff5fe82a2835dd20489f3e38ca2492030b272a8de888fdc1ccba91fab3c3c4",
+    "SELECT id FROM accounting_entries WHERE id = ?"
+  ],
+  [
     "861cbdc76ebee5398bdb7a21f231dc19a5f63647c59c53736e665dfdfbe93508",
     "SELECT id FROM accounting_requests WHERE kind = ? AND targetId = ? AND status = 'pending'"
+  ],
+  [
+    "2bcfe3e842769fa53fcd3eb85acd717e546f1b4edfe6254d28081a4466d10e65",
+    "SELECT id FROM clients WHERE id = ?"
   ],
   [
     "494ba46c8daee18c0d0106d44c28a8c55bd17672eaef907659da8c3ff03ad986",
@@ -3337,6 +4308,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id FROM legal_cases WHERE creditId = ? AND deletedAt IS NULL AND stage <> 'closed'"
   ],
   [
+    "d61c4989462471273a31c5333a530a5078129ca92bebc382c1dc35931302445b",
+    "SELECT id FROM legal_cases WHERE creditId = ? AND stage <> 'closed' AND deletedAt IS NULL"
+  ],
+  [
     "5202cc4abdce53a37ab39a6b28071d6d20df0455b0b050c5fdf30cd5e9c0ff48",
     "SELECT id FROM notifications WHERE id = ?"
   ],
@@ -3345,8 +4320,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id FROM payments WHERE idempotencyKey = ?"
   ],
   [
+    "b291155cc461679266d5bd642395403efdab5eaa2d04686883d8de1fe685c9c2",
+    "SELECT id FROM rh_ausencia WHERE funcionario_id = ? AND estado <> 'anulada' AND data_inicio <= ? AND data_fim >= ?"
+  ],
+  [
     "179adb4c10c4d0178d51050bb3bbbe50c42be41454b24fbeb73fb0cf97aebfef",
     "SELECT id FROM rh_funcionario WHERE numero_mecanografico = ?"
+  ],
+  [
+    "33e0bde1c3400e34fb7d8a27c2ecc0a40d175b199e9f78d0300f9e6f3f898e6f",
+    "SELECT id FROM rh_funcionario WHERE utilizador_id = ?"
+  ],
+  [
+    "428d4f7356d6b044fac5fe2986ad92484d759e12aad2e8402e3686a1e6e468d7",
+    "SELECT id FROM rh_justificacao WHERE funcionario_id = ? AND estado = 'pendente' AND data_inicio <= ? AND data_fim >= ?"
   ],
   [
     "8fba13f1d3c6aa856318f2379e60236b6eadacdfaa296b29e7448800f1968aa5",
@@ -3365,6 +4352,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id FROM users WHERE email = ?"
   ],
   [
+    "dabd815610d8fc580756935c59189d49fe08d23f449002ba30dbb349db6aaf4d",
+    "SELECT id FROM users WHERE isOwner = 1"
+  ],
+  [
     "a0c2a7f0d5cd98b706cb5be27130f5073bf7c22a5e00a9f883341133491e2c67",
     "SELECT id FROM users WHERE role IN ('admin','super_admin','credit_director') AND (status IS NULL OR status <> 'blocked')"
   ],
@@ -3381,8 +4372,44 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, ano, lei_referencia, vigencia_inicio, vigencia_fim FROM rh_irt_tabela ORDER BY vigencia_inicio DESC"
   ],
   [
+    "45deb9d1e3e49c8285d81234f9a4a11fb21c91bb67e50bfbbecdf31f8e5e78d7",
+    "SELECT id, ano, mes, estado FROM rh_processamento WHERE tipo = 'normal' AND estado IN ('aberto', 'calculado')"
+  ],
+  [
     "6d7b3935f9f8e4a18e369d3e76f6ce48e560a71f078c394f230a91155d30eb19",
     "SELECT id, chave, valor, descricao, vigencia_inicio, vigencia_fim FROM rh_parametro ORDER BY chave, vigencia_inicio DESC"
+  ],
+  [
+    "8b60c066ad16f773d327287db66902a129be619f57e06a56780dbf245c551eb9",
+    "SELECT id, clientId, NULL AS clientName FROM legal_cases"
+  ],
+  [
+    "34e9a9b233bd13368de58eafe519413202debb13e23c5a76c316630851f11b77",
+    "SELECT id, clientId, NULL AS clientName FROM warranties"
+  ],
+  [
+    "3e9d3040daab8b484eba3e0bff42f812371b82f2d8dc6d3da017c2afacdb556c",
+    "SELECT id, clientId, clientName FROM collection_messages"
+  ],
+  [
+    "0c0e058ea529801a27880053b460a58e22a6eef545c3b963ccb14f3ca6ff862f",
+    "SELECT id, clientId, clientName FROM contracts"
+  ],
+  [
+    "84e4d4993174c13982a947d70dc15e7b756ca5f740bf911d7926dd1fc9f667ba",
+    "SELECT id, clientId, clientName FROM credits"
+  ],
+  [
+    "86cd5c13ec91eee3e3ac2acf35ed531d4e2fbfe6cabe6cf8f632dbf8b7da5e4c",
+    "SELECT id, clientId, clientName FROM simulations"
+  ],
+  [
+    "449f95b73521fb1fe4fcf6523df7677845b1c2dcc936adfcd5f5472da9641d46",
+    "SELECT id, clientId, clientName, creditNumber, principalAmount, totalDue, currentBalance, installments, paidInstallments, status, createdAt, dueDate, paidAt FROM credits WHERE usuario_id = ? AND deletedAt IS NULL ORDER BY createdAt"
+  ],
+  [
+    "e8bf3e4eaef1d3b357eb2e4c3af9957b7bf7bc8b5df2c3691ecdf035d51cc9ec",
+    "SELECT id, clientId, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL"
   ],
   [
     "33c7348b49294ad9b1ccf1e756b16b31fc61650d4b51ad4d561ddb5971f812fc",
@@ -3395,6 +4422,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "68a37b8e9bab8c64d19dc673d86ee67997224e261d646b12e0a13b94806dacc1",
     "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "839bad88dd743df1bb3197359d4ea7be650c14383f0666382698af5fef8b5bae",
+    "SELECT id, clientId, clientName, status, version, dueDate FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
     "40e256e2a8dfeb3b6334c509ea5dd63fbe8965a4035998ec12ca5ccb9dfb6169",
@@ -3413,12 +4444,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientId, status, version, lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "b8c34b3dcd738a62a2244c14b48b42d82d38c255ea5b00bb5c652e54154a37b1",
+    "SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL"
+  ],
+  [
     "463f0161a81c45d9b44e81bb00da9c1d600a8475d6e0916fba7a26d628571e1c",
     "SELECT id, createdAt, startDate FROM credits"
   ],
   [
-    "2700cbcf81526b02bff254c2148f19906658bb7180c0b753ff42aad7e9012c78",
-    "SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments, decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt FROM credit_approvals ORDER BY decidedAt DESC"
+    "9f9c08f3b26056685e6d039a882211569a2318a386a71025189f7e54346a6ff9",
+    "SELECT id, creditId, clientName, amount, paymentDate, method, status FROM payments WHERE usuario_id = ? AND deletedAt IS NULL ORDER BY paymentDate"
   ],
   [
     "363e9c081ff01a62e89b553e613e142a89a67fb240317ebc1b1bc361a186a0f7",
@@ -3433,16 +4468,52 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, deletedBy FROM clients WHERE deletedAt IS NOT NULL"
   ],
   [
+    "8aaf715d27a388337e087ab118d50f51624ef0ebbaaca7445c6c246b7cedcdc5",
+    "SELECT id, departamento_id, nome, responsavel_id, activo FROM rh_seccao ORDER BY nome"
+  ],
+  [
     "cd9c8e924c552da45d883f5e02f6f267e3f7130b5d55661f8d77a75ce5bc1218",
     "SELECT id, dueDate, principalMinor, interestMinor, paidPrincipalMinor, paidInterestMinor, status, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
+  ],
+  [
+    "819ed510af1f56599a14cabd16e1bf7bf020dd6f6cdb4fa19241c068bc233016",
+    "SELECT id, email FROM users"
   ],
   [
     "a968fbb38a8a55fceb9493e0a6a0bf3f4ff3d80b2c499e350eb816df04055421",
     "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts ORDER BY createdAt DESC, id ASC"
   ],
   [
+    "8c01c0096996d2a63475b90acb873157fc6753eabd9cf35b14c6f9c6dfe8ce54",
+    "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending'"
+  ],
+  [
+    "a446576f662ca1a898bf08ea15d902dee6f59cd51c6a8bf9489af753f59be6bf",
+    "SELECT id, entityType, entityId, operation, status, createdAt, resolutionNote, resolvedBy, resolvedAt FROM sync_conflicts WHERE status = 'pending' ORDER BY createdAt DESC LIMIT 5"
+  ],
+  [
+    "fb07e36183e757ef757de789738a182a253b17fb10acf5fe405fa743813190a8",
+    "SELECT id, entityType, operation FROM sync_conflicts WHERE status = 'pending'"
+  ],
+  [
+    "c8235665d1c2ef00849d4d1bc120f5f9b3f39f126a47cdb580d8a51b6c677fb5",
+    "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100"
+  ],
+  [
+    "a9dcfb09eab890b703ac20b0ef371c75c8255b1340189a859405833116e26da8",
+    "SELECT id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, estado, comentario, decidido_por_nome, decidido_em, criado_em, criado_por_nome FROM rh_justificacao ORDER BY estado = 'pendente' DESC, criado_em DESC"
+  ],
+  [
+    "8d33bf682811268dc0c54fc73c4843d10fb3e86c539dafe6970f422922e820eb",
+    "SELECT id, funcionario_id, data_inicio, data_fim, ausencia_id, motivo_codigo, motivo, anexo_nome, anexo_mime, estado, comentario, decidido_por_nome, decidido_em, criado_em, criado_por_nome FROM rh_justificacao WHERE funcionario_id = ? ORDER BY criado_em DESC"
+  ],
+  [
     "9f8d1be53f9d38c18734596b7746c96512bbed2514143d020d3875878437bf1b",
     "SELECT id, funcionario_id, nome, parentesco, data_nascimento FROM rh_dependente WHERE funcionario_id = ? ORDER BY nome"
+  ],
+  [
+    "42df72690b652f88ce6ff5c4f469fc35ae81b5898133d9570b6e879051039534",
+    "SELECT id, funcionario_id, tipo_id, data_inicio, data_fim, horas, estado, meio_dia FROM rh_ausencia WHERE data_fim >= ? AND data_inicio <= ?"
   ],
   [
     "e98f48b365d100b404c42775a95dd65679921d01273ee2fcbe61191b4324fa4b",
@@ -3463,6 +4534,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d4e82fae11dd8685c4078a481dcfbad01e016e35bd74288ac66264fd270e4cdf",
     "SELECT id, name, email, username, role, avatar, status, permissions FROM users"
+  ],
+  [
+    "ae82b24e38ac8e07be0a3ec52ecb1a34f063c179292e21bd4b7a75ea0dc8ac27",
+    "SELECT id, name, nif, createdAt FROM clients WHERE usuario_id = ? AND deletedAt IS NULL ORDER BY createdAt"
+  ],
+  [
+    "710e50450bcb49366133a2306c95dae6ac8a76a1299da24277fde0d54509727d",
+    "SELECT id, name, nif, createdAt, deletedAt, deletedBy FROM clients"
   ],
   [
     "778d419b2ac687743b5cbc33649fb974d0d615ff3d43dde2572e18522a4de31b",
@@ -3489,8 +4568,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome"
   ],
   [
+    "aa9a0ff6144e6a47ec67a0f9a061b02a7bfc834a51b9874057c3cab11c3ef872",
+    "SELECT id, nome, departamento_id, salario_referencia_minor, activo, nivel FROM rh_cargo ORDER BY nome"
+  ],
+  [
     "9669f694073b70deffb681c56c5cee2b8a107ef71f5cf16951a43e11176d5609",
     "SELECT id, nome, responsavel_id, activo FROM rh_departamento ORDER BY nome"
+  ],
+  [
+    "801485cfd2c135183065ae4383f664c096e46018f85e749720cbd1ecf5b42ff3",
+    "SELECT id, operation FROM sync_conflicts WHERE status = 'archived' AND entityType = 'clients'"
+  ],
+  [
+    "d00a2d87c007892593f34120855957ac7bdf2a0f59a521a5cc2bf2d324e72ae0",
+    "SELECT id, operation FROM sync_conflicts WHERE status = 'pending' AND (entityType = ? OR entityType = 'desconhecido') AND (entityId = ? OR instr(operation, ?) > 0)"
   ],
   [
     "1308df400a7c24c53059236ef3d0be65f01f195fa81bcdd6e6f1202f40acaf89",
@@ -3525,6 +4616,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, status, interestMinor, lateInterestMinor, paidInterestMinor, paidLateInterestMinor, version FROM credit_installments WHERE creditId = ? ORDER BY installmentNumber"
   ],
   [
+    "1c070ea182f6e8f25ef18a12ae4e5a24e81371775203534f0f39d885cfd5fee6",
+    "SELECT id, status, resolutionNote, operation FROM sync_conflicts WHERE status = 'pending' OR resolutionNote = ?"
+  ],
+  [
+    "c024d39ef68ac5d03aaccc9261bd8c7c2c4c210f150b0b683e2381cd4f961a83",
+    "SELECT id, timestamp, action, entity, details, metadata, userName FROM audit_logs WHERE userId = ? ORDER BY timestamp"
+  ],
+  [
     "1c6cd7487d8c304c871361e6c8caf23a6cf43f6eca836c431a34caafd22bdb0a",
     "SELECT id, timestamp, type, description, debit, credit, amountTotal, justification FROM accounting_entries WHERE paymentId = ? ORDER BY timestamp"
   ],
@@ -3537,12 +4636,28 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, timestamp, userId, userName, action, entity, details, previousState, newState, metadata FROM audit_logs"
   ],
   [
+    "15fa05a49cfb8f2fbdcf5a9cdaecf7c7d59171916c4713b89d2e2170df8ed7b2",
+    "SELECT id, timestamp, userName, action, details FROM audit_logs WHERE details LIKE 'Fiscal:%' ORDER BY timestamp DESC LIMIT 300"
+  ],
+  [
     "4c603e933bf26c91ba8819985b723329ba01977ff95541ac85776f7622f1bda8",
     "SELECT id, timestamp, userName, action, details, metadata FROM audit_logs WHERE entity = 'payment' AND (metadata LIKE ? OR details LIKE ?) ORDER BY timestamp"
   ],
   [
+    "33191cbe50be0fa97d8f4f2f44f49c11fa6fbb113c2ab35711f00e363fb1b58d",
+    "SELECT id, timestamp, userName, action, details, previousState, newState, metadata FROM audit_logs WHERE entity = 'rh' AND metadata LIKE '%\"modulo\":\"ponto\"%' AND timestamp >= ? AND timestamp <= ? AND (? = '' OR metadata LIKE ?) AND (? = '' OR userName = ?) AND (? = '' OR action = ?) ORDER BY timestamp DESC LIMIT 2000"
+  ],
+  [
+    "df64726503777ff732a2fd97f5c19db6941d2cc8471efed68894839306b965e4",
+    "SELECT id, timestamp, userName, action, details, previousState, newState, metadata FROM audit_logs WHERE entity = 'rh' AND metadata LIKE ? AND metadata LIKE ? ORDER BY timestamp DESC LIMIT 100"
+  ],
+  [
     "c6e443cd9c8c37b255d18b0b1ce45e6d91699f3fb334b82104daabea473fadee",
     "SELECT id, timestamp, userName, action, entity, details, metadata FROM audit_logs WHERE details LIKE ? OR metadata LIKE ? ORDER BY timestamp DESC LIMIT 500"
+  ],
+  [
+    "09195776dcb7e442622c3ad56d4752a7b975861a8219ea9f59830f1cd9cef108",
+    "SELECT id, title, message FROM notifications WHERE userId = ? AND read = 0 AND timestamp >= ? ORDER BY timestamp DESC LIMIT 20"
   ],
   [
     "14fee47bb181f867e0e0738dbbeef2b087656dcd28b049f1b862bac69d87da45",
@@ -3577,6 +4692,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT l.*, t.timestamp, t.sourceId, t.description FROM ledger_lines l LEFT JOIN ledger_transactions t ON t.id = l.transactionId ORDER BY t.timestamp, l.id"
   ],
   [
+    "0a903bfac66dfe859739822104eec4fa29c40723aa9fad80d3cb996d6df36535",
+    "SELECT l.account, l.side, SUM(l.amountMinor) AS total FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId WHERE a.creditId = ? AND l.account IN ('portfolio', 'receivable_interest', 'receivable_late_interest') GROUP BY l.account, l.side"
+  ],
+  [
     "5558fd1c526ae8992497c24e2af82739e380ff079dc39e59e0687c1732642342",
     "SELECT l.account, l.side, l.amountMinor FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId WHERE a.creditId = ? AND l.account IN ('receivable_interest', 'receivable_late_interest')"
   ],
@@ -3597,6 +4716,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT name FROM users WHERE id = ?"
   ],
   [
+    "22488534dfe722c430a6d902ab8a33cf231f623862608ff4b99cf735a72dda9f",
+    "SELECT operation FROM sync_conflicts WHERE status = 'pending'"
+  ],
+  [
+    "8d98e229e64c28989ac154879fe77385041a351df2d12edc2d36039f502e88f5",
+    "SELECT p.id, p.creditId, p.clientName, p.amount, p.paymentDate, p.method, p.status FROM payments p JOIN credits c ON c.id = p.creditId WHERE c.usuario_id = ? AND p.deletedAt IS NULL ORDER BY p.paymentDate"
+  ],
+  [
     "cd7425ad37f05c39d77544341e93a100b38f87d46cbfa2509baa808deca16090",
     "SELECT password FROM users WHERE id = ?"
   ],
@@ -3607,6 +4734,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "459f4f20e07f4541b02443d4f186443ea6c6a9ee38a3b954d97811d11caccc93",
     "SELECT paymentDate, allocatedToPrincipalMinor, allocatedToInterestMinor, allocatedToLateInterestMinor FROM payments WHERE creditId = ? AND deletedAt IS NULL AND status = 'confirmed'"
+  ],
+  [
+    "c3ae21f924689cb6dda76b92daacb1037966c811723ce50e9d925f274969bb7e",
+    "SELECT paymentId FROM fiscal_documents WHERE paymentId IS NOT NULL"
   ],
   [
     "d97d7ae68294c41233c982840721ac90ca3447c1b22adcb80b583cdbceab48d0",
@@ -3627,6 +4758,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6182871c6857599612b3bfcdb721769c02bfa0827f1434873f34862c0bcefe10",
     "SELECT r.*, p.ano, p.mes, p.tipo, p.estado FROM rh_recibo r JOIN rh_processamento p ON p.id = r.processamento_id WHERE r.funcionario_id = ? ORDER BY p.ano DESC, p.mes DESC"
+  ],
+  [
+    "da5064670e3c76c4732f0e8472b61eb8bdf113286f25390fbff175f6e07bfd70",
+    "SELECT r.utilizador_id FROM rh_departamento d JOIN rh_funcionario r ON r.id = d.responsavel_id WHERE d.id = ?"
   ],
   [
     "80b923cccce89f645cf1de26a8b39ef94afa07c0541f5df197186e2eb74e0935",
@@ -3671,6 +4806,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "be96f977f4c6c5ccde3e8d8a555a7e0eeebc5197084882551764119cec4c22c8",
     "SELECT rowid AS ledgerSequence, * FROM accounting_entries ORDER BY rowid ASC"
+  ],
+  [
+    "35e58df133f60ae4922f6a6ebc9b91214d6566179926b42461932b4b2298c6ec",
+    "SELECT saftHash FROM fiscal_documents WHERE seriesId = ? AND sequenceNumber < ? ORDER BY sequenceNumber DESC LIMIT 1"
+  ],
+  [
+    "0ac8e46fd603367f813790b5367b99c08448651c683bf52bb29117fd34f7caee",
+    "SELECT saftHash FROM fiscal_documents WHERE seriesId = ? ORDER BY sequenceNumber DESC LIMIT 1"
+  ],
+  [
+    "c488eba4035d6f40df767d80942f035261b05fa84aa1b283e8353e74bfafb012",
+    "SELECT service, httpStatus, resultCode, durationMs, error, createdAt FROM fiscal_agt_requests WHERE documentNos LIKE ? ORDER BY createdAt DESC LIMIT 30"
   ],
   [
     "bb293c2fc380f941ebdcbc4b3e08ce6bbcd5a0286b82c3624ea7c7b63b9210ec",
@@ -3745,8 +4892,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET biAlertSentAt = ? WHERE id = ?"
   ],
   [
+    "7b34b8c9a3bf8f4de98752190284240b321a44636de583dd3b86796447af9e1f",
+    "UPDATE clients SET deletedAt = ?, deletedBy = ? WHERE id = ?"
+  ],
+  [
     "cc56e1bbcaa83b9aa4a6a4c3b3a8630e9c084935453c1c62425ac2929ab65c46",
     "UPDATE clients SET deletedAt = ?, deletedBy = ?, originalState = ? WHERE id = ?"
+  ],
+  [
+    "1c39c1848fdc4301f994e78dd3f8c4c9f27960ce37be1510047a9a24efba1d41",
+    "UPDATE clients SET deletedAt = NULL, deletedBy = NULL WHERE id = ?"
   ],
   [
     "254e0e1286c08e459be91d2b89add0d879ada5c708955afb9f5aae1927b0c0f2",
@@ -3757,12 +4912,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL"
   ],
   [
-    "b8b3e41aa4ffdfa17ea7ea60603a7cd739caed63f45683a85dbe58eaffad9e1b",
-    "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy) WHERE id = ?"
+    "ba50bf729e0a7dd52c768839404370d7b8b4ae2c23a3492e3c8fbea2cd321e7a",
+    "UPDATE clients SET name = COALESCE(?, name), nif = COALESCE(?, nif), phone = COALESCE(?, phone), email = COALESCE(?, email), address = COALESCE(?, address), creditLimit = COALESCE(?, creditLimit), usedCredit = COALESCE(?, usedCredit), availableCredit = COALESCE(?, availableCredit), monthlyIncome = COALESCE(?, monthlyIncome), defaultInterestRate = COALESCE(?, defaultInterestRate), lateInterestRate = COALESCE(?, lateInterestRate), toleranceDays = COALESCE(?, toleranceDays), status = COALESCE(?, status), riskLevel = COALESCE(?, riskLevel), whatsappVerified = COALESCE(?, whatsappVerified), documents = COALESCE(?, documents), bankCoordinates = COALESCE(?, bankCoordinates), receiveMethod = COALESCE(?, receiveMethod), lastContacted = COALESCE(?, lastContacted), usuario_id = COALESCE(?, usuario_id), birthDate = COALESCE(?, birthDate), age = COALESCE(?, age), issueDate = COALESCE(?, issueDate), expiryDate = COALESCE(?, expiryDate), gender = COALESCE(?, gender), maritalStatus = COALESCE(?, maritalStatus), fatherName = COALESCE(?, fatherName), motherName = COALESCE(?, motherName), workInstitution = COALESCE(?, workInstitution), socialSecurityNumber = COALESCE(?, socialSecurityNumber), spouseName = COALESCE(?, spouseName), spouseBi = COALESCE(?, spouseBi), spouseNif = COALESCE(?, spouseNif), spousePhone = COALESCE(?, spousePhone), spouseEmail = COALESCE(?, spouseEmail), legalRepresentative = COALESCE(?, legalRepresentative), legalRepRole = COALESCE(?, legalRepRole), spouseBirthDate = COALESCE(?, spouseBirthDate), spouseOccupation = COALESCE(?, spouseOccupation), spouseIncome = COALESCE(?, spouseIncome), spouseDataRefused = COALESCE(?, spouseDataRefused), spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt), spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy), spouseConsentAt = COALESCE(?, spouseConsentAt), spouseConsentBy = COALESCE(?, spouseConsentBy), birthPlace = COALESCE(?, birthPlace), province = COALESCE(?, province), municipality = COALESCE(?, municipality), neighborhood = COALESCE(?, neighborhood), zone = COALESCE(?, zone), spouseBirthPlace = COALESCE(?, spouseBirthPlace), spouseProvince = COALESCE(?, spouseProvince), spouseMunicipality = COALESCE(?, spouseMunicipality), spouseNeighborhood = COALESCE(?, spouseNeighborhood), spouseZone = COALESCE(?, spouseZone), employmentSector = COALESCE(?, employmentSector), ministry = COALESCE(?, ministry), employerNif = COALESCE(?, employerNif), workPosition = COALESCE(?, workPosition), clientCategory = COALESCE(?, clientCategory), clientType = COALESCE(?, clientType), documentType = COALESCE(?, documentType), countryCode = COALESCE(?, countryCode), nationality = COALESCE(?, nationality), passportFormatValidated = COALESCE(?, passportFormatValidated), foundationDate = COALESCE(?, foundationDate), legalForm = COALESCE(?, legalForm), businessSector = COALESCE(?, businessSector), commercialRegistry = COALESCE(?, commercialRegistry) WHERE id = ?"
   ],
   [
     "2f7925dfbdf6d1a23a6e49b58530e1a21aeb956df25dfba73b9630f5833ef9e4",
     "UPDATE clients SET nif = 'SEM-' || substr(hex(randomblob(4)),1,8) WHERE nif = 'SEM IDENTIFICAÇÃO'"
+  ],
+  [
+    "855d6d15c8e80a8a70904062bb8942e9bfbb52f3e6cbf6be66553d891fd89dbc",
+    "UPDATE clients SET usedCredit = ?, availableCredit = ?, status = ? WHERE id = ?"
+  ],
+  [
+    "f9cefe92a518cf9804e547a552999c6258d2ffb8f24c91b4562a449e6264bea4",
+    "UPDATE collection_messages SET clientId = ? WHERE id = ?"
   ],
   [
     "d22eef7acbed00c1607c1fb515f4c922bc8cef0c745b906abeb35ecbc671943a",
@@ -3779,6 +4942,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "cd2d870a39f3cc21c902caf66fb4044863c21d91a3c2c3456a16e4b612d34c18",
     "UPDATE company_settings SET rescueKey = NULL WHERE rescueKey = ?"
+  ],
+  [
+    "c4132819a7a00dfd05bc48c79925cee616e37f8a76b5e95719414be82b7f1e6b",
+    "UPDATE contracts SET clientId = ? WHERE id = ?"
   ],
   [
     "1f47bc88d56694d6fd29862949abbba5a1b22c46856ed92b0cb36f33c234b486",
@@ -3877,6 +5044,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, dueDate = ?, status = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
+    "8f1b664e1445ba7cda6dd6603cc05500665097c02fddd2b0584b1cbdb513b0ba",
+    "UPDATE credits SET clientId = ? WHERE id = ?"
+  ],
+  [
     "a725143990d6d068b5042e81ee952a0bef767210d8e5e6ac633b401000cf06c5",
     "UPDATE credits SET currentBalance = ?, currentBalanceMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, lateInterest = ?, lateInterestMinor = ?, totalDue = ?, totalDueMinor = ?, paidInstallments = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
@@ -3903,6 +5074,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "c844921d1680cc66ae248eb364224f933767329f16738f743a16ce50beffdfee",
     "UPDATE credits SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL"
+  ],
+  [
+    "77ea8af1824e5fece6a80968178139716c43bc8e6f6bd88aca0f6fcd78271413",
+    "UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?, installments = installments + ?, dueDate = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?"
   ],
   [
     "fe1a161f6325e819fde15144917bf75aa8e7538614876bcd4e6b2ab5aa46b31e",
@@ -3941,8 +5116,52 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE credits SET usuario_id = ? WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "a198323addabcb08b50a971f2a3f0d89b2df0dfb5c0a67fc3ec35ac65e8f3726",
+    "UPDATE fiscal_documents SET agtNextAttemptAt = ? WHERE id = ?"
+  ],
+  [
+    "b635bbc75952dade73eb04d800c859c3903cc81a10ce4b15da6a19c4826f8013",
+    "UPDATE fiscal_documents SET agtStatus = 'em_validacao', agtAttempts = ?, agtNextAttemptAt = ? WHERE agtRequestId = ? AND agtStatus IN ('enviado','em_validacao')"
+  ],
+  [
+    "50e84c76f0a73ea9b9295d40718e21f64772573e1085bfb70b9e50b909abae28",
+    "UPDATE fiscal_documents SET agtStatus = 'enviado', agtRequestId = ?, agtErrors = '[]', agtLastAttemptAt = ?, agtNextAttemptAt = ?, agtAttempts = agtAttempts + 1 WHERE id = ?"
+  ],
+  [
+    "df5161d4089065b39fdb3b5131e6cbf5843eac6fe590bb54853fe414ccd730d5",
+    "UPDATE fiscal_documents SET agtStatus = 'erro_envio', agtErrors = ?, agtLastAttemptAt = ?, agtNextAttemptAt = ?, agtAttempts = ? WHERE id = ?"
+  ],
+  [
+    "f53981da78376aee5d152f949f412545ceb80e1c5758c5c48cf59365a7193fd1",
+    "UPDATE fiscal_documents SET agtStatus = 'invalido', agtErrors = ?, agtLastAttemptAt = ?, agtNextAttemptAt = NULL, agtAttempts = agtAttempts + 1 WHERE id = ?"
+  ],
+  [
+    "17f90c3a687f74e343426ca53b5c7622cb26756df9f10b675f2be89d8aebd960",
+    "UPDATE fiscal_documents SET agtStatus = 'invalido', agtErrors = ?, agtNextAttemptAt = NULL WHERE id = ?"
+  ],
+  [
+    "3d2289462ceb11184814449819cc16adeb1388d9618cc0acc0433cf7cfecc527",
+    "UPDATE fiscal_documents SET agtStatus = 'pendente', agtRequestId = NULL, agtNextAttemptAt = ? WHERE agtRequestId = ?"
+  ],
+  [
+    "ae746bcd1f9dad255e0d3ce4edbfc70e2466869cedbb23ac9d251a96ee507434",
+    "UPDATE fiscal_documents SET agtStatus = ?, agtValidatedAt = ?, agtErrors = '[]', agtNextAttemptAt = NULL WHERE id = ?"
+  ],
+  [
+    "e31515f273a6356a781179a056d70435a7dd0bea576d42fe0ee77ee016871b0d",
+    "UPDATE fiscal_series SET nextNumber = nextNumber + 1, status = 'U' WHERE id = ? AND nextNumber = ?"
+  ],
+  [
+    "940410b8bff9d13f6c09b69d5e549d2b6166c89b4b75fb36096037b1f8234c8a",
+    "UPDATE fiscal_series SET status = ?, lastNumber = ?, agtSyncedAt = ? WHERE id = ?"
+  ],
+  [
     "9d9336ca8747e039dc5456d53c24237c97b0b67f0a54f71ec4221485798c1e6d",
     "UPDATE internal_messages SET read = 1 WHERE id = ?"
+  ],
+  [
+    "bbe65cc3d309f609d3b7dbfed343489465bdcf929f3e52198ffac0b7b8ce9af7",
+    "UPDATE legal_cases SET clientId = ? WHERE id = ?"
   ],
   [
     "48f5379958a85341393f726117a65debb862872e854e80356cb01c70f42d13d2",
@@ -4109,6 +5328,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_ausencia SET tipo_id = ?, documento_id = COALESCE(?, documento_id), motivo = ?, estado = 'aprovada', aprovado_por = COALESCE(aprovado_por, ?), aprovado_por_nome = COALESCE(aprovado_por_nome, ?), aprovado_em = COALESCE(aprovado_em, ?), actualizado_em = ? WHERE id = ?"
   ],
   [
+    "9c7473e87c6de227648b9448b7fbcd1ead5e4282930e63d8842e596c7fa03d45",
+    "UPDATE rh_ausencia SET tipo_id = ?, documento_id = COALESCE(documento_id, ?), motivo = ?, estado = 'aprovada', aprovado_por = COALESCE(aprovado_por, ?), aprovado_por_nome = COALESCE(aprovado_por_nome, ?), aprovado_em = COALESCE(aprovado_em, ?), actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "972ea14e59edd69f5fb65a99672e26932c4471769cc86c32c5844716212b0db1",
+    "UPDATE rh_banco_horas SET anulado = 1, motivo_anulacao = ?, actualizado_em = ? WHERE id = ? AND anulado = 0"
+  ],
+  [
+    "9ff8f340912ccee4d7e5cf8d83a912822fab8bd6d4c772aace06b9d7f8dd0d66",
+    "UPDATE rh_banco_horas SET anulado = 1, motivo_anulacao = ?, actualizado_em = ? WHERE origem = 'fecho' AND anulado = 0 AND data >= ? AND data <= ?"
+  ],
+  [
+    "c009f847c466738eb1cacb318f68e5c0205b1f3f4db55b7cc84d3e8de0f824ae",
+    "UPDATE rh_cargo SET nivel = ? WHERE id = ?"
+  ],
+  [
     "70b17522712170f46d29befb8fcf22e93175745dd74701b3e763dc0e74383b86",
     "UPDATE rh_cargo SET nome = ?, departamento_id = ?, salario_referencia_minor = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
@@ -4121,44 +5356,124 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_contrato SET estado = 'terminado', motivo_fim = ?, fim = COALESCE(fim, ?), actualizado_em = ? WHERE funcionario_id = ? AND estado = 'activo'"
   ],
   [
+    "bb6edfac87d99ceff2660e6c6ad2fe8b429841d16989682e57b1c7af2106c9dc",
+    "UPDATE rh_correio SET lida = 1 WHERE id = ?"
+  ],
+  [
     "1a75ecc7bd3ab836b71c8afbde3cdf927e6d2801e9ab7a96e4ad05b6e19c317f",
     "UPDATE rh_departamento SET nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
-    "132514af7576aea98e763da69454ed277f3a99793260bcc22ccef69642cdeb26",
-    "UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'"
+    "414a8e9799efafc8198eac0d0757aa3541bdb3a7346924ec1955932e8a0c7c9f",
+    "UPDATE rh_doc_pasta SET anulada = 1, actualizado_em = ? WHERE id = ? AND anulada = 0"
+  ],
+  [
+    "4a99ed3f8e60dbacbaad0ca34714726333d3186b6635bd192989a3904bbe118e",
+    "UPDATE rh_doc_pasta SET nome = ?, actualizado_em = ? WHERE id = ? AND anulada = 0"
+  ],
+  [
+    "211cf4d87ea2ca01907c2184b344fc66570b53f173a29d1018d17fa0387fcc56",
+    "UPDATE rh_documento SET estado = 'activo', anulado_por = NULL, anulado_por_nome = NULL, anulado_em = NULL, actualizado_em = ? WHERE id = ? AND estado = 'arquivado'"
+  ],
+  [
+    "84510c2519b50e716c3da411ef381a926fb9e7574da2453bdac15aff99ec9e66",
+    "UPDATE rh_documento SET estado = 'arquivado', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'"
   ],
   [
     "bb41ab2231a439651f053a7e7926ef4936116cb106d7d812915f6d9e27bb4fad",
     "UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'"
   ],
   [
+    "ddab18aa8762c9acd2520360cd4b879ad87c698669ba5e760d22680b04c54644",
+    "UPDATE rh_documento SET nome = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "45a93ad2f03094bb3e7333525105a6449aa62e70f4f30148a8932500ecbf6967",
+    "UPDATE rh_documento SET pasta_id = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "b133f82bf9292f0f600ba62b7a28ff57618e155e1703536e4ab65405bda11a4f",
+    "UPDATE rh_documento SET pasta_id = NULL, actualizado_em = ? WHERE pasta_id = ?"
+  ],
+  [
     "ccfe9f9dafb2bd15a93d3fa2c30d35c1722bfd1d868d60f4658e8ff790e70e62",
     "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?"
+  ],
+  [
+    "ca1996734edd02bc11ea8feacbabdedff0918eb81e149b0097fd86cea637ddd7",
+    "UPDATE rh_funcionario SET banco_horas = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "3ad26c356f68875cd895586c411354fc7602eeb6428ac916d4cbb15e1562821c",
+    "UPDATE rh_funcionario SET departamento_id = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "91554a2daffb317a6380ec91e6d4e492c1d3e522d5ec700abc0ba427945f6fcf",
     "UPDATE rh_funcionario SET estado = 'cessado', data_saida = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
-    "443db8e17413940e67a56041d89d2541fc325019f8c8207ad99943e207749deb",
-    "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, actualizado_em = ? WHERE id = ?"
+    "cd71cc4bcf85df8fab0dd7c4bddc2aeb7b0a03780673c869e2b642347ecaf783",
+    "UPDATE rh_funcionario SET estado = ?, actualizado_em = ? WHERE id = ? AND estado <> 'cessado'"
+  ],
+  [
+    "dad7a372bcdd4cfa7a4e289e81bd25b2164a3adea15e1b1c916a963fb45d289b",
+    "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, nacionalidade = ?, telefone_alternativo = ?, provincia = ?, municipio = ?, chefe_id = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "377b85204f4231d0a3a5e0558324aa9952484cc25da94c63f1c415f197f72c32",
+    "UPDATE rh_funcionario SET pin_ponto_hash = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "32a5da0c56be46fe39f85def333067068d0ba4712ea7455c5f730db3cf344d9d",
+    "UPDATE rh_funcionario SET qr_ponto_hash = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "cb91434f06e9ea348662226ae086a494bd7b7c260334ca5eb316d9e8f2b2a3c4",
+    "UPDATE rh_funcionario SET qr_ponto_hash = NULL, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "7feaadc4f6cfd258e06e7ff38dca548dcd88e7ecde43f1d3659449f147127d78",
+    "UPDATE rh_funcionario SET seccao_id = ? WHERE id = ?"
+  ],
+  [
+    "3ca6a2bd5e1d01daf48b86ad736c0bd695fbb19bb8918f37dd9124252c659213",
+    "UPDATE rh_funcionario SET utilizador_id = ? WHERE id = ?"
   ],
   [
     "1a4fe6b957191b66d3b2f3cbcb6c06db6e81ed418650bbdab93b0c397e4bd004",
     "UPDATE rh_funcionario_rubrica SET fim = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
-    "68302ce31775e48c49ff7d2e78566a71649e827b5bbd3a0693ee878dde64c49c",
-    "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+    "7b2674342702cd0286544bc1204dfc39acac2689b5df084ac047df192b1d971a",
+    "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, tipo = ?, ciclo = ?, ciclo_inicio = ?, minimo_diario_min = ?, faixa_inicio = ?, faixa_fim = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "a116cbd1fd6fc0c6f82a9ba6ad2edaa8f135746e9839182e931cc19303a203a8",
     "UPDATE rh_irt_tabela SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL"
   ],
   [
+    "02d43652df9696ec257c7ac5e114da5087a8643428e24729b148e3ad276e31c1",
+    "UPDATE rh_justificacao SET estado = ?, comentario = ?, decidido_por = ?, decidido_por_nome = ?, decidido_em = ? WHERE id = ? AND estado = 'pendente'"
+  ],
+  [
+    "a5c5a1b3ce2eed5cdb8125e9395369e45975d1a16b31db36dbd12c3f6f6836b7",
+    "UPDATE rh_marcacao SET anulada = 1, motivo_anulacao = ?, anulada_por = ?, anulada_por_nome = ?, anulada_em = ? WHERE id = ? AND anulada = 0"
+  ],
+  [
+    "adf509fe33aecfb3ca030f1bd3b2324546f8b9dc18ce32a42144a45aa2f99ffc",
+    "UPDATE rh_modelo SET nome = ?, titulo = ?, conteudo = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "c5023b053bd9822fc12fb730d2225d83fba9ef7abdb26cb883134fd15a16e43e",
+    "UPDATE rh_parametro SET valor = ? WHERE id = ?"
+  ],
+  [
     "dc95548728f2fe87b29ba2dcab4b4436c60e8407cebe081b28ed5b14ce1974a5",
     "UPDATE rh_parametro SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL"
+  ],
+  [
+    "fa6181ec740923f3603673f1205100d3bbfbe1f497dcc35e62a6000669052c15",
+    "UPDATE rh_pedido SET estado = ?, resposta = ?, respondido_em = ?, respondido_por = ?, respondido_por_nome = ? WHERE id = ? AND estado = 'pendente'"
   ],
   [
     "ac6053e6c1e8e477d46eeb08778813621104170df36db0377fef080989a529f9",
@@ -4189,6 +5504,26 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_plano_ferias SET subsidio_processado = 1, actualizado_em = ? WHERE id = ? AND subsidio_processado = 0"
   ],
   [
+    "5c29d45b0f98ffacc221533992d5ddcda5aa250f74e9fce215d020aa7c763c72",
+    "UPDATE rh_ponto SET observacoes = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "d5ac6ca43efbb23e87ba44743125c01646079c96f31f44d19724ca3555b3494e",
+    "UPDATE rh_ponto_periodo SET estado = 'aberto', reaberto_por = ?, reaberto_por_nome = ?, reaberto_em = ?, motivo_reabertura = ?, processamento_desactualizado = ?, actualizado_em = ? WHERE id = ? AND estado = 'fechado'"
+  ],
+  [
+    "3145c500663002cd369526f4c7547e89345088c78a16f563d97280abc83de7a6",
+    "UPDATE rh_ponto_periodo SET estado = 'em_validacao', validado_por = ?, validado_por_nome = ?, validado_em = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "baf5997401fcc6fa874606252ae85a65d76d85bf52b2cf9f0511c8d5d34f124a",
+    "UPDATE rh_ponto_periodo SET estado = 'fechado', fechado_por = ?, fechado_por_nome = ?, fechado_em = ?, resumo_json = ?, processamento_desactualizado = 0, actualizado_em = ? WHERE id = ? AND estado <> 'fechado'"
+  ],
+  [
+    "58d0d2f654f73d28e7d7ccb9453a55c6a9691a88b4e58c0db7c09e8939144e89",
+    "UPDATE rh_ponto_periodo SET estado = 'validado', aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, validado_por = COALESCE(validado_por, ?), validado_por_nome = COALESCE(validado_por_nome, ?), validado_em = COALESCE(validado_em, ?), actualizado_em = ? WHERE id = ?"
+  ],
+  [
     "741ee4672b157754af206274572b3d70721f8db06abe6b3e642b79130760b115",
     "UPDATE rh_processamento SET aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, estado = 'aprovado', actualizado_em = ? WHERE id = ? AND estado = 'calculado'"
   ],
@@ -4217,16 +5552,52 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_processamento SET fechado_por = ?, fechado_por_nome = ?, fechado_em = ?, lancamentos_json = ?, estado = 'fechado', actualizado_em = ? WHERE id = ? AND estado = 'pago'"
   ],
   [
+    "ce354c2dd8205914097363d6bdf17575dd256a6381d9aa68a9a9a8a248eead55",
+    "UPDATE rh_processamento SET id = ? WHERE id = ? AND tipo = 'normal'"
+  ],
+  [
     "45a9f8be6f789e6d3cfc784a87ce9d8cbd3f0be8aa2e972904a95bafc800749b",
     "UPDATE rh_processamento SET pago_por = ?, pago_por_nome = ?, pago_em = ?, conta_pagamento = ?, estado = 'pago', actualizado_em = ? WHERE id = ? AND estado = 'aprovado'"
   ],
   [
-    "ca4bfe7939b88a0018754073d7044641f42d2d6a77c6e7ba8ea93f7f49fa8596",
-    "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+    "aa14e21efe846c45a987bdebd03dbee080dd29e0a7c4169124ef7cc9429828bc",
+    "UPDATE rh_processamento_entrada SET id = ? || ':' || funcionario_id, processamento_id = ? WHERE processamento_id = ?"
+  ],
+  [
+    "a637275716e5c74186aabe798fe4f59ea2cff6258bf26df1aaca985c029631d5",
+    "UPDATE rh_recibo SET processamento_id = ? WHERE processamento_id = ?"
+  ],
+  [
+    "0564b77274dd9424229724ffbf33fafa287d9c91992270ce47410c9771e19a81",
+    "UPDATE rh_reclamacao SET estado = ?, resposta = ?, respondido_em = ?, respondido_por = ?, respondido_por_nome = ? WHERE id = ? AND estado = 'pendente'"
+  ],
+  [
+    "b09add5b32852d9029b3a3f24a3bb9f3b268d19f2da785e41f81a8b046e5574d",
+    "UPDATE rh_rubrica SET classe = 'abono' WHERE classe IS NULL AND tipo = 'abono' AND codigo IN ('RENDA_CASA', 'ISOLAMENTO', 'GRATIFICACAO', 'REPRESENTACAO', 'REM_SUPLEMENTAR')"
+  ],
+  [
+    "74851d06a145474e90012cc5326ee0596581dc9f1feca2b622773ca6bdfeedaa",
+    "UPDATE rh_rubrica SET classe = CASE WHEN tipo = 'desconto' THEN 'desconto' ELSE 'abono' END WHERE classe IS NULL"
+  ],
+  [
+    "bb5095356949ee1a7a4393dc34b55e0ec01d8533999304390af89620b573b7e4",
+    "UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?, limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, classe = ?, por_dia = ?, valor_padrao_minor = ?, periodicidade = ?, mes_pagamento = ?, proporcional_faltas = ?, auto_atribuir = ?, descricao = ?, incidencia_confirmada = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "66659958a91cc8d5cffe74bb693ad36a9457d14dec1061b12f36f440a83f7545",
+    "UPDATE rh_rubrica_pontual SET processamento_id = ? WHERE processamento_id = ?"
+  ],
+  [
+    "8aac58fc448916ed75cf51159a076a9606f5beadc10b937893247d94dc57e7f7",
+    "UPDATE rh_seccao SET departamento_id = ?, nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "5d5dd6d186e54faa20ce797f30001ca5cc398a3f6ae1f7844e6bfe55b5e77f33",
     "UPDATE rh_tipo_ausencia SET nome = ?, justificada = ?, remunerada = ?, desconta_salario = ?, desconta_ferias = ?, exige_documento = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "8107e8ea8d73edb0c8ebcee1566a6feea7c335dab6ecd551021a310f75426f2e",
+    "UPDATE simulations SET clientId = ? WHERE id = ?"
   ],
   [
     "f10327fdeff9b931d3d425a969d8addf50641449157d526ae2fa1c81ee86f4e0",
@@ -4241,8 +5612,16 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE id = ? AND status = 'pending'"
   ],
   [
+    "758571444fa4d7d04da4adfad350a2aefa97e23a4588ab235674ce30a10c150c",
+    "UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending' AND entityType IN ('rh_processamento', 'rh_recibo', 'rh_recibo_linha', 'rh_processamento_entrada', 'rh_rubrica_pontual')"
+  ],
+  [
     "d8cbfaf1464662df9dfc78f3270a83832ab0ea264725dffb847f2855cf12f4df",
     "UPDATE sync_conflicts SET status = 'pending', resolutionNote = NULL, resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'rejected' AND resolutionNote LIKE '[ARQUIVADO] %'"
+  ],
+  [
+    "def8bd483d3614b8fbb5467be1d03fa676283d152af0120f564147902f5a1bbd",
+    "UPDATE sync_conflicts SET status = 'pending', resolvedBy = NULL, resolvedAt = NULL WHERE id = ? AND status = 'archived'"
   ],
   [
     "4fb8c9043c09b4d19574f86d32e24f2360d63dcd3c1be2ef5aa7a3597795a0c4",
@@ -4285,6 +5664,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE users SET password = ? WHERE id = ?"
   ],
   [
+    "0ba6bf7f7676435c6e0be70a50328fe30720acd136addddeebb4b5b0d47bd930",
+    "UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?"
+  ],
+  [
     "528b08f60ad8123e7c3a2e52648dea6b40c040547a9e67108be1a83cf03066dc",
     "UPDATE users SET password = ?, status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?"
   ],
@@ -4303,6 +5686,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "1ff138a36f4d6b781ba0ec321225c7c8eeff36b3124db2ec0346e191d11ccb0c",
     "UPDATE users SET twoFactorEnabled = 1, twoFactorSecret = ? WHERE id = ?"
+  ],
+  [
+    "3a628feb712f30c36fe759a9504a6ab788a7867dfaf8922d938252c155b94f36",
+    "UPDATE warranties SET clientId = ? WHERE id = ?"
   ],
   [
     "03bd597f05be2c560ba84217c309a16043cbfb0c3e32bde60225e50191d3d6d0",
@@ -4345,12 +5732,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "select"
   ],
   [
-    "c25dd8c9ed4ff8a034f248fdab3e1ba525f6579a4b8deb0b1c806aec4b6d80bf",
-    "select-all-debtors"
+    "9c9aabed7214cf07dc865d604830f58fa6dcd7e0f05dd1924bceeb8dfe786a33",
+    "select-all break-all rounded bg-slate-100 px-1 dark:bg-slate-800"
+  ],
+  [
+    "cc665ab319ae2e65c0ccda5ad0403a28fdb6ad19f81e1d1015b775ac0a624529",
+    "select-all rounded bg-slate-100 px-1 dark:bg-slate-800"
   ],
   [
     "2937013f2181810606b2a799b05bda2849f3e369a20982a4138f0e0a55984ce4",
     "update"
+  ],
+  [
+    "aed9ced03873ba97080ee2a0e0561123e5a447728e0957a01705218e776fc9c1",
+    "update.available"
   ]
 ]);
 export const RENDERER_SQL_ID_BY_STATEMENT = new Map<string, string>([...RENDERER_SQL_BY_ID].map(([id, sql]) => [sql, id]));

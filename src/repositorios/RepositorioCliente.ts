@@ -17,7 +17,7 @@ export class RepositorioCliente extends RepositorioBase {
     }
 
     static async insert(client: Client): Promise<void> {
-        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const sql = 'INSERT INTO clients (id, name, nif, phone, email, address, creditLimit, usedCredit, availableCredit, monthlyIncome, defaultInterestRate, lateInterestRate, toleranceDays, status, riskLevel, whatsappVerified, documents, bankCoordinates, receiveMethod, lastContacted, createdAt, usuario_id, birthDate, age, issueDate, expiryDate, gender, maritalStatus, fatherName, motherName, workInstitution, socialSecurityNumber, spouseName, spouseBi, spouseNif, spousePhone, spouseEmail, legalRepresentative, legalRepRole, spouseBirthDate, spouseOccupation, spouseIncome, spouseDataRefused, spouseDataRefusedAt, spouseDataRefusedBy, spouseConsentAt, spouseConsentBy, birthPlace, province, municipality, neighborhood, zone, spouseBirthPlace, spouseProvince, spouseMunicipality, spouseNeighborhood, spouseZone, employmentSector, ministry, employerNif, workPosition, clientCategory, clientType, documentType, countryCode, nationality, passportFormatValidated, foundationDate, legalForm, businessSector, commercialRegistry) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         const params = [
             client.id, client.name, client.nif, client.phone, client.email, client.address,
             client.creditLimit, client.usedCredit, client.availableCredit, client.monthlyIncome || 0,
@@ -51,7 +51,31 @@ export class RepositorioCliente extends RepositorioBase {
             client.spouseDataRefusedAt || null,
             client.spouseDataRefusedBy || null,
             client.spouseConsentAt || null,
-            client.spouseConsentBy || null
+            client.spouseConsentBy || null,
+            client.birthPlace || null,
+            client.province || null,
+            client.municipality || null,
+            client.neighborhood || null,
+            client.zone || null,
+            client.spouseBirthPlace || null,
+            client.spouseProvince || null,
+            client.spouseMunicipality || null,
+            client.spouseNeighborhood || null,
+            client.spouseZone || null,
+            client.employmentSector || null,
+            client.ministry || null,
+            client.employerNif || null,
+            client.workPosition || null,
+            client.clientCategory || 'COMUM',
+            client.clientType || null,
+            client.documentType || null,
+            client.countryCode || null,
+            client.nationality || null,
+            client.passportFormatValidated ? 1 : 0,
+            client.foundationDate || null,
+            client.legalForm || null,
+            client.businessSector || null,
+            client.commercialRegistry || null
         ];
         await this.execute(sql, params);
     }
@@ -103,7 +127,31 @@ export class RepositorioCliente extends RepositorioBase {
             spouseDataRefusedAt = COALESCE(?, spouseDataRefusedAt),
             spouseDataRefusedBy = COALESCE(?, spouseDataRefusedBy),
             spouseConsentAt = COALESCE(?, spouseConsentAt),
-            spouseConsentBy = COALESCE(?, spouseConsentBy)
+            spouseConsentBy = COALESCE(?, spouseConsentBy),
+            birthPlace = COALESCE(?, birthPlace),
+            province = COALESCE(?, province),
+            municipality = COALESCE(?, municipality),
+            neighborhood = COALESCE(?, neighborhood),
+            zone = COALESCE(?, zone),
+            spouseBirthPlace = COALESCE(?, spouseBirthPlace),
+            spouseProvince = COALESCE(?, spouseProvince),
+            spouseMunicipality = COALESCE(?, spouseMunicipality),
+            spouseNeighborhood = COALESCE(?, spouseNeighborhood),
+            spouseZone = COALESCE(?, spouseZone),
+            employmentSector = COALESCE(?, employmentSector),
+            ministry = COALESCE(?, ministry),
+            employerNif = COALESCE(?, employerNif),
+            workPosition = COALESCE(?, workPosition),
+            clientCategory = COALESCE(?, clientCategory),
+            clientType = COALESCE(?, clientType),
+            documentType = COALESCE(?, documentType),
+            countryCode = COALESCE(?, countryCode),
+            nationality = COALESCE(?, nationality),
+            passportFormatValidated = COALESCE(?, passportFormatValidated),
+            foundationDate = COALESCE(?, foundationDate),
+            legalForm = COALESCE(?, legalForm),
+            businessSector = COALESCE(?, businessSector),
+            commercialRegistry = COALESCE(?, commercialRegistry)
             WHERE id = ?`;
         const params = [
             updates.name, updates.nif, updates.phone, updates.email, updates.address,
@@ -138,6 +186,30 @@ export class RepositorioCliente extends RepositorioBase {
             updates.spouseDataRefusedBy ?? null,
             updates.spouseConsentAt ?? null,
             updates.spouseConsentBy ?? null,
+            updates.birthPlace ?? null,
+            updates.province ?? null,
+            updates.municipality ?? null,
+            updates.neighborhood ?? null,
+            updates.zone ?? null,
+            updates.spouseBirthPlace ?? null,
+            updates.spouseProvince ?? null,
+            updates.spouseMunicipality ?? null,
+            updates.spouseNeighborhood ?? null,
+            updates.spouseZone ?? null,
+            updates.employmentSector ?? null,
+            updates.ministry ?? null,
+            updates.employerNif ?? null,
+            updates.workPosition ?? null,
+            updates.clientCategory ?? null,
+            updates.clientType ?? null,
+            updates.documentType ?? null,
+            updates.countryCode ?? null,
+            updates.nationality ?? null,
+            updates.passportFormatValidated === undefined ? null : (updates.passportFormatValidated ? 1 : 0),
+            updates.foundationDate ?? null,
+            updates.legalForm ?? null,
+            updates.businessSector ?? null,
+            updates.commercialRegistry ?? null,
             id
         ];
         await this.execute(sql, params);

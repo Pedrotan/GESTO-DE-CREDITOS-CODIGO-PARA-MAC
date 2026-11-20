@@ -26,6 +26,9 @@ async function loadModules() {
             contents: `
                 export { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
                 export { ServicoCarteira } from '@/servicos/ServicoCarteira';
+                export { ServicoPagamentos } from '@/servicos/ServicoPagamentos';
+                export { RepositorioCliente } from '@/repositorios/RepositorioCliente';
+                export { ServicoCliente } from '@/servicos/ServicoCliente';
                 export { ServicoContabilidadeGeral } from '@/servicos/ServicoContabilidadeGeral';
                 export { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
                 export { auditSqlHash } from '@/bibliotecas/cadeia-auditoria';
@@ -462,5 +465,162 @@ test('D · Variação dos cards da Carteira: valores no fim do mês anterior com
         assert.equal(now.activeMinor, 20_000_000);
         assert.ok(now.overdueMinor >= then.overdueMinor, 'o atraso não diminui sem pagamentos');
         console.log(`    D: fim do mês anterior ${kz(then.activeMinor)} em dívida, ${kz(then.overdueMinor)} em atraso · hoje ${kz(now.activeMinor)}, ${kz(now.overdueMinor)} em atraso`);
+    } finally { database.close(); }
+});
+
+// ── Perdão e renegociação de juros de mora ─────────────────────────────────────
+const creditInArrears = async (M, id, clientId = 'c3') => {
+    const today = M.F.luandaTodayKey();
+    const [y, m, d] = today.split('-').map(Number);
+    const due = new Date(Date.UTC(y, m - 1, d - 10));
+    const start = new Date(Date.UTC(due.getUTCFullYear(), due.getUTCMonth() - 1, due.getUTCDate(), 12));
+    await M.ServicoFinanceiro.addCredit(credit({ id, clientId, clientName: 'João Baptista', amount: 100_000, interest: 10_000, start: start.toISOString(), month: today.slice(0, 7), lateRate: 1 }));
+};
+const inDays = (M, days) => {
+    const [y, m, d] = M.F.luandaTodayKey().split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, d + days)).toISOString().slice(0, 10);
+};
+const ledgerBalance = (database, account) => database.prepare(`SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END), 0) AS n
+    FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = ?`).get(account).n;
+
+test('Mora · perdão parcial: sai dos saldos, do razão e da carteira e não volta a ser lançado', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        await creditInArrears(M, 'CR-PERDAO');
+        const owed = (await M.ServicoFinanceiro.getLateInterestSummary('CR-PERDAO')).owedMinor;
+        assert.equal(owed, 1_100_000, '110 000 Kz × 1%/dia × 10 dias');
+        const result = await M.ServicoFinanceiro.adjustLateInterest({ creditId: 'CR-PERDAO', kind: 'forgive', amountMinor: 300_000, reason: 'Acordo com o cliente em reunião', actor: ADMIN });
+        assert.equal(result.lateAfterMinor, 800_000);
+        const stored = database.prepare(`SELECT lateInterestMinor, totalDueMinor FROM credits WHERE id = 'CR-PERDAO'`).get();
+        assert.deepEqual({ late: stored.lateInterestMinor, total: stored.totalDueMinor }, { late: 800_000, total: 11_800_000 });
+        assert.equal(database.prepare(`SELECT SUM(lateInterestMinor) AS n FROM credit_installments WHERE creditId = 'CR-PERDAO'`).get().n, 800_000);
+        assert.equal(ledgerBalance(database, 'receivable_late_interest'), 800_000, 'a conta a receber acompanha o perdão');
+        assert.equal(ledgerBalance(database, 'revenue_late_interest'), -800_000, 'o proveito acompanha o perdão');
+        const posted = await M.ServicoFinanceiro.postAccruedLateInterest('CR-PERDAO');
+        assert.equal(posted.postedMinor, 0, 'o recálculo não volta a lançar a mora perdoada');
+        const { rows } = await portfolio(M);
+        assert.equal(rows.find(row => row.id === 'CR-PERDAO').moraMinor, 800_000, 'a carteira mostra a mora depois do perdão');
+        const preview = await M.ServicoPagamentos.previewImputation('CR-PERDAO', M.F.luandaTodayKey());
+        assert.equal(preview.totalDueMinor, 11_800_000);
+        assert.equal(preview.moraMinor, 0);
+        assert.ok(database.prepare(`SELECT COUNT(*) AS n FROM audit_logs WHERE details LIKE 'Perdoou%'`).get().n === 1, 'fica na auditoria');
+        assert.throws(() => database.prepare(`DELETE FROM late_interest_adjustments`).run(), /imutável/);
+    } finally { database.close(); }
+});
+
+test('Mora · perdão total de um crédito só com mora em dívida: fica liquidado', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        await creditInArrears(M, 'CR-SOMORA');
+        await M.ServicoFinanceiro.postAccruedLateInterest('CR-SOMORA');
+        // Capital e juros já pagos nos saldos: o que resta é a mora.
+        database.prepare(`UPDATE credits SET currentBalance = 0, currentBalanceMinor = 0, accruedInterest = 0, accruedInterestMinor = 0, totalDueMinor = lateInterestMinor WHERE id = 'CR-SOMORA'`).run();
+        const result = await M.ServicoFinanceiro.adjustLateInterest({ creditId: 'CR-SOMORA', kind: 'forgive', amountMinor: 1_100_000, reason: 'Encerramento da dívida acordado', actor: { id: 'u-super', name: 'Sara Super', role: 'super_admin' } });
+        assert.equal(result.paidOff, true);
+        const stored = database.prepare(`SELECT status, totalDueMinor, paidAt FROM credits WHERE id = 'CR-SOMORA'`).get();
+        assert.deepEqual({ status: stored.status, total: stored.totalDueMinor, hasDate: Boolean(stored.paidAt) }, { status: 'paid', total: 0, hasDate: true });
+    } finally { database.close(); }
+});
+
+test('Mora · renegociação: acordo em prestações, diferença perdoada e pagamento das novas prestações', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        await creditInArrears(M, 'CR-RENEG');
+        const result = await M.ServicoFinanceiro.adjustLateInterest({ creditId: 'CR-RENEG', kind: 'renegotiate', amountMinor: 1_100_000, agreedMinor: 900_000, installments: 3, firstDueKey: inDays(M, 5), reason: 'Plano acordado com o cliente', actor: ADMIN });
+        assert.equal(result.forgivenMinor, 200_000);
+        const stored = database.prepare(`SELECT lateInterestMinor, accruedInterestMinor, totalDueMinor, installments FROM credits WHERE id = 'CR-RENEG'`).get();
+        assert.deepEqual({ late: stored.lateInterestMinor, interest: stored.accruedInterestMinor, total: stored.totalDueMinor, n: stored.installments }, { late: 0, interest: 1_900_000, total: 11_900_000, n: 4 });
+        const added = database.prepare(`SELECT principalMinor, interestMinor FROM credit_installments WHERE creditId = 'CR-RENEG' AND installmentNumber > 1 ORDER BY installmentNumber`).all();
+        assert.deepEqual(added.map(item => [item.principalMinor, item.interestMinor]), [[0, 300_000], [0, 300_000], [0, 300_000]]);
+        assert.equal(ledgerBalance(database, 'receivable_late_interest'), 0);
+        assert.equal((await M.ServicoFinanceiro.postAccruedLateInterest('CR-RENEG')).postedMinor, 0);
+        await pay(M, 'CR-RENEG', 119_000);
+        const paid = database.prepare(`SELECT totalDueMinor, status, paidInstallments FROM credits WHERE id = 'CR-RENEG'`).get();
+        assert.deepEqual({ total: paid.totalDueMinor, status: paid.status, n: paid.paidInstallments }, { total: 0, status: 'paid', n: 4 }, 'pagar tudo liquida o crédito com as prestações da mora');
+    } finally { database.close(); }
+});
+
+test('Mora · limites: valor acima da dívida, data passada, sem permissão e acima da alçada são recusados', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        await creditInArrears(M, 'CR-LIMITE');
+        const base = { creditId: 'CR-LIMITE', reason: 'Motivo suficientemente longo', actor: ADMIN };
+        await assert.rejects(M.ServicoFinanceiro.adjustLateInterest({ ...base, kind: 'forgive', amountMinor: 1_100_001 }), /mora em dívida/);
+        await assert.rejects(M.ServicoFinanceiro.adjustLateInterest({ ...base, kind: 'forgive', amountMinor: 100, reason: 'curto' }), /motivo/i);
+        await assert.rejects(M.ServicoFinanceiro.adjustLateInterest({ ...base, kind: 'renegotiate', amountMinor: 100, agreedMinor: 200, installments: 1, firstDueKey: inDays(M, 1) }), /maior/);
+        await assert.rejects(M.ServicoFinanceiro.adjustLateInterest({ ...base, kind: 'renegotiate', amountMinor: 100, agreedMinor: 100, installments: 1, firstDueKey: inDays(M, -1) }), /anterior a hoje/);
+        await assert.rejects(M.ServicoFinanceiro.adjustLateInterest({ ...base, kind: 'forgive', amountMinor: 100, actor: { id: 'u-x', name: 'Sem Permissão', role: 'viewer' } }), /permissão/);
+        database.prepare(`INSERT INTO users (id, name, email, password, role, createdAt) VALUES ('u-cob', 'Carla Cobrança', 'c@example.invalid', 'x', 'collection_officer', ?)`).run(new Date().toISOString());
+        await assert.rejects(M.ServicoFinanceiro.adjustLateInterest({ ...base, kind: 'forgive', amountMinor: 1_100_000, actor: { id: 'u-cob', name: 'Carla Cobrança', role: 'collection_officer', permissions: ['pagamentos.perdoar_juros'] } }), /alçada/);
+        assert.equal(database.prepare(`SELECT COUNT(*) AS n FROM late_interest_adjustments`).get().n, 0, 'nada ficou gravado');
+    } finally { database.close(); }
+});
+
+test('Cliente · o local de trabalho grava e, ao mudar de sector, o campo anterior fica limpo', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        await M.RepositorioCliente.insert({ id: 'c-trab', name: 'Eva', nif: '000000000LA000', phone: '', email: '', address: '', creditLimit: 0, usedCredit: 0, availableCredit: 0, defaultInterestRate: 0, lateInterestRate: 0, toleranceDays: 0, status: 'active', riskLevel: 'low', documents: [], bankCoordinates: [], receiveMethod: 'cash', createdAt: new Date(), usuario_id: ADMIN.id,
+            employmentSector: 'PUBLICO', ministry: 'Ministério da Saúde', workInstitution: 'Hospital', workPosition: 'Enfermeira' });
+        const read = () => ({ ...database.prepare(`SELECT employmentSector, ministry, employerNif, workInstitution, workPosition FROM clients WHERE id = 'c-trab'`).get() });
+        assert.deepEqual(read(), { employmentSector: 'PUBLICO', ministry: 'Ministério da Saúde', employerNif: null, workInstitution: 'Hospital', workPosition: 'Enfermeira' });
+        await M.RepositorioCliente.update('c-trab', { employmentSector: 'PRIVADO', ministry: '', employerNif: '5000000000', workInstitution: 'Empresa' });
+        assert.deepEqual(read(), { employmentSector: 'PRIVADO', ministry: '', employerNif: '5000000000', workInstitution: 'Empresa', workPosition: 'Enfermeira' });
+    } finally { database.close(); }
+});
+
+test('Cliente · a carteira sobrevive a gravar e recarregar, e as listas ficam separadas', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const base = { phone: '', email: '', address: '', creditLimit: 0, usedCredit: 0, availableCredit: 0, defaultInterestRate: 0, lateInterestRate: 0, toleranceDays: 0, status: 'active', riskLevel: 'low', documents: [], bankCoordinates: [], receiveMethod: 'cash', createdAt: new Date(), usuario_id: ADMIN.id };
+        await M.ServicoCliente.add({ ...base, id: 'n-comum', name: 'Comum', nif: '000000001LA000', clientCategory: 'COMUM' });
+        await M.ServicoCliente.add({ ...base, id: 'n-apos', name: 'Aposentado', nif: '000000002LA000', clientCategory: 'APOSENTADO' });
+        await M.ServicoCliente.add({ ...base, id: 'n-estr', name: 'Estrangeiro', nif: 'N1234567', clientCategory: 'ESTRANGEIRO', documentType: 'PASSAPORTE', countryCode: 'PT', nationality: 'Portuguesa', passportFormatValidated: true });
+        const list = async category => (await M.ServicoCliente.getAll()).filter(c => c.id.startsWith('n-') && c.clientCategory === category).map(c => c.id);
+        assert.deepEqual(await list('COMUM'), ['n-comum']);
+        assert.deepEqual(await list('APOSENTADO'), ['n-apos']);
+        assert.deepEqual(await list('ESTRANGEIRO'), ['n-estr']);
+        const foreign = (await M.ServicoCliente.getAll()).find(c => c.id === 'n-estr');
+        assert.deepEqual({ doc: foreign.documentType, country: foreign.countryCode, nationality: foreign.nationality, ok: foreign.passportFormatValidated }, { doc: 'PASSAPORTE', country: 'PT', nationality: 'Portuguesa', ok: true });
+        // Mudar de lista na edição, e uma edição sem carteira não a apaga.
+        await M.ServicoCliente.update('n-comum', { clientCategory: 'APOSENTADO' });
+        await M.ServicoCliente.update('n-comum', { name: 'Comum Editado' });
+        assert.deepEqual((await list('APOSENTADO')).sort(), ['n-apos', 'n-comum']);
+        // Cliente antigo, sem carteira na base: é deduzida, e sair da dedução fica gravado.
+        database.prepare(`INSERT INTO clients (id, name, nif, socialSecurityNumber, riskLevel, status, createdAt) VALUES ('n-antigo', 'Antigo', '000000003LA000', '999', 'low', 'active', ?)`).run(new Date().toISOString());
+        assert.ok((await list('APOSENTADO')).includes('n-antigo'));
+        await M.ServicoCliente.update('n-antigo', { clientCategory: 'COMUM' });
+        assert.ok((await list('COMUM')).includes('n-antigo'));
+    } finally { database.close(); }
+});
+
+test('Cliente · os dados da empresa sobrevivem a gravar e recarregar, e todos os campos do formulário têm coluna', async () => {
+    const M = await loadModules();
+    const database = await createDatabase(M);
+    try {
+        const base = { phone: '', email: '', address: '', creditLimit: 0, usedCredit: 0, availableCredit: 0, defaultInterestRate: 0, lateInterestRate: 0, toleranceDays: 0, status: 'active', riskLevel: 'low', documents: [], bankCoordinates: [], receiveMethod: 'cash', createdAt: new Date(), usuario_id: ADMIN.id };
+        await M.ServicoCliente.add({ ...base, id: 'e-1', name: 'Empresa Teste', nif: '5000000000', clientType: 'EMPRESA', foundationDate: '2010-05-20', legalForm: 'Lda', businessSector: 'Comércio', commercialRegistry: 'CRC-123' });
+        const read = async () => (await M.ServicoCliente.getAll()).find(c => c.id === 'e-1');
+        const saved = await read();
+        assert.deepEqual([saved.clientType, saved.foundationDate, saved.legalForm, saved.businessSector, saved.commercialRegistry], ['EMPRESA', '2010-05-20', 'Lda', 'Comércio', 'CRC-123']);
+        await M.ServicoCliente.update('e-1', { legalForm: 'SA', businessSector: '' });
+        const edited = await read();
+        assert.deepEqual([edited.foundationDate, edited.legalForm, edited.businessSector, edited.commercialRegistry], ['2010-05-20', 'SA', '', 'CRC-123']);
+        // Guarda para o futuro: um campo novo no formulário sem coluna na base volta a perder-se em silêncio.
+        const form = readFileSync(path.join(root, 'src/componentes/forms/ClientForm.tsx'), 'utf8');
+        const schema = form.slice(form.indexOf('const clientSchema = z.object({'), form.indexOf('}).superRefine'));
+        const fields = [...schema.matchAll(/^\s{4}(\w+): z\./gm)].map(match => match[1]);
+        const columns = new Set(database.prepare('PRAGMA table_info(clients)').all().map(column => column.name));
+        const repository = readFileSync(path.join(root, 'src/repositorios/RepositorioCliente.ts'), 'utf8');
+        const insertColumns = repository.match(/INSERT INTO clients \(([^)]*)\)/)[1].split(',').map(item => item.trim());
+        assert.ok(fields.length > 50);
+        assert.deepEqual(fields.filter(field => !columns.has(field)), [], 'sem coluna na base');
+        assert.deepEqual(fields.filter(field => !insertColumns.includes(field)), [], 'fora do INSERT');
+        assert.deepEqual(fields.filter(field => !repository.includes(`${field} = COALESCE(?, ${field})`)), [], 'fora do UPDATE');
     } finally { database.close(); }
 });

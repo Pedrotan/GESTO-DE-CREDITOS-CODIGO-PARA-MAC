@@ -1,4 +1,3 @@
-/// <reference path="./electron-env.d.ts" />
 /// <reference types="node" />
 
 import { EMPTY_USAGE, canApproveAtLevel, diffPolicies, evaluateOperation, needsSecondApproval, parsePolicy, policyFromRows, requiredLevelFor } from '../src/bibliotecas/alcadas';
@@ -15,21 +14,27 @@ import * as url from 'url';
 import * as nodemailer from 'nodemailer';
 import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
-import { RENDERER_SQL_BY_ID } from './renderer-sql-allowlist';
-import { applyRemoteGroups, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
+import { SYNC_SQL_BY_ID } from './sync-sql';
+import { applyRemoteGroups, RETAINED_FOR_ROW_SQL, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
+import { executarManutencaoSync } from '../src/bibliotecas/manutencao-sync';
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
-import { isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
+import { isMarcarCorreioLidoSql, isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
+import { carregamentoPortalPermitido, regraLeituraRH } from '../src/bibliotecas/rh/permissoes-rh';
 import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
 import { MASTER_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-licencas';
-import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, isPrimaryOwner, PAGE_PERMISSIONS, parsePermissionList } from '../src/bibliotecas/conta-principal';
+import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, ehContaPortalNova, ehContaSoPortal, ehReposicaoSenhaPortal, isPrimaryOwner, updatedUserColumns, updatedUserValue, PAGE_PERMISSIONS, parsePermissionList } from '../src/bibliotecas/conta-principal';
+import { CHAVE_ADMIN_PRINCIPAL, lerAdminPrincipal, motivoRecusaDesignar } from '../src/bibliotecas/administrador-principal';
 import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-tokens';
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
 import { decodeVerifiedBackup, writeVerifiedBackup } from './backup-storage';
 import { assertIntranetLicense } from './intranet-license';
+import { isInstallingUpdate, startUpdater } from './actualizador';
+// @ts-ignore — módulo JS partilhado com a API da VPS (vercel-api/agt.js)
+import { assinarDocumento as agtAssinarDocumento, chamarAgt, descreverChave as agtDescreverChave, hashSaft as agtHashSaft, lerChavePrivada as agtLerChave, AGT_CAMPOS_ASSINATURA } from '../vercel-api/_agt-nucleo.js';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
 installStructuredConsole('tango-electron-main');
@@ -798,7 +803,9 @@ const MAX_SQL_LENGTH = 2e5;
 const MAX_SQL_STATEMENTS = 100;
 const MAX_TRANSACTION_STATEMENTS = 1e3;
 const MAX_PARAM_COUNT = 500;
-const MAX_STRING_PARAM_LENGTH = 1e6;
+// Texto de um parâmetro SQL: os clientes guardam documentos anexados (BI, comprovativos) em base64 e a
+// sincronização traz alterações até 12 MB; com 1 MB a ligação de um computador novo parava.
+const MAX_STRING_PARAM_LENGTH = 16e6;
 const MAX_IMPORT_BYTES = 512 * 1024 * 1024;
 const FORBIDDEN_SQL_PATTERN = /\b(ATTACH|DETACH|LOAD_EXTENSION)\b|\bPRAGMA\s+(key|rekey|hexkey|textkey|cipher|cipher_|legacy)\b/i;
 const READ_KEYWORDS = /* @__PURE__ */ new Set(["SELECT", "WITH", "PRAGMA"]);
@@ -1032,8 +1039,14 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   payment_gateways: "manage_settings",
   payment_references: "manage_payments",
   closed_months: "manage_fiscal",
+  late_interest_adjustments: "manage_payments",
   accounting_cash_sessions: "manage_payments",
   collection_events: "manage_credits",
+  legal_cases: "manage_legal",
+  hub_collection_settings: "manage_payments",
+  hub_collection_clients: "manage_clients",
+  hub_collection_campaigns: "manage_payments",
+  hub_collection_events: "manage_payments",
   accounting_bank_imports: "manage_fiscal",
   accounting_receipts: "manage_fiscal",
   audit_log_chain: "manage_fiscal",
@@ -1045,6 +1058,7 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   // Recursos Humanos: ficha, contratos e arquivo com hr_manage; tabelas legais com hr_settings.
   rh_departamento: "hr_manage",
   rh_cargo: "hr_manage",
+  rh_seccao: "hr_manage",
   rh_funcionario: "hr_manage",
   rh_dependente: "hr_manage",
   rh_contrato: "hr_manage",
@@ -1065,8 +1079,31 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_recibo: "hr_payroll",
   rh_recibo_linha: "hr_payroll",
   rh_rubrica_pontual: "hr_payroll",
+  rh_processamento_entrada: "hr_payroll",
+  rh_doc_pasta: "hr_manage",
+  rh_modelo: "hr_settings",
+  // Reclamações da folha de correcção: o funcionário reclama pelo portal (pedido do portal); responder é de quem processa.
+  rh_reclamacao: "hr_payroll",
+  // Confirmação da recepção do salário: só pelo portal (pedido do funcionário); ninguém a altera.
+  rh_recebimento: "hr_payroll",
+  // Portal (2.ª fase): o funcionário pede e escreve pelo portal (pedidos do portal); responder é de quem gere o RH.
+  rh_pedido: "hr_manage",
+  rh_correio: "hr_manage",
+  rh_doc_auditoria: "hr_view",
   // rh_alerta fica sem permissão própria: os alertas são derivados e a tarefa diária corre para qualquer utilizador autenticado.
-  rh_plano_ferias: "hr_manage"
+  rh_plano_ferias: "hr_manage",
+  // Livro de ponto: o funcionário e o chefe de departamento são verificados em assertPontoAutorizado.
+  rh_marcacao: "hr_manage",
+  rh_ponto_periodo: "hr_manage",
+  rh_justificacao: "hr_manage",
+  rh_escala: "hr_manage",
+  rh_banco_horas: "hr_manage",
+  // Facturação electrónica AGT e SAF-T
+  fiscal_settings: "manage_fiscal",
+  fiscal_series: "manage_fiscal",
+  fiscal_documents: "manage_fiscal",
+  fiscal_agt_requests: "manage_fiscal",
+  fiscal_saft_exports: "manage_fiscal"
 };
 // Processamento salarial: calcular exige hr_payroll; aprovar, pagar e fechar exigem hr_payroll_approve e o
 // utilizador autenticado como responsável (1.º parâmetro); aprovar o que o próprio calculou e reabrir um
@@ -1074,6 +1111,69 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
 // Pedidos do portal do funcionário: só estas duas instruções (estado fixo «planeado»/«pendente»), com
 // hr_self e o próprio utilizador como autor. Que a ficha é mesmo do utilizador confirma-se em assertApprovalBatch.
 const isPortalPedido = (statement: { sql: string }) => isPortalPedidoSql(statement.sql);
+// Livro de ponto (especificação, secção 9): sem «gerir RH» só escrevem o próprio funcionário (marcações no portal e
+// pedidos de justificação, na sua ficha) e o chefe do departamento (ponto e validação do seu departamento).
+const PONTO_TABELAS_DELEGADAS = new Set(["rh_marcacao", "rh_ausencia", "rh_ponto", "rh_ponto_periodo", "rh_justificacao"]);
+const assertPontoAutorizado = async (event: Electron.IpcMainInvokeEvent, statement: { sql: string; params?: unknown[] }, query: (type: string, sql: string, params?: unknown[]) => Promise<any>) => {
+  const table = mutationTable(statement.sql);
+  if (financialSchemaBootstrapOpen || !table || !PONTO_TABELAS_DELEGADAS.has(table) || isPortalPedido(statement)) return;
+  const actor: any = userAuth.assertAuthenticated(event.sender.id);
+  if (hasPermission(actor, "hr_manage")) return;
+  const params = statement.params || [];
+  const insert = /^s*INSERT/i.test(statement.sql);
+  const ultimo = params[params.length - 1];
+  const funcionarioDe = async (tabela: string) => (await query("get", `SELECT funcionario_id FROM ${tabela} WHERE id = ?`, [ultimo]))?.funcionario_id;
+  let funcionarioId: unknown;
+  let departamentoId: unknown;
+  if (table === "rh_ponto") funcionarioId = String(insert ? params[1] : ultimo).split(":")[0];
+  else if (table === "rh_ponto_periodo") departamentoId = insert ? params[3] : String(ultimo).split(":")[1];
+  else funcionarioId = insert ? params[1] : await funcionarioDe(table);
+  const ficha = funcionarioId ? await query("get", "SELECT utilizador_id, departamento_id FROM rh_funcionario WHERE id = ?", [funcionarioId]) : null;
+  if (ficha?.utilizador_id === actor.id && insert && ((table === "rh_marcacao" && params[5] === "app") || table === "rh_justificacao")) return;
+  const departamento = departamentoId || ficha?.departamento_id;
+  const chefe = departamento ? await query("get", "SELECT 1 AS ok FROM rh_departamento d JOIN rh_funcionario r ON r.id = d.responsavel_id WHERE d.id = ? AND r.utilizador_id = ?", [departamento, actor.id]) : null;
+  if (!chefe?.ok) throw new Error("Sem permissão para alterar o livro de ponto deste funcionário (só o RH ou o chefe do departamento).");
+  // O chefe valida o seu departamento; aprovar e fechar o mês é do RH.
+  if (table === "rh_ponto_periodo" && /estado = '(validado|fechado)'|'fechado'/i.test(statement.sql)) throw new Error("Só o RH aprova e fecha o mês do livro de ponto.");
+};
+// Leituras sensíveis do RH (ficheiros, anexos e dados salariais): verificadas aqui e não só escondidas na interface.
+// O RH com «documentos confidenciais» vê tudo; sem ela não abre documentos confidenciais. O próprio funcionário vê os
+// seus (não confidenciais) e os seus recibos; o chefe do departamento vê os documentos da equipa (parâmetro
+// «chefe_ve_documentos», 1 por omissão) mas nunca os dados salariais.
+const assertLeituraRH = async (event: Electron.IpcMainInvokeEvent, sql: string, params: unknown[] | undefined, query: (type: string, sql: string, params?: unknown[]) => Promise<any>) => {
+  const regra = regraLeituraRH(sql);
+  if (!regra) return;
+  const actor: any = userAuth.assertAuthenticated(event.sender.id);
+  const p = params || [];
+  const proprioOuChefe = async (funcionarioId: unknown, chefePode: boolean) => {
+    const ficha = funcionarioId ? await query("get", "SELECT utilizador_id, departamento_id FROM rh_funcionario WHERE id = ?", [funcionarioId]) : null;
+    if (!ficha) return false;
+    if (ficha.utilizador_id === actor.id) return true;
+    if (!chefePode || !ficha.departamento_id) return false;
+    const parametro = await query("get", "SELECT valor FROM rh_parametro WHERE chave = 'chefe_ve_documentos' AND vigencia_fim IS NULL ORDER BY vigencia_inicio DESC LIMIT 1").catch(() => null);
+    if (parametro && String(parametro.valor) === '0') return false;
+    const chefe = await query("get", "SELECT 1 AS ok FROM rh_departamento d JOIN rh_funcionario r ON r.id = d.responsavel_id WHERE d.id = ? AND r.utilizador_id = ?", [ficha.departamento_id, actor.id]);
+    return Boolean(chefe?.ok);
+  };
+  if (regra.tipo === 'ficheiro_documento' || regra.tipo === 'anexo_justificacao') {
+    const linha = regra.tipo === 'ficheiro_documento'
+      ? await query("get", "SELECT funcionario_id, confidencial FROM rh_documento WHERE id = ?", [p[regra.documentoParam]])
+      : await query("get", "SELECT funcionario_id, 0 AS confidencial FROM rh_justificacao WHERE id = ?", [p[regra.justificacaoParam]]);
+    if (!linha) return;
+    if (Number(linha.confidencial) && !hasPermission(actor, "hr_confidential")) throw new Error("Sem permissão para abrir documentos confidenciais.");
+    if (hasPermission(actor, "hr_manage") || hasPermission(actor, "hr_view")) return;
+    if (linha.funcionario_id === '__empresa__' && hasPermission(actor, "hr_self")) return;
+    if (await proprioOuChefe(linha.funcionario_id, true)) return;
+    throw new Error("Sem permissão para abrir este documento.");
+  }
+  if (hasPermission(actor, "hr_view_salaries") || hasPermission(actor, "hr_payroll")) return;
+  if (regra.tipo === 'salarial_funcionario' && await proprioOuChefe(p[regra.funcionarioParam], false)) return;
+  if (regra.tipo === 'salarial_recibo') {
+    const recibo = await query("get", "SELECT funcionario_id FROM rh_recibo WHERE id = ?", [p[regra.reciboParam]]);
+    if (recibo && await proprioOuChefe(recibo.funcionario_id, false)) return;
+  }
+  throw new Error("Sem permissão para ver dados salariais (RH: Ver salários).");
+};
 const assertPayrollSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statement: { sql: string; params?: unknown[] }) => {
   const sql = statement.sql.replace(/\s+/g, " ");
   const setClause = /^\s*UPDATE\b/i.test(sql) ? (sql.match(/\bSET\b(.*?)\bWHERE\b/i)?.[1] || "") : "";
@@ -1141,7 +1241,8 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if(statement.params?.[3]!==actor.id) throw new Error('O extrato deve ser importado pelo utilizador autenticado.');
     }
     if (table === 'collection_events') {
-      const actor = assertUserPermission(event, 'manage_credits');
+      const actor = assertUserPermission(event);
+      if (!hasPermission(actor, 'manage_credits') && !hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para registar cobranças.');
       if (statement.params?.[10] !== actor.id) throw new Error('O responsável pelo registo de cobrança deve ser o utilizador autenticado.');
       if (['assignment','target'].includes(String(statement.params?.[2])) && !['admin','super_admin'].includes(String(actor.role)))
         throw new Error('Atribuições e metas exigem um administrador.');
@@ -1160,6 +1261,25 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if (statement.params?.[statement.params.length - 2] !== actor.id) throw new Error("O pedido tem de ser feito pelo utilizador autenticado.");
       continue;
     }
+    if (table.startsWith('hub_collection_')) {
+      const actor = assertUserPermission(event);
+      if (table === 'hub_collection_clients' || (table === 'hub_collection_events' && statement.params?.[3] === 'consent')) {
+        if (!hasPermission(actor, 'manage_clients') && !hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para preferências de contacto.');
+      } else if (!hasPermission(actor, 'manage_payments')) throw new Error('Sem permissão para o Hub de Cobrança.');
+      if (['hub_collection_settings', 'hub_collection_campaigns'].includes(table) && !['admin', 'super_admin'].includes(String(actor.role))) throw new Error('Régua e campanhas exigem um administrador.');
+      const actorId = table === 'hub_collection_events' ? statement.params?.[9] : statement.params?.[3];
+      if (actorId !== actor.id) throw new Error('O registo deve identificar o utilizador autenticado.');
+      continue;
+    }
+    if (table === 'collection_events') continue;
+    // Correio interno: marcar como lida não muda o conteúdo (quem recebe a mensagem, funcionário ou RH).
+    if (table === 'rh_correio' && isMarcarCorreioLidoSql(statement.sql)) { userAuth.assertAuthenticated(event.sender.id); continue; }
+    if (PONTO_TABELAS_DELEGADAS.has(table) && !hasPermission(userAuth.assertAuthenticated(event.sender.id), 'hr_manage')) continue; // assertPontoAutorizado
+    // Carregamento de documentos pelo próprio funcionário (portal): só na sua pasta e nas subpastas permitidas.
+    if (['rh_documento', 'rh_documento_ficheiro', 'rh_doc_auditoria'].includes(table)) {
+      const actor: any = userAuth.assertAuthenticated(event.sender.id);
+      if (!hasPermission(actor, 'hr_manage') && hasPermission(actor, 'hr_self') && carregamentoPortalPermitido(statements, actor.id)) continue;
+    }
     assertUserPermission(event, TABLE_WRITE_PERMISSIONS[table]);
   }
 };
@@ -1173,6 +1293,7 @@ const loadLimitPolicy = async (query:(type:string,sql:string,params?:unknown[])=
 const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:Array<{sql:string;params?:unknown[]}>,query:(type:string,sql:string,params?:unknown[])=>Promise<any>)=>{
   if(financialSchemaBootstrapOpen)return;
   for(const statement of statements){
+    await assertPontoAutorizado(event,statement,query);
     if(isPortalPedido(statement)){
       // A ficha do pedido tem de estar ligada à conta de quem pede (ou quem pede gere o RH).
       const actor:any=userAuth.assertAuthenticated(event.sender.id);
@@ -1180,6 +1301,14 @@ const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:
       if(ficha?.utilizador_id!==actor.id && !hasPermission(actor,'hr_manage'))throw new Error('Só pode fazer pedidos na sua própria ficha.');
     }
     const table=mutationTable(statement.sql);
+    if(table==='rh_documento' && /^\s*INSERT/i.test(statement.sql)){
+      // Documento carregado sem «gerir RH» (portal): a ficha tem de ser a do utilizador autenticado.
+      const actor:any=userAuth.assertAuthenticated(event.sender.id);
+      if(!hasPermission(actor,'hr_manage')){
+        const ficha=await query('get','SELECT utilizador_id FROM rh_funcionario WHERE id = ?',[statement.params?.[1]]);
+        if(ficha?.utilizador_id!==actor.id)throw new Error('Só pode carregar documentos na sua própria pasta.');
+      }
+    }
     if(table==='limit_policy_versions' && /^\s*INSERT/i.test(statement.sql)){
       const actor=assertUserPermission(event,'manage_limits');
       if(statement.params?.[9]!==actor.id)throw new Error('A versão dos limites tem de ser criada pelo utilizador autenticado.');
@@ -1760,6 +1889,71 @@ function registerCloudLicenseHandlers() {
     }, 10 * 60_000);
     try { cloudLicenseStatusNow(); } catch (error) { console.warn("[Licença]", (error as Error)?.message); }
   }
+}
+// ─── Facturação Electrónica AGT ─────────────────────────────────────────────────────────────────────────────
+// As chaves privadas (contribuinte e hash SAF-T) ficam cifradas pelo cofre do sistema operativo (safeStorage),
+// por conta de empresa, e nunca passam para o renderer. O renderer só pede assinaturas de documentos com os
+// campos da especificação, hashes SAF-T e chamadas aos 7 serviços da AGT (o jwsSignature é feito aqui).
+function registerAgtHandlers(accountDir: () => string) {
+  const agtDir = () => path.join(accountDir(), "agt");
+  const keyFile = (tipo: "contribuinte" | "saft") => path.join(agtDir(), `${tipo}.bin`);
+  const readKey = (tipo: "contribuinte" | "saft") => {
+    const file = keyFile(tipo);
+    if (!fs.existsSync(file)) return null;
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("Armazenamento seguro indisponível neste computador.");
+    return agtLerChave(safeStorage.decryptString(fs.readFileSync(file)), tipo === "saft" ? 1024 : 2048);
+  };
+  const readNif = () => {
+    try { return String(JSON.parse(fs.readFileSync(path.join(agtDir(), "contribuinte.json"), "utf8")).nif || ""); }
+    catch { return ""; }
+  };
+  const describe = (tipo: "contribuinte" | "saft") => {
+    try { const key = readKey(tipo); return key ? agtDescreverChave(key) : { carregada: false }; }
+    catch (error: any) { return { carregada: false, erro: error?.message || String(error) }; }
+  };
+  ipcMain.handle("agt-estado", async (event) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    return { success: true, nif: readNif(), contribuinte: describe("contribuinte"), saft: describe("saft") };
+  });
+  ipcMain.handle("agt-importar-chave", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    const actor = assertUserPermission(event, "manage_fiscal");
+    if (!["admin", "super_admin"].includes(String(actor.role))) throw new Error("Só administradores podem importar chaves da AGT.");
+    const tipo = payload?.tipo === "saft" ? "saft" : payload?.tipo === "contribuinte" ? "contribuinte" : null;
+    if (!tipo || typeof payload?.pem !== "string" || payload.pem.length > 20_000) throw new Error("Chave inválida.");
+    if (tipo === "contribuinte" && !/^\d{10}$/.test(String(payload?.nif || ""))) throw new Error("Indique o NIF (10 dígitos) a que a chave pertence.");
+    if (!safeStorage.isEncryptionAvailable()) throw new Error("Armazenamento seguro indisponível neste computador.");
+    const key = agtLerChave(payload.pem, tipo === "saft" ? 1024 : 2048);
+    fs.mkdirSync(agtDir(), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(keyFile(tipo), safeStorage.encryptString(key.export({ type: "pkcs8", format: "pem" }).toString()), { mode: 0o600 });
+    if (tipo === "contribuinte") fs.writeFileSync(path.join(agtDir(), "contribuinte.json"), JSON.stringify({ nif: String(payload.nif) }), { mode: 0o600 });
+    return { success: true, ...agtDescreverChave(key) };
+  });
+  ipcMain.handle("agt-assinar-documento", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    const key = readKey("contribuinte");
+    if (!key) throw new Error("A chave do contribuinte ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    return { success: true, jws: agtAssinarDocumento(payload, readNif(), key) };
+  });
+  ipcMain.handle("agt-hash-saft", async (event, mensagens) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    const key = readKey("saft");
+    if (!key) throw new Error("A chave do hash SAF-T ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    if (!Array.isArray(mensagens) || mensagens.length > 500) throw new Error("Pedido de hash inválido.");
+    return { success: true, hashes: mensagens.map((m: unknown) => agtHashSaft(m, key)) };
+  });
+  ipcMain.handle("agt-chamar", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    assertUserPermission(event, "manage_fiscal");
+    if (!payload || !(payload.servico in AGT_CAMPOS_ASSINATURA)) throw new Error("Serviço AGT desconhecido.");
+    const key = readKey("contribuinte");
+    if (!key) throw new Error("A chave do contribuinte ainda não foi importada (Relatórios Fiscais › Configuração AGT).");
+    const resultado = await chamarAgt({ ambiente: payload.ambiente, servico: payload.servico, corpo: payload.corpo, nif: readNif(), chave: key });
+    return { success: true, ...resultado };
+  });
 }
 function registerMainHandlers() {
   const assertMasterSession = (event: Electron.IpcMainInvokeEvent) => {
@@ -2512,6 +2706,7 @@ app.whenReady().then(async () => {
   ipcMain.on("is-packaged", (event) => {
     event.returnValue = app.isPackaged;
   });
+  registerAgtHandlers(() => getAccountBaseDir(activeAccount.id));
   ipcMain.handle("accounts-list", async (event) => {
     assertTrustedIpcSender(event);
     return getPublicAccounts();
@@ -3024,10 +3219,35 @@ app.whenReady().then(async () => {
   let cloudLinkGrant: { senderId: number; tenantId: string; expiresAt: number } | null = null;
   const hasCloudLinkGrant = (event: Electron.IpcMainInvokeEvent) =>
     Boolean(cloudLinkGrant && cloudLinkGrant.senderId === event.sender.id && Date.now() < cloudLinkGrant.expiresAt);
+  // Depois de a própria conta trocar a senha temporária, a sessão deixa de pedir a troca (também ao recarregar).
+  const actualizarTrocaSenhaDaSessao = (senderId: number, request: { sql: string; params?: unknown[] }) => {
+    if (mutationTable(request.sql) !== 'users' || !/^\s*UPDATE\b/iu.test(request.sql)) return;
+    if (!updatedUserColumns(request.sql).includes('mustchangepassword')) return;
+    const params = Array.isArray(request.params) ? request.params : [];
+    const sessao: any = userAuth.status(senderId).user;
+    if (!sessao || String(params[params.length - 1] ?? '') !== String(sessao.id)) return;
+    userAuth.updateSessionUser(senderId, { mustChangePassword: Number(updatedUserValue(request.sql, params, 'mustchangepassword')) === 1 ? 1 : 0 });
+  };
   const assertUserSqlAuthorized = async (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>) => {
     let reservedHere = false;
     try {
       for (const statement of statements) {
+      // Designar ou transferir o Administrador principal (shared_settings): as regras são verificadas aqui, com a base.
+      if (mutationTable(statement.sql) === 'shared_settings' && String(statement.params?.[0] ?? '') === CHAVE_ADMIN_PRINCIPAL) {
+        const sessao: any = userAuth.assertAuthenticated(event.sender.id);
+        const actorRow: any = await runQuery('get', 'SELECT id, role, status, name FROM users WHERE id = ? LIMIT 1', [sessao.id]);
+        const actualRow: any = await runQuery('get', 'SELECT value FROM shared_settings WHERE key = ? LIMIT 1', [CHAVE_ADMIN_PRINCIPAL]).catch(() => null);
+        const novo = lerAdminPrincipal(statement.params?.[1]);
+        const alvo: any = novo ? await runQuery('get', 'SELECT id, role, status, name FROM users WHERE id = ? LIMIT 1', [novo.userId]) : null;
+        const motivo = !novo ? 'Designação do Administrador principal inválida.'
+          : novo.designadoPor !== sessao.id ? 'A designação tem de ser feita pelo utilizador autenticado.'
+            : motivoRecusaDesignar(actorRow, alvo, lerAdminPrincipal(actualRow?.value));
+        if (motivo) {
+          await writeAuthAudit(sessao, 'permission_denied', motivo, { targetUserId: novo?.userId || null, sql: 'admin_principal' });
+          throw new Error(motivo);
+        }
+        continue;
+      }
       const kind = userStatementKind(statement.sql);
       if (!kind) continue;
       if (kind === 'schema' && financialSchemaBootstrapOpen) continue;
@@ -3064,10 +3284,16 @@ app.whenReady().then(async () => {
         const params = Array.isArray(statement.params) ? statement.params : [];
         const byId = /\bWHERE\s+id\s*=\s*\?\s*$/iu.test(statement.sql.trim());
         if (kind !== 'insert' && !byId) throw new Error("Alterações a utilizadores têm de indicar o utilizador (WHERE id = ?).");
-        const target: any = kind === 'insert' ? null : await runQuery("get", "SELECT id, role, isOwner FROM users WHERE id = ? LIMIT 1", [params[params.length - 1]]);
+        const target: any = kind === 'insert' ? null : await runQuery("get", "SELECT id, role, isOwner, permissions FROM users WHERE id = ? LIMIT 1", [params[params.length - 1]]);
+        // Repor a senha de uma conta só do portal (fica com troca obrigatória): basta gerir o RH.
+        if (kind === 'update' && ehReposicaoSenhaPortal(statement.sql, params) && ehContaSoPortal(target) && hasPermission(currentUser, 'hr_manage')) {
+          pendingPrivilegeAudits.push({ actor: currentUser, kind, targetId: target.id, sql: statement.sql, params });
+          continue;
+        }
         // A conta da sessão é relida da base: a marca de conta principal nunca vem do renderer.
         const actorRow: any = await runQuery("get", "SELECT id, role, isOwner, permissions FROM users WHERE id = ? LIMIT 1", [currentUser.id]);
-        const verdict = checkUserMutation({ kind, sql: statement.sql, params, actor: actorRow || currentUser, target });
+        const principalRow: any = await runQuery('get', 'SELECT value FROM shared_settings WHERE key = ? LIMIT 1', [CHAVE_ADMIN_PRINCIPAL]).catch(() => null);
+        const verdict = checkUserMutation({ kind, sql: statement.sql, params, actor: actorRow || currentUser, target, principal: lerAdminPrincipal(principalRow?.value) });
         if (verdict.error) {
           await writeAuthAudit(currentUser, "permission_denied", verdict.error, { targetUserId: target?.id || null, sql: statement.sql.slice(0, 120) });
           throw new Error(verdict.error);
@@ -3080,6 +3306,8 @@ app.whenReady().then(async () => {
         const params = Array.isArray(statement.params) ? statement.params : [];
         if (String(params[params.length - 1] || '') === String(currentUser.id)) continue;
       }
+      // Conta do portal do funcionário (só o portal, troca de senha obrigatória): basta gerir o RH.
+      if (kind === 'insert' && ehContaPortalNova(statement.sql, Array.isArray(statement.params) ? statement.params : []) && hasPermission(currentUser, 'hr_manage')) continue;
       if (!hasManageUsers(currentUser)) throw new Error("O utilizador nao possui permissao para gerir utilizadores.");
       }
       return reservedHere;
@@ -3358,11 +3586,14 @@ app.whenReady().then(async () => {
   ipcMain.handle("company-public-info", async (event) => {
     assertTrustedIpcSender(event);
     try {
-      const row: any = await runQuery("get", "SELECT name, logo, enableMultiTenant FROM company_settings WHERE id = 1 LIMIT 1");
+      const row: any = await runQuery("get", "SELECT * FROM company_settings WHERE id = 1 LIMIT 1");
       if (!row) return null;
       return {
         name: typeof row.name === "string" ? row.name : "",
         logo: typeof row.logo === "string" ? row.logo : null,
+        // Mesma imagem que os relatórios usam como marca de água (fundo esbatido do login).
+        watermarkLogo: typeof row.watermarkLogo === "string" && row.watermarkLogo ? row.watermarkLogo : null,
+        reportLogo: typeof row.reportLogo === "string" && row.reportLogo ? row.reportLogo : null,
         enableMultiTenant: row.enableMultiTenant === null || row.enableMultiTenant === undefined ? null : Number(row.enableMultiTenant) !== 0
       };
     } catch {
@@ -3493,6 +3724,7 @@ app.whenReady().then(async () => {
     try {
       const r = await runQuery("execute", request.sql, request.params);
       await flushPrivilegeAudits();
+      actualizarTrocaSenhaDaSessao(event.sender.id, request);
       if (insertsAccountingEntries([request])) sealAfterWrite("local");
       if (insertsAuditLogs([request])) sealAuditAfterWrite();
       broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
@@ -3515,14 +3747,20 @@ app.whenReady().then(async () => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("query", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
+    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) {
+      userAuth.assertAuthenticated(event.sender.id);
+      await assertLeituraRH(event, request.sql, request.params, runQuery);
+    }
     return runQuery("query", request.sql, request.params);
   });
   ipcMain.handle("db-get", async (event, sql, params) => {
     assertTrustedIpcSender(event);
     const request = validateSqlRequest("get", sql, params);
     if (userReadExposesSecrets(request.sql)) throw new Error("A leitura de credenciais pelo renderer nao e permitida.");
-    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) userAuth.assertAuthenticated(event.sender.id);
+    if (!hasCloudLinkGrant(event) && !financialSchemaBootstrapOpen && !(await isFirstSetup()) && await accountHasUsers()) {
+      userAuth.assertAuthenticated(event.sender.id);
+      await assertLeituraRH(event, request.sql, request.params, runQuery);
+    }
     return runQuery("get", request.sql, request.params);
   });
   ipcMain.handle("db-exec", async (event, sql) => {
@@ -3568,7 +3806,7 @@ app.whenReady().then(async () => {
     if (!Array.isArray(groups) || groups.length > 500) throw new TypeError("Lote de sincronização inválido.");
     const columnsCache = new Map<string, Set<string>>();
     const result = await applyRemoteGroups(groups as RemoteGroup[], {
-      sqlById: RENDERER_SQL_BY_ID,
+      sqlById: SYNC_SQL_BY_ID,
       tableColumns: async (table) => {
         if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return new Set();
         if (!columnsCache.has(table)) {
@@ -3577,10 +3815,32 @@ app.whenReady().then(async () => {
         }
         return columnsCache.get(table)!;
       },
+      retainedForRow: async (table, rowId) => ((await runQuery("query", RETAINED_FOR_ROW_SQL, [table, rowId, JSON.stringify(rowId)])) || []) as Array<{ id: string; operation: string }>,
+      rowExists: async (table, rowId) => {
+        if (!/^[a-z_][a-z0-9_]*$/i.test(table)) return false;
+        return Boolean(await runQuery("get", `SELECT 1 AS found FROM "${table}" WHERE id = ? LIMIT 1`, [rowId]));
+      },
       transaction: async (statements) => runTransaction(validateDbTransaction(statements))
     });
     if (result.applied) { sealAfterWrite("remote"); sealAuditAfterWrite(); }
     if (result.applied || result.conflicts) broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    return result;
+  });
+  // Manutenção depois da sincronização (manutencao-sync.ts): calculada só a partir desta base, sem SQL vindo do
+  // ecrã — como as operações da nuvem, não depende das permissões de quem tem a sessão aberta (no canal db-transaction
+  // cada recusa era registada como «acção sem permissão»).
+  ipcMain.handle("sync-maintenance", async (event) => {
+    assertTrustedIpcSender(event);
+    if (!hasCloudLinkGrant(event)) userAuth.assertAuthenticated(event.sender.id);
+    if (financialSchemaBootstrapOpen) throw new Error("A base de dados ainda está a ser preparada.");
+    const result = await executarManutencaoSync({
+      all: async (sql, params = []) => ((await runQuery("query", sql, params)) || []) as any[],
+      transaction: async (statements) => runTransaction(validateDbTransaction(statements)),
+      sqlById: SYNC_SQL_BY_ID,
+    }, { limparAlertasFalsos: true });
+    if (result.reactivados || result.restaurados || result.fundidos || result.religados || result.resolvidos || result.alertasLimpos) {
+      broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });
+    }
     return result;
   });
   // Colunas de utilizador partilhadas entre dispositivos: sem 2FA, bloqueios, presença nem fotografia (ficheiro local).
@@ -3649,9 +3909,12 @@ app.whenReady().then(async () => {
     const allowed = new Set(await sharedUserColumns());
     // A marca de conta principal nunca chega da web, e a própria conta principal só se altera neste computador.
     const columns = incomingColumns.filter(name => allowed.has(name) && name !== "isOwner");
-    if (!["id", "name", "email", "password", "role"].every(name => columns.includes(name))) return { applied: 0, deleted: 0 };
+    if (!["id", "name", "email", "password", "role"].every(name => columns.includes(name))) return { applied: 0, deleted: 0, clashes: [] };
     const at = (row: unknown[], name: string) => row[incomingColumns.indexOf(name)];
     const statements: Array<{ sql: string; params: unknown[] }> = [];
+    // Mesmo email com outro ID neste computador (a mesma pessoa criada em separado em dois sítios): não se sobrepõe,
+    // mas fica registado para o diagnóstico e para a unificação — antes era esquecido e o chat deixava de bater certo.
+    const clashes: Array<{ email: string; name: string; localId: string; remoteId: string }> = [];
     let applied = 0;
     for (const row of incomingRows) {
       if (!Array.isArray(row)) continue;
@@ -3664,7 +3927,10 @@ app.whenReady().then(async () => {
       if (isPrimaryOwner(localOwner)) continue;
       // Email já usado por outro utilizador deste computador: não se sobrepõe.
       const sameEmail: any = await runQuery("get", "SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1", [email, id]);
-      if (sameEmail) continue;
+      if (sameEmail) {
+        clashes.push({ email, name: String(at(row, "name") || email).slice(0, 120), localId: String(sameEmail.id), remoteId: id });
+        continue;
+      }
       const values = columns.map(name => {
         const value = at(row, name);
         return value === undefined ? null : value !== null && typeof value === "object" ? JSON.stringify(value) : value;
@@ -3687,7 +3953,7 @@ app.whenReady().then(async () => {
       statements.push({ sql: "DELETE FROM users WHERE id = ?", params: [id] });
       removed += 1;
     }
-    if (!statements.length) return { applied: 0, deleted: 0 };
+    if (!statements.length) return { applied: 0, deleted: 0, clashes };
     try {
       await runTransaction(validateDbTransaction(statements));
     } catch (error: any) {
@@ -3706,7 +3972,7 @@ app.whenReady().then(async () => {
     }
     await writeAuthAudit(currentUser, "users_synced_from_web",
       `Sincronização de utilizadores da versão web: ${applied} criado(s)/actualizado(s), ${removed} removido(s).`);
-    return { applied, deleted: removed };
+    return { applied, deleted: removed, clashes };
   });
   ipcMain.handle("db-import", async (event, payload) => {
     assertTrustedIpcSender(event);
@@ -4617,6 +4883,17 @@ app.whenReady().then(async () => {
     }, msUntil2AM);
   }
   scheduleBackup();
+  // Actualizações do Tango ERP (o Tango Master é distribuído à parte). Antes de reiniciar para instalar,
+  // a base de dados é copiada; se a cópia falhar, a instalação não avança.
+  if (!isTangoMaster) startUpdater({
+    serverUrl: () => readCloudLicense()?.serverUrl || DEFAULT_LICENSE_SERVER,
+    licenseToken: () => readCloudLicense()?.token || null,
+    assertTrustedSender: assertTrustedIpcSender,
+    prepareForInstall: async () => {
+      const result: any = await backupDatabase();
+      if (result && result.success === false) throw new Error(result.error || "a cópia de segurança falhou");
+    },
+  });
   ipcMain.handle("backup-database", async (event) => {
     assertTrustedIpcSender(event);
     const currentUser: any = userAuth.assertAuthenticated(event.sender.id);
@@ -4683,6 +4960,8 @@ app.whenReady().then(async () => {
     }
   });
   app.on("before-quit", async (event) => {
+    // A instalar uma actualização: a cópia de segurança já foi feita e o instalador espera que a aplicação feche.
+    if (isInstallingUpdate()) return;
     event.preventDefault();
     await backupDatabase();
     app.exit(0);

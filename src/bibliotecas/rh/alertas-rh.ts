@@ -35,7 +35,9 @@ export function aniversarioNoAno(nascimento: string, ano: number) {
 export function gerarAlertas(e: {
     hoje: string; funcionarios: Func[]; contratos: Contrato[]; documentos: Documento[]; planos: PlanoFerias[]; processamentos: Processamento[];
     ausenciasPendentes: number; clientes?: Cliente[];
-    parametros: { alertaFeriasDias: number; mesNatal: number; prazoEntregaDia: number; alertaPrazosDias: number; biDiasAviso: number };
+    parametros: { alertaFeriasDias: number; mesNatal: number; prazoEntregaDia: number; alertaPrazosDias: number; biDiasAviso: number;
+        /** Prazos de aviso antes da validade dos documentos e do BI (por omissão 90, 30 e 7 dias). */
+        alertasDocumentoDias?: number[] };
 }): Alerta[] {
     const { hoje } = e;
     const lista: Alerta[] = [];
@@ -43,6 +45,10 @@ export function gerarAlertas(e: {
     const activos = e.funcionarios.filter(f => f.estado === 'activo');
     const nome = (id: string) => e.funcionarios.find(f => f.id === id)?.nome || '—';
     const ano = Number(hoje.slice(0, 4));
+    const prazos = [...new Set((e.parametros.alertasDocumentoDias?.length ? e.parametros.alertasDocumentoDias : [90, 30, 7]).filter(n => n > 0))].sort((a, b) => a - b);
+    // Prazo de aviso em que o documento está (o mais curto que já foi atingido): 7, 30 ou 90 dias por omissão.
+    const prazoDe = (falta: number) => (falta === 0 ? 0 : prazos.find(p => falta <= p));
+    const prioridadeDe = (falta: number) => (falta <= Math.min(7, prazos[0] ?? 7) ? 1 : falta <= 30 ? 2 : 3) as 1 | 2 | 3;
 
     for (const f of activos) {
         if (f.data_nascimento) {
@@ -55,7 +61,9 @@ export function gerarAlertas(e: {
         }
         if (f.bi_validade) {
             const falta = dias(hoje, f.bi_validade);
-            if (falta >= 0 && falta <= 30) add({ id: `bi-funcionario:${f.id}:${f.bi_validade}`, tipo: 'documento', referencia_id: f.id, funcionario_id: f.id, mensagem: `O BI de ${f.nome} expira a ${dataPt(f.bi_validade)}.`, destinatario_perfil: 'rh', prioridade: 2, accao: `/rh/funcionarios?ficha=${f.id}` });
+            const prazo = falta >= 0 ? prazoDe(falta) : undefined;
+            if (prazo !== undefined) add({ id: `bi-funcionario:${f.id}:${f.bi_validade}${prazo > 30 ? `:${prazo}` : ''}`, tipo: 'documento', referencia_id: f.id, funcionario_id: f.id,
+                mensagem: `O BI de ${f.nome} ${falta === 0 ? 'expira hoje' : `expira a ${dataPt(f.bi_validade)} (faltam ${falta} dias)`}.`, destinatario_perfil: 'rh', prioridade: prioridadeDe(falta), accao: `/rh/funcionarios?ficha=${f.id}` });
         }
     }
 
@@ -87,8 +95,9 @@ export function gerarAlertas(e: {
     for (const d of e.documentos) {
         if (d.estado !== 'activo' || !d.data_validade || !activos.some(f => f.id === d.funcionario_id)) continue;
         const falta = dias(hoje, d.data_validade);
-        if (falta >= 0 && falta <= 30) add({ id: `documento-${falta === 0 ? 'dia' : '30'}:${d.id}`, tipo: 'documento', referencia_id: d.id, funcionario_id: d.funcionario_id, prioridade: falta === 0 ? 1 : 2, destinatario_perfil: 'rh', accao: `/rh/funcionarios?ficha=${d.funcionario_id}`,
-            mensagem: `O documento «${d.nome}» de ${nome(d.funcionario_id)} ${falta === 0 ? 'expira hoje' : `expira a ${dataPt(d.data_validade)}`}.` });
+        const prazo = falta >= 0 ? prazoDe(falta) : undefined;
+        if (prazo !== undefined) add({ id: `documento-${falta === 0 ? 'dia' : prazo}:${d.id}`, tipo: 'documento', referencia_id: d.id, funcionario_id: d.funcionario_id, prioridade: falta === 0 ? 1 : prioridadeDe(falta), destinatario_perfil: 'rh', accao: `/rh/documentos?funcionario=${d.funcionario_id}`,
+            mensagem: `O documento «${d.nome}» de ${nome(d.funcionario_id)} ${falta === 0 ? 'expira hoje' : `expira a ${dataPt(d.data_validade)} (faltam ${falta} dias)`}.` });
     }
 
     const mesNatal = e.parametros.mesNatal;

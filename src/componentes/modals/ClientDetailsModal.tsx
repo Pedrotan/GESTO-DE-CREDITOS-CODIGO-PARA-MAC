@@ -12,7 +12,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/componentes/ui/tabs'
 import { Download, FileText, Landmark, Phone, Mail, MapPin, Calendar, CreditCard, Wallet, ShieldAlert, History, Receipt, MessageCircle } from 'lucide-react';
 import { Client, Credit, Payment } from '@/tipos/credito';
 import { formatCurrency, formatDate } from '@/bibliotecas/formatters';
-import { generateClientProfilePDF, generateClientGeneralPaymentHistoryPDF, generateReceiptPDF } from '@/bibliotecas/pdf';
+import { generateClientGeneralPaymentHistoryPDF, generateReceiptPDF } from '@/bibliotecas/pdf';
+import { generateClientProfilePDFWithDocuments } from '@/bibliotecas/pdf-anexos-cliente';
 import { useToast } from '@/ganchos/usar-toast';
 import { useData } from '@/contextos/ContextoDados';
 import { CLIENT_STATUS_LABELS, clientDisplayStatus } from '@/bibliotecas/estado-cliente';
@@ -113,9 +114,9 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
         }
     };
 
-    const confirmDownload = () => {
+    const confirmDownload = async () => {
         try {
-            generateClientProfilePDF(
+            await generateClientProfilePDFWithDocuments(
                 client,
                 clientCredits,
                 clientPayments,
@@ -601,7 +602,7 @@ export function ClientDetailsModal({ client, open, onOpenChange, onGrantRemainin
                         </div>
                         <DialogFooter>
                             <Button variant="outline" onClick={() => setIsDownloadOptionsOpen(false)}>Cancelar</Button>
-                            <Button onClick={confirmDownload}>Gerar PDF</Button>
+                            <Button onClick={() => void confirmDownload()}>Gerar PDF</Button>
                         </DialogFooter>
                     </DialogContent>
                 </Dialog>

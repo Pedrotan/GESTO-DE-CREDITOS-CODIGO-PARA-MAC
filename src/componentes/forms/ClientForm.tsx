@@ -1,4 +1,5 @@
 import { BankLogo } from '@/componentes/BankLogo';
+import { PreferenciasCliente } from '@/componentes/cobranca/PreferenciasCliente';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { estadoBI, validadeSugerida, validarDatasBI } from '@/bibliotecas/rh/bi-validade';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
@@ -72,6 +73,8 @@ import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { needsSpouse, spouseFieldsToSave } from '@/bibliotecas/conjuge';
+import { CAMPOS_MORADA, campoConjuge, validarNaturalidadeMorada, type CampoMorada } from '@/bibliotecas/morada-cliente';
+import { MUNICIPIOS_POR_PROVINCIA, PROVINCIAS_DPA, municipioDPA, municipiosDaProvincia, provinciaDPA, semAcentos } from '@/bibliotecas/dpa-angola';
 import { cn } from '@/bibliotecas/utils';
 import { formatAngolanPhone } from '@/bibliotecas/formatters';
 import { analisarTelefoneAngola, telefoneOpcionalValido } from '@/bibliotecas/operadoras-telefone';
@@ -79,6 +82,8 @@ import { IndicadorOperadora } from '@/componentes/ui/IndicadorOperadora';
 import { detetarGeneroPorNome } from '@/bibliotecas/genero';
 import { calcularIdade, validarBI, inferirProvinciaDoBI, normalizarDataISO } from '@/bibliotecas/formatadores';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
+import { EMPLOYMENT_SECTORS, MINISTRY_SUGGESTIONS, fieldsToClearOnSectorChange, validateWorkplace } from '@/bibliotecas/local-trabalho';
+import { CLIENT_CATEGORIES, type ClientCategory } from '@/bibliotecas/carteira-cliente';
 import { PAISES, nacionalidadeDoPais } from '@/dados/paises';
 import {
     validarPassaporte,
@@ -93,6 +98,12 @@ const clientSchema = z.object({
         .refine(value => analisarTelefoneAngola(value).valido, value => ({ message: analisarTelefoneAngola(value).mensagem })),
     email: z.string().email('Email inválido').or(z.literal('')).optional(),
     address: z.string().optional(),
+    // Naturalidade e morada administrativa (obrigatórias, validadas ao gravar).
+    birthPlace: z.string().optional(),
+    province: z.string().optional(),
+    municipality: z.string().optional(),
+    neighborhood: z.string().optional(),
+    zone: z.string().optional(),
     birthDate: z.string().optional(),
     age: z.coerce.number().min(0).optional(),
     issueDate: z.string().optional(),
@@ -109,10 +120,20 @@ const clientSchema = z.object({
     spouseBirthDate: z.string().optional(),
     spouseOccupation: z.string().optional(),
     spouseIncome: z.coerce.number().min(0).optional(),
+    spouseBirthPlace: z.string().optional(),
+    spouseProvince: z.string().optional(),
+    spouseMunicipality: z.string().optional(),
+    spouseNeighborhood: z.string().optional(),
+    spouseZone: z.string().optional(),
     spouseDataRefused: z.boolean().optional(),
     // --- Campos exclusivos da carteira de Aposentados ---
     workInstitution: z.string().optional(),
     socialSecurityNumber: z.string().optional(),
+    // --- Local de trabalho do particular: o sector escolhido decide os campos pedidos ---
+    employmentSector: z.string().optional(),
+    ministry: z.string().optional(),
+    employerNif: z.string().optional(),
+    workPosition: z.string().optional(),
     // --- Identificacao do tipo de titular ---
     clientType: z.enum(['PARTICULAR', 'EMPRESA']).optional(),
     // --- Documento de identificação (nacional ou estrangeiro) ---
@@ -135,6 +156,13 @@ const clientSchema = z.object({
     status: z.enum(['active', 'blocked', 'inactive']),
     riskLevel: z.enum(['low', 'medium', 'high']),
     receiveMethod: z.enum(['transfer', 'cash']),
+}).superRefine((data, ctx) => {
+    // Naturalidade e morada obrigatórias (cliente e, com dados fornecidos, cônjuge), assinaladas junto com os outros erros.
+    const emFalta = validarNaturalidadeMorada(data, { particular: data.clientType !== 'EMPRESA', conjuge: needsSpouse(data.maritalStatus) && !data.spouseDataRefused });
+    for (const [campo, message] of emFalta) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [campo], message });
+    if (data.clientType !== 'EMPRESA') {
+        for (const [campo, message] of validateWorkplace(data)) ctx.addIssue({ code: z.ZodIssueCode.custom, path: [campo], message });
+    }
 });
 
 type ClientFormValues = z.infer<typeof clientSchema>;
@@ -229,6 +257,79 @@ function isPdfDocument(doc: ClientDocument): boolean {
     return doc.type === 'pdf' || doc.data?.startsWith('data:application/pdf');
 }
 
+/** Opções da lista de escolha (pesquisa também sem acentos); um valor antigo fora da lista continua visível. */
+const opcoesDPA = (nomes: string[], actual: string, subLabel?: (nome: string) => string) => {
+    const opcoes = nomes.map(nome => ({ value: nome, label: nome, keywords: semAcentos(nome), subLabel: subLabel?.(nome) }));
+    return actual && !nomes.includes(actual)
+        ? [{ value: actual, label: actual, keywords: semAcentos(actual), subLabel: 'Valor antigo, fora da nova DPA', className: 'text-amber-700' }, ...opcoes]
+        : opcoes;
+};
+
+/** Naturalidade, província, município, bairro e zona (do cliente ou, com `conjuge`, do cônjuge). */
+function CamposNaturalidadeMorada({ form, conjuge = false, semNaturalidade = false }: { form: any; conjuge?: boolean; semNaturalidade?: boolean }) {
+    const nome = (key: CampoMorada) => (conjuge ? campoConjuge(key) : key);
+    const provincia = String(form.watch(nome('province')) || '');
+    const municipios = municipiosDaProvincia(provincia);
+    const escolherProvincia = (valor: string) => {
+        form.setValue(nome('province'), valor, { shouldDirty: true, shouldValidate: true });
+        // O município só fica se pertencer à província escolhida.
+        const municipio = municipioDPA(valor, form.getValues(nome('municipality')));
+        if (municipio !== form.getValues(nome('municipality'))) form.setValue(nome('municipality'), municipio, { shouldDirty: true });
+    };
+    const classeCampo = "h-10 rounded-xl border-slate-200 bg-white text-sm";
+    return (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-5">
+            {CAMPOS_MORADA.filter(campo => !(semNaturalidade && campo.key === 'birthPlace')).map(campo => (
+                <FormField
+                    key={campo.key}
+                    control={form.control}
+                    name={nome(campo.key) as any}
+                    render={({ field }) => {
+                        const valor = String(field.value || '');
+                        return (
+                            <FormItem>
+                                <FormLabel className="text-xs font-bold text-slate-700">
+                                    {campo.label}{conjuge ? ' do Cônjuge' : ''}<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
+                                </FormLabel>
+                                {campo.key === 'province' ? (
+                                    <SearchableSelect
+                                        options={opcoesDPA(PROVINCIAS_DPA, provinciaDPA(valor) || valor, nomeProvincia => `${MUNICIPIOS_POR_PROVINCIA[nomeProvincia].length} municípios`)}
+                                        value={provinciaDPA(valor) || valor}
+                                        onValueChange={escolherProvincia}
+                                        placeholder={campo.placeholder}
+                                        searchPlaceholder="Pesquisar província…"
+                                        emptyMessage="Nenhuma província encontrada."
+                                        className={classeCampo}
+                                        contentClassName="min-w-[260px]"
+                                    />
+                                ) : campo.key === 'municipality' ? (
+                                    <SearchableSelect
+                                        options={opcoesDPA(municipios, municipioDPA(provincia, valor) || valor)}
+                                        value={municipioDPA(provincia, valor) || valor}
+                                        onValueChange={field.onChange}
+                                        disabled={!municipios.length}
+                                        placeholder={municipios.length ? campo.placeholder : 'Escolha primeiro a província'}
+                                        searchPlaceholder="Pesquisar município…"
+                                        emptyMessage="Nenhum município encontrado nesta província."
+                                        className={classeCampo}
+                                        contentClassName="min-w-[260px]"
+                                    />
+                                ) : (
+                                    <FormControl>
+                                        <Input {...field} value={valor} placeholder={campo.placeholder}
+                                            className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                    </FormControl>
+                                )}
+                                <FormMessage />
+                            </FormItem>
+                        );
+                    }}
+                />
+            ))}
+        </div>
+    );
+}
+
 export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Guardar', category = 'COMUM' }: ClientFormProps) {
     const parametrosBI = useParametrosBI();
     const { user: authUser } = useAuth();
@@ -267,9 +368,10 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
     const { clients: registeredClients, deletedClients: binClients } = useData();
     const [confirmedSameName, setConfirmedSameName] = useState('');
     /** Só a carteira de estrangeiros mostra passaporte, país e nacionalidade. */
-    const ehEstrangeiro = category === 'ESTRANGEIRO';
+    const [carteira, setCarteira] = useState<ClientCategory>(initialData?.clientCategory || category);
+    const ehEstrangeiro = carteira === 'ESTRANGEIRO';
     /** Só a carteira de aposentados mostra a instituição e o nº de segurança social. */
-    const ehAposentado = category === 'APOSENTADO';
+    const ehAposentado = carteira === 'APOSENTADO';
     const [documentType, setDocumentType] = useState<'BI' | 'PASSAPORTE'>(
         ehEstrangeiro ? (initialData?.documentType || 'PASSAPORTE') : 'BI'
     );
@@ -288,6 +390,16 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 phone: initialData.phone || '',
                 email: initialData.email || '',
                 address: initialData.address || '',
+                birthPlace: initialData.birthPlace || '',
+                province: initialData.province || '',
+                municipality: initialData.municipality || '',
+                neighborhood: initialData.neighborhood || '',
+                zone: initialData.zone || '',
+                spouseBirthPlace: initialData.spouseBirthPlace || '',
+                spouseProvince: initialData.spouseProvince || '',
+                spouseMunicipality: initialData.spouseMunicipality || '',
+                spouseNeighborhood: initialData.spouseNeighborhood || '',
+                spouseZone: initialData.spouseZone || '',
                 birthDate: initialData.birthDate || '',
                 age: initialData.age ?? (initialData.birthDate ? calcularIdade(initialData.birthDate) : 0),
                 issueDate: initialData.issueDate || '',
@@ -305,8 +417,12 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 spouseDataRefused: Boolean(initialData.spouseDataRefused),
                 workInstitution: initialData.workInstitution || '',
                 socialSecurityNumber: initialData.socialSecurityNumber || '',
+                employmentSector: initialData.employmentSector || '',
+                ministry: initialData.ministry || '',
+                employerNif: initialData.employerNif || '',
+                workPosition: initialData.workPosition || '',
                 clientType: initialData.clientType || detectClientType(initialData.nif),
-                documentType: category === 'ESTRANGEIRO' ? (initialData.documentType || 'PASSAPORTE') : 'BI',
+                documentType: carteira === 'ESTRANGEIRO' ? (initialData.documentType || 'PASSAPORTE') : 'BI',
                 countryCode: initialData.countryCode || '',
                 nationality: initialData.nationality || '',
                 passportFormatValidated: initialData.passportFormatValidated || false,
@@ -331,6 +447,16 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 phone: '',
                 email: '',
                 address: '',
+                birthPlace: '',
+                province: '',
+                municipality: '',
+                neighborhood: '',
+                zone: '',
+                spouseBirthPlace: '',
+                spouseProvince: '',
+                spouseMunicipality: '',
+                spouseNeighborhood: '',
+                spouseZone: '',
                 birthDate: '',
                 age: 0,
                 issueDate: '',
@@ -339,6 +465,10 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 maritalStatus: '',
                 workInstitution: '',
                 socialSecurityNumber: '',
+                employmentSector: '',
+                ministry: '',
+                employerNif: '',
+                workPosition: '',
                 creditLimit: 0,
                 monthlyIncome: 0,
                 defaultInterestRate: 0,
@@ -354,6 +484,8 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
      * Troca o tipo de titular e limpa os campos que deixam de fazer sentido,
      * para nao ficarem dados de pessoa singular guardados numa empresa (e vice-versa).
      */
+    const employmentSector = form.watch('employmentSector');
+
     const applyClientType = (next: 'PARTICULAR' | 'EMPRESA') => {
         if (next === clientType) return;
         setClientType(next);
@@ -361,7 +493,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
         const limpar = next === 'EMPRESA'
             ? ['birthDate', 'age', 'gender', 'maritalStatus', 'issueDate', 'expiryDate',
                'spouseName', 'spouseBi', 'spouseNif', 'spousePhone', 'spouseEmail', 'spouseBirthDate', 'spouseOccupation',
-               'workInstitution', 'socialSecurityNumber'] as const
+               'workInstitution', 'socialSecurityNumber', 'employmentSector', 'ministry', 'employerNif', 'workPosition'] as const
             : ['foundationDate', 'legalForm', 'businessSector', 'commercialRegistry', 'legalRepresentative', 'legalRepRole'] as const;
         limpar.forEach((campo) => {
             form.setValue(campo as any, campo === 'age' ? undefined : '', { shouldDirty: true });
@@ -477,6 +609,9 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 if (addressVal) {
                     form.setValue('address', addressVal, { shouldValidate: true, shouldDirty: true, shouldTouch: true });
                 }
+                // Província de emissão do BI como sugestão (só se ainda estiver vazia; o operador confirma ou corrige).
+                const provinciaBI = clientType === 'PARTICULAR' ? provinciaDPA(inferirProvinciaDoBI(nifValue)) : '';
+                if (provinciaBI && !form.getValues('province')) form.setValue('province', provinciaBI, { shouldDirty: true });
 
                 setIsNameAutoFilled(true);
 
@@ -684,16 +819,36 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                 return;
             }
         }
+        // Naturalidade e morada (província, município, bairro, zona): obrigatórias para o cliente e, quando os dados do
+        // cônjuge são fornecidos, também para o cônjuge.
+        const emFalta = validarNaturalidadeMorada(data, { particular: clientType === 'PARTICULAR', conjuge: needsSpouse(data.maritalStatus) && !data.spouseDataRefused });
+        if (emFalta.length) {
+            for (const [campo, mensagem] of emFalta) form.setError(campo as any, { type: 'manual', message: mensagem });
+            setGenericAlert({ isOpen: true, title: 'Dados de morada em falta', description: emFalta.map(([, mensagem]) => mensagem).join(' '), type: 'warning' });
+            return;
+        }
         clearDraft();
         onSubmit({
             ...data,
             // Cônjuge: só para casados/união de facto; a recusa e o consentimento ficam registados.
             ...spouseFieldsToSave(data, initialData, authUser?.name || 'Sistema'),
+            clientCategory: carteira,
             clientType,
             documentType,
             documents,
             bankCoordinates,
         });
+    };
+
+    /** Muda o cliente de lista. Fora da carteira de estrangeiros o documento volta a ser o BI; o número fica para corrigir. */
+    const alterarCarteira = (nova: ClientCategory) => {
+        setCarteira(nova);
+        if (nova !== 'ESTRANGEIRO' && documentType === 'PASSAPORTE') {
+            setDocumentType('BI');
+            form.setValue('documentType', 'BI', { shouldDirty: true });
+            setEstadoPassaporte('vazio');
+            setMsgPassaporte('');
+        }
     };
 
     const handleWhatsAppTest = () => {
@@ -716,6 +871,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
         <Form {...form}>
             <form onSubmit={form.handleSubmit(handleFormSubmit)} className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50/50">
                 <div className="flex-1 overflow-y-auto p-4 md:p-6 lg:p-8 space-y-6 min-h-0">
+                    {initialData?.id && <PreferenciasCliente clientId={initialData.id} />}
                     
                     {/* ========================================================================= */}
                     {/* SEÇÃO 1: DADOS PESSOAIS E IDENTIFICAÇÃO */}
@@ -750,6 +906,22 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
 
                         {/* Campos da Seção 1 */}
                         <div className="p-5 md:p-6 space-y-4">
+                            {/* Na edição, permite pôr o cliente na lista certa (os antigos têm a carteira deduzida). */}
+                            {initialData && (
+                                <FormItem className="max-w-xs">
+                                    <FormLabel className="text-xs font-bold text-slate-700">Carteira do Cliente</FormLabel>
+                                    <Select value={carteira} onValueChange={(valor) => alterarCarteira(valor as ClientCategory)}>
+                                        <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white text-sm" aria-label="Carteira do Cliente">
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {CLIENT_CATEGORIES.map((item) => (
+                                                <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </FormItem>
+                            )}
                             {/* Identificação estrangeira: só na carteira de estrangeiros. */}
                             {ehEstrangeiro && (
                                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 items-start">
@@ -1440,6 +1612,10 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                         </FormItem>
                                                     )}
                                                 />
+                                                <div className="col-span-full">
+                                                    <p className="mb-2 text-xs font-bold text-slate-700">Naturalidade e morada do cônjuge</p>
+                                                    <CamposNaturalidadeMorada form={form} conjuge />
+                                                </div>
                                     </div>
                                 )}
 
@@ -1699,6 +1875,9 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                 />
                             </div>
 
+                            {/* Linha 5: Naturalidade e morada administrativa (obrigatórias) */}
+                            <CamposNaturalidadeMorada form={form} semNaturalidade={form.watch('clientType') === 'EMPRESA'} />
+
                             {/* Linha 5: Morada e Residência */}
                             <FormField
                                 control={form.control}
@@ -1714,13 +1893,129 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
                                                 language="pt-AO" 
                                                 placeholder="Ex: Rua Direita de Luanda, Bairro Maianga, Município de Luanda..." 
                                                 {...field} 
-                                                className="h-10 rounded-xl border-slate-200 focus-visible:ring-blue-500 text-sm" 
+                                                className="h-10 rounded-xl border-slate-200 focus-visible:ring-blue-500 text-sm"
                                             />
                                         </FormControl>
                                         <FormMessage />
                                     </FormItem>
                                 )}
                             />
+
+                            {/* Local de trabalho (particulares; os aposentados têm os Dados da Reforma): o select muda os campos */}
+                            {clientType === 'PARTICULAR' && !ehAposentado && (
+                                <div className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-100 bg-slate-50/50 p-4 md:grid-cols-2">
+                                    <div className="flex items-center gap-1.5 md:col-span-2">
+                                        <Briefcase className="h-3.5 w-3.5 text-blue-600 shrink-0" />
+                                        <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">Local de Trabalho</p>
+                                    </div>
+
+                                    <FormField
+                                        control={form.control}
+                                        name="employmentSector"
+                                        render={({ field }) => (
+                                            <FormItem>
+                                                <FormLabel className="text-xs font-bold text-slate-700">Tipo de Instituição</FormLabel>
+                                                <Select
+                                                    value={field.value || ''}
+                                                    onValueChange={(value) => {
+                                                        field.onChange(value);
+                                                        fieldsToClearOnSectorChange(value).forEach((campo) => {
+                                                            form.setValue(campo, '', { shouldDirty: true });
+                                                            form.clearErrors(campo);
+                                                        });
+                                                    }}
+                                                >
+                                                    <FormControl>
+                                                        <SelectTrigger className="h-10 rounded-xl border-slate-200 bg-white text-sm" aria-label="Tipo de Instituição">
+                                                            <SelectValue placeholder="Selecione pública ou privada" />
+                                                        </SelectTrigger>
+                                                    </FormControl>
+                                                    <SelectContent>
+                                                        {EMPLOYMENT_SECTORS.map((sector) => (
+                                                            <SelectItem key={sector.value} value={sector.value}>{sector.label}</SelectItem>
+                                                        ))}
+                                                    </SelectContent>
+                                                </Select>
+                                                <FormMessage />
+                                            </FormItem>
+                                        )}
+                                    />
+
+                                    {employmentSector === 'PUBLICO' && (
+                                        <FormField
+                                            control={form.control}
+                                            name="ministry"
+                                            render={({ field }) => (
+                                                <FormItem>
+                                                    <FormLabel className="text-xs font-bold text-slate-700">Ministério<span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span></FormLabel>
+                                                    <FormControl>
+                                                        <Input list="ministerios-angola" placeholder="Ex.: Ministério da Educação" {...field} value={field.value || ''} className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                                    </FormControl>
+                                                    <datalist id="ministerios-angola">
+                                                        {MINISTRY_SUGGESTIONS.map((ministry) => <option key={ministry} value={ministry} />)}
+                                                    </datalist>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                    )}
+
+                                    {employmentSector === 'PRIVADO' && (
+                                        <FormField
+                                            control={form.control}
+                                            name="employerNif"
+                                            render={({ field }) => (
+                                                <FormItem>
+                                                    <FormLabel className="text-xs font-bold text-slate-700">NIF da Empresa</FormLabel>
+                                                    <FormControl>
+                                                        <Input placeholder="Ex.: 5000000000" {...field} value={field.value || ''} className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 font-mono text-sm" />
+                                                    </FormControl>
+                                                    <FormMessage />
+                                                </FormItem>
+                                            )}
+                                        />
+                                    )}
+
+                                    {employmentSector && (
+                                        <>
+                                            <FormField
+                                                control={form.control}
+                                                name="workInstitution"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel className="text-xs font-bold text-slate-700">
+                                                            {employmentSector === 'PUBLICO' ? 'Instituição Onde Trabalha' : 'Empresa Onde Trabalha'}
+                                                            <span className="ml-0.5 font-black text-red-600" title="Campo obrigatório" aria-label="obrigatório">*</span>
+                                                        </FormLabel>
+                                                        <FormControl>
+                                                            <Input
+                                                                placeholder={employmentSector === 'PUBLICO' ? 'Ex.: Hospital Josina Machel' : 'Ex.: Nome da empresa'}
+                                                                {...field}
+                                                                value={field.value || ''}
+                                                                className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm"
+                                                            />
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                            <FormField
+                                                control={form.control}
+                                                name="workPosition"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel className="text-xs font-bold text-slate-700">Cargo / Função</FormLabel>
+                                                        <FormControl>
+                                                            <Input placeholder={employmentSector === 'PUBLICO' ? 'Ex.: Técnico Superior' : 'Ex.: Contabilista'} {...field} value={field.value || ''} className="h-10 rounded-xl border-slate-200 bg-white focus-visible:ring-blue-500 text-sm" />
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+                                        </>
+                                    )}
+                                </div>
+                            )}
                         </div>
                     </div>
 

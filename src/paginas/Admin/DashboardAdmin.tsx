@@ -56,7 +56,8 @@ import {
     Calendar,
     Clock,
     CreditCard,
-    Cloud
+    Cloud,
+    Rocket
 } from 'lucide-react';
 import GestaoEmpresasCloud, { type CloudTenant, type SubscriptionPayment } from './GestaoEmpresasCloud';
 import VolumeNegocioSaas from './VolumeNegocioSaas';
@@ -64,6 +65,7 @@ import ContratosSoftware from './ContratosSoftware';
 import MarcaAguaMaster from './MarcaAguaMaster';
 import { validateSoftwareContract } from '@/bibliotecas/contrato-software';
 import SegurancaServidor from './SegurancaServidor';
+import CentroActualizacoes from './CentroActualizacoes';
 import { subscriptionState } from '@/bibliotecas/subscricao';
 import { LicenseType, getLicenseTypeName } from '@/bibliotecas/licenciamento';
 import { decodeLicensePayload, encodeLicensePayload } from '@/bibliotecas/payload-licenca';
@@ -118,7 +120,7 @@ export default function DashboardAdmin() {
     const navigate = useNavigate();
 
     // Estado da Navegação (Sidebar)
-    const [activeTab, setActiveTab] = useState<'painel' | 'licenciamento' | 'precos' | 'perfil' | 'relatorios' | 'guia' | 'suporte' | 'contabilidade' | 'empresas' | 'volume' | 'seguranca' | 'contratos' | 'marcaagua'>('painel');
+    const [activeTab, setActiveTab] = useState<'painel' | 'licenciamento' | 'precos' | 'perfil' | 'relatorios' | 'guia' | 'suporte' | 'contabilidade' | 'empresas' | 'volume' | 'seguranca' | 'actualizacoes' | 'contratos' | 'marcaagua'>('painel');
 
     // Tema
     const [theme, setTheme] = useState<'light' | 'dark'>(() => {
@@ -1034,6 +1036,7 @@ export default function DashboardAdmin() {
                         <SidebarItem id="painel" icon={LayoutDashboard} label="Visão Geral" />
                         <SidebarItem id="volume" icon={TrendingUp} label="Volume de Negócio" />
                         <SidebarItem id="seguranca" icon={ShieldAlert} label="Segurança" />
+                        <SidebarItem id="actualizacoes" icon={Rocket} label="Actualizações" />
                 <SidebarItem id="relatorios" icon={BarChart3} label="Relatórios" />
                         <SidebarItem id="licenciamento" icon={Key} label="Gerar Licenças" />
                         <SidebarItem id="contratos" icon={FileText} label="Contratos de Venda" />
@@ -1765,6 +1768,7 @@ export default function DashboardAdmin() {
                     {/* --- RELATÓRIOS --- */}
                     {activeTab === 'volume' && <VolumeNegocioSaas />}
                     {activeTab === 'seguranca' && <SegurancaServidor />}
+                    {activeTab === 'actualizacoes' && <CentroActualizacoes />}
 
                     {activeTab === 'relatorios' && (
                         <div className="space-y-6">

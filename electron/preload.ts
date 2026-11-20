@@ -1,4 +1,3 @@
-/// <reference path="./electron-env.d.ts" />
 import { contextBridge, ipcRenderer } from 'electron';
 
 type SqlParams = unknown[];
@@ -12,7 +11,9 @@ type TransactionStatement = {
 const MAX_SQL_LENGTH = 200_000;
 const MAX_TRANSACTION_STATEMENTS = 1_000;
 const MAX_PARAM_COUNT = 500;
-const MAX_STRING_PARAM_LENGTH = 1_000_000;
+// Texto de um parâmetro SQL: os clientes guardam documentos anexados (BI, comprovativos) em base64 e a
+// sincronização traz alterações até 12 MB; com 1 MB a ligação de um computador novo parava.
+const MAX_STRING_PARAM_LENGTH = 16_000_000;
 const MAX_BASE64_IMAGE_LENGTH = 15 * 1024 * 1024;
 const MAX_TEXT_PAYLOAD_LENGTH = 2 * 1024 * 1024;
 
@@ -187,6 +188,8 @@ const api = Object.freeze({
         if (!Array.isArray(groups)) throw new TypeError('Lote de sincronização inválido.');
         return ipcRenderer.invoke('sync-apply-remote', JSON.parse(JSON.stringify(groups)));
     },
+    // Manutenção depois da sincronização (clientes repetidos, conflitos sem efeito): calculada no processo principal.
+    syncMaintenance: () => ipcRenderer.invoke('sync-maintenance'),
     // Utilizadores para a versão web: o processo principal devolve só a carga já cifrada (nunca as senhas).
     syncUsersPayload: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null; knownIds?: string[] }) => {
         if (!input || typeof input !== 'object') throw new TypeError('Pedido inválido.');
@@ -306,9 +309,31 @@ const api = Object.freeze({
     }),
     onCloudLicenseChanged: (callback: (status: any) => void) => subscribe('cloud-license-changed', callback),
 
+    // Actualizações do Tango ERP: só estes cinco pedidos e o aviso de estado (o processo principal decide tudo).
+    updates: Object.freeze({
+        getStatus: () => ipcRenderer.invoke('updates:status'),
+        check: () => ipcRenderer.invoke('updates:check'),
+        download: () => ipcRenderer.invoke('updates:download'),
+        install: () => ipcRenderer.invoke('updates:install'),
+        defer: (hours: number) => {
+            if (!Number.isFinite(hours) || hours < 1 || hours > 72) throw new TypeError('Adiamento inválido.');
+            return ipcRenderer.invoke('updates:defer', Math.round(hours));
+        },
+        onStatus: (callback: (status: any) => void) => subscribe('updates:status-changed', callback),
+    }),
+
     readLicenseKeys: () => ipcRenderer.invoke('read-license-keys'),
     generateLicenseKeypair: () => ipcRenderer.invoke('generate-license-keypair'),
     signLicensePayload: (payload: string) => ipcRenderer.invoke('sign-license-payload', ensureText(payload, 'Payload da licenca', 64_000)),
+
+    // Facturação Electrónica AGT (chaves e assinaturas ficam no processo principal)
+    agtEstado: () => ipcRenderer.invoke('agt-estado'),
+    agtImportarChave: (payload: { tipo: 'contribuinte' | 'saft'; pem: string; nif?: string }) => ipcRenderer.invoke('agt-importar-chave', {
+        tipo: payload?.tipo, pem: ensureText(payload?.pem, 'Chave', 20_000), nif: payload?.nif ? ensureText(payload.nif, 'NIF', 20) : undefined,
+    }),
+    agtAssinarDocumento: (payload: Record<string, unknown>) => ipcRenderer.invoke('agt-assinar-documento', payload),
+    agtHashSaft: (mensagens: string[]) => ipcRenderer.invoke('agt-hash-saft', mensagens),
+    agtChamar: (payload: { ambiente: string; servico: string; corpo: Record<string, unknown> }) => ipcRenderer.invoke('agt-chamar', payload),
 
     dbNuclearReset: (confirmation?: string) => ipcRenderer.invoke('db-nuclear-reset', {
         confirmation: confirmation ? ensureText(confirmation, 'Confirmacao', 64) : ''

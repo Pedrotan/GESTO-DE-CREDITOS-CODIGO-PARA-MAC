@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { BACKUP_REMINDER_TITLE, backupReminderId, remindersToClear } from '@/bibliotecas/aviso-backup';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
 import { AlertTriangle, Download, RefreshCw, ShieldAlert, Database } from 'lucide-react';
@@ -16,7 +17,7 @@ import { useState } from 'react';
 
 export function BackupReminder() {
     const { user } = useAuth();
-    const { companySettings, addNotification, markNotificationAsRead, notifications, clients, credits, payments } = useData();
+    const { companySettings, addNotification, deleteNotification, notifications, clients, credits, payments } = useData();
     const navigate = useNavigate();
 
     // Lógica de "Fluxo de Dados": Verificar se existem registros relevantes
@@ -52,15 +53,13 @@ export function BackupReminder() {
             }
 
             if (shouldWarn) {
-                // Verificar se já existe uma notificação de backup não lida
-                const alreadyNotified = (notifications || []).some(
-                    n => n.title === 'Lembrete de Backup' && !n.read
-                );
+                // Um único aviso por período em toda a empresa: lido ou não, não volta a ser criado.
+                const alreadyNotified = (notifications || []).some(n => n.title === BACKUP_REMINDER_TITLE);
 
                 if (!alreadyNotified) {
                     await addNotification({
-                        id: crypto.randomUUID(),
-                        title: 'Lembrete de Backup',
+                        id: backupReminderId(referenceDateStr),
+                        title: BACKUP_REMINDER_TITLE,
                         message: 'Já passaram 10 dias desde a última cópia de segurança manual. Por favor, realize um backup para garantir a segurança dos dados.',
                         type: 'warning',
                         timestamp: new Date(),
@@ -70,7 +69,8 @@ export function BackupReminder() {
             }
         };
 
-        checkBackup();
+        // O aviso pode já ter chegado de outro dispositivo com o mesmo identificador.
+        checkBackup().catch(() => undefined);
     }, [user, companySettings.lastBackupDate, companySettings.installDate, notifications, hasDataFlow, addNotification]);
 
     const lastBackup = companySettings.lastBackupDate;
@@ -124,13 +124,16 @@ export function BackupReminder() {
         setIsOpen(false);
     };
 
-    // Backup feito (neste ou noutro computador, recebido pela nuvem): o lembrete pendente deixa de fazer sentido.
+    // Backup feito (neste ou noutro dispositivo, recebido pela nuvem): o lembrete sai da lista de todas as contas. A
+    // remoção sincroniza; um aviso criado entretanto por um dispositivo atrasado é removido quando aqui chega.
+    const clearing = useRef(new Set<string>());
     useEffect(() => {
-        if (isOverdue) return;
-        for (const n of notifications || []) {
-            if (n.title === 'Lembrete de Backup' && !n.read) markNotificationAsRead(n.id).catch(() => undefined);
+        for (const n of remindersToClear(notifications, lastBackup, isOverdue)) {
+            if (clearing.current.has(n.id)) continue;
+            clearing.current.add(n.id);
+            deleteNotification(n.id).catch(() => undefined).finally(() => clearing.current.delete(n.id));
         }
-    }, [isOverdue, notifications, markNotificationAsRead]);
+    }, [isOverdue, lastBackup, notifications, deleteNotification]);
 
     // Close if it's no longer overdue or if snooze is active (handled by checkStatus logic, but good for cleanup)
     useEffect(() => {

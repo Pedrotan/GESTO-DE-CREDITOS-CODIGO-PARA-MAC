@@ -6,6 +6,7 @@ import { useData } from '@/contextos/ContextoDados';
 import { Role } from '@/tipos/autenticacao';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { isPrimaryOwner } from '@/bibliotecas/conta-principal';
+import { ehSoFuncionario } from '@/bibliotecas/portal-funcionario';
 import { validateLicense } from '@/bibliotecas/licenciamento';
 import { CaixaEletronicoIcon } from '@/componentes/ui/CaixaEletronicoIcon';
 import {
@@ -88,11 +89,26 @@ interface MenuItem {
   hideWhenSingular?: boolean;
   /** Submenu só para administradores. */
   adminOnly?: boolean;
+  /** Só o Super Administrador (consulta técnica). */
+  superAdminOnly?: boolean;
   /** Submenus. O item pai deixa de navegar e passa a abrir/fechar a lista. */
   children?: MenuItem[];
   /** Módulo activado pela licença (funcionalidade do plano no Tango Master Gen). */
   licensedModule?: 'rh';
+  /** Outras rotas que também marcam este item como activo (páginas agrupadas numa só entrada). */
+  alsoActive?: string[];
 }
+
+// Menu do funcionário: as secções do seu portal (painel, pedidos, salários, documentos e contratos, correio, ponto).
+const MENU_FUNCIONARIO: MenuItem[] = [
+  { icon: LayoutDashboard, label: 'Painel', path: '/rh/portal?aba=painel' },
+  { icon: Plane, label: 'Pedidos', path: '/rh/portal?aba=pedidos' },
+  { icon: Wallet, label: 'Salários', path: '/rh/portal?aba=salarios' },
+  { icon: FileText, label: 'Documentos e contratos', path: '/rh/portal?aba=documentos' },
+  { icon: Mail, label: 'Correio', path: '/rh/portal?aba=correio' },
+  { icon: Clock, label: 'Ponto', path: '/rh/portal?aba=ponto' },
+  { icon: Gavel, label: 'Termos e Políticas', path: '/termos-e-politicas' },
+];
 
 const menuItems: MenuItem[] = [
   { icon: LayoutDashboard, label: 'Painel', path: '/' },
@@ -148,18 +164,16 @@ const menuItems: MenuItem[] = [
     path: '/rh',
     licensedModule: 'rh',
     children: [
+      // As mesmas 8 entradas das abas do módulo (as páginas agrupadas abrem com a sub-navegação dentro da aba).
       { icon: LayoutDashboard, label: 'Painel de RH', path: '/rh/painel', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Users, label: 'Funcionários', path: '/rh/funcionarios', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Clock, label: 'Livro de Ponto', path: '/rh/ponto', permission: 'hr_view', licensedModule: 'rh' },
-      { icon: CalendarDays, label: 'Horários e Calendário', path: '/rh/calendario', permission: 'hr_view', licensedModule: 'rh' },
-      { icon: Plane, label: 'Férias', path: '/rh/ferias', permission: 'hr_view', licensedModule: 'rh' },
-      { icon: Plane, label: 'Dispensas e Licenças', path: '/rh/ausencias', permission: 'hr_view', licensedModule: 'rh' },
-      { icon: Banknote, label: 'Processamento Salarial', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh' },
-      { icon: ReciboIcon, label: 'Recibos e Declarações', path: '/rh/recibos', permission: 'hr_view_salaries', licensedModule: 'rh' },
-      { icon: FolderOpen, label: 'Documentos', path: '/rh/documentos', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: Plane, label: 'Férias e Ausências', path: '/rh/ferias', permission: 'hr_view', licensedModule: 'rh', alsoActive: ['/rh/ausencias'] },
+      { icon: Banknote, label: 'Salários', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh', alsoActive: ['/rh/recibos'] },
+      { icon: FolderOpen, label: 'Gestão Documental', path: '/rh/documentos', permission: 'hr_view', licensedModule: 'rh' },
       { icon: BarChart, label: 'Relatórios de RH', path: '/rh/relatorios', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: SlidersHorizontal, label: 'Configurações de RH', path: '/rh/configuracoes', permission: 'hr_view', licensedModule: 'rh', alsoActive: ['/rh/calendario'] },
       { icon: UserCog, label: 'Portal do Funcionário', path: '/rh/portal', permission: 'hr_self', licensedModule: 'rh' },
-      { icon: SlidersHorizontal, label: 'Configurações de RH', path: '/rh/configuracoes', permission: 'hr_view', licensedModule: 'rh' },
     ],
   },
   { icon: Trash2, label: 'Lixeira do Sistema', path: '/lixeira', permission: 'manage_settings' },
@@ -179,7 +193,7 @@ const menuItems: MenuItem[] = [
       { icon: Megaphone, label: 'Marketing', path: '/definicoes?tab=marketing' },
       { icon: Mail, label: 'Email (SMTP)', path: '/definicoes?tab=email' },
       { icon: Cloud, label: 'Sincronização & Nuvem', path: '/definicoes?tab=cloud' },
-      { icon: AlertTriangle, label: 'Conflitos de Sincronização', path: '/definicoes?tab=conflicts' },
+      { icon: AlertTriangle, label: 'Correcções da Sincronização', path: '/definicoes?tab=conflicts', superAdminOnly: true },
       { icon: DatabaseBackup, label: 'Backup', path: '/definicoes?tab=backup' },
       { icon: RefreshCw, label: 'Backup Automático', path: '/definicoes?tab=auto-backup' },
       { icon: PenTool, label: 'Assinaturas', path: '/definicoes?tab=signatures' },
@@ -262,11 +276,13 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
     (item.children || []).filter(child => {
       if (child.hideWhenSingular && isSingular && user?.role !== 'super_admin' && !isPrimaryOwner(user)) return false;
       if (child.adminOnly && user?.role !== 'admin' && user?.role !== 'super_admin') return false;
+      if (child.superAdminOnly && user?.role !== 'super_admin') return false;
       if (!isAllowed(child)) return false;
       return true;
     }), [isAllowed, isSingular, user]);
 
-  const isChildActive = useCallback((item: MenuItem) => filhosVisiveis(item).some(c => matchPath(c.path)), [filhosVisiveis, matchPath]);
+  const childMatches = useCallback((c: MenuItem) => matchPath(c.path) || Boolean(c.alsoActive?.some(matchPath)), [matchPath]);
+  const isChildActive = useCallback((item: MenuItem) => filhosVisiveis(item).some(childMatches), [filhosVisiveis, childMatches]);
 
   // Abre automaticamente o menu cuja subpágina está activa
   useEffect(() => {
@@ -295,7 +311,10 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
     }
   };
 
-  const filteredMenu = menuItems.filter(item => {
+  // Funcionário: o menu é só o portal (nada de créditos nem da gestão da empresa).
+  const soFuncionario = ehSoFuncionario(user);
+  const filteredMenu = (soFuncionario ? MENU_FUNCIONARIO : menuItems).filter(item => {
+    if (soFuncionario) return true;
     // Grupos sem permissão própria (ex.: "Usuários") só existem para juntar
     // subitens com regras de acesso diferentes; a visibilidade do grupo
     // depende de haver pelo menos um subitem visível para este utilizador.
@@ -457,7 +476,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
                       </p>
                       <div className="flex flex-col gap-0.5">
                         {filhos.map(child => {
-                          const childActive = matchPath(child.path);
+                          const childActive = childMatches(child);
                           return (
                             <Link
                               key={child.path}
@@ -514,7 +533,7 @@ export function Sidebar({ collapsed, setCollapsed, mobileOpen = false, setMobile
                     <div className="overflow-hidden">
                       <div className="ml-[1.55rem] mt-1 flex flex-col gap-0.5 border-l border-sidebar-border/70 pl-3 py-1">
                         {filhos.map(child => {
-                          const childActive = matchPath(child.path);
+                          const childActive = childMatches(child);
                           return (
                             <Link
                               key={child.path}

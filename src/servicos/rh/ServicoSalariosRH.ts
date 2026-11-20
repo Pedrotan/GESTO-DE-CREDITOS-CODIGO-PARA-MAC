@@ -11,6 +11,7 @@ import { ServicoContabilidade } from '@/servicos/ServicoContabilidade';
 import { ServicoFinanceiro } from '@/servicos/ServicoFinanceiro';
 import { auditoriaRH, ServicoRH, type ActorRH } from './ServicoRH';
 import { ServicoTempoRH } from './ServicoTempoRH';
+import { ServicoPontoRH } from './ServicoPontoRH';
 
 type Statement = { sql: string; params?: unknown[]; expectChanges?: number };
 export type EstadoProcessamento = 'aberto' | 'calculado' | 'aprovado' | 'pago' | 'fechado';
@@ -30,6 +31,8 @@ export type Recibo = {
     outros_descontos_minor: number; liquido_minor: number; custo_empresa_minor: number; avisos_json: string | null; resumo_json: string | null; criado_em: string;
 };
 export type LinhaReciboRH = LinhaRecibo & { id: string; recibo_id: string };
+/** Valores lançados à mão no mês: salário base deste mês e número de faltas (null = usar o contrato / o livro de ponto). */
+export type EntradaMes = { id: string; processamento_id: string; funcionario_id: string; salario_base_minor: number | null; faltas: number | null; actualizado_em: string; actualizado_por_nome: string | null };
 export type RubricaPontual = { id: string; processamento_id: string; funcionario_id: string; rubrica_id: string; quantidade: number; valor_minor: number; descricao: string | null; criado_por_nome: string | null };
 
 export const ROTULO_TIPO: Record<TipoProcessamento, string> = { normal: 'Salário', ferias: 'Subsídio de férias', natal: 'Subsídio de Natal', acerto: 'Acerto' };
@@ -38,8 +41,54 @@ const agora = () => new Date().toISOString();
 const autoridadeTotal = (actor: ActorRH) => actor.role === 'super_admin' || isPrimaryOwner(actor);
 const ultimoDia = (ano: number, mes: number) => `${ano}-${String(mes).padStart(2, '0')}-${String(new Date(Date.UTC(ano, mes, 0)).getUTCDate()).padStart(2, '0')}`;
 const LOTE = 40;
+/**
+ * Identificador fixo do processamento normal de um mês. Com um identificador aleatório, dois computadores que abriam
+ * o mesmo mês antes de sincronizar criavam dois «Novembro» diferentes: cada um recusava o do outro e todas as
+ * alterações seguintes (cálculo, faltas, aprovação) ficavam em conflito nos restantes computadores.
+ */
+export const idProcessamentoNormal = (ano: number, mes: number) => `rh-proc-normal-${ano}-${String(mes).padStart(2, '0')}`;
+/** Valores do mês de um funcionário: um registo por processamento e funcionário, com o mesmo id em todos os computadores. */
+export const idEntradaMes = (processamentoId: string, funcionarioId: string) => `${processamentoId}:${funcionarioId}`;
+export const NOTA_UNIFICACAO = 'Processamento do mês unificado entre computadores (identificador fixo). Recalcule o mês para alinhar os valores.';
+type RubricaCatalogo = RubricaMotor & { periodicidade?: string; mes_pagamento?: number | null; incidencia_confirmada?: number; valor_padrao_minor?: number; nome: string };
+/** Mensal: todos os meses; anual: só no mês de pagamento; pontual: nunca como rubrica fixa. */
+const periodoPermite = (r: RubricaCatalogo, mes: number) => (r.periodicidade === 'pontual' ? false : r.periodicidade === 'anual' ? Number(r.mes_pagamento) === mes : true);
 
 export class ServicoSalariosRH {
+    private static unificado = false;
+
+    /**
+     * Passa os processamentos normais ainda abertos ou calculados para o identificador fixo do mês (com os recibos,
+     * rubricas e valores do mês) e dá por resolvidos os conflitos que os identificadores antigos deixaram. Todos os
+     * computadores chegam ao mesmo identificador; o próximo cálculo alinha os recibos em todos. Uma vez por sessão.
+     */
+    static async unificarNormais(forcar = false) {
+        if (this.unificado && !forcar) return 0;
+        this.unificado = true;
+        const linhas = await db.all<{ id: string; ano: number; mes: number; estado: string }>(
+            `SELECT id, ano, mes, estado FROM rh_processamento WHERE tipo = 'normal' AND estado IN ('aberto', 'calculado')`).catch(() => []);
+        const antigos = linhas.filter(p => p.id !== idProcessamentoNormal(p.ano, p.mes));
+        if (!antigos.length) return 0;
+        const statements = antigos.flatMap(p => {
+            const fixo = idProcessamentoNormal(p.ano, p.mes);
+            return [
+                { sql: `UPDATE rh_processamento_entrada SET id = ? || ':' || funcionario_id, processamento_id = ? WHERE processamento_id = ?`, params: [fixo, fixo, p.id] },
+                { sql: 'UPDATE rh_rubrica_pontual SET processamento_id = ? WHERE processamento_id = ?', params: [fixo, p.id] },
+                { sql: 'UPDATE rh_recibo SET processamento_id = ? WHERE processamento_id = ?', params: [fixo, p.id] },
+                // Sem expectChanges: nos outros computadores este id não existe e a alteração não pode virar conflito.
+                { sql: `UPDATE rh_processamento SET id = ? WHERE id = ? AND tipo = 'normal'`, params: [fixo, p.id] },
+            ];
+        });
+        await db.transaction(statements);
+        // Alterações antigas que apontavam para identificadores que já não existem em nenhum computador.
+        await db.transaction([{
+            sql: `UPDATE sync_conflicts SET status = 'accepted', resolutionNote = ?, resolvedAt = ? WHERE status = 'pending'
+                  AND entityType IN ('rh_processamento', 'rh_recibo', 'rh_recibo_linha', 'rh_processamento_entrada', 'rh_rubrica_pontual')`,
+            params: [NOTA_UNIFICACAO, agora()],
+        }]).catch(() => undefined);
+        return antigos.length;
+    }
+
     static processamentos() {
         return db.all<Processamento>('SELECT * FROM rh_processamento ORDER BY ano DESC, mes DESC, criado_em DESC').catch(() => [] as Processamento[]);
     }
@@ -72,6 +121,30 @@ export class ServicoSalariosRH {
         return db.all<RubricaPontual>('SELECT * FROM rh_rubrica_pontual WHERE processamento_id = ? ORDER BY criado_em', [processamentoId]).catch(() => [] as RubricaPontual[]);
     }
 
+    static entradas(processamentoId: string) {
+        return db.all<EntradaMes>('SELECT * FROM rh_processamento_entrada WHERE processamento_id = ?', [processamentoId]).catch(() => [] as EntradaMes[]);
+    }
+
+    /** Grava o salário base do mês e/ou as faltas de um funcionário; o processamento volta a «aberto» para recalcular. */
+    static async guardarEntrada(p: Processamento, funcionarioId: string, valores: { salario_base_minor?: number | null; faltas?: number | null }, actor: ActorRH) {
+        if (!['aberto', 'calculado'].includes(p.estado)) throw new Error('O processamento já foi aprovado: os valores do mês não mudam.');
+        const actual = (await this.entradas(p.id)).find(e => e.funcionario_id === funcionarioId);
+        const salario = valores.salario_base_minor === undefined ? actual?.salario_base_minor ?? null : valores.salario_base_minor;
+        const faltas = valores.faltas === undefined ? actual?.faltas ?? null : valores.faltas;
+        if (salario !== null && (!Number.isSafeInteger(Math.round(salario)) || salario < 0)) throw new Error('Salário inválido.');
+        if (faltas !== null && (!Number.isFinite(faltas) || faltas < 0 || faltas > 31)) throw new Error('Indique entre 0 e 31 faltas.');
+        const when = agora();
+        await db.transaction([
+            { sql: `INSERT INTO rh_processamento_entrada (id, processamento_id, funcionario_id, salario_base_minor, faltas, actualizado_em, actualizado_por, actualizado_por_nome)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(processamento_id, funcionario_id) DO UPDATE SET salario_base_minor = excluded.salario_base_minor,
+                    faltas = excluded.faltas, actualizado_em = excluded.actualizado_em, actualizado_por = excluded.actualizado_por, actualizado_por_nome = excluded.actualizado_por_nome`,
+                params: [actual?.id ?? idEntradaMes(p.id, funcionarioId), p.id, funcionarioId, salario === null ? null : Math.round(salario), faltas, when, actor.id, actor.name] },
+            { sql: `UPDATE rh_processamento SET estado = 'aberto', actualizado_em = ? WHERE id = ? AND estado IN ('aberto', 'calculado')`, params: [when, p.id], expectChanges: 1 },
+            auditoriaRH(actor, 'update', `Valores do mês ${String(p.mes).padStart(2, '0')}/${p.ano} de um funcionário`, { processamentoId: p.id, funcionarioId },
+                actual ? { salario_base_minor: actual.salario_base_minor, faltas: actual.faltas } : undefined, { salario_base_minor: salario, faltas }, when),
+        ]);
+    }
+
     /** Abre um processamento: normal (um por mês, todos os activos), férias, Natal ou acerto (funcionários escolhidos). */
     static async abrir(input: { ano: number; mes: number; tipo: TipoProcessamento; funcionarios?: string[]; descricao?: string }, actor: ActorRH) {
         if (!Number.isInteger(input.ano) || input.mes < 1 || input.mes > 12) throw new Error('Ano ou mês inválido.');
@@ -79,14 +152,29 @@ export class ServicoSalariosRH {
         if (input.tipo === 'normal' && existentes.some(p => p.tipo === 'normal' && p.ano === input.ano && p.mes === input.mes))
             throw new Error('Já existe o processamento normal deste mês.');
         if (input.tipo === 'acerto' && !input.funcionarios?.length) throw new Error('Escolha os funcionários do acerto.');
-        const id = crypto.randomUUID();
+        const normal = input.tipo === 'normal';
+        const id = normal ? idProcessamentoNormal(input.ano, input.mes) : crypto.randomUUID();
         const when = agora();
         await db.transaction([
-            { sql: `INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)`,
-                params: [id, input.ano, input.mes, input.tipo, input.descricao?.trim() || null, input.funcionarios?.length ? JSON.stringify(input.funcionarios) : null, when, actor.id, actor.name], expectChanges: 1 },
+            normal
+                ? { sql: `INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, ?, ?)`,
+                    params: [id, input.ano, input.mes, when, actor.id, actor.name] }
+                : { sql: `INSERT INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 'aberto', ?, ?, ?, ?, ?)`,
+                    params: [id, input.ano, input.mes, input.tipo, input.descricao?.trim() || null, input.funcionarios?.length ? JSON.stringify(input.funcionarios) : null, when, actor.id, actor.name], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Abriu o processamento ${ROTULO_TIPO[input.tipo]} de ${String(input.mes).padStart(2, '0')}/${input.ano}`, { processamentoId: id }, undefined, undefined, when),
         ]);
         return id;
+    }
+
+    /**
+     * Abertura automática do mês corrente: o mesmo registo em todos os computadores (identificador, data e autor fixos),
+     * por isso abrir em dois computadores antes de sincronizar não cria conflito.
+     */
+    static async abrirAutomatico(ano: number, mes: number) {
+        await db.transaction([{
+            sql: `INSERT OR IGNORE INTO rh_processamento (id, ano, mes, tipo, estado, descricao, funcionarios_json, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, 'normal', 'aberto', NULL, NULL, ?, NULL, ?)`,
+            params: [idProcessamentoNormal(ano, mes), ano, mes, `${ano}-${String(mes).padStart(2, '0')}-01T00:00:00.000Z`, 'Abertura automática'],
+        }]);
     }
 
     /** Apaga um processamento que ainda está aberto (aberto por engano). */
@@ -126,11 +214,20 @@ export class ServicoSalariosRH {
         if (!['aberto', 'calculado'].includes(p.estado)) throw new Error('Só se calcula um processamento aberto ou calculado.');
         const referencia = ultimoDia(p.ano, p.mes);
         const hoje = luandaTodayKey();
-        const [funcionarios, contratos, rubricas, fixas, pontuais, parametros, tabelas, horarios, feriados, pontos, ausencias, tipos, cargos, departamentos] = await Promise.all([
+        const [funcionarios, contratos, rubricas, fixas, pontuais, parametros, tabelas, horarios, feriados, pontos, ausencias, tipos, cargos, departamentos, entradas] = await Promise.all([
             ServicoRH.funcionarios(), ServicoRH.contratos(), ServicoRH.rubricas(), ServicoRH.todasRubricasFuncionarios(), this.pontuais(p.id), ServicoRH.parametros(),
             ServicoRH.tabelasIrt(), ServicoTempoRH.horarios(), ServicoTempoRH.feriados(), ServicoTempoRH.pontosMes(p.ano, p.mes), ServicoTempoRH.ausencias(),
-            ServicoTempoRH.tiposAusencia(), ServicoRH.cargos(), ServicoRH.departamentos(),
+            ServicoTempoRH.tiposAusencia(), ServicoRH.cargos(), ServicoRH.departamentos(), this.entradas(p.id),
         ]);
+        const entradaDe = new Map(entradas.map(e => [e.funcionario_id, e]));
+        // Subsídios atribuídos com a incidência de IRT/INSS por confirmar bloqueiam o cálculo até ser definida.
+        if (p.tipo === 'normal') {
+            const inicioM = `${p.ano}-${String(p.mes).padStart(2, '0')}-01`;
+            const porConfirmar = [...new Set(fixas.filter(x => x.inicio <= referencia && (!x.fim || x.fim >= inicioM))
+                .map(x => rubricas.find(r => r.id === x.rubrica_id) as RubricaCatalogo | undefined)
+                .filter((r): r is RubricaCatalogo => Boolean(r && r.incidencia_confirmada === 0 && periodoPermite(r, p.mes))).map(r => r.nome))];
+            if (porConfirmar.length) throw new Error(`Defina se incide IRT e INSS em: ${porConfirmar.join(', ')} (Configurações › Subsídios e abonos). Confirme com o contabilista.`);
+        }
         const tabela = tabelaIrtEmVigor(tabelas, referencia);
         if (!tabela) throw new Error(`Não há tabela do IRT em vigor a ${referencia}. Crie-a nas Configurações de RH.`);
         const escaloes = await ServicoRH.escaloesIrt(tabela.id);
@@ -146,8 +243,12 @@ export class ServicoSalariosRH {
             inss_trabalhador: num('inss_trabalhador', 0.03), inss_empresa: num('inss_empresa', 0.08), inss_reformado: num('inss_reformado', 0.08),
             divisor_dia: valorTexto(parametros, 'divisor_dia', referencia, '30'), horas_extra_acrescimo: num('horas_extra_acrescimo', 0.5),
             horas_extra_feriado_acrescimo: num('horas_extra_feriado_acrescimo', 1), subsidio_ferias_pct: num('subsidio_ferias_pct', 0.5),
-            subsidio_natal_pct: num('subsidio_natal_pct', 0.5), salario_minimo: num('salario_minimo', 0), irt_tabela: `${tabela.ano} — ${tabela.lei_referencia}`,
+            subsidio_natal_pct: num('subsidio_natal_pct', 0.5), salario_minimo: num('salario_minimo', 0), valor_falta: num('valor_falta', 0), irt_tabela: `${tabela.ano} — ${tabela.lei_referencia}`,
         };
+        // Faltas, atrasos e horas extra vêm do livro de ponto fechado (secção 10.3 da especificação do ponto). Com o mês
+        // ainda por fechar, valem as faltas lançadas à mão no ecrã do processamento (atrasos e horas extra a zero).
+        const ponto = p.tipo === 'normal' ? await ServicoPontoRH.totaisSalario(p.ano, p.mes) : null;
+        const pontoFechado = Boolean(ponto?.totais);
         const escolhidos = p.funcionarios_json ? new Set<string>(JSON.parse(p.funcionarios_json)) : null;
         const inicioMes = `${p.ano}-${String(p.mes).padStart(2, '0')}-01`;
         const elegiveis = funcionarios.filter(f => (escolhidos ? escolhidos.has(f.id) : true) && f.data_admissao <= referencia && (!f.data_saida || f.data_saida >= inicioMes)
@@ -159,20 +260,31 @@ export class ServicoSalariosRH {
             const contrato = contratos.find(c => c.funcionario_id === f.id && c.estado === 'activo')
                 || contratos.filter(c => c.funcionario_id === f.id && c.inicio <= referencia).sort((a, b) => b.inicio.localeCompare(a.inicio))[0];
             const avisos: string[] = [];
-            if (!contrato) avisos.push('Sem contrato: salário base 0.');
-            const base = contrato?.salario_base_minor || 0;
+            const entrada = entradaDe.get(f.id);
+            if (!contrato && entrada?.salario_base_minor == null) avisos.push('Sem contrato: salário base 0.');
+            const base = entrada?.salario_base_minor ?? contrato?.salario_base_minor ?? 0;
             const horario = horarios.find(h => h.id === f.horario_id) || horarios.find(h => h.id === 'horario-normal') || HORARIO_OMISSAO;
-            const resumo = resumoMes({ funcionarioId: f.id, ano: p.ano, mes: p.mes, horario, feriados, pontos, ausencias, tipos, admissao: f.data_admissao, saida: f.data_saida, hoje });
+            const totaisPonto = ponto?.totais?.get(f.id);
+            const resumo = totaisPonto ? {
+                faltasDescontaveis: totaisPonto.faltas_descontaveis, minutosAtraso: totaisPonto.minutos_atraso,
+                horasExtra: Math.round(totaisPonto.minutos_extra_util / 60 * 100) / 100,
+                horasExtraFeriado: Math.round((totaisPonto.minutos_extra_descanso + totaisPonto.minutos_extra_feriado) / 60 * 100) / 100,
+                ausenciasPendentes: totaisPonto.ausencias_pendentes, diasSemRegisto: totaisPonto.pendentes,
+            } : { faltasDescontaveis: 0, minutosAtraso: 0, horasExtra: 0, horasExtraFeriado: 0, ausenciasPendentes: 0, diasSemRegisto: 0 };
+            if (entrada?.faltas != null) resumo.faltasDescontaveis = entrada.faltas;
+            else if (p.tipo === 'normal' && !pontoFechado) avisos.push('Livro de ponto do mês por fechar: sem faltas lançadas.');
             const divisor = taxas.divisor_dia === 'uteis' ? diasUteis(inicioMes, referencia, horario, feriados) : 30;
+            // Subsídios do catálogo: mensais todos os meses, anuais só no mês de pagamento, pontuais só pela «Rubrica do mês».
             const linhasFixas = fixas.filter(x => x.funcionario_id === f.id && x.inicio <= referencia && (!x.fim || x.fim >= inicioMes))
-                .map(x => ({ rubrica: porId.get(x.rubrica_id)!, valorMinor: x.valor_minor, quantidade: x.quantidade })).filter(x => x.rubrica);
+                .map(x => ({ rubrica: porId.get(x.rubrica_id)!, valorMinor: x.valor_minor || (porId.get(x.rubrica_id) as RubricaCatalogo | undefined)?.valor_padrao_minor || 0, quantidade: x.quantidade }))
+                .filter(x => x.rubrica && periodoPermite(x.rubrica as RubricaCatalogo, p.mes));
             const linhasMes = pontuais.filter(x => x.funcionario_id === f.id)
                 .map(x => ({ rubrica: porId.get(x.rubrica_id)!, valorMinor: x.valor_minor, quantidade: x.quantidade, descricao: x.descricao || undefined })).filter(x => x.rubrica);
             const reformado = Boolean(f.reformado);
             const resultado = calcularRecibo({
                 tipo: p.tipo, salarioBaseMinor: base, horasSemanais: contrato?.horas_semanais || horasSemanais(horario) || 40, divisorDia: divisor,
                 diasForaContrato: diasForaDoContrato(p.ano, p.mes, f.data_admissao, f.data_saida, divisor),
-                faltasDescontaveis: resumo.faltasDescontaveis, minutosAtraso: resumo.minutosAtraso, horasExtra: resumo.horasExtra, horasExtraFeriado: resumo.horasExtraFeriado,
+                faltasDescontaveis: resumo.faltasDescontaveis, valorFaltaMinor: Math.round(taxas.valor_falta * 100), minutosAtraso: resumo.minutosAtraso, horasExtra: resumo.horasExtra, horasExtraFeriado: resumo.horasExtraFeriado,
                 acrescimoHorasExtra: taxas.horas_extra_acrescimo, acrescimoHorasExtraFeriado: taxas.horas_extra_feriado_acrescimo,
                 subsidioPct: p.tipo === 'ferias' ? taxas.subsidio_ferias_pct : taxas.subsidio_natal_pct, mesesServico: mesesServicoNoAno(p.ano, f.data_admissao, f.data_saida),
                 // Só as rubricas fixas entram no salário normal; nos subsídios e acertos entram só as do próprio processamento.
@@ -261,6 +373,9 @@ export class ServicoSalariosRH {
     /** Aprovação: outra pessoa que não quem calculou (o Super Administrador pode fazer ambos). */
     static async aprovar(p: Processamento, actor: ActorRH) {
         if (p.estado !== 'calculado') throw new Error('Só se aprova um processamento calculado.');
+        // Reclamações da folha de correcção por responder bloqueiam a aprovação (a folha final tem de as ter em conta).
+        const pendentes = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM rh_reclamacao WHERE processamento_id = ? AND estado = 'pendente'", [p.id]).catch(() => undefined);
+        if (Number(pendentes?.n || 0) > 0) throw new Error(`Há ${pendentes!.n} reclamação(ões) de funcionários por responder nesta folha. Responda antes de aprovar.`);
         const when = agora();
         const proprio = p.calculado_por === actor.id;
         if (proprio && !autoridadeTotal(actor)) throw new Error('O processamento tem de ser aprovado por outra pessoa (quem calculou não aprova).');

@@ -7,6 +7,9 @@ import { PERIOD_PATTERN, currentPeriod, ensureUsageTable } from './_uso-empresas
 import { ensureTenantProfileColumns } from './_autorizacao-empresa.js';
 import { changeLicensePlan, importLegacyKeys, legacyKeyStatuses, issueLicenseKey, licenseDetails, listLicenses, listPlans, releaseMachine, setLicenseModules, migrateTenantsToLicenses, prepareLicenses, syncLicenseFromTenant, toPublicLicense } from './_licencas.js';
 import { createMasterSession, isValidMasterSession, revokeMasterSession } from './_sessao-master.js';
+import { listSyncDevices, userIdDivergences } from './_dispositivos-sync.js';
+import { integrityPlan } from './_integridade-sync.js';
+import { tenantLockCte } from './_bloqueio-empresa.js';
 import { generateLicenseKey, licenseKeyHash, licenseKeyPrefix, parseLicenseKey } from './_chave-licenca.js';
 
 const KEY_TOOLS = { generate: generateLicenseKey, parse: parseLicenseKey, hash: licenseKeyHash, prefix: licenseKeyPrefix };
@@ -267,6 +270,22 @@ export default async function handler(req, res) {
       });
     }
 
+    // Diagnóstico da sincronização de cada dispositivo da empresa (versão, última sincronização, retidas, erros).
+    if (action === 'sync-devices') {
+      const [tenant] = await sql(`SELECT tenant_hash, name FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)`, [String(body.tenantId || '')]);
+      if (!tenant) return send(res, 404, { success: false, message: 'Empresa não encontrada.' });
+      const devices = await listSyncDevices(sql, tenant.tenant_hash);
+      return send(res, 200, {
+        success: true, tenantName: tenant.name, serverTime: new Date().toISOString(),
+        devices: devices.map(({ usersFingerprint, integrity, ...device }) => {
+          const plan = integrity ? integrityPlan(devices, device.deviceId) : null;
+          return { ...device, users: usersFingerprint.length, integrityAt: integrity?.at || null,
+            integrityMissing: plan ? plan.missing.map(item => item.table) : null, integrityContent: plan ? plan.content : null };
+        }),
+        userIdDivergences: userIdDivergences(devices),
+      });
+    }
+
     if (action === 'list-requests') {
       await ensureRegistrationRequestsTable(sql);
       const requests = await sql(`SELECT * FROM tango_registration_requests
@@ -415,7 +434,9 @@ export default async function handler(req, res) {
     if (action === 'delete') {
       await sql('DELETE FROM tango_tenants WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       if (body.purgeData === true) {
-        await sql('DELETE FROM tango_sync_operations WHERE tenant_hash = $1', [tenantHash]);
+        // Com o bloqueio da empresa: um envio a meio termina antes, não deixa alterações soltas de uma empresa eliminada.
+        await sql(`${tenantLockCte('$1')}
+          DELETE FROM tango_sync_operations USING tenant_lock WHERE tango_sync_operations.tenant_hash = $1`, [tenantHash]);
         await ensureUsageTable(sql);
         await sql('DELETE FROM tango_usage_reports WHERE UPPER(tenant_id) = UPPER($1)', [tenantId]);
       }

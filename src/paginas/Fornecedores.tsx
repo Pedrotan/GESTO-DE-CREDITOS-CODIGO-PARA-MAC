@@ -52,6 +52,8 @@ import {
 import { toast } from '@/ganchos/usar-toast';
 import { generateSupplierReportPDF } from '@/bibliotecas/pdf';
 import { formatCurrency } from '@/bibliotecas/formatters';
+import { maisRecentePrimeiro } from '@/bibliotecas/ordenacao';
+import { confirmar } from '@/bibliotecas/alerta';
 
 export default function Fornecedores() {
   const { user } = useAuth();
@@ -300,7 +302,7 @@ export default function Fornecedores() {
 
   // Filtered Suppliers List
   const filteredSuppliers = useMemo(() => {
-    return suppliers.filter(sup => {
+    return maisRecentePrimeiro(suppliers, sup => sup.createdAt).filter(sup => {
       const s = searchTerm.toLowerCase();
       return (
         sup.name.toLowerCase().includes(s) ||
@@ -443,7 +445,7 @@ export default function Fornecedores() {
   };
 
   const handleDelete = async (id: string) => {
-    if (!confirm("Tem certeza de que deseja remover este fornecedor/parceiro? Os créditos já vinculados continuarão registados.")) return;
+    if (!await confirmar("Tem certeza de que deseja remover este fornecedor/parceiro? Os créditos já vinculados continuarão registados.")) return;
 
     try {
       await deleteSupplier(id, user ? { id: user.id, name: user.name } : undefined);

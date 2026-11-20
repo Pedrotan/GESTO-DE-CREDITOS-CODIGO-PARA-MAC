@@ -34,6 +34,7 @@ import {
 } from '@/componentes/ui/table';
 import { Input } from '@/componentes/ui/input';
 import { AlertModal, AlertModalType } from '@/componentes/ui/AlertModal';
+import { porMaisRecente } from '@/bibliotecas/ordenacao';
 
 const typeConfig = {
     info: { icon: Info, color: 'text-info', bg: 'bg-info/10' },
@@ -119,7 +120,8 @@ export default function Notifications() {
                 n.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
                 n.message.toLowerCase().includes(searchTerm.toLowerCase());
             return matchesClient && matchesSearch;
-        });
+        })
+        .sort(porMaisRecente(n => n.timestamp));
 
     const unreadCount = filteredNotifications.filter((n) => !n.read).length;
 

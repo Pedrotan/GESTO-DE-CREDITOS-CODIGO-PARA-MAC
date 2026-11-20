@@ -20,7 +20,7 @@ const ENTITY_LABELS: Record<string, string> = {
     accounting_entry_seals: 'Selos contabilísticos', accounting_receipts: 'Recibos contabilísticos', accounting_requests: 'Pedidos contabilísticos',
     audit_alert_comments: 'Comentários de alertas de auditoria', audit_alerts: 'Alertas de auditoria', audit_daily_closes: 'Fechos diários da auditoria',
     audit_log_chain: 'Cadeia da auditoria', audit_logs: 'Registos de auditoria', calendar_tasks: 'Tarefas do calendário', chat_messages: 'Mensagens do chat',
-    clients: 'Clientes', closed_months: 'Meses fechados', collection_events: 'Acções de cobrança', collection_messages: 'Mensagens de cobrança',
+    clients: 'Clientes', closed_months: 'Meses fechados', collection_events: 'Acções de cobrança', collection_messages: 'Mensagens de cobrança', late_interest_adjustments: 'Perdões e renegociações de mora',
     company_settings: 'Definições da empresa', contracts: 'Contratos', credit_approvals: 'Aprovações de crédito', credit_documents: 'Documentos de crédito',
     credit_import_batches: 'Importações de créditos', credit_import_items: 'Linhas de importação de créditos', credit_installments: 'Prestações',
     credit_manager_transfers: 'Transferências de gestor', credit_reinforcements: 'Reforços de crédito', credit_restructurings: 'Reestruturações de crédito',
@@ -33,12 +33,12 @@ const ENTITY_LABELS: Record<string, string> = {
     payments: 'Pagamentos', report_history: 'Histórico de relatórios', report_schedules: 'Relatórios agendados', schema_migrations: 'Actualizações da base de dados',
     shared_settings: 'Definições partilhadas', simulations: 'Simulações', suppliers: 'Fornecedores', sync_conflicts: 'Conflitos de sincronização',
     user_limits: 'Limites dos utilizadores', users: 'Utilizadores', warranties: 'Garantias',
-    rh_alerta: 'RH · Alertas', rh_ausencia: 'RH · Ausências', rh_cargo: 'RH · Cargos', rh_contrato: 'RH · Contratos de trabalho', rh_departamento: 'RH · Departamentos',
+    rh_alerta: 'RH · Alertas', rh_ausencia: 'RH · Ausências', rh_cargo: 'RH · Cargos', rh_contrato: 'RH · Contratos de trabalho', rh_departamento: 'RH · Departamentos', rh_seccao: 'RH · Secções',
     rh_dependente: 'RH · Dependentes', rh_documento: 'RH · Documentos', rh_documento_emitido: 'RH · Documentos emitidos', rh_documento_ficheiro: 'RH · Ficheiros',
     rh_feriado: 'RH · Feriados', rh_funcionario: 'RH · Funcionários', rh_funcionario_rubrica: 'RH · Rubricas do funcionário', rh_historico_salarial: 'RH · Histórico salarial',
     rh_horario: 'RH · Horários', rh_irt_escalao: 'RH · Escalões de IRT', rh_irt_tabela: 'RH · Tabelas de IRT', rh_parametro: 'RH · Parâmetros', rh_plano_ferias: 'RH · Planos de férias',
     rh_ponto: 'RH · Livro de ponto', rh_processamento: 'RH · Processamentos salariais', rh_recibo: 'RH · Recibos', rh_recibo_linha: 'RH · Linhas de recibo',
-    rh_rubrica: 'RH · Rubricas', rh_rubrica_pontual: 'RH · Rubricas pontuais', rh_tipo_ausencia: 'RH · Tipos de ausência',
+    rh_rubrica: 'RH · Rubricas', rh_rubrica_pontual: 'RH · Rubricas pontuais', rh_processamento_entrada: 'RH · Valores do mês', rh_doc_pasta: 'RH · Pastas de documentos', rh_modelo: 'RH · Modelos de declaração e relatório', rh_doc_auditoria: 'RH · Acessos a documentos', rh_tipo_ausencia: 'RH · Tipos de ausência',
     desconhecido: 'Alteração de outra versão',
 };
 /** Nome em português do tipo de registo (tabela). */
@@ -67,7 +67,8 @@ export const translateReason = (reason: string) => {
     if (noTable) return `Esta versão do sistema ainda não tem «${entityLabel(noTable[1])}». Actualize o programa.`;
     if (/database is locked|SQLITE_BUSY/i.test(text)) return 'A base de dados estava ocupada. Carregue em «Reprocessar registos seguros».';
     if (/Pagamento já registado no ledger/i.test(text)) return 'O lançamento contabilístico deste pagamento já está registado neste dispositivo.';
-    if (/Comando remoto desconhecido/i.test(text)) return 'Alteração feita numa versão mais recente do sistema. Depois de actualizar este dispositivo, é aplicada automaticamente.';
+    if (/Formato de alteração de uma versão mais recente/i.test(text)) return 'Alteração feita numa versão mais recente do sistema. Fica guardada e é aplicada automaticamente quando este dispositivo actualizar.';
+    if (/Comando remoto desconhecido/i.test(text)) return 'Alteração feita noutra versão do sistema que este dispositivo ainda não reconhece. Fica guardada e é aplicada automaticamente quando os dois dispositivos tiverem a mesma versão.';
     if (/Conflito de concorrência|esperadas \d+ alterações/i.test(text)) return 'O mesmo registo foi alterado noutro dispositivo ao mesmo tempo.';
     return text.replace(/\bledger\b/gi, 'razão').replace(/\bsnapshot\b/gi, 'cópia de registo');
 };

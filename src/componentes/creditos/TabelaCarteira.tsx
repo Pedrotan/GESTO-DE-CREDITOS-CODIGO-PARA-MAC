@@ -14,6 +14,7 @@ import { Textarea } from '@/componentes/ui/textarea';
 import { ServicoCarteira } from '@/servicos/ServicoCarteira';
 import { FiltrosCarteira } from './FiltrosCarteira';
 import type { CarteiraState } from './useCarteira';
+import { porMaisRecente } from '@/bibliotecas/ordenacao';
 
 const kz = (minor: number) => formatCurrency(minor / 100);
 type ColumnId = 'reference' | 'client' | 'product' | 'manager' | 'granted' | 'outstanding' | 'rate' | 'installment' | 'progress' | 'nextDue' | 'days' | 'mora' | 'risk' | 'stage';
@@ -57,7 +58,8 @@ export function TabelaCarteira({ state, renderActions, onOpen, clientsById, curr
     currentUser: { id: string; name: string; role: string; permissions?: string[] } | null;
 }) {
     const [columns, setColumns] = useState<ColumnId[]>(readColumns);
-    const [sort, setSort] = useState<{ id: ColumnId; dir: 'asc' | 'desc' }>({ id: 'days', dir: 'desc' });
+    // «recent»: ordem inicial, o crédito registado por último primeiro; um clique numa coluna ordena por ela.
+    const [sort, setSort] = useState<{ id: ColumnId | 'recent'; dir: 'asc' | 'desc' }>({ id: 'recent', dir: 'desc' });
     const [page, setPage] = useState(1);
     const [pageSize, setPageSize] = useState(25);
     const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -67,7 +69,8 @@ export function TabelaCarteira({ state, renderActions, onOpen, clientsById, curr
     useEffect(() => { setPage(1); }, [state.filters, state.tab, state.card, state.view, state.month, state.year]);
 
     const sorted = useMemo(() => {
-        const column = COLUMNS.find(item => item.id === sort.id)!;
+        const column = COLUMNS.find(item => item.id === sort.id);
+        if (!column) return [...state.visibleRows].sort(porMaisRecente(row => row.credit.createdAt || row.credit.startDate));
         return [...state.visibleRows].sort((a, b) => {
             const left = column.sort(a), right = column.sort(b);
             const order = left < right ? -1 : left > right ? 1 : 0;

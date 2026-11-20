@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { ChevronLeft, ChevronRight, Edit, Plus } from 'lucide-react';
 import { ServicoTempoRH, type AusenciaRH } from '@/servicos/rh/ServicoTempoRH';
-import { datasDoMes, diaSemana, feriadoNaData, horasSemanais, type Feriado, type Horario, type TipoAusencia } from '@/bibliotecas/rh/ponto';
+import { datasDoMes, diaSemana, feriadoNaData, horasSemanais, type Feriado, type Horario, type TipoAusencia, type TipoHorario } from '@/bibliotecas/rh/ponto';
+import { cicloDoHorario } from '@/bibliotecas/rh/ponto-escalas';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { NavegacaoRH, dataPt, executar, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
@@ -18,6 +19,7 @@ import { useBaseRH } from './FuncionariosRH';
 import { LIGACOES_TEMPO } from './LivroPontoRH';
 
 const TODOS = '__todos__';
+const ROTULO_TIPO: Record<TipoHorario, string> = { fixo: 'Fixo', rotativo: 'Rotativo / escala', flexivel: 'Flexível', noturno: 'Nocturno' };
 const DIAS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 
 export default function CalendarioRH() {
@@ -85,7 +87,7 @@ export default function CalendarioRH() {
                     <div className="flex justify-end">{configurar && <Button size="sm" onClick={() => setHorario({ entrada: '08:00', saida: '17:00', intervalo_min: 60, dias_semana: '1,2,3,4,5', tolerancia_min: 10 })}><Plus className="mr-1.5 h-4 w-4" /> Novo horário</Button>}</div>
                     {horarios.length === 0 ? <Vazio>Sem horários.</Vazio> : horarios.map(h => (
                         <div key={h.id} className={`flex items-center justify-between rounded-xl border border-slate-200 px-4 py-2.5 text-sm dark:border-slate-800 ${h.activo ? '' : 'opacity-50'}`}>
-                            <span><b>{h.nome}</b> · {h.entrada}–{h.saida} · intervalo {h.intervalo_min} min · tolerância {h.tolerancia_min} min · {String(h.dias_semana).split(',').map(n => DIAS[Number(n) - 1]).join(', ')} · {horasSemanais(h)} h/semana
+                            <span><b>{h.nome}</b>{h.tipo && h.tipo !== 'fixo' && <span className="ml-1.5 rounded bg-sky-100 px-1.5 py-0.5 text-[10px] font-black uppercase text-sky-800">{ROTULO_TIPO[h.tipo]}</span>} · {h.entrada}–{h.saida} · intervalo {h.intervalo_min} min · tolerância {h.tolerancia_min} min · {String(h.dias_semana).split(',').map(n => DIAS[Number(n) - 1]).join(', ')} · {horasSemanais(h)} h/semana
                                 · {base.dados.funcionarios.filter(f => f.horario_id === h.id || (!f.horario_id && h.id === 'horario-normal')).length} funcionário(s)</span>
                             {configurar && <Button size="icon" variant="ghost" onClick={() => setHorario(h)}><Edit className="h-4 w-4" /></Button>}
                         </div>
@@ -106,7 +108,7 @@ export default function CalendarioRH() {
                     ))}
                 </TabsContent>
             </Tabs>
-            {actor && horario && <DialogoHorario horario={horario} actor={actor} onClose={() => setHorario(null)} onSaved={() => void dados.recarregar()} />}
+            {actor && horario && <DialogoHorario horario={horario} horarios={horarios} actor={actor} onClose={() => setHorario(null)} onSaved={() => void dados.recarregar()} />}
             {actor && feriado && <DialogoFeriado feriado={feriado} actor={actor} onClose={() => setFeriado(null)} onSaved={() => void dados.recarregar()} />}
         </MainLayout>
     );
@@ -114,25 +116,75 @@ export default function CalendarioRH() {
 
 type Base = { actor: ActorRH; onClose: () => void; onSaved: () => void };
 
-function DialogoHorario({ horario, actor, onClose, onSaved }: Base & { horario: Partial<Horario> }) {
-    const [h, setH] = useState(horario);
+function DialogoHorario({ horario, horarios, actor, onClose, onSaved }: Base & { horario: Partial<Horario>; horarios: Horario[] }) {
+    const [h, setH] = useState<Partial<Horario>>({ tipo: 'fixo', ...horario });
     const dias = new Set(String(h.dias_semana || '').split(',').filter(Boolean).map(Number));
     const alternar = (n: number) => { const s = new Set(dias); if (s.has(n)) s.delete(n); else s.add(n); setH(p => ({ ...p, dias_semana: [...s].sort().join(',') })); };
+    const ciclo = h.tipo === 'rotativo' ? cicloDoHorario({ tipo: 'rotativo', ciclo: h.ciclo || '[]' }) : [];
+    const setCiclo = (novo: string[]) => setH(p => ({ ...p, ciclo: JSON.stringify(novo) }));
+    // Turnos que podem entrar no ciclo: os outros horários que não são rotativos.
+    const turnos = horarios.filter(x => x.activo !== 0 && x.tipo !== 'rotativo' && x.id !== h.id);
     return (
         <Dialog open onOpenChange={v => !v && onClose()}>
-            <DialogContent className="max-w-lg">
+            <DialogContent className="max-h-[90vh] max-w-xl overflow-y-auto">
                 <DialogHeader><DialogTitle>{h.id ? 'Editar horário' : 'Novo horário'}</DialogTitle></DialogHeader>
                 <div className="grid gap-3 sm:grid-cols-2">
                     <div className="sm:col-span-2"><Label className="text-xs font-bold">Nome</Label><Input className="mt-1" value={h.nome || ''} onChange={e => setH(p => ({ ...p, nome: e.target.value }))} /></div>
-                    <div><Label className="text-xs font-bold">Entrada</Label><Input className="mt-1" type="time" value={h.entrada || ''} onChange={e => setH(p => ({ ...p, entrada: e.target.value }))} /></div>
-                    <div><Label className="text-xs font-bold">Saída</Label><Input className="mt-1" type="time" value={h.saida || ''} onChange={e => setH(p => ({ ...p, saida: e.target.value }))} /></div>
+                    <div className="sm:col-span-2"><Label className="text-xs font-bold">Tipo</Label>
+                        <Select value={h.tipo || 'fixo'} onValueChange={v => setH(p => ({ ...p, tipo: v as TipoHorario, ...(v === 'rotativo' && !p.ciclo ? { ciclo: '[]', ciclo_inicio: luandaTodayKey() } : {}), ...(v === 'flexivel' && !p.faixa_inicio ? { faixa_inicio: '10:00', faixa_fim: '15:00', minimo_diario_min: 480 } : {}) }))}>
+                            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="fixo">Fixo: mesmo horário nos dias escolhidos</SelectItem>
+                                <SelectItem value="rotativo">Rotativo / escala: ciclo de N dias (ex.: 2 manhã, 2 noite, 4 folgas)</SelectItem>
+                                <SelectItem value="flexivel">Flexível: horas mínimas por dia com faixa obrigatória</SelectItem>
+                                <SelectItem value="noturno">Nocturno: sai no dia seguinte (o dia é o da entrada)</SelectItem>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                    <div><Label className="text-xs font-bold">{h.tipo === 'flexivel' ? 'Pode entrar a partir de' : 'Entrada'}</Label><Input className="mt-1" type="time" value={h.entrada || ''} onChange={e => setH(p => ({ ...p, entrada: e.target.value }))} /></div>
+                    <div><Label className="text-xs font-bold">{h.tipo === 'flexivel' ? 'Pode sair até' : h.tipo === 'noturno' ? 'Saída (dia seguinte)' : 'Saída'}</Label><Input className="mt-1" type="time" value={h.saida || ''} onChange={e => setH(p => ({ ...p, saida: e.target.value }))} /></div>
                     <div><Label className="text-xs font-bold">Intervalo (min)</Label><Input className="mt-1" type="number" value={h.intervalo_min ?? 60} onChange={e => setH(p => ({ ...p, intervalo_min: Number(e.target.value) }))} /></div>
                     <div><Label className="text-xs font-bold">Tolerância de atraso (min)</Label><Input className="mt-1" type="number" value={h.tolerancia_min ?? 10} onChange={e => setH(p => ({ ...p, tolerancia_min: Number(e.target.value) }))} /></div>
-                    <div className="sm:col-span-2"><Label className="text-xs font-bold">Dias de trabalho</Label>
-                        <div className="mt-1 flex flex-wrap gap-1">{DIAS.map((d, i) => (
-                            <button key={d} type="button" onClick={() => alternar(i + 1)} className={`rounded-lg px-3 py-1.5 text-xs font-bold ${dias.has(i + 1) ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}>{d}</button>
-                        ))}</div>
-                    </div>
+                    {h.tipo === 'flexivel' && (<>
+                        <div><Label className="text-xs font-bold">Faixa obrigatória: início</Label><Input className="mt-1" type="time" value={h.faixa_inicio || ''} onChange={e => setH(p => ({ ...p, faixa_inicio: e.target.value }))} /></div>
+                        <div><Label className="text-xs font-bold">Faixa obrigatória: fim</Label><Input className="mt-1" type="time" value={h.faixa_fim || ''} onChange={e => setH(p => ({ ...p, faixa_fim: e.target.value }))} /></div>
+                        <div className="sm:col-span-2"><Label className="text-xs font-bold">Horas mínimas por dia</Label>
+                            <Input className="mt-1" type="number" step="0.5" value={(Number(h.minimo_diario_min) || 0) / 60} onChange={e => setH(p => ({ ...p, minimo_diario_min: Math.round(Number(e.target.value) * 60) }))} />
+                            <p className="mt-1 text-[11px] text-slate-500">Conta atraso quem chega depois do início da faixa e saída antecipada quem sai antes do fim; horas extra são as que passam do mínimo.</p>
+                        </div>
+                    </>)}
+                    {h.tipo === 'rotativo' ? (
+                        <div className="space-y-2 sm:col-span-2">
+                            <div className="flex flex-wrap items-end gap-2">
+                                <div><Label className="text-xs font-bold">Dia 1 do ciclo</Label><Input className="mt-1 w-40" type="date" value={h.ciclo_inicio || ''} onChange={e => setH(p => ({ ...p, ciclo_inicio: e.target.value }))} /></div>
+                                <Button type="button" size="sm" variant="outline" onClick={() => setCiclo([...ciclo, turnos[0]?.id || ''])}><Plus className="mr-1 h-3.5 w-3.5" /> Dia de trabalho</Button>
+                                <Button type="button" size="sm" variant="outline" onClick={() => setCiclo([...ciclo, ''])}><Plus className="mr-1 h-3.5 w-3.5" /> Folga</Button>
+                            </div>
+                            {ciclo.length === 0 && <p className="text-xs text-slate-500">Acrescente os dias do ciclo pela ordem. Os turnos são os outros horários: crie primeiro, por exemplo, «Manhã 06–14» e «Noite 22–06».</p>}
+                            <div className="grid gap-1.5 sm:grid-cols-2">
+                                {ciclo.map((id, i) => (
+                                    <div key={i} className="flex items-center gap-1.5">
+                                        <span className="w-12 text-xs font-black text-slate-500">Dia {i + 1}</span>
+                                        <Select value={id || '__folga__'} onValueChange={v => setCiclo(ciclo.map((x, j) => (j === i ? (v === '__folga__' ? '' : v) : x)))}>
+                                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                            <SelectContent>
+                                                <SelectItem value="__folga__">Folga</SelectItem>
+                                                {turnos.map(x => <SelectItem key={x.id} value={x.id}>{x.nome} ({x.entrada}–{x.saida})</SelectItem>)}
+                                            </SelectContent>
+                                        </Select>
+                                        <Button type="button" size="icon" variant="ghost" className="h-8 w-8" aria-label="Retirar dia" onClick={() => setCiclo(ciclo.filter((_, j) => j !== i))}>×</Button>
+                                    </div>
+                                ))}
+                            </div>
+                            <p className="text-[11px] text-slate-500">O ciclo repete-se a partir do dia 1. No ecrã «Escalas» pode trocar os turnos de dias concretos.</p>
+                        </div>
+                    ) : (
+                        <div className="sm:col-span-2"><Label className="text-xs font-bold">Dias de trabalho</Label>
+                            <div className="mt-1 flex flex-wrap gap-1">{DIAS.map((d, i) => (
+                                <button key={d} type="button" onClick={() => alternar(i + 1)} className={`rounded-lg px-3 py-1.5 text-xs font-bold ${dias.has(i + 1) ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-500'}`}>{d}</button>
+                            ))}</div>
+                        </div>
+                    )}
                     {h.id && <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={h.activo !== 0} onCheckedChange={v => setH(p => ({ ...p, activo: v ? 1 : 0 }))} /> Activo</label>}
                 </div>
                 <DialogFooter><Button variant="outline" onClick={onClose}>Cancelar</Button>

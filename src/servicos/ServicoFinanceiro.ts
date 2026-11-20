@@ -15,7 +15,9 @@ import { planearAjusteEncargos, type EncargoPrestacao } from '@/bibliotecas/ajus
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
 import { reconcileInstallments } from '@/bibliotecas/conciliacao-prestacoes';
 import { planConsecutiveInstallments, type InstallmentBalance } from '@/bibliotecas/liquidacao-prestacoes';
-import { calculateLateInterest, type LateInterestSummary } from '@/bibliotecas/juros-mora';
+import { buildMoraPlan, calculateLateInterest, type LateInterestSummary, type MoraWaiver } from '@/bibliotecas/juros-mora';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
+import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { actorHasFullAuthority } from '@/servicos/AutoridadeTotal';
 import {
     allocatePaymentByInstallments, allocatePaymentMinor, applyPaymentToBalances, creditBalancesFromRow, revertPaymentFromBalances,
@@ -243,8 +245,10 @@ export class ServicoFinanceiro {
     static readonly PAYABLE_STATUSES = ['active', 'overdue', 'defaulted', 'renegotiated'];
 
     /** Juros de mora de um crédito, por prestação, até `asOf` (sem gravar nada). */
-    static async getLateInterestSummary(creditId: string, asOf: Date = new Date()): Promise<LateInterestSummary> {
+    static async getLateInterestSummary(creditId: string, asOf: Date = new Date(), extraWaivers: MoraWaiver[] = []): Promise<LateInterestSummary> {
         const credit = await db.get<any>('SELECT lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL', [creditId]);
+        const waivers = await db.all<{ effectiveDate: string; amountMinor: number }>(
+            'SELECT effectiveDate, amountMinor FROM late_interest_adjustments WHERE creditId = ?', [creditId]).catch(() => []);
         const installments = await this.getCreditInstallments(creditId);
         const payments = await db.all<any>(`SELECT paymentDate, allocatedToPrincipal, allocatedToPrincipalMinor,
             allocatedToInterest, allocatedToInterestMinor, allocatedToLateInterest, allocatedToLateInterestMinor
@@ -264,7 +268,114 @@ export class ServicoFinanceiro {
             })),
             dailyRatePercent: Number(credit?.lateInterestRate || 0),
             asOf,
+            waivers: [...waivers.map(item => ({ date: item.effectiveDate, amountMinor: Number(item.amountMinor) })), ...extraWaivers],
         });
+    }
+
+    /** Administradores, directores de crédito e quem tiver a permissão própria; o valor fica sujeito à alçada. */
+    static canForgiveLateInterest(actor: Record<string, any> | null | undefined): boolean {
+        return ['admin', 'super_admin', 'credit_director'].includes(String(actor?.role))
+            || ServicoControloAcesso.temPermissao(actor as any, 'pagamentos.perdoar_juros');
+    }
+
+    static canRenegotiateLateInterest(actor: Record<string, any> | null | undefined): boolean {
+        return this.canForgiveLateInterest(actor) || ServicoControloAcesso.temPermissao(actor as any, 'creditos.reestruturar');
+    }
+
+    /**
+     * Perdão ou renegociação dos juros de mora em dívida, numa só transacção com o razão e a auditoria.
+     * Perdoar retira a mora. Renegociar retira-a e acrescenta ao plano prestações só de juros com o valor acordado;
+     * a diferença para a mora em dívida é um perdão. O perdão respeita a permissão e a alçada de quem decide.
+     * A prestação que continuar em atraso volta a gerar mora a partir do dia seguinte.
+     */
+    static async adjustLateInterest(input: {
+        creditId: string; kind: 'forgive' | 'renegotiate'; amountMinor: number; agreedMinor?: number; installments?: number;
+        firstDueKey?: string; reason: string; actor: { id: string; name: string } & Record<string, unknown>;
+    }): Promise<{ id: string; forgivenMinor: number; agreedMinor: number; lateAfterMinor: number; totalDueMinor: number; paidOff: boolean }> {
+        await assertFinancialConnection(input.kind === 'forgive' ? 'perdoar juros de mora' : 'renegociar juros de mora');
+        await this.assertNotFrozen();
+        const reason = input.reason.trim();
+        if (reason.length < 10 || reason.length > 1000) throw new Error('Indique o motivo com pelo menos 10 caracteres.');
+        const amountMinor = Math.round(input.amountMinor);
+        const agreedMinor = input.kind === 'renegotiate' ? Math.round(input.agreedMinor ?? 0) : 0;
+        const forgivenMinor = amountMinor - agreedMinor;
+        if (!Number.isSafeInteger(amountMinor) || amountMinor <= 0) throw new Error('Indique o valor de mora.');
+        if (agreedMinor < 0 || forgivenMinor < 0) throw new Error('O valor acordado não pode ser maior do que a mora.');
+        if (forgivenMinor > 0 && !this.canForgiveLateInterest(input.actor)) throw new Error('Não tem permissão para perdoar juros de mora.');
+        if (input.kind === 'renegotiate' && !this.canRenegotiateLateInterest(input.actor)) throw new Error('Não tem permissão para renegociar juros de mora.');
+
+        const todayKey = luandaTodayKey();
+        const plan = input.kind === 'renegotiate' ? buildMoraPlan(agreedMinor, input.installments ?? 1, input.firstDueKey || '') : [];
+        if (plan.some(item => item.dueDateKey < todayKey)) throw new Error('A primeira prestação da mora não pode ser anterior a hoje.');
+
+        // A mora até hoje entra primeiro nos saldos, para o valor perdoado ser medido contra a dívida real.
+        const now = new Date();
+        await this.postAccruedLateInterest(input.creditId, now, input.actor);
+        const credit = await db.get<any>('SELECT id, clientId, clientName, status, version, dueDate FROM credits WHERE id = ? AND deletedAt IS NULL', [input.creditId]);
+        if (!credit) throw new Error('Crédito não encontrado.');
+        if (!this.PAYABLE_STATUSES.includes(String(credit.status))) throw new Error('Só créditos em curso têm mora por perdoar ou renegociar.');
+        const balances = await this.loadCreditBalances(input.creditId, Number(credit.version ?? 0));
+        if (amountMinor > balances.lateInterestMinor) throw new Error(`A mora em dívida é de ${formatCurrency(balances.lateInterestMinor / 100)}.`);
+
+        const limitActor = forgivenMinor > 0 ? await ServicoAlcadas.actorOf(input.actor.id) : null;
+        const limitStatements = limitActor ? await ServicoAlcadas.enforce({ actor: limitActor, operationType: 'interest_waiver', amountMinor: forgivenMinor,
+            percent: (forgivenMinor / balances.lateInterestMinor) * 100, entityType: 'credit', entityId: input.creditId }) : [];
+
+        const id = crypto.randomUUID();
+        const timestamp = new Date();
+        const when = timestamp.toISOString();
+        const schedule = await this.getCreditInstallments(input.creditId);
+        const after = await this.getLateInterestSummary(input.creditId, now, [{ date: now, amountMinor }]);
+        const lateChanges = schedule.flatMap(item => {
+            const net = after.installments.find(entry => entry.id === item.id)?.accruedMinor;
+            const target = net === undefined ? item.lateInterestMinor : Math.max(net, item.paidLateInterestMinor);
+            return target === item.lateInterestMinor ? [] : [{ sql: `UPDATE credit_installments SET lateInterestMinor = ?, version = version + 1 WHERE id = ? AND version = ?`,
+                params: [target, item.id, item.version], expectChanges: 1 }];
+        });
+        let number = Math.max(0, ...schedule.map(item => Number(item.installmentNumber)));
+        const planInserts = plan.map(item => {
+            number += 1;
+            return { sql: `INSERT INTO credit_installments
+                (id, creditId, installmentNumber, dueDate, principalMinor, interestMinor)
+                VALUES (?, ?, ?, ?, ?, ?)`,
+                params: [`${input.creditId}:installment:${number}`, input.creditId, number, new Date(`${item.dueDateKey}T12:00:00.000Z`).toISOString(), 0, item.amountMinor], expectChanges: 1 };
+        });
+
+        const lateAfterMinor = balances.lateInterestMinor - amountMinor;
+        const interestAfterMinor = balances.interestMinor + agreedMinor;
+        const totalDueMinor = balances.balanceMinor + interestAfterMinor + lateAfterMinor;
+        const paidOff = totalDueMinor <= 0;
+        const lastDue = [String(credit.dueDate || ''), ...plan.map(item => new Date(`${item.dueDateKey}T12:00:00.000Z`).toISOString())].sort().at(-1) || null;
+        const label = input.kind === 'forgive' ? 'Perdão' : 'Renegociação';
+        const lateEntry = await buildChargeAdjustmentEntry({ id: `late-adjustment:${id}:late`, creditId: input.creditId, clientId: credit.clientId || undefined,
+            component: 'late_interest', deltaMinor: -amountMinor, processedBy: input.actor.name, usuario_id: input.actor.id, justification: `${label} de juros de mora: ${reason}` },
+            await this.previousAccountingHash(), timestamp);
+        const entries: any[] = [lateEntry];
+        if (agreedMinor > 0) entries.push(await buildChargeAdjustmentEntry({ id: `late-adjustment:${id}:interest`, creditId: input.creditId, clientId: credit.clientId || undefined,
+            component: 'interest', deltaMinor: agreedMinor, processedBy: input.actor.name, usuario_id: input.actor.id, justification: `Mora renegociada em ${plan.length} prestação(ões): ${reason}` },
+            lateEntry.integrityHash, timestamp));
+
+        await db.transaction([
+            { sql: `INSERT INTO late_interest_adjustments (id, creditId, kind, amountMinor, agreedMinor, installments, effectiveDate, reason, actorId, actorName, createdAt)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                params: [id, input.creditId, input.kind, amountMinor, agreedMinor, plan.length, when, reason, input.actor.id, input.actor.name, when], expectChanges: 1 },
+            { sql: `UPDATE credits SET lateInterest = ?, lateInterestMinor = ?, accruedInterest = ?, accruedInterestMinor = ?, totalDue = ?, totalDueMinor = ?,
+                    installments = installments + ?, dueDate = ?, status = ?, paidAt = ?, version = version + 1 WHERE id = ? AND deletedAt IS NULL AND version = ?`,
+                params: [lateAfterMinor / 100, lateAfterMinor, interestAfterMinor / 100, interestAfterMinor, totalDueMinor / 100, totalDueMinor,
+                    plan.length, lastDue, paidOff ? 'paid' : credit.status, paidOff ? when : null, input.creditId, balances.version], expectChanges: 1 },
+            ...lateChanges,
+            ...planInserts,
+            ...entries.flatMap(entry => [this.accountingInsert(entry), ...this.ledgerStatements(entry)]),
+            { sql: `INSERT INTO audit_logs (id, timestamp, userId, userName, action, entity, details, metadata)
+                    VALUES (?, ?, ?, ?, 'update', 'credit', ?, ?)`,
+                params: [crypto.randomUUID(), when, input.actor.id, input.actor.name,
+                    input.kind === 'forgive'
+                        ? `Perdoou ${formatCurrency(amountMinor / 100)} de juros de mora do crédito ${input.creditId} de ${credit.clientName}`
+                        : `Renegociou ${formatCurrency(amountMinor / 100)} de juros de mora do crédito ${input.creditId} de ${credit.clientName}: ${formatCurrency(agreedMinor / 100)} em ${plan.length} prestação(ões)`,
+                    JSON.stringify({ creditId: input.creditId, adjustmentId: id, kind: input.kind, amountMinor, agreedMinor, forgivenMinor, installments: plan.length, reason, justification: reason })] },
+            ...limitStatements,
+        ]);
+        return { id, forgivenMinor, agreedMinor, lateAfterMinor, totalDueMinor, paidOff };
     }
 
     /**
@@ -458,7 +569,7 @@ export class ServicoFinanceiro {
         return (await this.liquidBalancesMinor()).total;
     }
 
-    private static async persistCredit(credit: Credit, limitStatements: Array<{ sql: string; params: unknown[]; expectChanges?: number }>): Promise<Credit> {
+    private static async persistCredit({ scheduleDueDates, ...credit }: Credit, limitStatements: Array<{ sql: string; params: unknown[]; expectChanges?: number }>): Promise<Credit> {
         const principalMinor = toMinorUnits(credit.principalAmount, 'Capital do crédito');
         if (principalMinor <= 0) throw new Error('O capital do crédito deve ser superior a zero.');
         const schedule = buildInstallmentSchedule({
@@ -467,7 +578,8 @@ export class ServicoFinanceiro {
             startDate: credit.startDate,
             method: credit.amortizationMethod || 'FLAT',
             annualRatePercent: credit.interestRate,
-            flatInterestMinor: toMinorUnits(Math.max(0, credit.accruedInterest || 0))
+            flatInterestMinor: toMinorUnits(Math.max(0, credit.accruedInterest || 0)),
+            dueDates: scheduleDueDates
         });
         const interestMinor = schedule.reduce((sum, item) => sum + item.interestMinor, 0);
         const normalizedCredit: Credit = {
@@ -480,7 +592,7 @@ export class ServicoFinanceiro {
         const disbursed = !['pending_approval', 'rejected', 'cancelled'].includes(normalizedCredit.status);
         if (disbursed) {
             await this.assertNotFrozen();
-            await this.assertCashAvailable(principalMinor, 'o desembolso deste crédito');
+            await this.assertCashAvailable(principalMinor, 'o desembolso deste crédito', await this.fundingAccountForClient(normalizedCredit.clientId));
         }
         const entry: any = disbursed ? await buildDisbursementAccountingEntry({
             id: `origination:${normalizedCredit.id}`, creditId: normalizedCredit.id, clientId: normalizedCredit.clientId,
@@ -620,7 +732,7 @@ export class ServicoFinanceiro {
         const interestMinor = toMinorUnits(reinforcementInterest(input.amount, Number(storedCredit.interestRate), storedCredit.amortizationMethod || 'FLAT'), 'Juro do reforço');
         if (interestMinor !== toMinorUnits(input.interestAmount, 'Juro indicado')) throw new Error('Os juros do reforço divergiram da taxa do contrato. Atualize os dados.');
         await this.assertNotFrozen();
-        await this.assertCashAvailable(amountMinor, 'o reforço de capital');
+        await this.assertCashAvailable(amountMinor, 'o reforço de capital', await this.fundingAccountForClient(input.credit.clientId));
         const timestamp = new Date();
         const entry: any = await buildDisbursementAccountingEntry({
             id: input.idempotencyKey, creditId: input.credit.id, clientId: input.credit.clientId,
@@ -731,7 +843,7 @@ export class ServicoFinanceiro {
         };
         if (approved) {
             await this.assertNotFrozen();
-            await this.assertCashAvailable(toMinorUnits(input.credit.principalAmount, 'Capital do crédito'), 'o desembolso deste crédito');
+            await this.assertCashAvailable(toMinorUnits(input.credit.principalAmount, 'Capital do crédito'), 'o desembolso deste crédito', await this.fundingAccountForClient(input.credit.clientId));
         }
         const entry: any = approved ? await buildDisbursementAccountingEntry({
             id: `origination:${input.credit.id}`, creditId: input.credit.id,
@@ -787,9 +899,13 @@ export class ServicoFinanceiro {
 
     /** Histórico das decisões de aprovação/rejeição (mais recentes primeiro). */
     static async getCreditApprovals(): Promise<CreditApprovalRecord[]> {
-        const rows = await db.all<any>(`SELECT id, creditId, clientId, clientName, principalAmount, interestRate, installments,
-            decision, reason, requestedBy, requestedAt, decidedBy, decidedById, decidedAt
-            FROM credit_approvals ORDER BY decidedAt DESC`).catch(() => []);
+        // Decisões de créditos ou clientes eliminados (lixeira ou apagados) não aparecem: o registo fica guardado.
+        const rows = await db.all<any>(`SELECT a.id, a.creditId, a.clientId, a.clientName, a.principalAmount, a.interestRate, a.installments,
+            a.decision, a.reason, a.requestedBy, a.requestedAt, a.decidedBy, a.decidedById, a.decidedAt
+            FROM credit_approvals a
+            WHERE NOT EXISTS (SELECT 1 FROM credits c WHERE c.id = a.creditId AND c.deletedAt IS NOT NULL)
+              AND NOT EXISTS (SELECT 1 FROM clients k WHERE k.id = a.clientId AND k.deletedAt IS NOT NULL)
+            ORDER BY a.decidedAt DESC`).catch(() => []);
         return rows.map(row => ({
             ...row,
             principalAmount: Number(row.principalAmount) || 0,
@@ -807,6 +923,131 @@ export class ServicoFinanceiro {
 
     static async restoreCredit(id: string): Promise<void> {
         await RepositorioCredito.restore(id);
+    }
+
+    // ── Créditos eliminados e o razão ────────────────────────────────────────────────
+    // Um crédito que vai para a lixeira (ou é apagado) deixa de existir na carteira, mas o desembolso continuava no
+    // razão: o dinheiro ficava "na carteira" de um contrato inexistente e Caixa e Bancos mostrava menos do que havia.
+    // O estorno devolve o capital ainda em dívida à conta de onde saiu e anula os juros ainda por receber. O restauro
+    // volta a lançar o desembolso. Ids determinísticos (crédito + data): dois computadores não duplicam o lançamento.
+
+    /** Saldos do razão de um crédito (cêntimos): capital em carteira e juros/mora por receber. */
+    private static async creditLedgerBalances(creditId: string) {
+        const rows = await db.all<{ account: string; side: string; total: number }>(`SELECT l.account, l.side, SUM(l.amountMinor) AS total
+            FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId
+            WHERE a.creditId = ? AND l.account IN ('portfolio', 'receivable_interest', 'receivable_late_interest')
+            GROUP BY l.account, l.side`, [creditId]);
+        const net = (account: string) => rows.filter(row => row.account === account)
+            .reduce((sum, row) => sum + (row.side === 'debit' ? 1 : -1) * Number(row.total || 0), 0);
+        return { portfolio: net('portfolio'), interest: net('receivable_interest'), late: net('receivable_late_interest') };
+    }
+
+    /** Conta usada no desembolso (caixa ou banco); sem desembolso registado, a conta habitual do cliente. */
+    private static async disbursementAccount(creditId: string, clientId?: string): Promise<'cash' | 'bank'> {
+        const row = await db.get<{ credit: string }>(`SELECT credit FROM accounting_entries WHERE creditId = ? AND type = 'disbursement'
+            ORDER BY timestamp LIMIT 1`, [creditId]).catch(() => undefined);
+        if (row?.credit === 'cash' || row?.credit === 'bank') return row.credit;
+        return this.fundingAccountForClient(clientId);
+    }
+
+    private static removalKey = (value: string | null | undefined) => String(value || '').replace(/[^0-9]/g, '').slice(0, 17) || '0';
+
+    /** Créditos eliminados que ainda têm capital ou juros por receber no razão (o que o estorno vai regularizar). */
+    static async removedCreditsPendingReversal(): Promise<Array<{ creditId: string; clientName: string; principalMinor: number; interestMinor: number }>> {
+        const removed = await db.all<{ id: string; clientName: string; deletedAt: string }>('SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL').catch(() => []);
+        const pending: Array<{ creditId: string; clientName: string; principalMinor: number; interestMinor: number }> = [];
+        for (const credit of removed) {
+            if (await db.get('SELECT id FROM accounting_entries WHERE id = ?', [`credit-removal:${credit.id}:${this.removalKey(credit.deletedAt)}`])) continue;
+            const balances = await this.creditLedgerBalances(credit.id);
+            const principalMinor = Math.max(0, balances.portfolio);
+            const interestMinor = Math.max(0, balances.interest) + Math.max(0, balances.late);
+            if (principalMinor || interestMinor) pending.push({ creditId: credit.id, clientName: credit.clientName, principalMinor, interestMinor });
+        }
+        return pending;
+    }
+
+    /**
+     * Estorna no razão os créditos eliminados que ainda lá têm capital ou juros por receber (todos, ou só os indicados).
+     * Devolve o número de estornos lançados e o valor total devolvido a Caixa e Bancos (cêntimos).
+     */
+    static async reverseRemovedCredits(actor: { id: string; name: string }, creditIds?: string[]): Promise<{ entries: number; returnedMinor: number }> {
+        await this.assertNotFrozen();
+        const only = creditIds ? new Set(creditIds) : null;
+        const removed = (await db.all<{ id: string; clientId: string; clientName: string; deletedAt: string }>(
+            'SELECT id, clientId, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL')).filter(credit => !only || only.has(credit.id));
+        let entries = 0;
+        let returnedMinor = 0;
+        for (const credit of removed) {
+            const id = `credit-removal:${credit.id}:${this.removalKey(credit.deletedAt)}`;
+            if (await db.get('SELECT id FROM accounting_entries WHERE id = ?', [id])) continue;
+            const balances = await this.creditLedgerBalances(credit.id);
+            const principal = Math.max(0, balances.portfolio);
+            const interest = Math.max(0, balances.interest);
+            const late = Math.max(0, balances.late);
+            if (!principal && !interest && !late) continue;
+            const funding = await this.disbursementAccount(credit.id, credit.clientId);
+            const lines: JournalLineInput[] = ([
+                { account: funding, side: 'debit', amountMinor: principal, component: 'settlement' },
+                { account: 'portfolio', side: 'credit', amountMinor: principal, component: 'principal' },
+                { account: 'revenue_interest', side: 'debit', amountMinor: interest, component: 'interest_receivable' },
+                { account: 'receivable_interest', side: 'credit', amountMinor: interest, component: 'interest_receivable' },
+                { account: 'revenue_late_interest', side: 'debit', amountMinor: late, component: 'late_receivable' },
+                { account: 'receivable_late_interest', side: 'credit', amountMinor: late, component: 'late_receivable' },
+            ] as JournalLineInput[]).filter(line => line.amountMinor > 0);
+            const clientExists = credit.clientId ? await db.get('SELECT id FROM clients WHERE id = ?', [credit.clientId]) : null;
+            const entry: any = await buildJournalEntry({
+                id, type: 'credit_removal', sourceType: 'credit_removal', sourceId: credit.id, creditId: credit.id,
+                clientId: clientExists ? credit.clientId : undefined, processedBy: actor.name, usuario_id: actor.id,
+                description: `Estorno do desembolso do crédito eliminado ${credit.id} (${credit.clientName})`,
+                justification: 'Crédito enviado para a lixeira ou apagado: o capital em dívida volta à conta de origem.', lines,
+            }, await this.previousAccountingHash(), new Date());
+            await db.transaction([
+                { ...this.accountingInsert(entry), expectChanges: 1 },
+                ...this.ledgerStatements(entry),
+                this.journalAudit(entry, actor.id, actor.name, `Estorno do desembolso do crédito eliminado ${credit.id}`,
+                    { creditId: credit.id, principalMinor: principal, interestMinor: interest, lateMinor: late, account: funding }),
+            ]);
+            entries += 1;
+            returnedMinor += principal;
+        }
+        return { entries, returnedMinor };
+    }
+
+    /** Restauro: volta a lançar o que o estorno da eliminação devolveu (exige saldo, como um desembolso). */
+    static async restoreRemovedCreditLedger(creditId: string, actor: { id: string; name: string }): Promise<void> {
+        const rows = await db.all<{ type: string; account: string; side: string; total: number }>(`SELECT a.type, l.account, l.side, SUM(l.amountMinor) AS total
+            FROM ledger_lines l JOIN accounting_entries a ON a.id = l.transactionId
+            WHERE a.creditId = ? AND a.type IN ('credit_removal', 'credit_restore') GROUP BY a.type, l.account, l.side`, [creditId]);
+        if (!rows.length) return;
+        const net = (account: string) => rows.filter(row => row.account === account)
+            .reduce((sum, row) => sum + (row.side === 'credit' ? 1 : -1) * Number(row.total || 0), 0);
+        const principal = Math.max(0, net('portfolio'));
+        const interest = Math.max(0, net('receivable_interest'));
+        const late = Math.max(0, net('receivable_late_interest'));
+        if (!principal && !interest && !late) return;
+        await this.assertNotFrozen();
+        const credit = await db.get<{ clientId: string; clientName: string }>('SELECT clientId, clientName FROM credits WHERE id = ?', [creditId]);
+        const funding = await this.disbursementAccount(creditId, credit?.clientId);
+        if (principal) await this.assertCashAvailable(principal, 'restaurar este crédito (o desembolso volta a sair de Caixa e Bancos)', funding);
+        const lines: JournalLineInput[] = ([
+            { account: 'portfolio', side: 'debit', amountMinor: principal, component: 'principal' },
+            { account: funding, side: 'credit', amountMinor: principal, component: 'settlement' },
+            { account: 'receivable_interest', side: 'debit', amountMinor: interest, component: 'interest_receivable' },
+            { account: 'revenue_interest', side: 'credit', amountMinor: interest, component: 'interest_receivable' },
+            { account: 'receivable_late_interest', side: 'debit', amountMinor: late, component: 'late_receivable' },
+            { account: 'revenue_late_interest', side: 'credit', amountMinor: late, component: 'late_receivable' },
+        ] as JournalLineInput[]).filter(line => line.amountMinor > 0);
+        const entry: any = await buildJournalEntry({
+            id: `credit-restore:${creditId}:${this.removalKey(new Date().toISOString())}`, type: 'credit_restore', sourceType: 'credit_restore',
+            sourceId: creditId, creditId, clientId: credit?.clientId || undefined, processedBy: actor.name, usuario_id: actor.id,
+            description: `Novo desembolso do crédito restaurado ${creditId} (${credit?.clientName || ''})`,
+            justification: 'Crédito restaurado da lixeira: o desembolso estornado volta a ser lançado.', lines,
+        }, await this.previousAccountingHash(), new Date());
+        await db.transaction([
+            { ...this.accountingInsert(entry), expectChanges: 1 },
+            ...this.ledgerStatements(entry),
+            this.journalAudit(entry, actor.id, actor.name, `Novo desembolso do crédito restaurado ${creditId}`, { creditId, principalMinor: principal, account: funding }),
+        ]);
     }
 
     /** Sai da lixeira sem restauro. Os lançamentos contabilísticos ficam: são imutáveis por lei e pela cadeia de hashes. */
@@ -1166,11 +1407,17 @@ export class ServicoFinanceiro {
         return (minor / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     }
 
-    private static async assertCashAvailable(amountMinor: number, purpose: string) {
+    private static async assertCashAvailable(amountMinor: number, purpose: string, account?: 'cash' | 'bank') {
         if (!(await this.getAccountingConfig()).cashGuard) return;
         const balances = await this.liquidBalancesMinor();
         if (balances.total < amountMinor) {
             throw new Error(`Saldo de Caixa e Bancos insuficiente para ${purpose}: disponível ${this.formatMinor(balances.total)} Kz, necessário ${this.formatMinor(amountMinor)} Kz. Registe a entrada de capital ou o financiamento em Contabilidade › Lançamentos.`);
+        }
+        // O dinheiro sai de uma conta concreta: com saldo só no banco, um pagamento em numerário deixava a Caixa negativa
+        // (dinheiro entregue que a contabilidade não sabe de onde veio).
+        if (account && balances[account] < amountMinor) {
+            const [here, other] = account === 'cash' ? ['Caixa', 'Bancos'] : ['Bancos', 'Caixa'];
+            throw new Error(`Saldo em ${here} insuficiente para ${purpose}: disponível ${this.formatMinor(balances[account])} Kz em ${here} (${this.formatMinor(balances.total - balances[account])} Kz em ${other}), necessário ${this.formatMinor(amountMinor)} Kz. Registe a transferência ${other} → ${here} em Contabilidade › Lançamentos, ou mude a forma de entrega do valor ao cliente.`);
         }
     }
 

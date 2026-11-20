@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { useData } from '@/contextos/ContextoDados';
 import { ServicoAutoBackup, AutoBackupConfig } from '@/servicos/ServicoAutoBackup';
+import { backupDoneToday } from '@/bibliotecas/aviso-backup';
 import { Database, ShieldCheck, RefreshCw, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import { Button } from '@/componentes/ui/button';
 import {
@@ -16,12 +17,29 @@ import { useToast } from '@/ganchos/usar-toast';
 
 export function AutoBackupManager() {
     const { user } = useAuth();
-    const { addNotification } = useData();
+    const { addNotification, companySettings, updateCompanySettings } = useData();
     const { toast } = useToast();
 
     const [isPromptOpen, setIsPromptOpen] = useState(false);
     const [isExecuting, setIsExecuting] = useState(false);
     const isRunningRef = useRef(false);
+
+    // Data do último backup da empresa: partilhada por todos os computadores e pela web.
+    const lastBackupDate = companySettings.lastBackupDate;
+    const lastBackupRef = useRef(lastBackupDate);
+    lastBackupRef.current = lastBackupDate;
+    const updateSettingsRef = useRef(updateCompanySettings);
+    updateSettingsRef.current = updateCompanySettings;
+
+    // Regista o backup para os outros dispositivos deixarem de o pedir. Falhar aqui não invalida o backup já feito.
+    const shareBackupDate = () => updateSettingsRef.current({ lastBackupDate: new Date().toISOString() }).catch(error => {
+        console.warn('[AutoBackupManager] Backup feito, mas a data não foi partilhada:', error);
+    });
+
+    // Outro utilizador fez o backup de hoje enquanto o pedido estava aberto neste dispositivo.
+    useEffect(() => {
+        if (backupDoneToday(lastBackupDate)) setIsPromptOpen(false);
+    }, [lastBackupDate]);
 
     // Verificar e executar backup diário
     useEffect(() => {
@@ -42,13 +60,14 @@ export function AutoBackupManager() {
             }
 
             if (config.mode === 'interactive') {
-                setIsPromptOpen(true);
+                if (!backupDoneToday(lastBackupRef.current)) setIsPromptOpen(true);
             } else {
                 // Modo silencioso: executa automaticamente
                 isRunningRef.current = true;
                 try {
                     const result = await ServicoAutoBackup.executeBackup('scheduled');
                     if (result.success) {
+                        await shareBackupDate();
                         if (config.notifyOnSuccess) {
                             toast({
                                 title: "Backup Automático Concluído",
@@ -87,6 +106,7 @@ export function AutoBackupManager() {
         try {
             const result = await ServicoAutoBackup.executeBackup('scheduled');
             if (result.success) {
+                await shareBackupDate();
                 toast({
                     title: "Backup Concluído!",
                     description: result.message,

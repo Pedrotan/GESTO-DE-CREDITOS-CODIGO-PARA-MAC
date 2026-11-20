@@ -1,4 +1,5 @@
-import React from 'react';
+import { useEffect, useState } from 'react';
+import { LoadingSkeleton } from './LoadingSkeleton';
 
 interface SplashScreenProps {
   message?: string;
@@ -6,7 +7,15 @@ interface SplashScreenProps {
 
 export const SplashScreen = ({
   message = "Tango Gestão de Creditos ERP"
-}: SplashScreenProps) => (
+}: SplashScreenProps) => {
+  const [demorado, setDemorado] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setDemorado(true), 1200);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  if (demorado) return <LoadingSkeleton />;
+  return (
   <div
     role="status"
     aria-live="polite"
@@ -66,4 +75,5 @@ export const SplashScreen = ({
       }
     `}</style>
   </div>
-);
+  );
+};

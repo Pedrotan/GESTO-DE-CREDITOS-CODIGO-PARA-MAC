@@ -5,12 +5,15 @@ import { db } from '@/bibliotecas/bd';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { validarDatasBI } from '@/bibliotecas/rh/bi-validade';
 import { validarEscaloes, type IrtEscalao, type IrtTabela, type ParametroRH } from '@/bibliotecas/rh/parametros-rh';
+import { FORMATO_BI } from '@/bibliotecas/rh/esquema-rh';
+import { cicloChefia } from '@/bibliotecas/rh/hierarquia-rh';
 
 export type ActorRH = { id: string; name: string; role?: string; permissions?: string[] };
 type Statement = { sql: string; params?: unknown[]; expectChanges?: number };
 
 export type Departamento = { id: string; nome: string; responsavel_id: string | null; activo: number };
-export type Cargo = { id: string; nome: string; departamento_id: string | null; salario_referencia_minor: number; activo: number };
+export type Cargo = { id: string; nome: string; departamento_id: string | null; salario_referencia_minor: number; activo: number; nivel?: number | null };
+export type Seccao = { id: string; departamento_id: string; nome: string; responsavel_id: string | null; activo: number };
 export type EstadoFuncionario = 'activo' | 'suspenso' | 'cessado';
 export type Funcionario = {
     id: string; numero_mecanografico: string; nome: string; data_nascimento: string | null; sexo: string | null; estado_civil: string | null;
@@ -18,8 +21,15 @@ export type Funcionario = {
     morada: string | null; telefone: string | null; email: string | null; iban: string | null; banco: string | null;
     data_admissao: string; data_saida: string | null; cargo_id: string | null; departamento_id: string | null; horario_id: string | null;
     estado: EstadoFuncionario; foto_url: string | null; utilizador_id: string | null; reformado: number; observacoes: string | null;
+    /** Enquadramento impresso na folha de salário (Cargo/Vinc.): vínculo, grupo/carreira, categoria, escalão e unidade orgânica. */
+    vinculo?: string | null; carreira?: string | null; categoria?: string | null; escalao?: string | null; unidade_organica?: string | null;
+    nacionalidade?: string | null; telefone_alternativo?: string | null; provincia?: string | null; municipio?: string | null; chefe_id?: string | null;
+    /** Secção dentro do departamento (hierarquia). */
+    seccao_id?: string | null;
     criado_em: string; actualizado_em: string | null;
 };
+/** Abono fixo escolhido no registo do funcionário (Renda de casa, Isolamento, Gratificação…). */
+export type AbonoInicial = { rubrica_id: string; valor_minor: number; quantidade?: number };
 export type Dependente = { id: string; funcionario_id: string; nome: string; parentesco: string | null; data_nascimento: string | null };
 export type Contrato = {
     id: string; funcionario_id: string; tipo: 'indeterminado' | 'determinado'; inicio: string; fim: string | null; periodo_experiencia_fim: string | null;
@@ -34,6 +44,11 @@ export type Rubrica = {
     id: string; codigo: string; nome: string; tipo: 'abono' | 'desconto'; forma: 'fixo' | 'percentagem' | 'quantidade'; percentagem: number;
     incide_inss: number; incide_irt: number; limite_isento_irt_minor: number; limite_isento_irt_pct: number; conta_contabilistica: string | null;
     ordem_no_recibo: number; sistema: number; activo: number;
+    /** Catálogo de subsídios: classe (abono, subsídio, desconto), por dia trabalhado, valor padrão, periodicidade, etc. */
+    classe?: 'abono' | 'subsidio' | 'desconto' | null; por_dia?: number; valor_padrao_minor?: number; periodicidade?: 'mensal' | 'anual' | 'pontual';
+    mes_pagamento?: number | null; proporcional_faltas?: number; auto_atribuir?: number; descricao?: string | null;
+    /** 0 = incidência de IRT/INSS por confirmar (bloqueia o processamento de quem o tiver atribuído). */
+    incidencia_confirmada?: number;
 };
 export type FuncionarioRubrica = {
     id: string; funcionario_id: string; rubrica_id: string; valor_minor: number; quantidade: number; inicio: string; fim: string | null;
@@ -43,6 +58,8 @@ export type DocumentoRH = {
     id: string; funcionario_id: string; categoria: CategoriaDocumento; nome: string; ficheiro_nome: string; mime: string; tamanho: number;
     data_emissao: string | null; data_validade: string | null; confidencial: number; estado: 'activo' | 'substituido' | 'arquivado';
     substituido_por: string | null; carregado_por_nome: string | null; criado_em: string;
+    /** Gestão documental: pasta (sys:<chave> ou id de uma pasta pessoal), origem, versão e anulação. */
+    pasta_id?: string | null; origem?: string | null; versao?: number; anulado_por_nome?: string | null; anulado_em?: string | null;
 };
 
 export const CATEGORIAS_DOCUMENTO: Array<{ id: CategoriaDocumento; nome: string; validade: boolean; confidencial?: boolean }> = [
@@ -55,7 +72,7 @@ export const CATEGORIAS_DOCUMENTO: Array<{ id: CategoriaDocumento; nome: string;
     { id: 'outros', nome: 'Outros', validade: false },
 ];
 export const CATEGORIAS_CONFIDENCIAIS = new Set<CategoriaDocumento>(['saude', 'disciplinar']);
-const MIMES_DOCUMENTO = /^data:(application\/pdf|image\/(png|jpe?g)|application\/vnd\.openxmlformats-officedocument\.wordprocessingml\.document);base64,/u;
+const MIMES_DOCUMENTO = /^data:(application\/pdf|image\/(png|jpe?g)|application\/vnd\.openxmlformats-officedocument\.(wordprocessingml\.document|spreadsheetml\.sheet));base64,/u;
 
 const agora = () => new Date().toISOString();
 /** Lista vazia quando a tabela ainda não existe (base de dados antiga a meio da migração). */
@@ -103,18 +120,24 @@ export class ServicoRH {
     }
 
     static cargos() {
-        return lista(db.all<Cargo>('SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome'));
+        // Bases antigas (antes da migração da hierarquia) não têm a coluna «nivel».
+        return db.all<Cargo>('SELECT id, nome, departamento_id, salario_referencia_minor, activo, nivel FROM rh_cargo ORDER BY nome')
+            .catch(() => lista(db.all<Cargo>('SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome')));
     }
 
-    static async guardarCargo(input: { id?: string; nome: string; departamento_id?: string | null; salario_referencia_minor?: number; activo?: boolean }, actor: ActorRH) {
+    static async guardarCargo(input: { id?: string; nome: string; departamento_id?: string | null; salario_referencia_minor?: number; activo?: boolean; nivel?: number | null }, actor: ActorRH) {
         const nome = texto(input.nome);
         if (!nome) throw new Error('Indique o nome do cargo.');
+        const nivel = input.nivel == null ? null : Number(input.nivel);
+        if (nivel !== null && !(Number.isInteger(nivel) && nivel >= 1 && nivel <= 5)) throw new Error('Nível do cargo inválido.');
+        const nivelSql = (id: string): Statement => ({ sql: 'UPDATE rh_cargo SET nivel = ? WHERE id = ?', params: [nivel, id], expectChanges: 1 });
         const referencia = minor(input.salario_referencia_minor || 0);
         const when = agora();
         if (input.id) {
             await db.transaction([
                 { sql: 'UPDATE rh_cargo SET nome = ?, departamento_id = ?, salario_referencia_minor = ?, activo = ?, actualizado_em = ? WHERE id = ?',
                     params: [nome, input.departamento_id || null, referencia, input.activo === false ? 0 : 1, when, input.id], expectChanges: 1 },
+                nivelSql(input.id),
                 auditoriaRH(actor, 'update', `Alterou o cargo ${nome}`, { cargoId: input.id }, undefined, undefined, when),
             ]);
             return input.id;
@@ -123,9 +146,58 @@ export class ServicoRH {
         await db.transaction([
             { sql: 'INSERT INTO rh_cargo (id, nome, departamento_id, salario_referencia_minor, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)',
                 params: [id, nome, input.departamento_id || null, referencia, when, actor.id], expectChanges: 1 },
+            nivelSql(id),
             auditoriaRH(actor, 'create', `Criou o cargo ${nome}`, { cargoId: id }, undefined, undefined, when),
         ]);
         return id;
+    }
+
+    static seccoes() {
+        return lista(db.all<Seccao>('SELECT id, departamento_id, nome, responsavel_id, activo FROM rh_seccao ORDER BY nome'));
+    }
+
+    static async guardarSeccao(input: { id?: string; departamento_id: string; nome: string; responsavel_id?: string | null; activo?: boolean }, actor: ActorRH) {
+        const nome = texto(input.nome);
+        if (!nome) throw new Error('Indique o nome da secção.');
+        if (!input.departamento_id) throw new Error('Escolha o departamento da secção.');
+        const existentes = await this.seccoes();
+        if (existentes.some(s => s.id !== input.id && s.departamento_id === input.departamento_id && s.nome.toLowerCase() === nome.toLowerCase()))
+            throw new Error(`Já existe a secção ${nome} neste departamento.`);
+        const when = agora();
+        if (input.id) {
+            await db.transaction([
+                { sql: 'UPDATE rh_seccao SET departamento_id = ?, nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?',
+                    params: [input.departamento_id, nome, input.responsavel_id || null, input.activo === false ? 0 : 1, when, input.id], expectChanges: 1 },
+                auditoriaRH(actor, 'update', `Alterou a secção ${nome}`, { seccaoId: input.id, departamentoId: input.departamento_id }, undefined, undefined, when),
+            ]);
+            return input.id;
+        }
+        const id = crypto.randomUUID();
+        await db.transaction([
+            { sql: 'INSERT INTO rh_seccao (id, departamento_id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)',
+                params: [id, input.departamento_id, nome, input.responsavel_id || null, when, actor.id], expectChanges: 1 },
+            auditoriaRH(actor, 'create', `Criou a secção ${nome}`, { seccaoId: id, departamentoId: input.departamento_id }, undefined, undefined, when),
+        ]);
+        return id;
+    }
+
+    /** Ciclo na hierarquia com o chefe escolhido (o chefe responde, directa ou indirectamente, ao funcionário)? */
+    private static async validarChefia(id: string, f: Partial<Funcionario>) {
+        if (!f.chefe_id) return;
+        const [departamentos, seccoes, funcionarios] = await Promise.all([this.departamentos(), this.seccoes(), this.funcionarios()]);
+        const proprio = { ...(funcionarios.find(x => x.id === id) || {}), ...f, id } as Funcionario;
+        const erro = cicloChefia(id, f.chefe_id, { departamentos, seccoes, cargos: [], funcionarios: [...funcionarios.filter(x => x.id !== id), proprio] });
+        if (erro) throw new Error(erro);
+    }
+
+    /** Secção do funcionário: só uma secção do seu departamento (instrução à parte, para não mudar o registo da ficha). */
+    private static async instrucaoSeccao(id: string, f: Partial<Funcionario>): Promise<Statement> {
+        let seccao = f.seccao_id || null;
+        if (seccao) {
+            const s = (await this.seccoes()).find(x => x.id === seccao);
+            if (!s || s.departamento_id !== f.departamento_id) seccao = null;
+        }
+        return { sql: 'UPDATE rh_funcionario SET seccao_id = ? WHERE id = ?', params: [seccao, id], expectChanges: 1 };
     }
 
     // ── Funcionários ──────────────────────────────────────────────────────────────
@@ -153,7 +225,15 @@ export class ServicoRH {
         if (!texto(f.nome)) erros.push('Indique o nome do funcionário.');
         if (!texto(f.numero_mecanografico)) erros.push('Indique o número mecanográfico.');
         if (!data(f.data_admissao)) erros.push('Indique a data de admissão.');
+        // Campos que a folha de salário imprime em cada funcionário.
+        if (!texto(f.iban)) erros.push('Indique o IBAN (sai na folha de salário).');
+        if (!texto(f.vinculo)) erros.push('Indique o vínculo (Comissão de Serviço, Pessoal do Quadro, Quadro Temporário…).');
+        if (!texto(f.carreira)) erros.push('Indique o grupo / regime de carreira.');
+        if (!f.cargo_id) erros.push('Escolha o cargo.');
         if (f.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(f.email)) erros.push('O email é inválido.');
+        if (texto(f.bi_numero) && !FORMATO_BI.test(String(f.bi_numero).trim().toUpperCase())) erros.push('O n.º do BI tem 9 algarismos, 2 letras e 3 algarismos (ex.: 002658949BA031).');
+        if (f.data_nascimento && data(f.data_nascimento)! > `${Number(luandaTodayKey().slice(0, 4)) - 14}${luandaTodayKey().slice(4)}`) erros.push('A data de nascimento indica menos de 14 anos (idade mínima para trabalhar).');
+        if (f.chefe_id && f.chefe_id === f.id) erros.push('O chefe directo não pode ser o próprio funcionário.');
         if (f.iban && !/^[A-Z]{2}\d{2}[A-Z0-9 ]{10,40}$/u.test(f.iban.replace(/\s+/gu, '').toUpperCase())) erros.push('O IBAN é inválido.');
         erros.push(...validarDatasBI(f.bi_emissao, f.bi_validade, luandaTodayKey()));
         if (erros.length) throw new Error(erros.join(' '));
@@ -166,39 +246,77 @@ export class ServicoRH {
             texto(f.email), f.iban ? f.iban.replace(/\s+/gu, '').toUpperCase() : null, texto(f.banco), data(f.data_admissao), data(f.data_saida),
             f.cargo_id || null, f.departamento_id || null, f.horario_id || null, f.estado || 'activo', texto(f.foto_url), f.utilizador_id || null,
             f.reformado ? 1 : 0, texto(f.observacoes),
+            texto(f.vinculo), texto(f.carreira), texto(f.categoria), texto(f.escalao)?.toUpperCase() ?? null, texto(f.unidade_organica),
+            texto(f.nacionalidade), texto(f.telefone_alternativo), texto(f.provincia), texto(f.municipio), f.chefe_id || null,
         ];
     }
 
+    /**
+     * Duplicados na empresa (n.º mecanográfico, BI, NIF, IBAN, email): devolve as mensagens com o funcionário que já os usa.
+     * Verificado na base de dados ao gravar, e também chamado pelo formulário para avisar antes de guardar.
+     */
+    static async duplicados(f: Partial<Funcionario>, excluirId?: string | null) {
+        const campos: Array<[keyof Funcionario, string, (v: string) => string]> = [
+            ['numero_mecanografico', 'n.º mecanográfico', v => v.trim()], ['bi_numero', 'n.º do BI', v => v.trim().toUpperCase()],
+            ['nif', 'NIF', v => v.trim().toUpperCase()], ['iban', 'IBAN', v => v.replace(/\s+/gu, '').toUpperCase()], ['email', 'email', v => v.trim().toLowerCase()],
+        ];
+        const lista = await this.funcionarios();
+        const conflitos: Array<{ campo: keyof Funcionario; mensagem: string; funcionario: Funcionario }> = [];
+        for (const [campo, rotulo, norm] of campos) {
+            const valor = typeof f[campo] === 'string' && (f[campo] as string).trim() ? norm(f[campo] as string) : '';
+            if (!valor) continue;
+            const outro = lista.find(x => x.id !== excluirId && typeof x[campo] === 'string' && norm(x[campo] as string) === valor);
+            if (outro) conflitos.push({ campo, mensagem: `O ${rotulo} ${valor} já pertence a ${outro.nome} (n.º ${outro.numero_mecanografico}).`, funcionario: outro });
+        }
+        return conflitos;
+    }
+
     /** Cria o funcionário e, se indicado, o primeiro contrato (e a primeira linha do histórico salarial). */
-    static async criarFuncionario(f: Partial<Funcionario>, contrato: Omit<Contrato, 'id' | 'funcionario_id' | 'estado' | 'motivo_fim' | 'criado_em' | 'documento_id'> | null, actor: ActorRH) {
+    static async criarFuncionario(f: Partial<Funcionario>, contrato: Omit<Contrato, 'id' | 'funcionario_id' | 'estado' | 'motivo_fim' | 'criado_em' | 'documento_id'> | null, actor: ActorRH, abonos: AbonoInicial[] = []) {
         this.validarFuncionario(f);
+        const conflitos = await this.duplicados(f);
+        if (conflitos.length) throw new Error(conflitos.map(c => c.mensagem).join(' '));
         const id = crypto.randomUUID();
+        await this.validarChefia(id, f);
         const when = agora();
         const statements: Statement[] = [{
             sql: `INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade,
                     numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url,
-                    utilizador_id, reformado, observacoes, criado_em, criado_por)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                    utilizador_id, reformado, observacoes, vinculo, carreira, categoria, escalao, unidade_organica, nacionalidade, telefone_alternativo,
+                    provincia, municipio, chefe_id, criado_em, criado_por)
+                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             params: [id, ...this.linhaFuncionario(f), when, actor.id], expectChanges: 1,
-        }];
+        }, await this.instrucaoSeccao(id, f)];
         if (contrato) statements.push(...this.instrucoesContrato(id, contrato, null, 'Admissão', actor, when));
+        const inicioAbonos = data(contrato?.inicio) || data(f.data_admissao);
+        for (const a of abonos.filter(x => x.rubrica_id)) statements.push({
+            sql: `INSERT INTO rh_funcionario_rubrica (id, funcionario_id, rubrica_id, valor_minor, quantidade, inicio, fim, criado_em, criado_por)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            params: [crypto.randomUUID(), id, a.rubrica_id, minor(a.valor_minor), Number(a.quantidade) || 1, inicioAbonos, null, when, actor.id], expectChanges: 1,
+        });
         statements.push(auditoriaRH(actor, 'create', `Registou o funcionário ${f.nome} (n.º ${f.numero_mecanografico})`, { funcionarioId: id }, undefined, undefined, when));
         await db.transaction(statements);
         return id;
     }
 
     static async actualizarFuncionario(id: string, f: Partial<Funcionario>, actor: ActorRH) {
-        this.validarFuncionario(f);
+        this.validarFuncionario({ ...f, id });
         const anterior = await this.funcionario(id);
         if (!anterior) throw new Error('Funcionário não encontrado.');
+        const conflitos = await this.duplicados(f, id);
+        if (conflitos.length) throw new Error(conflitos.map(c => c.mensagem).join(' '));
+        await this.validarChefia(id, f);
+        const seccao = await this.instrucaoSeccao(id, f);
         const when = agora();
         const linha = this.linhaFuncionario(f);
         await db.transaction([
             { sql: `UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?,
                     bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?,
                     data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?,
-                    observacoes = ?, actualizado_em = ? WHERE id = ?`,
+                    observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, nacionalidade = ?, telefone_alternativo = ?,
+                    provincia = ?, municipio = ?, chefe_id = ?, actualizado_em = ? WHERE id = ?`,
                 params: [...linha, when, id], expectChanges: 1 },
+            seccao,
             auditoriaRH(actor, 'update', `Alterou a ficha do funcionário ${f.nome}`, { funcionarioId: id },
                 { ...anterior, foto_url: undefined }, { ...f, foto_url: undefined }, when),
         ]);
@@ -283,15 +401,44 @@ export class ServicoRH {
         ]);
     }
 
+    /** Suspende ou reactiva um funcionário (não mexe no contrato). */
+    static async alterarEstado(funcionarioId: string, estado: 'activo' | 'suspenso', motivo: string, actor: ActorRH) {
+        if (estado === 'suspenso' && !texto(motivo)) throw new Error('Indique o motivo da suspensão.');
+        const when = agora();
+        await db.transaction([
+            { sql: `UPDATE rh_funcionario SET estado = ?, actualizado_em = ? WHERE id = ? AND estado <> 'cessado'`, params: [estado, when, funcionarioId], expectChanges: 1 },
+            auditoriaRH(actor, 'update', `${estado === 'suspenso' ? 'Suspendeu' : 'Reactivou'} o funcionário ${funcionarioId}${texto(motivo) ? `: ${motivo.trim()}` : ''}`, { funcionarioId, estado, motivo: texto(motivo) }, undefined, undefined, when),
+        ]);
+    }
+
+    /** Muda o departamento de vários funcionários de uma vez (acção em massa da lista). */
+    static async alterarDepartamento(funcionarioIds: string[], departamentoId: string | null, actor: ActorRH) {
+        if (!funcionarioIds.length) throw new Error('Seleccione pelo menos um funcionário.');
+        const when = agora();
+        await db.transaction([
+            ...funcionarioIds.map(id => ({ sql: 'UPDATE rh_funcionario SET departamento_id = ?, actualizado_em = ? WHERE id = ?', params: [departamentoId, when, id], expectChanges: 1 })),
+            auditoriaRH(actor, 'update', `Mudou o departamento de ${funcionarioIds.length} funcionário(s)`, { funcionarioIds, departamentoId }, undefined, undefined, when),
+        ]);
+    }
+
     // ── Rubricas ──────────────────────────────────────────────────────────────────
     static rubricas() {
         return lista(db.all<Rubrica>('SELECT * FROM rh_rubrica ORDER BY ordem_no_recibo, nome'));
     }
 
     static async guardarRubrica(r: Partial<Rubrica>, actor: ActorRH) {
-        const codigo = texto(r.codigo)?.toUpperCase().replace(/[^A-Z0-9_]/gu, '_');
         const nome = texto(r.nome);
-        if (!codigo || !nome) throw new Error('Indique o código e o nome da rubrica.');
+        // O código é opcional no catálogo: sem ele, gera-se a partir do nome.
+        const codigo = (texto(r.codigo) || (nome ? nome.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').slice(0, 24) : ''))?.toUpperCase().replace(/[^A-Z0-9_]/gu, '_');
+        if (!codigo || !nome) throw new Error('Indique o nome da rubrica.');
+        const repetida = (await this.rubricas()).find(x => x.id !== r.id && (x.nome.trim().toLowerCase() === nome.toLowerCase() || x.codigo === codigo));
+        if (repetida) throw new Error(repetida.codigo === codigo ? `Já existe uma rubrica com o código ${codigo}.` : `Já existe «${repetida.nome}» no catálogo.`);
+        const periodicidade = ['mensal', 'anual', 'pontual'].includes(String(r.periodicidade)) ? String(r.periodicidade) : 'mensal';
+        const mes = periodicidade === 'anual' ? Math.round(Number(r.mes_pagamento)) : null;
+        if (periodicidade === 'anual' && !(mes && mes >= 1 && mes <= 12)) throw new Error('Indique o mês de pagamento do subsídio anual.');
+        const classe = r.tipo === 'desconto' ? 'desconto' : r.classe === 'subsidio' ? 'subsidio' : 'abono';
+        const extra = [classe, r.por_dia ? 1 : 0, minor(r.valor_padrao_minor || 0), periodicidade, mes, r.proporcional_faltas ? 1 : 0, r.auto_atribuir ? 1 : 0,
+            texto(r.descricao), r.incidencia_confirmada === 0 ? 0 : 1];
         if (!['abono', 'desconto'].includes(String(r.tipo))) throw new Error('Escolha se a rubrica é abono ou desconto.');
         if (!['fixo', 'percentagem', 'quantidade'].includes(String(r.forma))) throw new Error('Forma de cálculo inválida.');
         const pct = Number(r.percentagem) || 0;
@@ -304,8 +451,9 @@ export class ServicoRH {
             const anterior = await db.get<Rubrica>('SELECT * FROM rh_rubrica WHERE id = ?', [r.id]);
             await db.transaction([
                 { sql: `UPDATE rh_rubrica SET nome = ?, tipo = ?, forma = ?, percentagem = ?, incide_inss = ?, incide_irt = ?, limite_isento_irt_minor = ?,
-                        limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, actualizado_em = ? WHERE id = ?`,
-                    params: [...valores, when, r.id], expectChanges: 1 },
+                        limite_isento_irt_pct = ?, conta_contabilistica = ?, ordem_no_recibo = ?, activo = ?, classe = ?, por_dia = ?, valor_padrao_minor = ?,
+                        periodicidade = ?, mes_pagamento = ?, proporcional_faltas = ?, auto_atribuir = ?, descricao = ?, incidencia_confirmada = ?, actualizado_em = ? WHERE id = ?`,
+                    params: [...valores, ...extra, when, r.id], expectChanges: 1 },
                 auditoriaRH(actor, 'update', `Alterou a rubrica ${anterior?.codigo || codigo}`, { rubricaId: r.id }, anterior, r, when),
             ]);
             return r.id;
@@ -313,8 +461,9 @@ export class ServicoRH {
         const id = crypto.randomUUID();
         await db.transaction([
             { sql: `INSERT INTO rh_rubrica (id, codigo, nome, tipo, forma, percentagem, incide_inss, incide_irt, limite_isento_irt_minor, limite_isento_irt_pct,
-                    conta_contabilistica, ordem_no_recibo, activo, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-                params: [id, codigo, ...valores, when, actor.id], expectChanges: 1 },
+                    conta_contabilistica, ordem_no_recibo, activo, classe, por_dia, valor_padrao_minor, periodicidade, mes_pagamento, proporcional_faltas, auto_atribuir,
+                    descricao, incidencia_confirmada, sistema, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+                params: [id, codigo, ...valores, ...extra, when, actor.id], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Criou a rubrica ${codigo} — ${nome}`, { rubricaId: id }, undefined, r, when),
         ]);
         return id;
@@ -432,10 +581,12 @@ export class ServicoRH {
      * o antigo passa a «substituído». As categorias Saúde e Disciplinar ficam sempre confidenciais.
      */
     static async carregarDocumento(input: { funcionario_id: string; categoria: CategoriaDocumento; nome: string; ficheiro_nome: string; data_url: string;
-        data_emissao?: string | null; data_validade?: string | null; confidencial?: boolean; substitui?: string | null }, maxMb: number, actor: ActorRH) {
+        data_emissao?: string | null; data_validade?: string | null; confidencial?: boolean; substitui?: string | null; pasta_id?: string | null; origem?: string }, maxMb: number, actor: ActorRH) {
+        // Os PDF gerados pelo sistema vêm como «data:application/pdf;filename=…;base64,»: guarda-se só o tipo.
+        input = { ...input, data_url: input.data_url.replace(/^data:([^;,]+)(?:;[^,;]+=[^,;]*)*;base64,/u, 'data:$1;base64,') };
         if (!texto(input.nome)) throw new Error('Indique o nome do documento.');
         if (!CATEGORIAS_DOCUMENTO.some(c => c.id === input.categoria)) throw new Error('Categoria inválida.');
-        if (!MIMES_DOCUMENTO.test(input.data_url)) throw new Error('O ficheiro tem de ser PDF, JPG, PNG ou DOCX.');
+        if (!MIMES_DOCUMENTO.test(input.data_url)) throw new Error('O ficheiro tem de ser PDF, JPG, PNG, DOCX ou XLSX.');
         const tamanho = Math.floor((input.data_url.length - input.data_url.indexOf(',') - 1) * 3 / 4);
         if (tamanho > maxMb * 1024 * 1024) throw new Error(`O ficheiro é demasiado grande (máximo ${maxMb} MB).`);
         if (input.data_emissao && input.data_validade && data(input.data_validade)! <= data(input.data_emissao)!) throw new Error('A validade tem de ser posterior à emissão.');
@@ -445,14 +596,24 @@ export class ServicoRH {
         const when = agora();
         const hoje = luandaTodayKey().replace(/-/gu, '');
         const extensao = input.ficheiro_nome.includes('.') ? input.ficheiro_nome.slice(input.ficheiro_nome.lastIndexOf('.')).toLowerCase() : '';
+        // O mesmo nome na mesma pasta cria uma nova versão (a anterior fica no histórico como «substituída»).
+        const pasta = input.pasta_id || null;
+        const anterior = input.substitui
+            ? await db.get<DocumentoRH>('SELECT * FROM rh_documento WHERE id = ?', [input.substitui]).catch(() => undefined)
+            : (await this.documentos(input.funcionario_id)).find(d => d.estado === 'activo' && d.nome.trim().toLowerCase() === input.nome.trim().toLowerCase()
+                && (d.pasta_id || null) === pasta && d.categoria === input.categoria);
+        if (anterior) input = { ...input, substitui: anterior.id };
+        const versao = (anterior?.versao || 1) + (anterior ? 1 : 0);
         const normalizado = `${hoje}-${input.nome.trim().normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^A-Za-z0-9]+/gu, '-').replace(/^-|-$/gu, '').toLowerCase()}${extensao}`;
         await db.transaction([
             ...(input.substitui ? [{ sql: `UPDATE rh_documento SET estado = 'substituido', substituido_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'activo'`,
                 params: [id, when, input.substitui], expectChanges: 1 }] : []),
             { sql: `INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado,
-                    carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)`,
+                    carregado_por, carregado_por_nome, criado_em, pasta_id, origem, versao) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?, ?, ?, ?)`,
                 params: [id, input.funcionario_id, input.categoria, input.nome.trim(), normalizado, mime, tamanho, data(input.data_emissao), data(input.data_validade),
-                    confidencial ? 1 : 0, actor.id, actor.name, when], expectChanges: 1 },
+                    confidencial ? 1 : 0, actor.id, actor.name, when, pasta || anterior?.pasta_id || null, input.origem || 'upload', versao], expectChanges: 1 },
+            { sql: 'INSERT INTO rh_doc_auditoria (id, documento_id, accao, detalhe, utilizador_id, utilizador_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                params: [crypto.randomUUID(), id, 'carregar', anterior ? `versão ${versao}` : null, actor.id, actor.name, when] },
             { sql: 'INSERT INTO rh_documento_ficheiro (documento_id, data_url) VALUES (?, ?)', params: [id, input.data_url], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Carregou o documento «${input.nome.trim()}» (${input.categoria}) do funcionário ${input.funcionario_id}`,
                 { funcionarioId: input.funcionario_id, documentoId: id, substitui: input.substitui || null }, undefined, undefined, when),
@@ -460,11 +621,15 @@ export class ServicoRH {
         return id;
     }
 
+    /** Anula (não apaga): o documento vai para «Anulados» e pode ser restaurado. */
     static async arquivarDocumento(id: string, actor: ActorRH) {
         const when = agora();
         await db.transaction([
-            { sql: `UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'`, params: [when, id], expectChanges: 1 },
-            auditoriaRH(actor, 'delete', 'Arquivou um documento do funcionário', { documentoId: id }, undefined, undefined, when),
+            { sql: `UPDATE rh_documento SET estado = 'arquivado', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'`,
+                params: [actor.id, actor.name, when, when, id], expectChanges: 1 },
+            { sql: 'INSERT INTO rh_doc_auditoria (id, documento_id, accao, detalhe, utilizador_id, utilizador_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?)',
+                params: [crypto.randomUUID(), id, 'anular', null, actor.id, actor.name, when] },
+            auditoriaRH(actor, 'delete', 'Anulou um documento do funcionário', { documentoId: id }, undefined, undefined, when),
         ]);
     }
 

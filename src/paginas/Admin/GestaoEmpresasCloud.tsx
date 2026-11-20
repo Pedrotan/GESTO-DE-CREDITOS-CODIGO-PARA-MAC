@@ -7,12 +7,13 @@ import { Label } from '@/componentes/ui/label';
 import {
     Cloud, Building2, KeyRound, Copy, RefreshCw, Loader2, ShieldCheck, ShieldOff,
     Trash2, Plus, CheckCircle, AlertTriangle, Link2, Eye, EyeOff, CalendarClock,
-    Search, FileDown, MessageSquare, Check, Sparkles, Shield, ClipboardList, Phone, Mail, X
+    Search, FileDown, MessageSquare, Check, Sparkles, Shield, ClipboardList, Phone, Mail, X, MonitorSmartphone
 } from 'lucide-react';
 import { ServicoAngolaAPI } from '@/servicos/ServicoAngolaAPI';
 import { exportCompanyCredentialsPDF } from '@/bibliotecas/pdf';
 import { RENEWAL_PERIODS, extendSubscription, parsePaidAmount, subscriptionState, type RenewalPeriod } from '@/bibliotecas/subscricao';
 import { PainelLicencasServidor, mostrarChaveLicenca } from './PainelLicencasServidor';
+import { DispositivosSync } from './DispositivosSync';
 import { getMasterPrices, periodPrice, priceInputValue, PRICES_CHANGED_EVENT } from '@/bibliotecas/precos-master';
 import { gerarManualCliente, gerarManualProcesso } from '@/bibliotecas/manuais-ativacao';
 import Swal from 'sweetalert2';
@@ -230,6 +231,9 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
         if (!response.ok || !data.success) throw new Error(data.message || `Erro do servidor (${response.status}).`);
         return data;
     };
+
+    // Diagnóstico da sincronização por dispositivo da empresa escolhida.
+    const [devicesTenant, setDevicesTenant] = useState<{ tenantId: string; name: string } | null>(null);
 
     const loadTenants = async (targetUrl?: string) => {
         setIsLoading(true);
@@ -1250,6 +1254,16 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                                     <Button
                                         size="sm"
                                         variant="outline"
+                                        onClick={() => setDevicesTenant({ tenantId: tenant.tenantId, name: tenant.name })}
+                                        className="h-9 gap-1.5 text-xs font-bold text-slate-700"
+                                        title="Ver o estado da sincronização de cada computador e navegador"
+                                    >
+                                        <MonitorSmartphone className="h-3.5 w-3.5 text-emerald-600" /> Dispositivos
+                                    </Button>
+
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
                                         disabled={busyTenant === tenant.tenantId}
                                         onClick={() => handleRotate(tenant)}
                                         className="h-9 gap-1.5 text-xs font-bold text-slate-700"
@@ -1378,6 +1392,7 @@ export default function GestaoEmpresasCloud({ onSubscriptionPayment }: { onSubsc
                     </div>
                 </div>
             </div>
+            <DispositivosSync tenant={devicesTenant} onClose={() => setDevicesTenant(null)} load={tenantId => api('sync-devices', { tenantId })} />
         </div>
     );
 }

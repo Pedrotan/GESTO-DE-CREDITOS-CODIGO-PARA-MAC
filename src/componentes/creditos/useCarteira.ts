@@ -70,7 +70,7 @@ export function useCarteira(input: { search?: string } = {}) {
 
     const rows = useMemo(() => context ? C.buildPortfolio(credits, {
         installments: context.installments, payments, legalCreditIds: context.legalCreditIds, writtenOffIds: context.writtenOffIds,
-        escalatedIds: context.escalatedIds, clients, users, productOf: context.productOf, productNames, deletedCredits: context.deletedCredits,
+        escalatedIds: context.escalatedIds, clients, users, productOf: context.productOf, productNames, deletedCredits: context.deletedCredits, moraWaivers: context.moraWaivers,
     }) : [], [context, credits, payments, clients, users, productNames]);
 
     const range = useMemo(() => monthRange(year, month), [year, month]);

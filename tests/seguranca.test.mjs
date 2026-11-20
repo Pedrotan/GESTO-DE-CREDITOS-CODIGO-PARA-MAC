@@ -143,3 +143,31 @@ test('API: chave mestra errada 5 vezes bloqueia o IP e gera alerta crítico', as
     assert.equal(events.at(-1).type, 'master_secret_failed_locked');
     assert.equal(events.at(-1).severity, 'critical');
 });
+
+test('API: dispositivo de confiança com o código antigo não bloqueia o IP do escritório; um IP desconhecido continua a ser bloqueado', async () => {
+    const lockouts = new Map();
+    const sql = async (text, params = []) => {
+        if (/SELECT failures, window_start, locked_until FROM security_lockouts/.test(text)) return lockouts.has(params[0]) ? [lockouts.get(params[0])] : [];
+        if (/INSERT INTO security_lockouts/.test(text)) { lockouts.set(params[0], { failures: params[1], window_start: params[2], locked_until: params[3] }); return []; }
+        if (/SELECT EXTRACT\(EPOCH FROM \(locked_until - NOW\(\)\)\)/.test(text)) {
+            return params[0].map(key => lockouts.get(key)).filter(row => row?.locked_until && new Date(row.locked_until).getTime() > Date.now())
+                .map(row => ({ remaining: Math.ceil((new Date(row.locked_until).getTime() - Date.now()) / 1000) }));
+        }
+        return [];
+    };
+    const escritorio = { headers: { 'x-vercel-forwarded-for': '41.63.184.31', 'user-agent': 'pc-antigo' }, url: '/api/sync' };
+    const warn = console.warn; console.warn = () => {};
+    try {
+        for (let i = 0; i < 30; i++) {
+            await registerAuthFailure(sql, escritorio, { scope: 'tenant_key', trustedSubject: '5001032771', type: 'tenant_key_failed', title: 'Chave errada', details: 'teste' });
+        }
+        assert.equal(await lockoutRemaining(sql, escritorio, { scope: 'tenant_key', subject: '5001032771', trusted: true }), 0, 'a empresa continua a entrar desse IP');
+        assert.equal(await lockoutRemaining(sql, escritorio, { scope: 'tenant_key', subject: '9999999999' }), 0, 'o IP não ficou bloqueado para outras empresas');
+        const atacante = { headers: { 'x-vercel-forwarded-for': '102.7.7.7' }, url: '/api/sync' };
+        for (let i = 0; i < LOCKOUT_POLICIES.ip.maxFailures; i++) {
+            await registerAuthFailure(sql, atacante, { scope: 'tenant_key', subject: '5001032771', type: 'tenant_key_failed', title: 'Chave errada', details: 'teste' });
+        }
+        assert.ok(await lockoutRemaining(sql, atacante, { scope: 'tenant_key', subject: '5001032771' }) > 0, 'IP desconhecido bloqueado');
+        assert.equal(await lockoutRemaining(sql, escritorio, { scope: 'tenant_key', subject: '5001032771', trusted: true }), 0, 'o bloqueio do NIF não tira o acesso ao escritório');
+    } finally { console.warn = warn; }
+});

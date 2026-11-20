@@ -36,6 +36,18 @@ const DOC_KINDS: Record<string, string> = { contrato: 'Contrato', livranca: 'Liv
 type StagedDoc = { kind: string; fileName: string; mimeType: string; dataUrl: string };
 type Warranty = { type: 'Veículo' | 'Imóvel' | 'Equipamento' | 'Outro'; description: string; marketValue: string; location: string };
 const pct = (value: number | null) => value === null ? '—' : `${value.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}%`;
+/** Mês (AAAA-MM) somado de n meses. */
+const addMonthKey = (key: string, months: number) => {
+    const [year, month] = key.split('-').map(Number);
+    const date = new Date(year, month - 1 + months, 1);
+    return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+};
+/** Meses de um mês (AAAA-MM) até outro. */
+const monthsBetween = (from: string, to: string) => {
+    const [fromYear, fromMonth] = from.split('-').map(Number);
+    const [toYear, toMonth] = to.split('-').map(Number);
+    return (toYear - fromYear) * 12 + (toMonth - fromMonth);
+};
 
 function Row({ label, value, tone }: { label: string; value: React.ReactNode; tone?: 'red' | 'green' }) {
     return (
@@ -126,6 +138,8 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
     };
 
     const result = calc.result;
+    const autoFirstMonth = addMonthKey(form.startDate.slice(0, 7), 1);
+    const firstMonth = form.firstDueMonth || autoFirstMonth;
     const stepError = (index: number): string | null => {
         if (index === 0) {
             if (!client) return 'Escolha o cliente.';
@@ -138,6 +152,8 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
             if (limitErrors.length) return limitErrors[0];
             if (flat && tableRate === null && !form.termRateManual) return `O prazo de ${form.months} ${form.months === 1 ? 'mês' : 'meses'} não tem taxa definida para ${product?.name || 'este produto'} (Configurações › Produtos de Crédito).`;
             if (form.graceMonths > 0) return 'Os pedidos de crédito não suportam carência.';
+            if (form.firstDueMonth && monthsBetween(form.startDate.slice(0, 7), form.firstDueMonth) > 12) return 'A 1.ª prestação não pode ficar mais de 12 meses depois da data de início.';
+            if (result?.firstDueDate && result.firstDueDate <= form.startDate) return 'A 1.ª prestação tem de vencer depois da data de início: escolha um mês ou um dia de vencimento posterior.';
             if (!result?.valid) return 'A simulação não é válida com estes valores.';
         }
         if (index === 2 && calc.effort !== null && calc.effort > config.effortLimit && notes.trim().length < 20) return `Taxa de esforço acima do limite (${pct(config.effortLimit)}): justifique o pedido (pelo menos 20 caracteres).`;
@@ -169,6 +185,8 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                 // FLAT: guarda a taxa do prazo usada (alterar a tabela depois não mexe neste crédito).
                 interestRate: flat ? form.termRate : Math.round(calc.annualRate * 10000) / 10000, lateInterestRate: Number(client.lateInterestRate) || 1, installments: form.months, paidInstallments: 0,
                 startDate: start, dueDate: due, status: pending ? 'pending_approval' : 'active', requestedBy: user.name || 'Sistema', requestedAt: new Date(),
+                // As prestações ficam com as datas mostradas na simulação.
+                scheduleDueDates: result.rows.length === form.months ? result.rows.map(row => `${row.dueDate}T00:00:00.000Z`) : undefined,
                 daysOverdue: 0, accruedInterest: result.totalInterest, lateInterest: 0, totalDue: form.principal + result.totalInterest,
                 amortizationMethod: flat ? 'FLAT' : form.system === 'sac' ? 'SAC' : 'PRICE', creditNumber: own.length + 1, createdAt: new Date(), targetMonthId: targetMonth,
                 supplierId: supplierId || undefined, supplierProfitRate: supplierId ? supplierRate : undefined,
@@ -292,7 +310,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                                     <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Prazo (meses)</span><Input type="number" min={1} value={form.months || ''} onChange={event => set({ months: Number(event.target.value) })} /></label>
                                 )}
                                 <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Data de início</span><Input type="date" value={form.startDate} onChange={event => { set({ startDate: event.target.value }); setTargetMonth(event.target.value.slice(0, 7)); }} /></label>
-                                <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Dia de vencimento</span><Input type="number" min={1} max={28} value={form.dueDay} onChange={event => set({ dueDay: Math.min(28, Math.max(1, Number(event.target.value) || 1)) })} /></label>
+                                <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Dia de vencimento (1 a 28)</span><DecimalInput digits={0} min={1} max={28} value={form.dueDay} onValueChange={dueDay => set({ dueDay: Math.min(28, Math.max(1, Math.round(dueDay) || 1)) })} /></label>
                                 {flat ? (
                                     <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Taxa do prazo {form.termRateManual ? '(alterada)' : '(automática)'}</span>
                                         {canEditRate
@@ -304,7 +322,26 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                                         <Select value={form.system} onValueChange={value => set({ system: value as any })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="price">Prestação constante (PRICE)</SelectItem><SelectItem value="sac">Amortização constante (SAC)</SelectItem></SelectContent></Select>
                                     </label>
                                 )}
-                                <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Mês de competência</span><Input type="month" value={targetMonth} onChange={event => setTargetMonth(event.target.value)} /></label>
+                                <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground" title="Mês em que o crédito conta nos indicadores e relatórios. Não muda as datas das prestações.">Mês de competência (relatórios)</span><Input type="month" value={targetMonth} onChange={event => setTargetMonth(event.target.value)} /></label>
+                            </div>
+                            <div className="space-y-2 rounded-lg border p-2">
+                                <div className="flex items-center justify-between gap-2">
+                                    <span className="text-xs font-bold uppercase text-muted-foreground">Período de pagamento</span>
+                                    {form.firstDueMonth
+                                        ? <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => set({ firstDueMonth: '' })}>Voltar ao automático</Button>
+                                        : <span className="text-[11px] text-muted-foreground">Automático</span>}
+                                </div>
+                                <div className="grid grid-cols-2 gap-2">
+                                    <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">1.ª prestação em</span>
+                                        <Input type="month" value={firstMonth} onChange={event => event.target.value && set({ firstDueMonth: event.target.value === autoFirstMonth ? '' : event.target.value })} /></label>
+                                    <label className="space-y-1"><span className="text-xs font-semibold text-muted-foreground">Última prestação em</span>
+                                        <Input type="month" value={form.months > 0 ? addMonthKey(firstMonth, form.months - 1) : ''} min={firstMonth}
+                                            onChange={event => { const months = monthsBetween(firstMonth, event.target.value) + 1; if (event.target.value && months >= 1) set({ months, termRateManual: false }); }} /></label>
+                                </div>
+                                <p className="text-[11px] leading-snug text-muted-foreground">
+                                    {form.firstDueMonth ? 'Escolhido à mão.' : 'Por defeito, a 1.ª prestação é no mês seguinte à data de início.'} Ao mudar o último mês, o prazo muda.
+                                    {' '}As prestações vencem no dia {form.dueDay} de cada mês; se calhar ao fim-de-semana ou feriado, passa para o dia útil seguinte.
+                                </p>
                             </div>
                             {showSuppliers && (
                                 <div className="grid grid-cols-2 gap-2 rounded-lg border p-2">

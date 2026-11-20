@@ -7,6 +7,7 @@ import { diasUteis, HORARIO_OMISSAO } from '@/bibliotecas/rh/ponto';
 import { auditoriaRH, type ActorRH, type Funcionario } from './ServicoRH';
 import { ServicoTempoRH } from './ServicoTempoRH';
 import { ServicoSalariosRH } from './ServicoSalariosRH';
+import { avisos } from './ServicoPortalComunicacao';
 
 const agora = () => new Date().toISOString();
 const OFICIAIS = new Set(['aprovado', 'pago', 'fechado']);
@@ -20,13 +21,18 @@ export class ServicoPortalRH {
         return (await ServicoSalariosRH.recibosFuncionario(funcionarioId)).filter(r => OFICIAIS.has(r.estado));
     }
 
+    /** Folha de correcção: recibos calculados mas ainda por aprovar (o funcionário confere e pode reclamar). */
+    static async minhaFolhaCorreccao(funcionarioId: string) {
+        return (await ServicoSalariosRH.recibosFuncionario(funcionarioId)).filter(r => r.estado === 'calculado');
+    }
+
     private static async horario(f: Funcionario) {
         const horarios = await ServicoTempoRH.horarios();
         return horarios.find(h => h.id === f.horario_id) || horarios.find(h => h.id === 'horario-normal') || HORARIO_OMISSAO;
     }
 
     /** Pedido de férias: fica «planeado» e marcado como pedido do funcionário até o RH o aprovar. */
-    static async pedirFerias(f: Funcionario, inicio: string, fim: string, observacoes: string, actor: ActorRH) {
+    static async pedirFerias(f: Funcionario, inicio: string, fim: string, observacoes: string, actor: ActorRH, destinatarios: string[] = []) {
         if (!/^\d{4}-\d{2}-\d{2}$/u.test(inicio) || !/^\d{4}-\d{2}-\d{2}$/u.test(fim) || fim < inicio) throw new Error('Indique o início e o fim das férias.');
         const dias = diasDoPlano(inicio, fim, await this.horario(f), await ServicoTempoRH.feriados());
         if (!dias) throw new Error('O período escolhido não tem dias úteis.');
@@ -37,11 +43,12 @@ export class ServicoPortalRH {
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)`,
                 params: [id, f.id, Number(inicio.slice(0, 4)), Number(inicio.slice(5, 7)), inicio, fim, dias, observacoes.trim() || null, when, actor.id, actor.name], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Pedido de férias no portal: ${inicio} a ${fim} (${dias} dias úteis)`, { funcionarioId: f.id, planoId: id }, undefined, undefined, when),
+            ...avisos(destinatarios, `Pedido de férias de ${f.nome}`, `${inicio} a ${fim} (${dias} dias úteis). Aprove em Férias e ausências.`, when),
         ]);
     }
 
     /** Pedido de dispensa: ausência pendente que o RH (ou o chefe) aprova em «Dispensas e licenças». */
-    static async pedirDispensa(f: Funcionario, input: { tipo_id: string; inicio: string; fim: string; horas: number; motivo: string }, actor: ActorRH) {
+    static async pedirDispensa(f: Funcionario, input: { tipo_id: string; inicio: string; fim: string; horas: number; motivo: string }, actor: ActorRH, destinatarios: string[] = []) {
         const fim = input.horas > 0 ? input.inicio : input.fim;
         if (!input.tipo_id || !/^\d{4}-\d{2}-\d{2}$/u.test(input.inicio) || !fim || fim < input.inicio) throw new Error('Indique o tipo e as datas.');
         if (!input.motivo.trim()) throw new Error('Indique o motivo.');
@@ -53,6 +60,7 @@ export class ServicoPortalRH {
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', 1, ?, ?, ?)`,
                 params: [id, f.id, input.tipo_id, input.inicio, fim, dias, Math.max(0, input.horas || 0), input.motivo.trim(), when, actor.id, actor.name], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Pedido de dispensa no portal: ${input.inicio}${fim !== input.inicio ? ` a ${fim}` : ''}`, { funcionarioId: f.id, ausenciaId: id }, undefined, undefined, when),
+            ...avisos(destinatarios, `Pedido de dispensa de ${f.nome}`, `${input.inicio}${fim !== input.inicio ? ` a ${fim}` : ''}: ${input.motivo.trim().slice(0, 140)}`, when),
         ]);
     }
 }

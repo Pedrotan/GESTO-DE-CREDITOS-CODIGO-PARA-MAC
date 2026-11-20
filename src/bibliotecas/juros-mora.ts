@@ -28,12 +28,14 @@ export type InstallmentLateInterest = {
     daysLate: number;
     /** Valor da prestação (capital + juros) ainda em dívida na data de referência. */
     outstandingMinor: number;
-    /** Mora acumulada desde o primeiro dia de atraso até à data de referência. */
+    /** Mora acumulada desde o primeiro dia de atraso até à data de referência, sem a perdoada ou renegociada. */
     accruedMinor: number;
     /** Mora que esta prestação gera por cada dia adicional de atraso. */
     dailyMinor: number;
     /** Parte da mora já paga pelo cliente. */
     paidLateMinor: number;
+    /** Mora retirada por perdão ou renegociação. */
+    waivedMinor: number;
     /** Mora ainda por pagar. */
     owedMinor: number;
 };
@@ -44,10 +46,14 @@ export type LateInterestSummary = {
     installments: InstallmentLateInterest[];
     accruedMinor: number;
     paidLateMinor: number;
+    waivedMinor: number;
     owedMinor: number;
     dailyMinor: number;
     overdueMinor: number;
 };
+
+/** Mora retirada (perdão ou renegociação) numa data. A prestação em atraso continua a gerar mora a partir daí. */
+export type MoraWaiver = { date: string | Date; amountMinor: number };
 
 const DAY_MS = 86_400_000;
 
@@ -73,6 +79,8 @@ export function calculateLateInterest(input: {
     payments: MoraPayment[];
     dailyRatePercent: number;
     asOf?: string | Date;
+    /** Perdões e renegociações já decididos: o recálculo nunca volta a lançar esta mora. */
+    waivers?: MoraWaiver[];
 }): LateInterestSummary {
     const rate = Number.isFinite(input.dailyRatePercent) && input.dailyRatePercent > 0 ? input.dailyRatePercent / 100 : 0;
     const asOfDate = input.asOf ? new Date(input.asOf) : new Date();
@@ -111,10 +119,15 @@ export function calculateLateInterest(input: {
 
     // Mora já paga: distribuída pelas prestações mais antigas primeiro.
     let paidLate = input.payments.reduce((sum, payment) => sum + (dayNumber(payment.date) <= asOfDay ? safe(payment.lateMinor || 0) : 0), 0);
+    // Mora perdoada ou renegociada: sai do que ainda não foi pago, também das prestações mais antigas primeiro.
+    let waived = (input.waivers || []).reduce((sum, waiver) => sum + (dayNumber(waiver.date) <= asOfDay ? safe(waiver.amountMinor) : 0), 0);
     const installments = schedule.map((item, index) => {
-        const accruedMinor = Math.round(accrued[index]);
-        const paidLateMinor = Math.min(paidLate, accruedMinor);
+        const grossMinor = Math.round(accrued[index]);
+        const paidLateMinor = Math.min(paidLate, grossMinor);
         paidLate -= paidLateMinor;
+        const waivedMinor = Math.min(waived, grossMinor - paidLateMinor);
+        waived -= waivedMinor;
+        const accruedMinor = grossMinor - waivedMinor;
         const due = dayNumber(item.dueDate);
         const endDay = remaining[index] > 0 ? asOfDay : (paidOffDay[index] ?? due);
         return {
@@ -126,11 +139,12 @@ export function calculateLateInterest(input: {
             accruedMinor,
             dailyMinor: asOfDay >= due ? Math.round(remaining[index] * rate) : 0,
             paidLateMinor,
+            waivedMinor,
             owedMinor: accruedMinor - paidLateMinor,
         };
     });
 
-    const total = (key: keyof Pick<InstallmentLateInterest, 'accruedMinor' | 'paidLateMinor' | 'owedMinor' | 'dailyMinor'>) =>
+    const total = (key: keyof Pick<InstallmentLateInterest, 'accruedMinor' | 'paidLateMinor' | 'waivedMinor' | 'owedMinor' | 'dailyMinor'>) =>
         installments.reduce((sum, item) => sum + item[key], 0);
     return {
         asOf: asOfDate.toISOString(),
@@ -138,10 +152,29 @@ export function calculateLateInterest(input: {
         installments,
         accruedMinor: total('accruedMinor'),
         paidLateMinor: total('paidLateMinor'),
+        waivedMinor: total('waivedMinor'),
         owedMinor: total('owedMinor'),
         dailyMinor: total('dailyMinor'),
         overdueMinor: installments.filter(item => dayNumber(item.dueDate) < asOfDay).reduce((sum, item) => sum + item.outstandingMinor, 0),
     };
+}
+
+/**
+ * Renegociação da mora: divide o valor acordado em prestações mensais iguais (a última leva o resto dos arredondamentos),
+ * no mesmo dia de cada mês; num mês mais curto, no último dia.
+ */
+export function buildMoraPlan(agreedMinor: number, count: number, firstDueKey: string): Array<{ dueDateKey: string; amountMinor: number }> {
+    if (!Number.isSafeInteger(agreedMinor) || agreedMinor <= 0) throw new Error('Indique o valor acordado da mora.');
+    if (!Number.isInteger(count) || count < 1 || count > 24) throw new Error('A renegociação da mora vai de 1 a 24 prestações.');
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(firstDueKey);
+    if (!match) throw new Error('Indique a data da primeira prestação.');
+    const [year, month, day] = match.slice(1).map(Number);
+    const share = Math.floor(agreedMinor / count);
+    return Array.from({ length: count }, (_, index) => {
+        const lastDay = new Date(Date.UTC(year, month - 1 + index + 1, 0)).getUTCDate();
+        const date = new Date(Date.UTC(year, month - 1 + index, Math.min(day, lastDay)));
+        return { dueDateKey: date.toISOString().slice(0, 10), amountMinor: index === count - 1 ? agreedMinor - share * (count - 1) : share };
+    });
 }
 
 /** Projecção da mora se o atraso continuar mais `days` dias sem pagamentos. */
