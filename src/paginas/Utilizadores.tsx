@@ -50,6 +50,9 @@ import { generateUsersPermissionsMatrixPDF } from '@/bibliotecas/matriz-permisso
 import { hasFullAuthority, isPrimaryOwner } from '@/bibliotecas/conta-principal';
 import { motivoRecusaDesignar, motivoRecusaNivel, type AdminPrincipal } from '@/bibliotecas/administrador-principal';
 import { ServicoAdminPrincipal } from '@/servicos/ServicoAdminPrincipal';
+import { EliminarUtilizador } from '@/componentes/utilizadores/EliminarUtilizador';
+import { relatorioUtilizadorEliminado, type LevantamentoUtilizador } from '@/bibliotecas/relatorio-utilizador-eliminado';
+import { generateReportFromDef } from '@/componentes/creditos/RelatoriosCreditos';
 import { maisRecentePrimeiro } from '@/bibliotecas/ordenacao';
 
 interface PasswordResetRequest {
@@ -114,6 +117,32 @@ export default function Utilizadores() {
         } catch (error) {
             toast({ variant: 'destructive', title: 'Não foi possível designar', description: error instanceof Error ? error.message : String(error) });
         } finally { setADesignar(false); }
+    };
+    // Eliminar utilizadores: só o Administrador principal (nunca a si próprio). As operações ficam no sistema.
+    const souPrincipal = Boolean(principal && currentUser && principal.userId === currentUser.id);
+    const [eliminarAlvo, setEliminarAlvo] = useState<User | null>(null);
+    const confirmarEliminacao = async (levantamento: LevantamentoUtilizador, motivo: string) => {
+        if (!eliminarAlvo || !currentUser) return;
+        try {
+            const erroMotivo = await ServicoAuditoriaAvancada.checkJustification(motivo, currentUser.id);
+            if (erroMotivo) throw new Error(erroMotivo);
+            ServicoControloAcesso.verificarUltimoSuperAdmin(users, eliminarAlvo.id, 'inactive', 'deleted');
+            const em = new Date().toISOString();
+            await deleteUser(eliminarAlvo.id);
+            await addLog('delete', 'user', `Eliminou o utilizador ${eliminarAlvo.name}. Motivo: ${motivo}. As operações dele continuam no sistema.`, currentUser.id, currentUser.name,
+                { name: eliminarAlvo.name, email: eliminarAlvo.email, role: eliminarAlvo.role }, undefined,
+                { targetUserId: eliminarAlvo.id, targetUserName: eliminarAlvo.name, reason: motivo, origin: 'eliminar_utilizador', creditos: levantamento.creditos.length });
+            // Relatório geral de tudo o que fez (descarregado e guardado nos relatórios).
+            await generateReportFromDef(relatorioUtilizadorEliminado(levantamento, { porNome: currentUser.name, em, motivo }), companySettings,
+                { id: currentUser.id, name: currentUser.name, role: currentUser.role } as never, 'pdf').catch(error => {
+                    toast({ variant: 'destructive', title: 'Utilizador eliminado, mas o relatório falhou', description: error instanceof Error ? error.message : String(error) });
+                });
+            await reloadUsers?.();
+            toast({ title: 'Utilizador eliminado', description: `${eliminarAlvo.name} foi eliminado. As operações dele continuam no sistema; o relatório geral foi gerado.` });
+            setEliminarAlvo(null);
+        } catch (error) {
+            toast({ variant: 'destructive', title: 'Não foi possível eliminar', description: error instanceof Error ? error.message : String(error) });
+        }
     };
     const bloqueioNivel = (u: User | null) => !u ? null
         : u.id === currentUser?.id ? 'Não pode mudar o seu próprio nível. Peça a outro Super Administrador.'
@@ -1010,6 +1039,18 @@ export default function Utilizadores() {
                                                         <Crown className="h-4 w-4" />
                                                     </Button>}
 
+                                                    {/* Eliminar (só o Administrador principal; as operações ficam) */}
+                                                    {souPrincipal && u.id !== currentUser?.id && <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950/30"
+                                                        title="Eliminar utilizador"
+                                                        aria-label={`Eliminar ${u.name}`}
+                                                        onClick={() => setEliminarAlvo(u)}
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>}
+
                                                     {/* Ficha PDF */}
                                                     <Button
                                                         variant="ghost"
@@ -1772,6 +1813,8 @@ export default function Utilizadores() {
                 cancelLabel={alertModal.cancelLabel}
                 onConfirm={alertModal.onConfirm}
             />
+            <EliminarUtilizador alvo={eliminarAlvo} roleLabel={eliminarAlvo ? ROLES[eliminarAlvo.role]?.label : undefined}
+                onClose={() => setEliminarAlvo(null)} onConfirmar={confirmarEliminacao} />
             <Dialog open={Boolean(designarAlvo)} onOpenChange={open => { if (!open && !aDesignar) setDesignarAlvo(null); }}>
                 <DialogContent className="max-w-md">
                     <DialogHeader>

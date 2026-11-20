@@ -8,7 +8,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import {
     Ban, Banknote, CalendarClock, Download, Eye, FileSignature, FileText, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Printer, RotateCcw, Search, UserX, Users, X,
 } from 'lucide-react';
-import { ServicoRH, type Contrato, type Funcionario } from '@/servicos/rh/ServicoRH';
+import { ServicoRH, type Contrato, type Funcionario, type Seccao } from '@/servicos/rh/ServicoRH';
 import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
 import { estadoBI } from '@/bibliotecas/rh/bi-validade';
 import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
@@ -29,13 +29,13 @@ const TODOS = '__todos__';
 /** Dados de base partilhados pelas páginas de RH. */
 export function useBaseRH() {
     return useCarregar(async () => {
-        const [funcionarios, departamentos, cargos, rubricas, parametros, contratos] = await Promise.all([
-            ServicoRH.funcionarios(), ServicoRH.departamentos(), ServicoRH.cargos(), ServicoRH.rubricas(), ServicoRH.parametros(), ServicoRH.contratos(),
+        const [funcionarios, departamentos, cargos, rubricas, parametros, contratos, seccoes] = await Promise.all([
+            ServicoRH.funcionarios(), ServicoRH.departamentos(), ServicoRH.cargos(), ServicoRH.rubricas(), ServicoRH.parametros(), ServicoRH.contratos(), ServicoRH.seccoes(),
         ]);
-        return { funcionarios, departamentos, cargos, rubricas, parametros, contratos };
-    }, { funcionarios: [], departamentos: [], cargos: [], rubricas: [], parametros: [], contratos: [] as Contrato[] } as {
+        return { funcionarios, departamentos, cargos, rubricas, parametros, contratos, seccoes };
+    }, { funcionarios: [], departamentos: [], cargos: [], rubricas: [], parametros: [], contratos: [] as Contrato[], seccoes: [] as Seccao[] } as {
         funcionarios: Funcionario[]; departamentos: Awaited<ReturnType<typeof ServicoRH.departamentos>>; cargos: Awaited<ReturnType<typeof ServicoRH.cargos>>;
-        rubricas: Awaited<ReturnType<typeof ServicoRH.rubricas>>; parametros: Awaited<ReturnType<typeof ServicoRH.parametros>>; contratos: Contrato[];
+        rubricas: Awaited<ReturnType<typeof ServicoRH.rubricas>>; parametros: Awaited<ReturnType<typeof ServicoRH.parametros>>; contratos: Contrato[]; seccoes: Seccao[];
     });
 }
 
@@ -251,12 +251,12 @@ export default function FuncionariosRH() {
             </div>
 
             {actor && (
-                <FormularioFuncionario open={formulario.aberto} funcionario={formulario.funcionario} seccaoInicial={formulario.seccao} actor={actor} departamentos={departamentos} cargos={cargos}
+                <FormularioFuncionario open={formulario.aberto} funcionario={formulario.funcionario} seccaoInicial={formulario.seccao} actor={actor} departamentos={departamentos} cargos={cargos} seccoes={base.dados.seccoes}
                     funcionarios={funcionarios} contratos={contratos} rubricas={rubricas} anosValidadeBI={anosBI} maxMb={maxMb} horarios={horarios.dados}
                     onClose={() => setFormulario({ aberto: false, funcionario: null })} onSaved={recarregar} />
             )}
             {ficha && (
-                <FichaFuncionario funcionario={ficha} departamentos={departamentos} cargos={cargos} rubricas={rubricas} funcionarios={funcionarios} contratosTodos={contratos} actor={actor}
+                <FichaFuncionario funcionario={ficha} departamentos={departamentos} cargos={cargos} seccoesOrg={base.dados.seccoes} rubricas={rubricas} funcionarios={funcionarios} contratosTodos={contratos} actor={actor}
                     permissoes={{ gerir, salarios, confidencial }} maxMb={maxMb} anosValidadeBI={anosBI} onClose={() => abrirFicha(null)}
                     onEditar={seccao => setFormulario({ aberto: true, funcionario: ficha, seccao })} onChange={recarregar} menuAccoes={menuAccoes} />
             )}

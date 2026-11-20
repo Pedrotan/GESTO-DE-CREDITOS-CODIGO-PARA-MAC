@@ -142,9 +142,14 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
         const mudaNivel = input.kind === 'delete' || desactiva || mudaPapel;
         const motivo = mudaNivel ? motivoRecusaNivel(input.actor, input.target, input.principal) : null;
         if (motivo) return { error: motivo, changesPrivileges: true };
+        // Eliminar utilizadores é do Administrador principal (as operações deles ficam no sistema).
+        if (input.kind === 'delete' && String(input.actor.id) !== input.principal.userId)
+            return { error: `Só o Administrador principal (${input.principal.nome}) pode eliminar utilizadores.`, changesPrivileges: true };
     }
     if (input.kind === 'delete') {
-        if (targetIsOwner) return { error: 'O Super Administrador principal não pode ser eliminado.', changesPrivileges: true };
+        // Com Administrador principal designado, ele pode eliminar outros Super Administradores (nunca a si próprio).
+        const principalElimina = Boolean(input.principal && String(input.actor.id) === input.principal.userId && String(input.target?.id) !== input.principal.userId);
+        if (targetIsOwner && !principalElimina) return { error: 'O Super Administrador principal não pode ser eliminado.', changesPrivileges: true };
         return { error: null, changesPrivileges: true };
     }
     const columns = updatedUserColumns(input.sql);

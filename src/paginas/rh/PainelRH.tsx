@@ -14,6 +14,7 @@ import { PainelHojePonto } from '@/componentes/rh/ponto/SeccoesPonto';
 import { BannerAniversarios } from '@/componentes/rh/BannerAniversarios';
 import { EVENTO_ALERTAS_RH } from '@/componentes/rh/TarefaDiariaRH';
 import { useBaseRH } from './FuncionariosRH';
+import { CaixaPortalRH } from '@/componentes/rh/CaixaPortalRH';
 
 /** Próximo aniversário (aaaa-mm-dd) a partir de hoje; 29/02 conta a 28/02 nos anos não bissextos. */
 export function proximoAniversario(nascimento: string, hoje: string) {
@@ -33,7 +34,7 @@ const INFORMATIVOS = new Set(['aniversario', 'aniversario_proximo', 'regresso'])
 const ROTULO_ACCAO: Record<string, string> = { ferias: 'Processar subsídio', contrato: 'Renovar contrato', experiencia: 'Ver contrato', documento: 'Carregar documento', natal: 'Processar subsídio de Natal', prazos: 'Ver processamento', faltas_pendentes: 'Ver faltas' };
 
 export default function PainelRH() {
-    const { actor, salarios } = useActorRH();
+    const { actor, salarios, gerir } = useActorRH();
     const navigate = useNavigate();
     const base = useBaseRH();
     const alertas = useCarregar(() => ServicoAlertasRH.abertos(), [] as AlertaRH[]);
@@ -63,6 +64,8 @@ export default function PainelRH() {
         <MainLayout title="Painel de RH" subtitle="Efectivos, custos, alertas e lembretes do dia">
             <NavegacaoRH />
             <BannerAniversarios />
+            {/* Pedidos e correio do portal dos funcionários (respondem o RH e o Administrador principal). */}
+            {actor && <div className="mb-4"><CaixaPortalRH actor={actor} podeResponder={gerir} /></div>}
             <div className="mb-4"><PainelHojePonto actor={actor} gerir={false} /></div>
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
                 <Indicador titulo="Funcionários activos" valor={activos.length} nota={`${funcionarios.filter(f => f.estado === 'suspenso').length} suspenso(s)`} tom="emerald" />

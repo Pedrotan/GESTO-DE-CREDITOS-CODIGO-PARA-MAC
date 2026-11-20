@@ -473,6 +473,31 @@ export const RH_MODELOS_SQL = [
         activo INTEGER NOT NULL DEFAULT 1, sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT
     )`,
 ];
+// Portal do funcionário (2.ª fase): outros pedidos ao RH (ex.: subsídio de férias) e correio interno funcionário ↔ RH.
+export const RH_PORTAL_V2_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_pedido (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('subsidio_ferias', 'declaracao', 'outro')),
+        ano INTEGER, assunto TEXT NOT NULL, descricao TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aprovado', 'recusado')),
+        resposta TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, respondido_em TEXT, respondido_por TEXT, respondido_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_pedido_estado ON rh_pedido(estado, criado_em)`,
+    `CREATE TABLE IF NOT EXISTS rh_correio (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, sentido TEXT NOT NULL CHECK(sentido IN ('para_rh', 'para_funcionario')),
+        assunto TEXT NOT NULL, corpo TEXT NOT NULL, de_id TEXT, de_nome TEXT, lida INTEGER NOT NULL DEFAULT 0, resposta_a TEXT, criado_em TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_correio_funcionario ON rh_correio(funcionario_id, criado_em)`,
+];
+// Hierarquia (bloco F): secções dentro dos departamentos, nível de cada cargo e a secção de cada funcionário.
+export const RH_HIERARQUIA_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_seccao (
+        id TEXT PRIMARY KEY, departamento_id TEXT NOT NULL, nome TEXT NOT NULL, responsavel_id TEXT, activo INTEGER NOT NULL DEFAULT 1,
+        criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_seccao_departamento ON rh_seccao(departamento_id)`,
+];
+export const RH_HIERARQUIA_COLUNAS: Array<[string, string, string]> = [
+    ["rh_funcionario", "seccao_id", "TEXT"], ["rh_cargo", "nivel", "INTEGER"],
+];
 export const RH_SEED_MODELO_SQL = `INSERT OR IGNORE INTO rh_modelo (id, tipo, nome, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome)
     VALUES (?, 'declaracao', ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')`;
 /** BI angolano: 9 algarismos, 2 letras e 3 algarismos (ex.: 002658949BA031). */

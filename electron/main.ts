@@ -20,7 +20,7 @@ import { executarManutencaoSync } from '../src/bibliotecas/manutencao-sync';
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
-import { isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
+import { isMarcarCorreioLidoSql, isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
 import { carregamentoPortalPermitido, regraLeituraRH } from '../src/bibliotecas/rh/permissoes-rh';
 import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
@@ -1058,6 +1058,7 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   // Recursos Humanos: ficha, contratos e arquivo com hr_manage; tabelas legais com hr_settings.
   rh_departamento: "hr_manage",
   rh_cargo: "hr_manage",
+  rh_seccao: "hr_manage",
   rh_funcionario: "hr_manage",
   rh_dependente: "hr_manage",
   rh_contrato: "hr_manage",
@@ -1085,6 +1086,9 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_reclamacao: "hr_payroll",
   // Confirmação da recepção do salário: só pelo portal (pedido do funcionário); ninguém a altera.
   rh_recebimento: "hr_payroll",
+  // Portal (2.ª fase): o funcionário pede e escreve pelo portal (pedidos do portal); responder é de quem gere o RH.
+  rh_pedido: "hr_manage",
+  rh_correio: "hr_manage",
   rh_doc_auditoria: "hr_view",
   // rh_alerta fica sem permissão própria: os alertas são derivados e a tarefa diária corre para qualquer utilizador autenticado.
   rh_plano_ferias: "hr_manage",
@@ -1268,6 +1272,8 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       continue;
     }
     if (table === 'collection_events') continue;
+    // Correio interno: marcar como lida não muda o conteúdo (quem recebe a mensagem, funcionário ou RH).
+    if (table === 'rh_correio' && isMarcarCorreioLidoSql(statement.sql)) { userAuth.assertAuthenticated(event.sender.id); continue; }
     if (PONTO_TABELAS_DELEGADAS.has(table) && !hasPermission(userAuth.assertAuthenticated(event.sender.id), 'hr_manage')) continue; // assertPontoAutorizado
     // Carregamento de documentos pelo próprio funcionário (portal): só na sua pasta e nas subpastas permitidas.
     if (['rh_documento', 'rh_documento_ficheiro', 'rh_doc_auditoria'].includes(table)) {

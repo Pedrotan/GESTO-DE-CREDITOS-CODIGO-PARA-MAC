@@ -36,6 +36,7 @@ async function loadModules() {
                 export { ABAS_RH } from '@/componentes/rh/comum-rh';
                 export { ServicoReclamacoesRH } from '@/servicos/rh/ServicoReclamacoesRH';
                 export { ServicoRecebimentoRH, ultimaPorRecibo } from '@/servicos/rh/ServicoRecebimentoRH';
+                export { ServicoPortalComunicacao, destinatariosRH } from '@/servicos/rh/ServicoPortalComunicacao';
                 export { ServicoPortalRH } from '@/servicos/rh/ServicoPortalRH';
                 export { isPortalPedidoSql } from '@/bibliotecas/rh/portal-sql';
             `,
@@ -65,9 +66,10 @@ async function createDatabase(M, valorFalta = '0') {
     const { RENDERER_SQL_ALLOWLIST } = await import('../electron/renderer-sql-allowlist.ts');
     const database = new DatabaseSync(':memory:');
     database.exec(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, timestamp TEXT, userId TEXT, userName TEXT, action TEXT, entity TEXT, details TEXT, previousState TEXT, newState TEXT, metadata TEXT)`);
-    for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL, ...M.E.RH_DOCS_SQL, ...M.E.RH_FASE4_SQL, ...M.E.RH_MODELOS_SQL]) database.exec(sql);
+    for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL, ...M.E.RH_DOCS_SQL, ...M.E.RH_FASE4_SQL, ...M.E.RH_MODELOS_SQL, ...M.E.RH_PORTAL_V2_SQL, ...M.E.RH_HIERARQUIA_SQL]) database.exec(sql);
+    database.exec(`CREATE TABLE notifications (id TEXT PRIMARY KEY, userId TEXT, title TEXT NOT NULL, message TEXT NOT NULL, type TEXT NOT NULL, source TEXT DEFAULT 'system', read INTEGER DEFAULT 0, timestamp TEXT NOT NULL)`);
     database.prepare(M.E.RH_SEED_MODELO_SQL).run('modelo-declaracao-servico', 'Declaração de serviço', 'DECLARAÇÃO DE SERVIÇO E SALÁRIO', M.MODELO_DECLARACAO_SERVICO, new Date().toISOString());
-    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS, ...M.E.RH_CATALOGO_COLUNAS, ...M.E.RH_DOCS_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
+    for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS, ...M.E.RH_CATALOGO_COLUNAS, ...M.E.RH_DOCS_COLUNAS, ...M.E.RH_HIERARQUIA_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
     const params = values => (values || []).map(value => value === undefined ? null : value);
     const normalizar = sql => sql.replace(/--.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\s+/g, ' ').trim().replace(/;$/u, '');
     const prepare = sql => {
@@ -154,6 +156,33 @@ test('valor de cada falta configurado: substitui o valor-dia', async () => {
         await M.ServicoSalariosRH.calcular(await processamento(M, id), RH);
         const falta = linhas(db, f).find(l => l.codigo === 'FALTAS');
         assert.deepEqual([falta.quantidade, falta.valor_minor], [3, 1_500_000]);
+    } finally { db.close(); }
+});
+
+test('hierarquia: secções, nível do cargo, secção do funcionário e chefe directo sem ciclos', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const dep = await M.ServicoRH.guardarDepartamento({ nome: 'Finanças' }, RH);
+        const dir = await M.ServicoRH.guardarCargo({ nome: 'Director', departamento_id: dep, nivel: 1 }, RH);
+        const tec = await M.ServicoRH.guardarCargo({ nome: 'Técnico', departamento_id: dep, nivel: 4 }, RH);
+        await assert.rejects(M.ServicoRH.guardarCargo({ nome: 'X', nivel: 9 }, RH), /Nível/u);
+        assert.deepEqual((await M.ServicoRH.cargos()).map(c => [c.nome, c.nivel]).sort(), [['Director', 1], ['Técnico', 4]]);
+        const base = { data_admissao: '2026-02-01', estado: 'activo', vinculo: 'Pessoal do Quadro', carreira: 'Geral - Pessoal Técnico', departamento_id: dep };
+        const ana = await M.ServicoRH.criarFuncionario({ ...base, numero_mecanografico: '10', nome: 'Ana Directora', iban: 'AO06004000002610435010128', cargo_id: dir }, null, RH);
+        const cont = await M.ServicoRH.guardarSeccao({ departamento_id: dep, nome: 'Contabilidade', responsavel_id: ana }, RH);
+        await assert.rejects(M.ServicoRH.guardarSeccao({ departamento_id: dep, nome: 'contabilidade' }, RH), /Já existe/u);
+        const bruno = await M.ServicoRH.criarFuncionario({ ...base, numero_mecanografico: '11', nome: 'Bruno Técnico', iban: 'AO06000600009202770530191', cargo_id: tec, seccao_id: cont, chefe_id: ana }, null, RH);
+        assert.equal(db.prepare('SELECT seccao_id FROM rh_funcionario WHERE id = ?').get(bruno).seccao_id, cont);
+        // Ana não pode passar a responder ao Bruno (que já responde à Ana).
+        const fichaAna = await M.ServicoRH.funcionario(ana);
+        await assert.rejects(M.ServicoRH.actualizarFuncionario(ana, { ...fichaAna, chefe_id: bruno }, RH), /ciclo/u);
+        // Mudar de departamento tira a secção (que é de outro departamento).
+        const outro = await M.ServicoRH.guardarDepartamento({ nome: 'Logística' }, RH);
+        const fichaBruno = await M.ServicoRH.funcionario(bruno);
+        await M.ServicoRH.actualizarFuncionario(bruno, { ...fichaBruno, departamento_id: outro, seccao_id: cont }, RH);
+        assert.equal(db.prepare('SELECT seccao_id FROM rh_funcionario WHERE id = ?').get(bruno).seccao_id, null);
+        assert.equal((await M.ServicoRH.seccoes()).length, 1);
     } finally { db.close(); }
 });
 
@@ -442,5 +471,39 @@ test('recepção do salário: só depois de pago, só do próprio recibo, e a ú
         assert.throws(() => db.prepare(`INSERT INTO rh_recebimento (id, funcionario_id, recibo_id, processamento_id, estado, criado_em) VALUES ('x', 'outro', ?, ?, 'recebido', 'agora')`).run(recibo.id, id), /seu próprio salário/u);
         assert.throws(() => db.prepare(`UPDATE rh_recebimento SET estado = 'nao_recebido'`).run(), /não se altera/u);
         assert.equal(M.isPortalPedidoSql('INSERT INTO rh_recebimento (id, funcionario_id, recibo_id, processamento_id, estado, observacao, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'), true);
+    } finally { db.close(); }
+});
+
+test('portal: pedido de subsídio avisa o RH e o principal; a resposta avisa o funcionário; correio nos dois sentidos', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const fid = await registar(M);
+        const f = (await M.ServicoRH.funcionarios()).find(x => x.id === fid);
+        const func = { id: 'u-func', name: 'Pedro Tango', role: 'employee' };
+        const users = [{ id: 'gestor', role: 'hr_manager' }, { id: 'principal', role: 'super_admin' }, { id: 'outro-admin', role: 'super_admin' }, { id: 'caixa', role: 'cashier' }, { id: 'u-func', role: 'employee' }];
+        const dest = M.destinatariosRH(users, 'principal');
+        assert.deepEqual(dest.sort(), ['gestor', 'principal'], 'o RH e o Administrador principal (não os outros)');
+
+        await M.ServicoPortalComunicacao.pedir(f, { tipo: 'subsidio_ferias', ano: 2026, descricao: 'Vou gozar em Dezembro.' }, func, dest);
+        const avisos = db.prepare('SELECT userId, title FROM notifications ORDER BY userId').all().map(x => [x.userId, x.title]);
+        assert.deepEqual(avisos, [['gestor', 'Pedido de Pedro de Morais Tango'], ['principal', 'Pedido de Pedro de Morais Tango']]);
+        const [pedido] = await M.ServicoPortalComunicacao.meusPedidos(fid);
+        assert.equal(pedido.assunto, 'Subsídio de férias 2026');
+        await M.ServicoPortalComunicacao.responderPedido(pedido, 'aprovado', 'Entra no processamento de Dezembro.', RH, 'u-func');
+        assert.equal((await M.ServicoPortalComunicacao.meusPedidos(fid))[0].estado, 'aprovado');
+        assert.equal(db.prepare(`SELECT COUNT(*) n FROM notifications WHERE userId = 'u-func'`).get().n, 1, 'o funcionário é avisado da resposta');
+
+        await M.ServicoPortalComunicacao.escreverAoRH(f, 'Dúvida', 'Quando sai o recibo?', func, dest);
+        await M.ServicoPortalComunicacao.escreverAoFuncionario(fid, 'Re: Dúvida', 'No dia 25.', RH, 'u-func');
+        const correio = await M.ServicoPortalComunicacao.correioDoFuncionario(fid);
+        assert.deepEqual(correio.map(m => m.sentido).sort(), ['para_funcionario', 'para_rh']);
+        const recebida = correio.find(m => m.sentido === 'para_funcionario');
+        await M.ServicoPortalComunicacao.marcarLida(recebida.id);
+        assert.equal((await M.ServicoPortalComunicacao.correioDoFuncionario(fid)).find(m => m.id === recebida.id).lida, 1);
+
+        assert.equal(M.isPortalPedidoSql(`INSERT INTO rh_pedido (id, funcionario_id, tipo, ano, assunto, descricao, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)`), true);
+        assert.equal(M.isPortalPedidoSql(`INSERT INTO rh_correio (id, funcionario_id, sentido, assunto, corpo, resposta_a, criado_em, de_id, de_nome) VALUES (?, ?, 'para_rh', ?, ?, ?, ?, ?, ?)`), true);
+        assert.equal(M.isPortalPedidoSql(`INSERT INTO rh_correio (id, funcionario_id, sentido, assunto, corpo, resposta_a, criado_em, de_id, de_nome) VALUES (?, ?, 'para_funcionario', ?, ?, ?, ?, ?, ?)`), false, 'o funcionário não escreve em nome do RH');
     } finally { db.close(); }
 });

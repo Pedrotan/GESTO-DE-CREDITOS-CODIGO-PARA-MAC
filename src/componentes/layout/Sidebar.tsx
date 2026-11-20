@@ -99,8 +99,14 @@ interface MenuItem {
   alsoActive?: string[];
 }
 
+// Menu do funcionário: as secções do seu portal (painel, pedidos, salários, documentos e contratos, correio, ponto).
 const MENU_FUNCIONARIO: MenuItem[] = [
-  { icon: UserCog, label: 'Portal do Funcionário', path: '/rh/portal' },
+  { icon: LayoutDashboard, label: 'Painel', path: '/rh/portal?aba=painel' },
+  { icon: Plane, label: 'Pedidos', path: '/rh/portal?aba=pedidos' },
+  { icon: Wallet, label: 'Salários', path: '/rh/portal?aba=salarios' },
+  { icon: FileText, label: 'Documentos e contratos', path: '/rh/portal?aba=documentos' },
+  { icon: Mail, label: 'Correio', path: '/rh/portal?aba=correio' },
+  { icon: Clock, label: 'Ponto', path: '/rh/portal?aba=ponto' },
   { icon: Gavel, label: 'Termos e Políticas', path: '/termos-e-politicas' },
 ];
 

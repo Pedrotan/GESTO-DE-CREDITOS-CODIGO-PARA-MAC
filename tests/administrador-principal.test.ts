@@ -53,3 +53,43 @@ test('funcionário só com o portal: só vê o portal; com outra permissão volt
     assert.equal(rotaPermitidaFuncionario('/creditos'), false);
     assert.equal(rotaPermitidaFuncionario('/rh/processamento'), false);
 });
+
+test('eliminar: só o Administrador principal, também outros Super Administradores, nunca a si próprio', () => {
+    const del = (actor: string, alvo: string, role: string, p: AdminPrincipal | null) => checkUserMutation({ kind: 'delete', sql: 'DELETE FROM users WHERE id = ?', params: [alvo],
+        actor: { id: actor, role: 'super_admin' }, target: { id: alvo, role }, principal: p }).error;
+    assert.equal(del('osvaldo', 'larissa', 'employee', principal), null);
+    assert.equal(del('osvaldo', 'paulo', 'super_admin', principal), null, 'o principal elimina outro Super Administrador');
+    assert.match(del('paulo', 'larissa', 'employee', principal)!, /Só o Administrador principal \(Osvaldo\) pode eliminar/u);
+    assert.match(del('osvaldo', 'osvaldo', 'super_admin', principal)!, /Transfira primeiro|não pode ser eliminado/u);
+});
+
+test('relatório do utilizador eliminado: créditos, % pago, arrecadado, clientes e operações activas', async () => {
+    const R = await import('../src/bibliotecas/relatorio-utilizador-eliminado.ts');
+    const l = {
+        utilizador: { id: 'paulo', name: 'Paulo', createdAt: '2026-10-01T00:00:00Z' },
+        creditos: [
+            { id: 'c1', clientId: 'k1', clientName: 'Ana', principalAmount: 100000, totalDue: 120000, currentBalance: 0, installments: 4, paidInstallments: 4, status: 'paid', createdAt: '2026-10-02' },
+            { id: 'c2', clientId: 'k2', clientName: 'Bruno', principalAmount: 200000, totalDue: 240000, currentBalance: 180000, installments: 4, paidInstallments: 1, status: 'active', createdAt: '2026-10-05' },
+            { id: 'c3', clientId: 'k2', clientName: 'Bruno', principalAmount: 50000, totalDue: 60000, currentBalance: 60000, installments: 2, paidInstallments: 0, status: 'pending_approval', createdAt: '2026-11-01' },
+        ],
+        pagamentosRecebidos: [{ id: 'p1', creditId: 'c1', clientName: 'Ana', amount: 120000, paymentDate: '2026-11-01', method: 'cash' }],
+        pagamentosDosCreditos: [
+            { id: 'p1', creditId: 'c1', clientName: 'Ana', amount: 120000, paymentDate: '2026-11-01', method: 'cash' },
+            { id: 'p2', creditId: 'c2', clientName: 'Bruno', amount: 60000, paymentDate: '2026-11-03', method: 'bank' },
+            { id: 'p3', creditId: 'c2', clientName: 'Bruno', amount: 5000, paymentDate: '2026-11-04', method: 'bank', status: 'cancelled' },
+        ],
+        clientes: [{ id: 'k1', name: 'Ana' }],
+        auditoria: [{ id: 'a1', timestamp: '2026-10-02T10:00:00Z', action: 'create', entity: 'credit', details: 'Crédito de Ana' }],
+    };
+    assert.equal(R.percentagemPaga(l.creditos[1] as never), 25);
+    assert.equal(R.percentagemPaga(l.creditos[0] as never), 100);
+    const activas = R.operacoesActivas(l as never);
+    assert.deepEqual([activas.creditosActivos, activas.porAprovar, activas.emDivida], [1, 1, 180000]);
+    const r = R.resumoUtilizador(l as never);
+    assert.equal(r.arrecadadoDaCarteira, 180000, 'pagamentos anulados não contam');
+    assert.equal(r.clientes, 2);
+    assert.equal(r.montanteConcedido, 300000, 'o crédito por aprovar não conta como concedido');
+    const def = R.relatorioUtilizadorEliminado(l as never, { porNome: 'Osvaldo', em: '2026-11-20T10:00:00Z', motivo: 'Saiu da empresa.' });
+    assert.equal(def.sections[0].rows.length, 3);
+    assert.equal(def.sections[3].rows.length, 1, 'o histórico completo vai no relatório');
+});

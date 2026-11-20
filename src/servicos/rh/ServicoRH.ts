@@ -6,12 +6,14 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { validarDatasBI } from '@/bibliotecas/rh/bi-validade';
 import { validarEscaloes, type IrtEscalao, type IrtTabela, type ParametroRH } from '@/bibliotecas/rh/parametros-rh';
 import { FORMATO_BI } from '@/bibliotecas/rh/esquema-rh';
+import { cicloChefia } from '@/bibliotecas/rh/hierarquia-rh';
 
 export type ActorRH = { id: string; name: string; role?: string; permissions?: string[] };
 type Statement = { sql: string; params?: unknown[]; expectChanges?: number };
 
 export type Departamento = { id: string; nome: string; responsavel_id: string | null; activo: number };
-export type Cargo = { id: string; nome: string; departamento_id: string | null; salario_referencia_minor: number; activo: number };
+export type Cargo = { id: string; nome: string; departamento_id: string | null; salario_referencia_minor: number; activo: number; nivel?: number | null };
+export type Seccao = { id: string; departamento_id: string; nome: string; responsavel_id: string | null; activo: number };
 export type EstadoFuncionario = 'activo' | 'suspenso' | 'cessado';
 export type Funcionario = {
     id: string; numero_mecanografico: string; nome: string; data_nascimento: string | null; sexo: string | null; estado_civil: string | null;
@@ -22,6 +24,8 @@ export type Funcionario = {
     /** Enquadramento impresso na folha de salário (Cargo/Vinc.): vínculo, grupo/carreira, categoria, escalão e unidade orgânica. */
     vinculo?: string | null; carreira?: string | null; categoria?: string | null; escalao?: string | null; unidade_organica?: string | null;
     nacionalidade?: string | null; telefone_alternativo?: string | null; provincia?: string | null; municipio?: string | null; chefe_id?: string | null;
+    /** Secção dentro do departamento (hierarquia). */
+    seccao_id?: string | null;
     criado_em: string; actualizado_em: string | null;
 };
 /** Abono fixo escolhido no registo do funcionário (Renda de casa, Isolamento, Gratificação…). */
@@ -116,18 +120,24 @@ export class ServicoRH {
     }
 
     static cargos() {
-        return lista(db.all<Cargo>('SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome'));
+        // Bases antigas (antes da migração da hierarquia) não têm a coluna «nivel».
+        return db.all<Cargo>('SELECT id, nome, departamento_id, salario_referencia_minor, activo, nivel FROM rh_cargo ORDER BY nome')
+            .catch(() => lista(db.all<Cargo>('SELECT id, nome, departamento_id, salario_referencia_minor, activo FROM rh_cargo ORDER BY nome')));
     }
 
-    static async guardarCargo(input: { id?: string; nome: string; departamento_id?: string | null; salario_referencia_minor?: number; activo?: boolean }, actor: ActorRH) {
+    static async guardarCargo(input: { id?: string; nome: string; departamento_id?: string | null; salario_referencia_minor?: number; activo?: boolean; nivel?: number | null }, actor: ActorRH) {
         const nome = texto(input.nome);
         if (!nome) throw new Error('Indique o nome do cargo.');
+        const nivel = input.nivel == null ? null : Number(input.nivel);
+        if (nivel !== null && !(Number.isInteger(nivel) && nivel >= 1 && nivel <= 5)) throw new Error('Nível do cargo inválido.');
+        const nivelSql = (id: string): Statement => ({ sql: 'UPDATE rh_cargo SET nivel = ? WHERE id = ?', params: [nivel, id], expectChanges: 1 });
         const referencia = minor(input.salario_referencia_minor || 0);
         const when = agora();
         if (input.id) {
             await db.transaction([
                 { sql: 'UPDATE rh_cargo SET nome = ?, departamento_id = ?, salario_referencia_minor = ?, activo = ?, actualizado_em = ? WHERE id = ?',
                     params: [nome, input.departamento_id || null, referencia, input.activo === false ? 0 : 1, when, input.id], expectChanges: 1 },
+                nivelSql(input.id),
                 auditoriaRH(actor, 'update', `Alterou o cargo ${nome}`, { cargoId: input.id }, undefined, undefined, when),
             ]);
             return input.id;
@@ -136,9 +146,58 @@ export class ServicoRH {
         await db.transaction([
             { sql: 'INSERT INTO rh_cargo (id, nome, departamento_id, salario_referencia_minor, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)',
                 params: [id, nome, input.departamento_id || null, referencia, when, actor.id], expectChanges: 1 },
+            nivelSql(id),
             auditoriaRH(actor, 'create', `Criou o cargo ${nome}`, { cargoId: id }, undefined, undefined, when),
         ]);
         return id;
+    }
+
+    static seccoes() {
+        return lista(db.all<Seccao>('SELECT id, departamento_id, nome, responsavel_id, activo FROM rh_seccao ORDER BY nome'));
+    }
+
+    static async guardarSeccao(input: { id?: string; departamento_id: string; nome: string; responsavel_id?: string | null; activo?: boolean }, actor: ActorRH) {
+        const nome = texto(input.nome);
+        if (!nome) throw new Error('Indique o nome da secção.');
+        if (!input.departamento_id) throw new Error('Escolha o departamento da secção.');
+        const existentes = await this.seccoes();
+        if (existentes.some(s => s.id !== input.id && s.departamento_id === input.departamento_id && s.nome.toLowerCase() === nome.toLowerCase()))
+            throw new Error(`Já existe a secção ${nome} neste departamento.`);
+        const when = agora();
+        if (input.id) {
+            await db.transaction([
+                { sql: 'UPDATE rh_seccao SET departamento_id = ?, nome = ?, responsavel_id = ?, activo = ?, actualizado_em = ? WHERE id = ?',
+                    params: [input.departamento_id, nome, input.responsavel_id || null, input.activo === false ? 0 : 1, when, input.id], expectChanges: 1 },
+                auditoriaRH(actor, 'update', `Alterou a secção ${nome}`, { seccaoId: input.id, departamentoId: input.departamento_id }, undefined, undefined, when),
+            ]);
+            return input.id;
+        }
+        const id = crypto.randomUUID();
+        await db.transaction([
+            { sql: 'INSERT INTO rh_seccao (id, departamento_id, nome, responsavel_id, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, 1, ?, ?)',
+                params: [id, input.departamento_id, nome, input.responsavel_id || null, when, actor.id], expectChanges: 1 },
+            auditoriaRH(actor, 'create', `Criou a secção ${nome}`, { seccaoId: id, departamentoId: input.departamento_id }, undefined, undefined, when),
+        ]);
+        return id;
+    }
+
+    /** Ciclo na hierarquia com o chefe escolhido (o chefe responde, directa ou indirectamente, ao funcionário)? */
+    private static async validarChefia(id: string, f: Partial<Funcionario>) {
+        if (!f.chefe_id) return;
+        const [departamentos, seccoes, funcionarios] = await Promise.all([this.departamentos(), this.seccoes(), this.funcionarios()]);
+        const proprio = { ...(funcionarios.find(x => x.id === id) || {}), ...f, id } as Funcionario;
+        const erro = cicloChefia(id, f.chefe_id, { departamentos, seccoes, cargos: [], funcionarios: [...funcionarios.filter(x => x.id !== id), proprio] });
+        if (erro) throw new Error(erro);
+    }
+
+    /** Secção do funcionário: só uma secção do seu departamento (instrução à parte, para não mudar o registo da ficha). */
+    private static async instrucaoSeccao(id: string, f: Partial<Funcionario>): Promise<Statement> {
+        let seccao = f.seccao_id || null;
+        if (seccao) {
+            const s = (await this.seccoes()).find(x => x.id === seccao);
+            if (!s || s.departamento_id !== f.departamento_id) seccao = null;
+        }
+        return { sql: 'UPDATE rh_funcionario SET seccao_id = ? WHERE id = ?', params: [seccao, id], expectChanges: 1 };
     }
 
     // ── Funcionários ──────────────────────────────────────────────────────────────
@@ -218,6 +277,7 @@ export class ServicoRH {
         const conflitos = await this.duplicados(f);
         if (conflitos.length) throw new Error(conflitos.map(c => c.mensagem).join(' '));
         const id = crypto.randomUUID();
+        await this.validarChefia(id, f);
         const when = agora();
         const statements: Statement[] = [{
             sql: `INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade,
@@ -226,7 +286,7 @@ export class ServicoRH {
                     provincia, municipio, chefe_id, criado_em, criado_por)
                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             params: [id, ...this.linhaFuncionario(f), when, actor.id], expectChanges: 1,
-        }];
+        }, await this.instrucaoSeccao(id, f)];
         if (contrato) statements.push(...this.instrucoesContrato(id, contrato, null, 'Admissão', actor, when));
         const inicioAbonos = data(contrato?.inicio) || data(f.data_admissao);
         for (const a of abonos.filter(x => x.rubrica_id)) statements.push({
@@ -245,6 +305,8 @@ export class ServicoRH {
         if (!anterior) throw new Error('Funcionário não encontrado.');
         const conflitos = await this.duplicados(f, id);
         if (conflitos.length) throw new Error(conflitos.map(c => c.mensagem).join(' '));
+        await this.validarChefia(id, f);
+        const seccao = await this.instrucaoSeccao(id, f);
         const when = agora();
         const linha = this.linhaFuncionario(f);
         await db.transaction([
@@ -254,6 +316,7 @@ export class ServicoRH {
                     observacoes = ?, vinculo = ?, carreira = ?, categoria = ?, escalao = ?, unidade_organica = ?, nacionalidade = ?, telefone_alternativo = ?,
                     provincia = ?, municipio = ?, chefe_id = ?, actualizado_em = ? WHERE id = ?`,
                 params: [...linha, when, id], expectChanges: 1 },
+            seccao,
             auditoriaRH(actor, 'update', `Alterou a ficha do funcionário ${f.nome}`, { funcionarioId: id },
                 { ...anterior, foto_url: undefined }, { ...f, foto_url: undefined }, when),
         ]);

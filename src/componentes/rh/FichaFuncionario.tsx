@@ -5,7 +5,8 @@ import { useNavigate } from 'react-router-dom';
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/componentes/ui/dialog';
 import { DropdownMenu, DropdownMenuTrigger } from '@/componentes/ui/dropdown-menu';
 import { AlertTriangle, FolderOpen, MoreHorizontal, Pencil, Printer, Trash2, X } from 'lucide-react';
-import { ServicoRH, type ActorRH, type Cargo, type Contrato, type Departamento, type Dependente, type DocumentoRH, type Funcionario, type FuncionarioRubrica, type HistoricoSalarial, type Rubrica } from '@/servicos/rh/ServicoRH';
+import { ServicoRH, type ActorRH, type Cargo, type Contrato, type Departamento, type Dependente, type DocumentoRH, type Funcionario, type FuncionarioRubrica, type HistoricoSalarial, type Rubrica, type Seccao } from '@/servicos/rh/ServicoRH';
+import { chefeDirecto, subordinados } from '@/bibliotecas/rh/hierarquia-rh';
 import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
 import { estadoBI } from '@/bibliotecas/rh/bi-validade';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
@@ -21,7 +22,7 @@ import type { AlvoEdicao, SeccaoFormulario } from './FormularioFuncionario';
 
 type Permissoes = { gerir: boolean; salarios: boolean; confidencial: boolean };
 type Props = {
-    funcionario: Funcionario; departamentos: Departamento[]; cargos: Cargo[]; rubricas: Rubrica[]; funcionarios: Funcionario[]; contratosTodos: Contrato[];
+    funcionario: Funcionario; departamentos: Departamento[]; cargos: Cargo[]; seccoesOrg?: Seccao[]; rubricas: Rubrica[]; funcionarios: Funcionario[]; contratosTodos: Contrato[];
     actor: ActorRH | null; permissoes: Permissoes; maxMb: number; anosValidadeBI: number; onClose: () => void; onEditar: (alvo: AlvoEdicao) => void; onChange: () => void;
     /** O mesmo menu «⋯» da tabela de funcionários. */
     menuAccoes?: (f: Funcionario) => ReactNode;
@@ -52,7 +53,7 @@ const Tabela = ({ cabecalho, children, vazio, colunas }: { cabecalho: ReactNode;
     </div>
 );
 
-export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubricas, funcionarios, contratosTodos, actor, permissoes, maxMb, onClose, onEditar, onChange, menuAccoes }: Props) {
+export function FichaFuncionario({ funcionario: f, departamentos, cargos, seccoesOrg = [], rubricas, funcionarios, contratosTodos, actor, permissoes, maxMb, onClose, onEditar, onChange, menuAccoes }: Props) {
     const id = f.id;
     const navigate = useNavigate();
     const { users } = useAuth();
@@ -80,7 +81,11 @@ export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubric
     const situacaoBI = estadoBI(f.bi_validade, hoje, 90);
     const emFalta = OBRIGATORIOS.filter(o => !f[o.campo]);
     const horario = dados.dados.horarios.find(h => h.id === f.horario_id) || dados.dados.horarios.find(h => h.id === 'horario-normal');
-    const chefe = funcionarios.find(x => x.id === f.chefe_id);
+    const estrutura = { departamentos, seccoes: seccoesOrg, cargos, funcionarios };
+    const chefia = chefeDirecto(f, estrutura);
+    const chefe = funcionarios.find(x => x.id === chefia.id);
+    const seccaoOrg = seccoesOrg.find(s => s.id === f.seccao_id)?.nome;
+    const equipa = subordinados(f.id, estrutura);
     const utilizador = (users || []).find(u => u.id === f.utilizador_id);
     const tipoContrato = activo ? (activo.tipo === 'indeterminado' ? 'Tempo indeterminado' : 'Termo certo') : 'Sem contrato activo';
     const editar = (seccao: SeccaoFormulario, campo?: string) => permissoes.gerir && onEditar({ seccao, campo });
@@ -210,12 +215,14 @@ export function FichaFuncionario({ funcionario: f, departamentos, cargos, rubric
                                 <div className={grelha}>
                                     <ValorRH rotulo="Cargo" obrigatorio valor={cargo} />
                                     <ValorRH rotulo="Departamento" valor={departamento} />
+                                    {seccoesOrg.length > 0 && <ValorRH rotulo="Secção" valor={seccaoOrg} />}
                                     <ValorRH rotulo="Data de admissão" valor={dataPt(f.data_admissao)} />
                                     <ValorRH rotulo="Horário" valor={horario ? `${horario.nome}${horario.entrada ? ` (${horario.entrada}–${horario.saida})` : ''}` : null} />
                                     <ValorRH rotulo="Vínculo / carreira" obrigatorio valor={[f.vinculo, f.carreira].filter(Boolean).join(' · ')} />
                                     <ValorRH rotulo="Categoria / escalão" valor={[f.categoria, f.escalao].filter(Boolean).join(' · ')} />
                                     <ValorRH rotulo="Unidade orgânica" valor={f.unidade_organica} />
-                                    <ValorRH rotulo="Chefe directo" valor={chefe?.nome} />
+                                    <ValorRH rotulo="Chefe directo" valor={chefe ? `${chefe.nome}${chefia.origem === 'seccao' ? ' (responsável da secção)' : chefia.origem === 'departamento' ? ' (responsável do departamento)' : ''}` : null} />
+                                    {equipa.length > 0 && <ValorRH rotulo="Equipa directa" valor={`${equipa.length}: ${equipa.slice(0, 4).map(x => x.nome.split(' ')[0]).join(', ')}${equipa.length > 4 ? '…' : ''}`} />}
                                     <ValorRH rotulo="Portal do funcionário" valor={utilizador ? `${utilizador.name}${utilizador.username ? ` (${utilizador.username})` : ''}` : 'Sem conta'} />
                                     {f.data_saida && <ValorRH rotulo="Data de saída" valor={dataPt(f.data_saida)} />}
                                     {f.observacoes && <ValorRH rotulo="Observações" className="sm:col-span-2 lg:col-span-3" valor={f.observacoes} />}

@@ -11,7 +11,8 @@ import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { Camera, CheckCircle2, FileUp, Plus, Trash2, X } from 'lucide-react';
-import { ServicoRH, CATEGORIAS_DOCUMENTO, type AbonoInicial, type ActorRH, type Cargo, type CategoriaDocumento, type Contrato, type Departamento, type Funcionario, type FuncionarioRubrica, type Rubrica } from '@/servicos/rh/ServicoRH';
+import { ServicoRH, CATEGORIAS_DOCUMENTO, type AbonoInicial, type ActorRH, type Cargo, type CategoriaDocumento, type Contrato, type Departamento, type Funcionario, type FuncionarioRubrica, type Rubrica, type Seccao } from '@/servicos/rh/ServicoRH';
+import { chefeSugerido } from '@/bibliotecas/rh/hierarquia-rh';
 import { RH_VINCULOS, FORMATO_BI } from '@/bibliotecas/rh/esquema-rh';
 import { valorNumerico, valorTexto } from '@/bibliotecas/rh/parametros-rh';
 import { validarDatasBI } from '@/bibliotecas/rh/bi-validade';
@@ -32,7 +33,7 @@ export type AlvoEdicao = { seccao?: SeccaoFormulario; campo?: string };
 
 type Props = {
     open: boolean; onClose: () => void; onSaved: () => void; actor: ActorRH;
-    funcionario?: Funcionario | null; seccaoInicial?: AlvoEdicao; departamentos: Departamento[]; cargos: Cargo[];
+    funcionario?: Funcionario | null; seccaoInicial?: AlvoEdicao; departamentos: Departamento[]; cargos: Cargo[]; seccoes?: Seccao[];
     funcionarios?: Funcionario[]; contratos?: Contrato[]; rubricas?: Rubrica[]; anosValidadeBI: number; maxMb?: number;
     horarios?: Array<{ id: string; nome: string; activo?: number; entrada?: string; saida?: string }>;
 };
@@ -97,7 +98,7 @@ function Campo({ id, label, obrig, erro, dica, className, children }: { id: stri
     );
 }
 
-export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionario, seccaoInicial, departamentos, cargos, funcionarios = [], contratos = [], rubricas: rubricasProp, anosValidadeBI, maxMb = 2, horarios = [] }: Props) {
+export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionario, seccaoInicial, departamentos, cargos, seccoes = [], funcionarios = [], contratos = [], rubricas: rubricasProp, anosValidadeBI, maxMb = 2, horarios = [] }: Props) {
     const { users } = useAuth();
     const { companySettings } = useData();
     const edicao = Boolean(funcionario);
@@ -498,13 +499,22 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                             <Campo id="departamento_id" label="Departamento">
                                 <Select value={f.departamento_id || NENHUM} onValueChange={v => {
                                     const dep = v === NENHUM ? null : v;
-                                    setF(p => { const c = cargos.find(x => x.id === p.cargo_id); return { ...p, departamento_id: dep, cargo_id: c?.departamento_id && dep && c.departamento_id !== dep ? null : p.cargo_id }; });
+                                    setF(p => { const c = cargos.find(x => x.id === p.cargo_id); return { ...p, departamento_id: dep, seccao_id: dep === p.departamento_id ? p.seccao_id : null, cargo_id: c?.departamento_id && dep && c.departamento_id !== dep ? null : p.cargo_id }; });
                                     setSujo(true);
                                 }}>
                                     <SelectTrigger id="ff-departamento_id" className={inp}><SelectValue /></SelectTrigger>
                                     <SelectContent><SelectItem value={NENHUM}>Seleccionar</SelectItem>{departamentos.filter(d => d.activo || d.id === f.departamento_id).map(d => <SelectItem key={d.id} value={d.id}>{d.nome}</SelectItem>)}</SelectContent>
                                 </Select>
                             </Campo>
+                            {seccoes.some(s => s.departamento_id === f.departamento_id) && (
+                                <Campo id="seccao_id" label="Secção" dica="O responsável da secção é o chefe directo sugerido">
+                                    <Select value={f.seccao_id || NENHUM} onValueChange={v => set('seccao_id', v === NENHUM ? null : v)}>
+                                        <SelectTrigger id="ff-seccao_id" className={inp}><SelectValue /></SelectTrigger>
+                                        <SelectContent><SelectItem value={NENHUM}>Sem secção (directamente no departamento)</SelectItem>
+                                            {seccoes.filter(s => s.departamento_id === f.departamento_id && (s.activo || s.id === f.seccao_id)).map(s => <SelectItem key={s.id} value={s.id}>{s.nome}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                </Campo>
+                            )}
                             <Campo id="cargo_id" label="Cargo" obrig erro={erro('cargo_id')} dica={f.departamento_id ? 'Filtrado pelo departamento' : undefined}>
                                 <Select value={f.cargo_id || NENHUM} onValueChange={v => { const c = cargos.find(x => x.id === v); setF(p => ({ ...p, cargo_id: v === NENHUM ? null : v, departamento_id: p.departamento_id || c?.departamento_id || null })); visitar('cargo_id'); setSujo(true); }}>
                                     <SelectTrigger id="ff-cargo_id" className={inp}><SelectValue /></SelectTrigger>
@@ -535,7 +545,12 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                                     <SelectContent><SelectItem value={NENHUM}>Horário normal</SelectItem>{horarios.filter(h => h.activo !== 0 && h.id !== 'horario-normal').map(h => <SelectItem key={h.id} value={h.id}>{h.nome}{h.entrada ? ` (${h.entrada}–${h.saida})` : ''}</SelectItem>)}</SelectContent>
                                 </Select>
                             </Campo>
-                            <Campo id="chefe_id" label="Chefe directo" dica="Aprova férias, faltas e o ponto">
+                            <Campo id="chefe_id" label="Chefe directo" dica={(() => {
+                                const s = chefeSugerido({ id: f.id || '', departamento_id: f.departamento_id || null, seccao_id: f.seccao_id }, { departamentos, seccoes });
+                                const nome = s.id ? funcionarios.find(x => x.id === s.id)?.nome : null;
+                                if (!f.chefe_id && nome) return `Sem escolha, responde a ${nome} (responsável ${s.origem === 'seccao' ? 'da secção' : 'do departamento'}).`;
+                                return 'Recebe os pedidos e aprova férias, faltas e o ponto';
+                            })()}>
                                 <SearchableSelect className={inp} value={f.chefe_id || ''} placeholder="Seleccionar" searchPlaceholder="Pesquisar funcionário…"
                                     options={[{ value: '', label: 'Sem chefe directo' }, ...funcionarios.filter(x => x.estado === 'activo' && x.id !== f.id).map(x => ({ value: x.id, label: x.nome, subLabel: `N.º ${x.numero_mecanografico}` }))]}
                                     onValueChange={v => set('chefe_id', v || null)} />
