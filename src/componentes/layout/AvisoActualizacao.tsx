@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, Download, Loader2, RefreshCw, Rocket } fro
 import { Button } from '@/componentes/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { Progress } from '@/componentes/ui/progress';
-import { formatBytes, parseSseChunk, type UpdateStatus } from '@/bibliotecas/actualizacoes';
+import { deveAbrirAvisoDesktop, formatBytes, parseSseChunk, type UpdateStatus } from '@/bibliotecas/actualizacoes';
 import { UPDATE_DIALOG_ATTR, flushPendingWork, hasOpenEditor, openEditorTitle } from '@/bibliotecas/trabalho-aberto';
 
 // Aviso de versão nova do Tango ERP.
@@ -29,7 +29,7 @@ function AvisoDesktop() {
     const [open, setOpen] = useState(false);
     const [notice, setNotice] = useState('');
     const [saving, setSaving] = useState(false);
-    const shownFor = useRef<string | null>(null);
+    const anterior = useRef<{ state: UpdateStatus['state']; version: string | null } | null>(null);
 
     useEffect(() => {
         if (!api) return;
@@ -44,15 +44,13 @@ function AvisoDesktop() {
         return () => window.removeEventListener(OPEN_UPDATE_EVENT, reopen);
     }, []);
 
-    // Abre sozinho uma vez por versão; depois só quando o estado avança (descarregada, erro).
+    // Abre sozinho a cada versão disponível — também quando acaba o «Mais tarde» — e quando fica descarregada ou falha.
     useEffect(() => {
-        if (!status?.release) return;
-        if (status.state === 'available' && shownFor.current !== status.release.version) {
-            shownFor.current = status.release.version;
-            setOpen(true);
-        }
-        if (status.state === 'downloaded' || status.state === 'error') setOpen(true);
-    }, [status?.state, status?.release]);
+        if (!status) return;
+        const actual = { state: status.state, version: status.release?.version ?? null };
+        if (deveAbrirAvisoDesktop(anterior.current, actual)) setOpen(true);
+        anterior.current = actual;
+    }, [status?.state, status?.release?.version]);
 
     if (!api || !status?.release) return null;
     const { release, state, progress } = status;
@@ -143,18 +141,9 @@ function AvisoWeb() {
             if (!response.ok) return;
             const data = await response.json();
             if (typeof data?.buildId !== 'string' || data.buildId === currentBuild) return;
-            // Página de entrada: ainda não há trabalho a perder — recarrega já, para a sessão começar na versão nova.
-            // Uma vez por versão (se a página voltasse com a versão antiga, por uma cache, não fica a recarregar sem fim).
-            let reloadedFor = '';
-            try { reloadedFor = sessionStorage.getItem('tango_login_reload_build') || ''; } catch { /* sem armazenamento */ }
-            if (/^#\/entrar\b/.test(window.location.hash) && reloadedFor !== data.buildId) {
-                try { sessionStorage.setItem('tango_login_reload_build', data.buildId); } catch { /* sem armazenamento */ }
-                await flushPendingWork(5_000);
-                window.location.reload();
-                return;
-            }
-            // Com sessão: a actualização é obrigatória (todos os dispositivos na mesma versão sincronizam sem
-            // alterações retidas); só espera que um formulário aberto seja guardado.
+            // Em todas as páginas (também na entrada) a modal aparece a cada publicação: a actualização é obrigatória
+            // (todos os dispositivos na mesma versão sincronizam sem alterações retidas); só espera que um
+            // formulário aberto seja guardado.
             setNewVersion(String(data.version || 'nova'));
             setOpen(true);
         } catch { /* sem rede: tenta na próxima */ }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-    deferHours, nextCheckDelayMs, parseCheckReply, parseSseChunk, reconnectDelayMs, trustedUpdateServer,
+    deferHours, deveAbrirAvisoDesktop, nextCheckDelayMs, parseCheckReply, parseSseChunk, reconnectDelayMs, trustedUpdateServer,
 } from '../src/bibliotecas/actualizacoes.ts';
 
 // Lado do desktop: o actualizador só fala com o servidor oficial por HTTPS, valida tudo o que o servidor responde
@@ -55,4 +55,17 @@ test('verificação periódica com variação e religação com espera crescente
     assert.equal(reconnectDelayMs(0), 5_000);
     assert.equal(reconnectDelayMs(2), 20_000);
     assert.equal(reconnectDelayMs(50), 300_000);
+});
+
+test('aviso do desktop: abre a cada versão disponível, também depois de «Mais tarde»', () => {
+    assert.equal(deveAbrirAvisoDesktop(null, { state: 'available', version: '3.0.8' }), true);
+    assert.equal(deveAbrirAvisoDesktop({ state: 'available', version: '3.0.8' }, { state: 'available', version: '3.0.8' }), false, 'sem mudança não reabre');
+    // «Mais tarde» → fim do adiamento → volta a abrir.
+    assert.equal(deveAbrirAvisoDesktop({ state: 'deferred', version: '3.0.8' }, { state: 'available', version: '3.0.8' }), true);
+    // A verificação seguinte (checking) e a resposta com a mesma versão também voltam a mostrar.
+    assert.equal(deveAbrirAvisoDesktop({ state: 'checking', version: '3.0.8' }, { state: 'available', version: '3.0.8' }), true);
+    assert.equal(deveAbrirAvisoDesktop({ state: 'available', version: '3.0.8' }, { state: 'available', version: '3.0.9' }), true, 'versão nova');
+    assert.equal(deveAbrirAvisoDesktop({ state: 'downloading', version: '3.0.8' }, { state: 'downloaded', version: '3.0.8' }), true);
+    assert.equal(deveAbrirAvisoDesktop({ state: 'downloading', version: '3.0.8' }, { state: 'downloading', version: '3.0.8' }), false);
+    assert.equal(deveAbrirAvisoDesktop(null, { state: 'up_to_date', version: null }), false);
 });

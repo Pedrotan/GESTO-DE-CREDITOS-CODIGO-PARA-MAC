@@ -114,3 +114,16 @@ export const formatBytes = (bytes: number | null | undefined) => {
     if (!bytes || bytes <= 0) return '';
     return bytes >= 1_048_576 ? `${(bytes / 1_048_576).toFixed(1)} MB` : `${Math.ceil(bytes / 1024)} KB`;
 };
+
+/**
+ * Quando o aviso de actualização do desktop abre sozinho: sempre que uma versão fica disponível — também quando
+ * acaba um «Mais tarde» ou chega outra versão — e quando fica descarregada ou falha. Só nas mudanças de estado, para
+ * não reabrir a cada progresso.
+ */
+export const deveAbrirAvisoDesktop = (
+    anterior: { state: UpdateState; version: string | null } | null,
+    actual: { state: UpdateState; version: string | null },
+) => {
+    if (!actual.version || !['available', 'downloaded', 'error'].includes(actual.state)) return false;
+    return !anterior || anterior.state !== actual.state || anterior.version !== actual.version;
+};
