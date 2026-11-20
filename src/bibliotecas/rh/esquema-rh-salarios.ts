@@ -84,6 +84,19 @@ export const RH_SALARIOS_SCHEMA_SQL = [
     `CREATE TRIGGER IF NOT EXISTS trg_rh_rubrica_pontual_delete BEFORE DELETE ON rh_rubrica_pontual
         WHEN (SELECT estado FROM rh_processamento WHERE id = OLD.processamento_id) NOT IN ('aberto', 'calculado')
         BEGIN SELECT RAISE(ABORT, 'O processamento já foi aprovado'); END`,
+    // Reclamações do funcionário sobre a folha de correcção (recibo calculado, ainda por aprovar). O RH responde antes de aprovar.
+    `CREATE TABLE IF NOT EXISTS rh_reclamacao (
+        id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, processamento_id TEXT NOT NULL, recibo_id TEXT, codigo TEXT, descricao TEXT,
+        valor_minor INTEGER NOT NULL DEFAULT 0, motivo TEXT NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'aceite', 'recusada')), resposta TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, respondido_em TEXT, respondido_por TEXT, respondido_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_rh_reclamacao_processamento ON rh_reclamacao(processamento_id, estado)`,
+    // Só da folha de correcção (calculado) e só do próprio recibo.
+    `CREATE TRIGGER IF NOT EXISTS trg_rh_reclamacao_insert BEFORE INSERT ON rh_reclamacao
+        WHEN COALESCE((SELECT estado FROM rh_processamento WHERE id = NEW.processamento_id), '') <> 'calculado'
+            OR (NEW.recibo_id IS NOT NULL AND COALESCE((SELECT funcionario_id FROM rh_recibo WHERE id = NEW.recibo_id AND processamento_id = NEW.processamento_id), '') <> NEW.funcionario_id)
+        BEGIN SELECT RAISE(ABORT, 'Só se reclama da sua folha de correcção, antes da aprovação'); END`,
 ];
 
 /** Só as tabelas e índices (para a migração versionada; os triggers vêm do esquema protegido). */

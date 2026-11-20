@@ -34,6 +34,9 @@ async function loadModules() {
                 export { ServicoModelosRH } from '@/servicos/rh/ServicoModelosRH';
                 export { regraLeituraRH, carregamentoPortalPermitido } from '@/bibliotecas/rh/permissoes-rh';
                 export { ABAS_RH } from '@/componentes/rh/comum-rh';
+                export { ServicoReclamacoesRH } from '@/servicos/rh/ServicoReclamacoesRH';
+                export { ServicoPortalRH } from '@/servicos/rh/ServicoPortalRH';
+                export { isPortalPedidoSql } from '@/bibliotecas/rh/portal-sql';
             `,
             resolveDir: root, loader: 'ts',
         },
@@ -384,5 +387,34 @@ test('dois computadores abrem o mesmo mês: o mesmo identificador; um processame
         await M.ServicoSalariosRH.guardarEntrada(await processamento(M, fixo), f, { faltas: 2 }, RH);
         await M.ServicoSalariosRH.calcular(await processamento(M, fixo), RH);
         assert.equal(db.prepare(`SELECT faltas FROM rh_processamento_entrada WHERE id = ?`).get(`${fixo}:${f}`).faltas, 2);
+    } finally { db.close(); }
+});
+
+test('folha de correcção: o funcionário reclama, a aprovação espera pela resposta, e depois de aprovada já não se reclama', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const f = await registar(M);
+        const func = { id: 'u-func', name: 'Pedro Tango', role: 'employee' };
+        const id = await M.ServicoSalariosRH.abrir({ ano: 2026, mes: 10, tipo: 'normal' }, RH);
+        await M.ServicoSalariosRH.calcular(await processamento(M, id), RH);
+        const recibo = db.prepare('SELECT * FROM rh_recibo WHERE funcionario_id = ?').get(f);
+        assert.equal((await M.ServicoPortalRH.minhaFolhaCorreccao(f)).length, 1, 'a folha calculada aparece como folha de correcção');
+        assert.equal((await M.ServicoPortalRH.meusRecibos(f)).length, 0, 'ainda não é folha final');
+
+        await assert.rejects(M.ServicoReclamacoesRH.reclamar({ funcionario_id: f, processamento_id: id, recibo_id: recibo.id, motivo: 'curto' }, func), /pelo menos 10/u);
+        await M.ServicoReclamacoesRH.reclamar({ funcionario_id: f, processamento_id: id, recibo_id: recibo.id, codigo: 'INSS', descricao: 'INSS', valor_minor: recibo.inss_minor,
+            motivo: 'O INSS descontado parece maior do que 3% do salário.' }, func);
+        // Recibo de outro funcionário ou ficha errada: a base recusa.
+        assert.throws(() => db.prepare(`INSERT INTO rh_reclamacao (id, funcionario_id, processamento_id, recibo_id, motivo, criado_em) VALUES ('x', 'outro', ?, ?, 'motivo qualquer', 'agora')`).run(id, recibo.id), /folha de correcção/u);
+
+        await assert.rejects(M.ServicoSalariosRH.aprovar(await processamento(M, id), { ...RH, id: 'u-aprov' }), /por responder/u);
+        const [r] = await M.ServicoReclamacoesRH.doProcessamento(id);
+        await M.ServicoReclamacoesRH.responder(r, 'recusada', 'O INSS é 3% da base sujeita: está certo.', RH);
+        await M.ServicoSalariosRH.aprovar(await processamento(M, id), { ...RH, id: 'u-aprov' });
+        assert.equal((await M.ServicoPortalRH.meusRecibos(f)).length, 1, 'aprovada: passa a folha final');
+        await assert.rejects(M.ServicoReclamacoesRH.reclamar({ funcionario_id: f, processamento_id: id, recibo_id: recibo.id, motivo: 'Depois de aprovada já não dá.' }, func), /antes da aprovação/u);
+        assert.equal(M.isPortalPedidoSql(`INSERT INTO rh_reclamacao (id, funcionario_id, processamento_id, recibo_id, codigo, descricao, valor_minor, motivo, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)`), true);
+        assert.equal(M.isPortalPedidoSql(`INSERT INTO rh_reclamacao (id, funcionario_id, processamento_id, recibo_id, codigo, descricao, valor_minor, motivo, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aceite', ?, ?, ?)`), false, 'o funcionário não decide a própria reclamação');
     } finally { db.close(); }
 });

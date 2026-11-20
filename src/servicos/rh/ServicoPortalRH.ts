@@ -20,6 +20,11 @@ export class ServicoPortalRH {
         return (await ServicoSalariosRH.recibosFuncionario(funcionarioId)).filter(r => OFICIAIS.has(r.estado));
     }
 
+    /** Folha de correcção: recibos calculados mas ainda por aprovar (o funcionário confere e pode reclamar). */
+    static async minhaFolhaCorreccao(funcionarioId: string) {
+        return (await ServicoSalariosRH.recibosFuncionario(funcionarioId)).filter(r => r.estado === 'calculado');
+    }
+
     private static async horario(f: Funcionario) {
         const horarios = await ServicoTempoRH.horarios();
         return horarios.find(h => h.id === f.horario_id) || horarios.find(h => h.id === 'horario-normal') || HORARIO_OMISSAO;

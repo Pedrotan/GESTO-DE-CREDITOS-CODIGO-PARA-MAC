@@ -6,26 +6,24 @@ import { Label } from '@/componentes/ui/label';
 import { Switch } from '@/componentes/ui/switch';
 import { Textarea } from '@/componentes/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
-import { FileDown, Plane, Send } from 'lucide-react';
+import { Plane, Send } from 'lucide-react';
 import { ServicoPortalRH } from '@/servicos/rh/ServicoPortalRH';
-import { ServicoSalariosRH, ROTULO_TIPO } from '@/servicos/rh/ServicoSalariosRH';
 import { ServicoFeriasRH } from '@/servicos/rh/ServicoFeriasRH';
 import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
 import { ServicoRH } from '@/servicos/rh/ServicoRH';
 import { estadoEfectivo, saldoFerias } from '@/bibliotecas/rh/ferias';
 import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
-import { gerarReciboPdf, periodoPt } from '@/bibliotecas/rh/pdf-rh';
+import { periodoPt } from '@/bibliotecas/rh/pdf-rh';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
-import { useData } from '@/contextos/ContextoDados';
 import { Indicador, dataPt, executar, kz, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { MarcarPonto, MeuPonto } from '@/componentes/rh/ponto/PortalPonto';
 import { MeusDocumentos } from '@/componentes/rh/MeusDocumentos';
+import { FolhasFuncionario } from '@/componentes/rh/FolhasFuncionario';
 
 /** Portal do funcionário: os seus recibos, o saldo de férias e os pedidos de férias e de dispensa. */
 export default function PortalFuncionario() {
     const { actor } = useActorRH();
-    const { companySettings } = useData();
     const hoje = luandaTodayKey();
     const dados = useCarregar(async () => {
         if (!actor) return null;
@@ -63,20 +61,9 @@ export default function PortalFuncionario() {
                 <MeuPonto f={f} actor={actor} />
             </div>
 
+            <FolhasFuncionario f={f} actor={actor} finais={d.recibos} />
+
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
-                <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
-                    <h2 className="mb-3 font-black">Os meus recibos</h2>
-                    {d.recibos.length === 0 ? <Vazio>Ainda não há recibos aprovados.</Vazio> : d.recibos.map((r: any) => (
-                        <div key={r.id} className="mb-1.5 flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
-                            <span><b>{periodoPt(r.ano, r.mes)}</b> · {ROTULO_TIPO[r.tipo as keyof typeof ROTULO_TIPO]}</span>
-                            <span className="flex items-center gap-2 font-black">{kz(r.liquido_minor)}
-                                <Button size="icon" variant="ghost" title="Recibo (PDF)" onClick={() => void ServicoSalariosRH.linhas(r.id).then(l => gerarReciboPdf(r, l, { ano: r.ano, mes: r.mes, tipoRotulo: ROTULO_TIPO[r.tipo as keyof typeof ROTULO_TIPO], estado: r.estado }, companySettings, actor.name))}>
-                                    <FileDown className="h-4 w-4" />
-                                </Button>
-                            </span>
-                        </div>
-                    ))}
-                </section>
 
                 <section className="space-y-4">
                     <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">

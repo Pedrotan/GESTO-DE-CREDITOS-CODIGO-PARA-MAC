@@ -373,6 +373,9 @@ export class ServicoSalariosRH {
     /** Aprovação: outra pessoa que não quem calculou (o Super Administrador pode fazer ambos). */
     static async aprovar(p: Processamento, actor: ActorRH) {
         if (p.estado !== 'calculado') throw new Error('Só se aprova um processamento calculado.');
+        // Reclamações da folha de correcção por responder bloqueiam a aprovação (a folha final tem de as ter em conta).
+        const pendentes = await db.get<{ n: number }>("SELECT COUNT(*) AS n FROM rh_reclamacao WHERE processamento_id = ? AND estado = 'pendente'", [p.id]).catch(() => undefined);
+        if (Number(pendentes?.n || 0) > 0) throw new Error(`Há ${pendentes!.n} reclamação(ões) de funcionários por responder nesta folha. Responda antes de aprovar.`);
         const when = agora();
         const proprio = p.calculado_por === actor.id;
         if (proprio && !autoridadeTotal(actor)) throw new Error('O processamento tem de ser aprovado por outra pessoa (quem calculou não aprova).');
