@@ -1,4 +1,4 @@
-import { useForm } from 'react-hook-form';
+import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useFormDraft } from '@/ganchos/usar-rascunho-formulario';
@@ -69,7 +69,7 @@ export function WarrantyForm({ onSubmit, clients, credits, onCancel, initialData
     const [openCredit, setOpenCredit] = useState(false);
 
     const form = useForm<WarrantyFormValues>({
-        resolver: zodResolver(warrantySchema),
+        resolver: zodResolver(warrantySchema) as Resolver<WarrantyFormValues>,
         defaultValues: {
             clientId: initialData?.clientId || prefill?.clientId || '',
             creditId: initialData?.creditId || prefill?.creditId || undefined,

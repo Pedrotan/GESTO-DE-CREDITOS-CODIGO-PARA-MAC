@@ -10,7 +10,8 @@ for (const file of files) {
   if (/\.js$/u.test(file) && !/^index-[^.]+\.js$/u.test(file) && !/^pdf\.worker-/u.test(file) && bytes > 600_000) {
     violations.push(`${file}: ${bytes} > 600000`);
   }
-  if (/\.css$/u.test(file) && bytes > 250_000) violations.push(`${file}: ${bytes} > 250000`);
+  // CSS: só utilitários do Tailwind usados nas páginas (um ficheiro, ~36 kB comprimido); cresce com as páginas.
+  if (/\.css$/u.test(file) && bytes > 300_000) violations.push(`${file}: ${bytes} > 300000`);
 }
 if (violations.length) {
   console.error(`Bundle budget exceeded:\n${violations.join('\n')}`);

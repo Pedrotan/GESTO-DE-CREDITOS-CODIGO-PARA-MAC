@@ -93,11 +93,15 @@ export default defineConfig(({ mode }) => ({
         // Bibliotecas grandes em ficheiros próprios: em ligações lentas ou instáveis, um ficheiro único de vários
         // MB falhava a meio (ERR_INCOMPLETE_CHUNKED_ENCODING); partes menores chegam e ficam em cache uma a uma.
         manualChunks(id: string) {
+          // Registo dos comandos SQL (gerado; a sincronização identifica cada comando pelo id): ficheiro próprio.
+          if (/[\\/]electron[\\/](renderer-sql-allowlist|renderer-sql-legacy|sync-sql)\.ts$/.test(id)) return "registo-sql";
           if (!id.includes("node_modules")) return undefined;
           if (/[\\/]node_modules[\\/](react|react-dom|react-router|react-router-dom|scheduler)[\\/]/.test(id)) return "vendor-react";
           if (/[\\/]node_modules[\\/]@radix-ui[\\/]/.test(id)) return "vendor-radix";
           if (/[\\/]node_modules[\\/](recharts|recharts-scale|d3-[\w-]+|victory-vendor|decimal\.js-light)[\\/]/.test(id)) return "vendor-graficos";
-          if (/[\\/]node_modules[\\/](jspdf|jspdf-autotable|html2canvas|canvg|dompurify|fflate|pdf-lib)[\\/]/.test(id)) return "vendor-pdf";
+          // PDF em duas partes (cada uma abaixo do limite de 600 kB): o jsPDF e a conversão de HTML/SVG em imagem.
+          if (/[\\/]node_modules[\\/](html2canvas|canvg|dompurify|core-js|stackblur-canvas|svg-pathdata|rgbcolor|raf)[\\/]/.test(id)) return "vendor-pdf-imagem";
+          if (/[\\/]node_modules[\\/](jspdf|jspdf-autotable|fflate|pdf-lib|pako|fast-png|iobuffer)[\\/]/.test(id)) return "vendor-pdf";
           if (/[\\/]node_modules[\\/](xlsx|exceljs|jszip)[\\/]/.test(id)) return "vendor-excel";
           if (/[\\/]node_modules[\\/](date-fns)[\\/]/.test(id)) return "vendor-datas";
           if (/[\\/]node_modules[\\/](lucide-react)[\\/]/.test(id)) return "vendor-icones";

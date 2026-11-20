@@ -30,7 +30,7 @@ import {
     Fingerprint,
     ExternalLink
 } from 'lucide-react';
-import { useForm } from 'react-hook-form';
+import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useData } from '@/contextos/ContextoDados';
 import { findDuplicateClients, missingClientFields } from '@/bibliotecas/cliente-validacao';
@@ -95,7 +95,10 @@ const clientSchema = z.object({
     name: z.string().min(3, 'Nome deve ter pelo menos 3 caracteres'),
     nif: z.string().min(1, 'NIF é obrigatório'),
     phone: z.string().min(1, 'Telefone é obrigatório')
-        .refine(value => analisarTelefoneAngola(value).valido, value => ({ message: analisarTelefoneAngola(value).mensagem })),
+        .superRefine((value, ctx) => {
+            const telefone = analisarTelefoneAngola(value);
+            if (!telefone.valido) ctx.addIssue({ code: 'custom', message: telefone.mensagem });
+        }),
     email: z.string().email('Email inválido').or(z.literal('')).optional(),
     address: z.string().optional(),
     // Naturalidade e morada administrativa (obrigatórias, validadas ao gravar).
@@ -115,7 +118,9 @@ const clientSchema = z.object({
     spouseBi: z.string().optional(),
     spouseNif: z.string().optional(),
     spousePhone: z.string().optional()
-        .refine(value => telefoneOpcionalValido(value), value => ({ message: analisarTelefoneAngola(value || '').mensagem })),
+        .superRefine((value, ctx) => {
+            if (!telefoneOpcionalValido(value)) ctx.addIssue({ code: 'custom', message: analisarTelefoneAngola(value || '').mensagem });
+        }),
     spouseEmail: z.string().email('Email do cônjuge inválido').or(z.literal('')).optional(),
     spouseBirthDate: z.string().optional(),
     spouseOccupation: z.string().optional(),
@@ -382,7 +387,7 @@ export function ClientForm({ onSubmit, initialData, onCancel, submitLabel = 'Gua
     const [isNameAutoFilled, setIsNameAutoFilled] = useState(false);
 
     const form = useForm<ClientFormValues>({
-        resolver: zodResolver(clientSchema),
+        resolver: zodResolver(clientSchema) as Resolver<ClientFormValues>,
         defaultValues: initialData
             ? {
                 name: initialData.name || '',

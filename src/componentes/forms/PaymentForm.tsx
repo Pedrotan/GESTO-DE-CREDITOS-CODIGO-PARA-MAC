@@ -1,4 +1,4 @@
-import { useForm } from 'react-hook-form';
+import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useFormDraft } from '@/ganchos/usar-rascunho-formulario';
@@ -66,7 +66,7 @@ const isPayableCredit = (credit: Credit) => (
 export function PaymentForm({ onSubmit, credits, onCancel, initialCreditId }: PaymentFormProps) {
     const [open, setOpen] = useState(false);
     const form = useForm<PaymentFormValues>({
-        resolver: zodResolver(paymentSchema),
+        resolver: zodResolver(paymentSchema) as Resolver<PaymentFormValues>,
         defaultValues: {
             creditId: initialCreditId || '',
             amount: 0,

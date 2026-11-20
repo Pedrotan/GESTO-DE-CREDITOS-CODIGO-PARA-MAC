@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useForm, useWatch } from 'react-hook-form';
+import { useForm, useWatch, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useFormDraft } from '@/ganchos/usar-rascunho-formulario';
@@ -185,7 +185,7 @@ export function CreditForm({ onSubmit, initialData, prefillData, clients, credit
     const defaultTierForInstallments = tierForMonths(interestTiers, initialInstallments) || interestTiers[0];
 
     const form = useForm<CreditFormValues>({
-        resolver: zodResolver(creditSchema),
+        resolver: zodResolver(creditSchema) as Resolver<CreditFormValues>,
         defaultValues: initialData
             ? {
                 clientId: initialData.clientId,

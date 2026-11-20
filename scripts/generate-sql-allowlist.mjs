@@ -52,9 +52,11 @@ const legacy = new Map([
   ...await readEntries(allowlistFile, 'RENDERER_SQL_BY_ID'),
 ].filter(([id, sql]) => !currentIds.has(id) && legacyAllowed(sql) && createHash('sha256').update(sql).digest('hex') === id));
 
+// Cada comando aparece uma só vez (no mapa por id); a lista permitida deriva dele. Antes ia duas vezes para o
+// bundle web (que precisa do mapa para a sincronização) e o ficheiro passava o limite de tamanho do CI.
 const output = `// Gerado por scripts/generate-sql-allowlist.mjs. Não editar manualmente.\n` +
-  `export const RENDERER_SQL_ALLOWLIST = new Set<string>(${JSON.stringify([...values].sort(), null, 2)});\n` +
   `export const RENDERER_SQL_BY_ID = new Map<string, string>(${JSON.stringify(byId, null, 2)});\n` +
+  `export const RENDERER_SQL_ALLOWLIST = new Set<string>(RENDERER_SQL_BY_ID.values());\n` +
   `export const RENDERER_SQL_ID_BY_STATEMENT = new Map<string, string>([...RENDERER_SQL_BY_ID].map(([id, sql]) => [sql, id]));\n`;
 await writeFile(allowlistFile, output, 'utf8');
 await writeFile(legacyFile, `// Gerado por scripts/generate-sql-allowlist.mjs. Não editar manualmente.\n` +

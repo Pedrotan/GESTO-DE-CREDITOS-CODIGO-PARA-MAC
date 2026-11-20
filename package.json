@@ -10,7 +10,8 @@
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
     "tar": "7.5.16",
     "minimatch": "^3.0.5",
-    "semver": "^7.5.4"
+    "semver": "^7.5.4",
+    "puppeteer": "^25.18.1"
   },
   "main": "dist-electron/main.cjs",
   "scripts": {
@@ -62,7 +63,7 @@
   },
   "dependencies": {
     "@djosekispy/nifvalidation": "github:Djosekispy/nifvalidation",
-    "@hookform/resolvers": "^3.10.0",
+    "@hookform/resolvers": "^5.9.2",
     "@neondatabase/serverless": "^1.2.0",
     "@noble/hashes": "2.2.0",
     "@radix-ui/react-accordion": "^1.2.11",
@@ -113,7 +114,7 @@
     "jsqr": "^1.4.0",
     "lucide-react": "^0.462.0",
     "next-themes": "^0.3.0",
-    "nodemailer": "^7.0.13",
+    "nodemailer": "^10.6.1",
     "pdfjs-dist": "^4.10.38",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
@@ -133,7 +134,7 @@
     "uuid": "^13.0.0",
     "vaul": "^0.9.9",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
-    "zod": "^3.25.76"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.2.17",

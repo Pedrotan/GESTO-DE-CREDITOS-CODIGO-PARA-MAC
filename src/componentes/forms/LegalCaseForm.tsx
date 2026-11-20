@@ -1,4 +1,4 @@
-import { useForm } from 'react-hook-form';
+import { useForm, type Resolver } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { useFormDraft } from '@/ganchos/usar-rascunho-formulario';
@@ -68,7 +68,7 @@ export function LegalCaseForm({ onSubmit, clients, credits, onCancel, initialDat
     const [openCredit, setOpenCredit] = useState(false);
 
     const form = useForm<LegalCaseFormValues>({
-        resolver: zodResolver(legalCaseSchema),
+        resolver: zodResolver(legalCaseSchema) as Resolver<LegalCaseFormValues>,
         defaultValues: {
             clientId: initialData?.clientId || prefill?.clientId || '',
             creditId: initialData?.creditId || prefill?.creditId || '',
