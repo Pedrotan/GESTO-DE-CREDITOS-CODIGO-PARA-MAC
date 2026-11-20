@@ -13,6 +13,7 @@ import { Fragment } from 'react';
 import { CONFLICT_STATUS_LABELS, conflictArchiveStatements, conflictNote, conflictOperationDetails, conflictReason, conflictStatus, entityLabel, filterConflicts, type SyncConflict } from '@/bibliotecas/sync-conflitos';
 import { downloadConflictReport } from '@/bibliotecas/sync-conflitos-relatorio';
 import { RefreshCw, CheckCircle2, AlertTriangle, ShieldCheck, Archive, ArchiveRestore, Download, Search, ChevronLeft, ChevronRight, ArrowUpDown, CloudDownload, History } from 'lucide-react';
+import { confirmar } from '@/bibliotecas/alerta';
 
 const dateText = (value?: string | null) => value && Number.isFinite(Date.parse(value)) ? new Date(value).toLocaleString('pt-AO') : '—';
 const selectClass = 'h-10 rounded-md border border-input bg-background px-3 text-sm';
@@ -125,7 +126,7 @@ export function ConflictReview({ actorId, actorName, canManage }: { actorId?: st
                 {canManage && <Button size="sm" disabled={busy || loading} onClick={() => void handleReprocess()}><ShieldCheck className="mr-2 h-4 w-4" />Reprocessar registos seguros</Button>}
                 {canManage && !window.electronAPI && <Button variant="outline" size="sm" disabled={busy || loading} onClick={() => { setError(''); setRebuildOpen(true); }}><CloudDownload className="mr-2 h-4 w-4" />Receber tudo de novo da nuvem</Button>}
                 {!window.electronAPI && replicaBackupAt() && <Button variant="outline" size="sm" disabled={busy} title="Repõe a cópia deste navegador guardada antes de «Receber tudo de novo» e recebe por cima o que mudou na nuvem."
-                    onClick={() => { if (window.confirm(`Repor a cópia deste navegador de ${new Date(replicaBackupAt()!).toLocaleString('pt-AO')}? O que mudou na nuvem desde então volta a ser recebido por cima.`)) { try { restoreBrowserReplicaBackup(); } catch (cause) { reportError(cause); } } }}>
+                    onClick={async () => { if (await confirmar(`Repor a cópia deste navegador de ${new Date(replicaBackupAt()!).toLocaleString('pt-AO')}? O que mudou na nuvem desde então volta a ser recebido por cima.`)) { try { restoreBrowserReplicaBackup(); } catch (cause) { reportError(cause); } } }}>
                     <History className="mr-2 h-4 w-4" />Repor cópia anterior
                 </Button>}
             </div>

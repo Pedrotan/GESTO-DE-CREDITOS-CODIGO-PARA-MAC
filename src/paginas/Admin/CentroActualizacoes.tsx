@@ -8,6 +8,7 @@ import { Switch } from '@/componentes/ui/switch';
 import { Textarea } from '@/componentes/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/componentes/ui/table';
 import { masterUpdatesApi } from '@/servicos/ServicoMasterCloud';
+import { confirmar, perguntar } from '@/bibliotecas/alerta';
 
 // Painel Master › Actualizações: versões do Tango ERP registadas na VPS. Cada versão tem o interruptor
 // «Disponibilizar actualizações para todos»: desligado, só a equipa de desenvolvimento a recebe; ligado, chega a
@@ -80,7 +81,7 @@ export default function CentroActualizacoes() {
         const question = enabled
             ? `Disponibilizar a versão ${release.version} para TODAS as empresas agora?\n\nOs computadores ligados recebem o aviso de imediato.`
             : `Voltar a reservar a versão ${release.version} só para a equipa de desenvolvimento?\n\nQuem ainda não a descarregou deixa de a receber.`;
-        if (!window.confirm(question)) return;
+        if (!await confirmar(question)) return;
         await run(`public-${release.version}`, 'release-set-public', { version: release.version, public: enabled });
     };
 
@@ -205,7 +206,7 @@ export default function CentroActualizacoes() {
                                             <Button size="sm" variant="outline" className="gap-1" disabled={!!busy} onClick={() => void run(`pause-${release.version}`, 'release-resume', { version: release.version })}><PlayCircle className="h-4 w-4" /> Retomar</Button>
                                         ) : (
                                             <Button size="sm" variant="outline" className="gap-1 text-red-600" disabled={!!busy}
-                                                onClick={() => { if (window.confirm(`Suspender a versão ${release.version}? Deixa de ser oferecida e descarregada.`)) void run(`pause-${release.version}`, 'release-pause', { version: release.version }); }}>
+                                                onClick={async () => { if (await confirmar(`Suspender a versão ${release.version}? Deixa de ser oferecida e descarregada.`)) void run(`pause-${release.version}`, 'release-pause', { version: release.version }); }}>
                                                 <PauseCircle className="h-4 w-4" /> Suspender
                                             </Button>
                                         )}
@@ -282,7 +283,7 @@ export default function CentroActualizacoes() {
                                     <TableRow key={device.device_id}>
                                         <TableCell>
                                             <Switch checked={device.team} disabled={!!busy} aria-label="Equipa de desenvolvimento"
-                                                onCheckedChange={checked => void run(`device-${device.device_id}`, 'device-set-team', { deviceId: device.device_id, team: checked, ...(checked && !device.label ? { label: window.prompt('Nome para este computador (opcional):') || '' } : {}) })} />
+                                                onCheckedChange={async checked => void run(`device-${device.device_id}`, 'device-set-team', { deviceId: device.device_id, team: checked, ...(checked && !device.label ? { label: await perguntar('Nome para este computador (opcional):') || '' } : {}) })} />
                                             {device.tenant_team && !device.team && <p className="text-[10px] text-blue-600">pela empresa</p>}
                                         </TableCell>
                                         <TableCell><p className="font-semibold">{device.label || (device.kind === 'web' ? 'Navegador' : 'Computador')}</p><p className="font-mono text-[10px] text-slate-500">{device.device_id}</p></TableCell>

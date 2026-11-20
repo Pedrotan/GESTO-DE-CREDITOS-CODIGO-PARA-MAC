@@ -44,6 +44,7 @@ import { ServicoCarteira, type Restructuring } from '@/servicos/ServicoCarteira'
 import { ServicoCobrancaOperacional } from '@/servicos/ServicoCobrancaOperacional';
 import { ServicoConfigSimulador } from '@/servicos/ServicoConfigSimulador';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
+import { confirmar } from '@/bibliotecas/alerta';
 
 const kz = (minor: number) => formatCurrency(minor / 100);
 const dateLabel = (value?: string | Date | null) => value ? luandaDateKey(value).split('-').reverse().join('/') : '—';
@@ -734,7 +735,7 @@ function Documentos({ creditId, documents, clientDocuments, actor, onChanged, on
         } catch (cause: any) { setError(cause?.message || 'Não foi possível carregar o documento.'); } finally { setBusy(false); }
     };
     const archive = async (id: string) => {
-        if (!actor || !window.confirm('Arquivar este documento? Continua no histórico de auditoria.')) return;
+        if (!actor || !await confirmar('Arquivar este documento? Continua no histórico de auditoria.')) return;
         try { await ServicoCarteira.archiveDocument(id, creditId, actor); onChanged(); } catch (cause: any) { setError(cause?.message || 'Não foi possível arquivar.'); }
     };
     return (

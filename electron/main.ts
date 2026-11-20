@@ -26,7 +26,7 @@ import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
 import { MASTER_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-licencas';
-import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, isPrimaryOwner, PAGE_PERMISSIONS, parsePermissionList } from '../src/bibliotecas/conta-principal';
+import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, ehContaPortalNova, isPrimaryOwner, PAGE_PERMISSIONS, parsePermissionList } from '../src/bibliotecas/conta-principal';
 import { CHAVE_ADMIN_PRINCIPAL, lerAdminPrincipal, motivoRecusaDesignar } from '../src/bibliotecas/administrador-principal';
 import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-tokens';
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
@@ -3292,6 +3292,8 @@ app.whenReady().then(async () => {
         const params = Array.isArray(statement.params) ? statement.params : [];
         if (String(params[params.length - 1] || '') === String(currentUser.id)) continue;
       }
+      // Conta do portal do funcionário (só o portal, troca de senha obrigatória): basta gerir o RH.
+      if (kind === 'insert' && ehContaPortalNova(statement.sql, Array.isArray(statement.params) ? statement.params : []) && hasPermission(currentUser, 'hr_manage')) continue;
       if (!hasManageUsers(currentUser)) throw new Error("O utilizador nao possui permissao para gerir utilizadores.");
       }
       return reservedHere;

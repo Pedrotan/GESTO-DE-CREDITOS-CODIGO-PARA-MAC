@@ -96,11 +96,29 @@ export const parsePermissionList = (value: unknown): string[] => {
     catch { return []; }
 };
 
+/** Permissões do perfil «Funcionário» só com o portal (sem créditos nem gestão). */
+export const PERMISSOES_PORTAL_FUNCIONARIO = new Set(['hr_self', 'rh_portal.ver', 'rh_portal.criar']);
+
+/**
+ * Conta do portal criada pelo RH a partir da ficha do funcionário: perfil «employee», só permissões do portal,
+ * activa e com troca obrigatória da senha no primeiro acesso. Quem gere o RH pode criá-la sem gerir utilizadores.
+ */
+export const ehContaPortalNova = (sql: string, params: unknown[]) => {
+    const colunas = insertedUserColumns(sql);
+    if (colunas.includes('isowner')) return false;
+    const permissoes = parsePermissionList(insertedUserValue(sql, params, 'permissions'));
+    return String(insertedUserValue(sql, params, 'role')) === 'employee'
+        && permissoes.length > 0 && permissoes.every(p => PERMISSOES_PORTAL_FUNCIONARIO.has(p))
+        && String(insertedUserValue(sql, params, 'status')) === 'active'
+        && Number(insertedUserValue(sql, params, 'mustchangepassword')) === 1;
+};
+const gereRH = (actor: { role?: unknown; permissions?: unknown }) => String(actor.role) === 'super_admin' || parsePermissionList(actor.permissions).includes('hr_manage');
+
 export type UserMutationCheck = {
     kind: 'insert' | 'update' | 'delete';
     sql: string;
     params: unknown[];
-    actor: { id: string; isOwner?: unknown; permissions?: unknown };
+    actor: { id: string; isOwner?: unknown; permissions?: unknown; role?: unknown };
     /** Utilizador alvo (UPDATE/DELETE ... WHERE id = ?), lido da base pelo processo principal. */
     target?: { id: string; isOwner?: unknown; role?: string } | null;
     /** Administrador principal designado (shared_settings), lido da base pelo processo principal. */
@@ -117,6 +135,7 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
         const columns = insertedUserColumns(input.sql);
         if (columns.includes('isowner')) return { error: 'A conta principal não pode ser criada nem atribuída por outro utilizador.', changesPrivileges: true };
         if (actorIsOwner) return { error: null, changesPrivileges: true };
+        if (ehContaPortalNova(input.sql, input.params) && gereRH(input.actor)) return { error: null, changesPrivileges: true };
         if (String(insertedUserValue(input.sql, input.params, 'role')) === 'super_admin') {
             return { error: 'Só o Super Administrador principal pode criar Super Administradores.', changesPrivileges: true };
         }

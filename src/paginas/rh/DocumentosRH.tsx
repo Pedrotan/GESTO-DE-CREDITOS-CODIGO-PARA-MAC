@@ -31,6 +31,7 @@ import { NavegacaoRH, SeloBI, dataPt, executar, lerFicheiro, useCarregar, Vazio 
 import { DialogoRelatorioPessoal } from '@/componentes/rh/DialogoRelatorioPessoal';
 import { RELATORIOS_PESSOAIS, type TipoRelatorio } from '@/componentes/rh/relatorios-pessoais';
 import { AvatarFuncionario, useBaseRH } from './FuncionariosRH';
+import { confirmar } from '@/bibliotecas/alerta';
 
 type Item = {
     chave: string; nome: string; tipo: string; validade: string | null; tamanho: number | null; por: string | null; data: string; estado: string;
@@ -247,7 +248,7 @@ export default function DocumentosRH() {
                                     onRenomear={d => setRenomear({ tipo: 'documento', documento: d })} onHistorico={setHistorico}
                                     onAnular={d => actor && void executar(() => ServicoRH.arquivarDocumento(d.id, actor), 'Documento anulado (pode restaurá-lo em «Anulados»)').then(ok => ok && recarregar())}
                                     onRestaurar={d => actor && void executar(() => ServicoDocumentosRH.restaurar(d, actor), 'Documento restaurado').then(ok => ok && recarregar())}
-                                    onApagar={d => actor && window.confirm(`Apagar definitivamente «${d.nome}»? Esta acção não se pode desfazer.`) && void executar(() => ServicoDocumentosRH.apagarDefinitivo(d, actor), 'Documento apagado definitivamente').then(ok => ok && recarregar())} />
+                                    onApagar={async d => actor && await confirmar(`Apagar definitivamente «${d.nome}»? Esta acção não se pode desfazer.`) && void executar(() => ServicoDocumentosRH.apagarDefinitivo(d, actor), 'Documento apagado definitivamente').then(ok => ok && recarregar())} />
                             </div>
                         ) : <>
                             {f ? (
@@ -286,7 +287,7 @@ export default function DocumentosRH() {
                                                 <DropdownMenuTrigger asChild><button type="button" className="absolute right-2 top-2 rounded p-1 text-slate-500 hover:bg-slate-100" aria-label={`Acções da pasta ${p.nome}`}><MoreHorizontal className="h-4 w-4" /></button></DropdownMenuTrigger>
                                                 <DropdownMenuContent align="end">
                                                     <DropdownMenuItem onSelect={() => setRenomear({ tipo: 'pasta', pasta: p })}><Pencil className="mr-2 h-4 w-4" /> Renomear</DropdownMenuItem>
-                                                    <DropdownMenuItem className="text-rh-danger" onSelect={() => actor && window.confirm(`Anular a pasta «${p.nome}»? Os documentos voltam a «Outros documentos».`) && void executar(() => ServicoDocumentosRH.anularPasta(p.id, actor), 'Pasta anulada').then(ok => ok && recarregar())}><Archive className="mr-2 h-4 w-4" /> Anular pasta</DropdownMenuItem>
+                                                    <DropdownMenuItem className="text-rh-danger" onSelect={async () => actor && await confirmar(`Anular a pasta «${p.nome}»? Os documentos voltam a «Outros documentos».`) && void executar(() => ServicoDocumentosRH.anularPasta(p.id, actor), 'Pasta anulada').then(ok => ok && recarregar())}><Archive className="mr-2 h-4 w-4" /> Anular pasta</DropdownMenuItem>
                                                 </DropdownMenuContent>
                                             </DropdownMenu>}
                                         </div>
@@ -322,7 +323,7 @@ export default function DocumentosRH() {
                                             onRenomear={d => setRenomear({ tipo: 'documento', documento: d })} onHistorico={setHistorico}
                                             onAnular={d => actor && void executar(() => ServicoRH.arquivarDocumento(d.id, actor), 'Documento anulado (pode restaurá-lo em «Anulados»)').then(ok => ok && recarregar())}
                                             onRestaurar={d => actor && void executar(() => ServicoDocumentosRH.restaurar(d, actor), 'Documento restaurado').then(ok => ok && recarregar())}
-                                            onApagar={d => actor && window.confirm(`Apagar definitivamente «${d.nome}»? Esta acção não se pode desfazer.`) && void executar(() => ServicoDocumentosRH.apagarDefinitivo(d, actor), 'Documento apagado definitivamente').then(ok => ok && recarregar())} />
+                                            onApagar={async d => actor && await confirmar(`Apagar definitivamente «${d.nome}»? Esta acção não se pode desfazer.`) && void executar(() => ServicoDocumentosRH.apagarDefinitivo(d, actor), 'Documento apagado definitivamente').then(ok => ok && recarregar())} />
                                     ) : (
                                         <div className="grid grid-cols-2 gap-3 p-4 lg:grid-cols-4">
                                             {itens.map(i => (

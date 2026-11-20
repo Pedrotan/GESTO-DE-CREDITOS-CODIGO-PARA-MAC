@@ -1,3 +1,4 @@
+import { createRequire } from 'node:module';
 // Processamento mês a mês sobre uma base SQLite real: salário do mês e faltas lançados no ecrã, desconto das faltas pelo
 // valor-dia ou pelo valor configurado, abonos fixos do registo, e valores bloqueados depois da aprovação.
 import test from 'node:test';
@@ -38,6 +39,7 @@ async function loadModules() {
                 export { ServicoRecebimentoRH, ultimaPorRecibo } from '@/servicos/rh/ServicoRecebimentoRH';
                 export { ServicoPortalComunicacao, destinatariosRH } from '@/servicos/rh/ServicoPortalComunicacao';
                 export { ServicoPortalRH } from '@/servicos/rh/ServicoPortalRH';
+                export { ServicoContaPortal } from '@/servicos/rh/ServicoContaPortal';
                 export { isPortalPedidoSql } from '@/bibliotecas/rh/portal-sql';
             `,
             resolveDir: root, loader: 'ts',
@@ -60,6 +62,7 @@ async function loadModules() {
     return modules;
 }
 
+const require_bcrypt = () => createRequire(import.meta.url)('bcryptjs');
 const RH = { id: 'u-rh', name: 'Rita RH', role: 'super_admin' };
 
 async function createDatabase(M, valorFalta = '0') {
@@ -67,6 +70,7 @@ async function createDatabase(M, valorFalta = '0') {
     const database = new DatabaseSync(':memory:');
     database.exec(`CREATE TABLE audit_logs (id TEXT PRIMARY KEY, timestamp TEXT, userId TEXT, userName TEXT, action TEXT, entity TEXT, details TEXT, previousState TEXT, newState TEXT, metadata TEXT)`);
     for (const sql of [...M.E.RH_FASE1_SQL, ...M.E.RH_FASE2_SQL, ...M.E.RH_PONTO_V2_SQL, ...M.E.RH_PONTO_V3_SQL, ...M.RH_SALARIOS_SCHEMA_SQL, ...M.E.RH_DOCS_SQL, ...M.E.RH_FASE4_SQL, ...M.E.RH_MODELOS_SQL, ...M.E.RH_PORTAL_V2_SQL, ...M.E.RH_HIERARQUIA_SQL]) database.exec(sql);
+    database.exec(`CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE, password TEXT, role TEXT, avatar TEXT, createdAt TEXT, permissions TEXT, status TEXT, mustChangePassword INTEGER DEFAULT 0)`);
     database.exec(`CREATE TABLE notifications (id TEXT PRIMARY KEY, userId TEXT, title TEXT NOT NULL, message TEXT NOT NULL, type TEXT NOT NULL, source TEXT DEFAULT 'system', read INTEGER DEFAULT 0, timestamp TEXT NOT NULL)`);
     database.prepare(M.E.RH_SEED_MODELO_SQL).run('modelo-declaracao-servico', 'Declaração de serviço', 'DECLARAÇÃO DE SERVIÇO E SALÁRIO', M.MODELO_DECLARACAO_SERVICO, new Date().toISOString());
     for (const [table, column, definition] of [...M.E.RH_PONTO_V2_COLUNAS, ...M.E.RH_PONTO_V3_COLUNAS, ...M.E.RH_FOLHA_COLUNAS, ...M.E.RH_CADASTRO_COLUNAS, ...M.E.RH_CATALOGO_COLUNAS, ...M.E.RH_DOCS_COLUNAS, ...M.E.RH_HIERARQUIA_COLUNAS]) { try { database.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`); } catch { /* já existe */ } }
@@ -183,6 +187,23 @@ test('hierarquia: secções, nível do cargo, secção do funcionário e chefe d
         await M.ServicoRH.actualizarFuncionario(bruno, { ...fichaBruno, departamento_id: outro, seccao_id: cont }, RH);
         assert.equal(db.prepare('SELECT seccao_id FROM rh_funcionario WHERE id = ?').get(bruno).seccao_id, null);
         assert.equal((await M.ServicoRH.seccoes()).length, 1);
+    } finally { db.close(); }
+});
+
+test('portal: criar acesso a partir da ficha gera utilizador pelo nome, senha temporária e troca obrigatória', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const id = await registar(M);
+        const ficha = await M.ServicoRH.funcionario(id);
+        const c = await M.ServicoContaPortal.criar(ficha, RH, [{ username: 'pedro.de.morais.tango' }]);
+        assert.equal(c.username, 'pedro.de.morais.tango2');
+        const u = db.prepare('SELECT * FROM users WHERE id = ?').get(c.id);
+        assert.deepEqual([u.role, u.status, u.mustChangePassword, JSON.parse(u.permissions)], ['employee', 'active', 1, ['hr_self', 'rh_portal.ver', 'rh_portal.criar']]);
+        assert.notEqual(u.password, c.senha, 'só o hash fica na base');
+        assert.ok(require_bcrypt().compareSync(c.senha, u.password));
+        assert.equal(db.prepare('SELECT utilizador_id FROM rh_funcionario WHERE id = ?').get(id).utilizador_id, c.id);
+        await assert.rejects(M.ServicoContaPortal.criar(await M.ServicoRH.funcionario(id), RH, []), /já tem acesso/u);
     } finally { db.close(); }
 });
 

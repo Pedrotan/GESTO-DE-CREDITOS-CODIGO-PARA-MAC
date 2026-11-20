@@ -42,6 +42,7 @@ import {
     CheckCircle2,
 } from 'lucide-react';
 import { cn } from '@/bibliotecas/utils';
+import { confirmar } from '@/bibliotecas/alerta';
 
 const DRAFT = 'tango_master_contract_draft_v1';
 const HISTORY = 'tango_master_contracts_v1';
@@ -154,8 +155,8 @@ export default function ContratosSoftware({ logo }: { logo?: string }) {
         }
     };
 
-    const fresh = () => {
-        if (!window.confirm('Criar um novo contrato? Guarde o atual no histórico antes de continuar.')) return;
+    const fresh = async () => {
+        if (!await confirmar('Criar um novo contrato? Guarde o atual no histórico antes de continuar.')) return;
         const next = newSoftwareContract();
         setContract(next);
         setSelected(next.sections[0].id);
@@ -339,8 +340,8 @@ export default function ContratosSoftware({ logo }: { logo?: string }) {
                             <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => {
-                                    if (!window.confirm('Abrir este contrato? Guarde primeiro as alterações do rascunho atual.')) return;
+                                onClick={async () => {
+                                    if (!await confirmar('Abrir este contrato? Guarde primeiro as alterações do rascunho atual.')) return;
                                     setContract(c);
                                     setSelected(c.sections[0]?.id || '');
                                     setTab('editor');
@@ -572,7 +573,7 @@ export default function ContratosSoftware({ logo }: { logo?: string }) {
                                         if (file.size > 2000000) throw new Error('Ficheiro demasiado grande.');
                                         const saved = JSON.parse(await file.text());
                                         if (!validateSoftwareContract(saved)) throw new Error('Cópia editável inválida.');
-                                        if (!window.confirm('Substituir o rascunho por esta cópia?')) return;
+                                        if (!await confirmar('Substituir o rascunho por esta cópia?')) return;
                                         setContract(saved);
                                         setSelected(saved.sections[0]?.id || '');
                                         setError('');
@@ -706,8 +707,8 @@ export default function ContratosSoftware({ logo }: { logo?: string }) {
                                         variant="ghost"
                                         size="sm"
                                         disabled={contract.sections.length <= 1}
-                                        onClick={() => {
-                                            if (window.confirm('Remover esta secção do contrato?')) {
+                                        onClick={async () => {
+                                            if (await confirmar('Remover esta secção do contrato?')) {
                                                 const remaining = contract.sections.filter((s) => s.id !== section.id);
                                                 change({ sections: remaining });
                                                 if (remaining[0]) setSelected(remaining[0].id);

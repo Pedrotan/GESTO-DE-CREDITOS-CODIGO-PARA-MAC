@@ -24,6 +24,7 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { WarrantyForm } from '@/componentes/forms/WarrantyForm';
 import { Warranty } from '@/tipos/contencioso';
+import { confirmar } from '@/bibliotecas/alerta';
 import {
     computePortfolioRisk, eligibleCollateralValue, warrantyHaircut, lastInspectionDate, needsInspection,
     warrantyDocumentationScore, appendTimelineEntry, parseTimeline, creditExposure, daysPastDue, isOpenCredit,
@@ -189,7 +190,7 @@ export default function Garantias() {
     };
 
     const handleDelete = async (id: string) => {
-        if (confirm('Deseja mover esta garantia para a lixeira? Poderá restaurá-la mais tarde se necessário.')) {
+        if (await confirmar('Deseja mover esta garantia para a lixeira? Poderá restaurá-la mais tarde se necessário.')) {
             await deleteWarranty(id, actor);
         }
     };

@@ -1,5 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode, useEffect, useState } from 'react';
 import { isChunkLoadError, isReloadPending, reloadForNewVersion } from '@/bibliotecas/carregamento-modulos';
+import { confirmar } from '@/bibliotecas/alerta';
 
 const ESPERA_SEGUNDOS = 10;
 
@@ -95,8 +96,8 @@ export class ErrorBoundary extends Component<{ children: ReactNode }, { hasError
                             </button>
 
                             <button
-                                onClick={() => {
-                                    if (confirm("Isto irá apagar todas as sessões e configurações temporárias. O banco de dados permanecerá. Deseja continuar?")) {
+                                onClick={async () => {
+                                    if (await confirmar("Isto irá apagar todas as sessões e configurações temporárias. O banco de dados permanecerá. Deseja continuar?")) {
                                         localStorage.clear();
                                         sessionStorage.clear();
                                         window.location.reload();

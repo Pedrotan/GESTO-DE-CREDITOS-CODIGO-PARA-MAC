@@ -114,5 +114,50 @@ export const alertaConfirmacao = async (
     return result.isConfirmed;
 };
 
+/**
+ * Confirmação em SweetAlert no lugar do confirm() do navegador. A mensagem é texto (nunca HTML), por isso nomes e
+ * motivos escritos pelos utilizadores aparecem tal como estão. «perigo» pinta o botão de vermelho.
+ */
+export const confirmar = async (mensagem: string, opcoes: { titulo?: string; confirmar?: string; cancelar?: string; perigo?: boolean } = {}): Promise<boolean> => {
+    const result = await customSwal.fire({
+        icon: opcoes.perigo ? 'warning' : 'question',
+        title: opcoes.titulo || 'Confirmar',
+        text: mensagem,
+        showCancelButton: true,
+        confirmButtonText: opcoes.confirmar || 'Sim, continuar',
+        cancelButtonText: opcoes.cancelar || 'Cancelar',
+        confirmButtonColor: opcoes.perigo ? '#e11d48' : '#059669',
+        cancelButtonColor: '#64748b',
+        reverseButtons: true,
+        focusCancel: Boolean(opcoes.perigo),
+    });
+    return result.isConfirmed;
+};
+
+/** Aviso em SweetAlert no lugar do alert() do navegador (texto simples). */
+export const avisar = (mensagem: string, tipo: 'success' | 'error' | 'warning' | 'info' = 'info', titulo?: string) => customSwal.fire({
+    icon: tipo,
+    title: titulo || ({ success: 'Concluído', error: 'Erro', warning: 'Atenção', info: 'Informação' } as const)[tipo],
+    text: mensagem,
+    confirmButtonText: 'OK',
+    confirmButtonColor: tipo === 'error' ? '#e11d48' : tipo === 'warning' ? '#f59e0b' : '#059669',
+});
+
+/** Pergunta com caixa de texto em SweetAlert no lugar do prompt() do navegador; null quando cancela. */
+export const perguntar = async (mensagem: string, opcoes: { titulo?: string; valor?: string; placeholder?: string } = {}): Promise<string | null> => {
+    const result = await customSwal.fire({
+        title: opcoes.titulo || mensagem,
+        text: opcoes.titulo ? mensagem : undefined,
+        input: 'text',
+        inputValue: opcoes.valor || '',
+        inputPlaceholder: opcoes.placeholder,
+        showCancelButton: true,
+        confirmButtonText: 'OK',
+        cancelButtonText: 'Cancelar',
+        reverseButtons: true,
+    });
+    return result.isConfirmed ? String(result.value ?? '') : null;
+};
+
 export { Swal };
 export default customSwal;

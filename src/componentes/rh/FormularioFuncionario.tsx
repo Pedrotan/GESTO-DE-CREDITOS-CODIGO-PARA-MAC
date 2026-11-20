@@ -21,11 +21,14 @@ import { PROVINCIAS_DPA, municipiosDaProvincia, provinciaDPA } from '@/bibliotec
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { cn } from '@/bibliotecas/utils';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { ServicoContaPortal, utilizadorDoNome } from '@/servicos/rh/ServicoContaPortal';
+import { alertaSucesso } from '@/bibliotecas/alerta';
 import { useData } from '@/contextos/ContextoDados';
 import { toast } from '@/ganchos/usar-toast';
 import { deslocarDentro, executar, kz, lerFicheiro, paraMinor, seccaoVisivel } from './comum-rh';
 import { DialogoContrato } from './DialogosFuncionario';
 import { calculoRubrica } from './CatalogoSubsidios';
+import { confirmar } from '@/bibliotecas/alerta';
 
 export type SeccaoFormulario = 'pessoais' | 'identificacao' | 'contactos' | 'empresa' | 'contrato' | 'subsidios' | 'documentos';
 /** Onde abrir a edição: secção e, opcionalmente, o campo a focar (ex.: «Completar agora» da ficha). */
@@ -99,7 +102,7 @@ function Campo({ id, label, obrig, erro, dica, className, children }: { id: stri
 }
 
 export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionario, seccaoInicial, departamentos, cargos, seccoes = [], funcionarios = [], contratos = [], rubricas: rubricasProp, anosValidadeBI, maxMb = 2, horarios = [] }: Props) {
-    const { users } = useAuth();
+    const { users, reloadUsers } = useAuth();
     const { companySettings } = useData();
     const edicao = Boolean(funcionario);
     const hoje = luandaTodayKey();
@@ -123,7 +126,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
     const [activa, setActiva] = useState<SeccaoFormulario>('pessoais');
     const [rascunho, setRascunho] = useState<null | { guardadoEm: string }>(null);
     const [renovar, setRenovar] = useState(false);
-    const [portalModo, setPortalModo] = useState<'sem' | 'existente'>('sem');
+    const [portalModo, setPortalModo] = useState<'sem' | 'criar' | 'existente'>('sem');
     const [rubricas, setRubricas] = useState<Rubrica[]>(rubricasProp || []);
     const [parametros, setParametros] = useState<Awaited<ReturnType<typeof ServicoRH.parametros>>>([]);
     const corpo = useRef<HTMLDivElement>(null);
@@ -265,8 +268,8 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
     const actualizarActiva = () => { const id = seccaoVisivel(corpo.current, 'section[id^="ff-sec-"]'); if (id) setActiva(id.replace('ff-sec-', '') as SeccaoFormulario); };
     const irPara = (s: SeccaoFormulario) => deslocarDentro(corpo.current, corpo.current?.querySelector(`#ff-sec-${s}`) || null);
 
-    const fechar = () => {
-        if (sujo && !window.confirm('Há alterações por guardar. Fechar sem guardar?')) return;
+    const fechar = async () => {
+        if (sujo && !await confirmar('O que alterou nesta ficha perde-se se fechar agora.', { titulo: 'Alterações por guardar', confirmar: 'Fechar sem guardar', cancelar: 'Continuar a editar', perigo: true })) return;
         onClose();
     };
 
@@ -282,6 +285,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
         }
         setAGuardar(true);
         const dados: Partial<Funcionario> = { ...f, iban: f.iban ? f.iban.replace(/\s+/gu, '') : f.iban, utilizador_id: portalModo === 'existente' ? f.utilizador_id || null : null };
+        let credenciais: Awaited<ReturnType<typeof ServicoContaPortal.criar>> | null = null;
         const ok = await executar(async () => {
             let id = funcionario?.id;
             if (funcionario) {
@@ -305,10 +309,23 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                 await ServicoRH.carregarDocumento({ funcionario_id: id!, categoria: a.categoria, nome: a.nome, ficheiro_nome: a.ficheiro.name, data_url: await lerFicheiro(a.ficheiro),
                     data_emissao: null, data_validade: a.validade || null, confidencial: false, substitui: null }, maxMb, actor);
             }
+            // Acesso ao portal: o sistema cria o utilizador (nome completo) e uma senha temporária.
+            if (portalModo === 'criar') credenciais = await ServicoContaPortal.criar({ id: id!, nome: dados.nome || '', email: dados.email || null, utilizador_id: null }, actor, users || []);
         }, funcionario ? 'Ficha do funcionário actualizada' : 'Funcionário registado');
         setAGuardar(false);
         if (!ok) return;
         setSujo(false);
+        if (credenciais) {
+            const c = credenciais as { username: string; senha: string };
+            const esc = (v: string) => v.replace(/[&<>"']/gu, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+            void reloadUsers();
+            setPortalModo('existente');
+            await alertaSucesso('Acesso ao portal criado', `<p>Entregue estes dados a <b>${esc(dados.nome || '')}</b>. A senha só aparece agora.</p>
+                <div style="margin-top:12px;text-align:left;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:14px">
+                <div>Utilizador: <b style="font-family:monospace">${esc(c.username)}</b></div>
+                <div style="margin-top:6px">Senha temporária: <b style="font-family:monospace">${esc(c.senha)}</b></div></div>
+                <p style="margin-top:10px;font-size:13px">No primeiro acesso o funcionário tem de trocar a senha. Só vê o portal do funcionário.</p>`, { allowOutsideClick: false });
+        }
         if (!funcionario) { try { localStorage.removeItem(CHAVE_RASCUNHO); } catch { /* sem armazenamento */ } }
         onSaved();
         if (outro && !funcionario) {
@@ -556,11 +573,18 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                                     onValueChange={v => set('chefe_id', v || null)} />
                             </Campo>
                             <Campo id="portal" label="Portal do funcionário" className="sm:col-span-2">
-                                <div className="flex flex-col gap-2 sm:flex-row">
+                                <div className={cn('flex flex-col gap-2', portalModo !== 'criar' && 'sm:flex-row')}>
                                     <Select value={portalModo} onValueChange={v => { setPortalModo(v as typeof portalModo); if (v === 'sem') set('utilizador_id', null); }}>
                                         <SelectTrigger id="ff-portal" className={cn(inp, 'sm:w-64')}><SelectValue /></SelectTrigger>
-                                        <SelectContent><SelectItem value="sem">Sem conta</SelectItem><SelectItem value="existente">Associar a utilizador existente</SelectItem></SelectContent>
+                                        <SelectContent><SelectItem value="sem">Sem acesso ao portal</SelectItem>
+                                            {!f.utilizador_id && <SelectItem value="criar">Criar acesso ao portal (utilizador e senha)</SelectItem>}
+                                            <SelectItem value="existente">{f.utilizador_id ? 'Com acesso ao portal' : 'Associar a utilizador existente'}</SelectItem></SelectContent>
                                     </Select>
+                                    {portalModo === 'criar' && (
+                                        <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-200">
+                                            Ao guardar, o sistema cria o utilizador <b>{f.nome?.trim() ? utilizadorDoNome(f.nome, users || []) : 'pelo nome completo'}</b> e uma senha temporária, trocada obrigatoriamente no 1.º acesso. Só vê o portal do funcionário.
+                                        </p>
+                                    )}
                                     {portalModo === 'existente' && (
                                         <SearchableSelect className={cn(inp, 'flex-1')} value={f.utilizador_id || ''} placeholder="Escolher utilizador" searchPlaceholder="Pesquisar utilizador…"
                                             options={(users || []).map(u => ({ value: u.id, label: u.name, subLabel: u.username || u.email || undefined }))} onValueChange={v => set('utilizador_id', v || null)} />

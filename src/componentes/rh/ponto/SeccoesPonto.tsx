@@ -21,6 +21,7 @@ import type { ActorRH, Funcionario } from '@/servicos/rh/ServicoRH';
 import { abrirDataUrl, executar, Indicador, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { ServicoRelogiosPonto } from '@/servicos/rh/ServicoRelogiosPonto';
 import { CartoesQrPonto } from './ExtrasPonto';
+import { avisar } from '@/bibliotecas/alerta';
 
 /** O servidor tem o e-mail (SMTP) configurado? Sem isso os alertas ficam só no sistema. */
 function EstadoEmail() {
@@ -408,7 +409,7 @@ export function DialogoPeriodo({ modo, ano, mes, departamentos, periodos, permit
                     {modo === 'fechar' && <Button disabled={aCorrer} onClick={() => void correr(() => ServicoPontoRH.fecharMes(ano, mes, actor, { converterPendentes: converter }), 'Mês fechado: os totais seguem para o processamento salarial')}><Lock className="mr-1.5 h-4 w-4" /> Fechar o mês</Button>}
                     {modo === 'reabrir' && <Button variant="destructive" disabled={aCorrer || motivo.trim().length < 5} onClick={() => void correr(async () => {
                         const r = await ServicoPontoRH.reabrirMes(ano, mes, motivo, actor);
-                        if (r.processamentoDesactualizado) window.alert('Atenção: o salário deste mês já tinha sido calculado. O processamento fica marcado como desactualizado: reabra-o e volte a calcular depois de corrigir o ponto.');
+                        if (r.processamentoDesactualizado) void avisar('O salário deste mês já tinha sido calculado. O processamento fica marcado como desactualizado: reabra-o e volte a calcular depois de corrigir o ponto.', 'warning');
                     }, 'Mês reaberto')}><LockOpen className="mr-1.5 h-4 w-4" /> Reabrir</Button>}
                 </DialogFooter>
             </DialogContent>

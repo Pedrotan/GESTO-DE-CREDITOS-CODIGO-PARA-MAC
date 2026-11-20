@@ -499,6 +499,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO simulations_flat_v2 (id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt) SELECT id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt FROM simulations",
   "INSERT INTO suppliers (id, name, phone, email, nif, address, notes, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
   "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, mustChangePassword) VALUES (?, ?, ?, ?, ?, 'employee', ?, ?, ?, 'active', 1)",
   "INSERT INTO warranties (id, clientId, creditId, type, description, marketValue, status, location, photos, documents, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO accounting_bank_imports (id, fileName, movements, actorId, actorName, importedAt) VALUES (?,?,?,?,?,?)",
   "INSERT OR IGNORE INTO audit_alerts (id, alertKey, ruleId, severity, title, description, eventIds, originUserId, originUserName, occurredAt, status, dueAt, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)",
@@ -1070,6 +1071,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE rh_funcionario SET qr_ponto_hash = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET qr_ponto_hash = NULL, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_funcionario SET seccao_id = ? WHERE id = ?",
+  "UPDATE rh_funcionario SET utilizador_id = ? WHERE id = ?",
   "UPDATE rh_funcionario_rubrica SET fim = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, tipo = ?, ciclo = ?, ciclo_inicio = ?, minimo_diario_min = ?, faixa_inicio = ?, faixa_fim = ?, actualizado_em = ? WHERE id = ?",
   "UPDATE rh_irt_tabela SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL",
@@ -3143,6 +3145,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "cfc731c9be02a2a7d51e20d9a8bca9e76c85319cb6b9747ca1664ed7531b17aa",
     "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "c73eca9923a175493035422c4236db3e5be51f9d2213120177a7d1cec0706a83",
+    "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, mustChangePassword) VALUES (?, ?, ?, ?, ?, 'employee', ?, ?, ?, 'active', 1)"
   ],
   [
     "c637cc14941e8f03adf41ddff99d5fc771ff8c1048acdc83e269e7e2a4b13b2c",
@@ -5427,6 +5433,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "7feaadc4f6cfd258e06e7ff38dca548dcd88e7ecde43f1d3659449f147127d78",
     "UPDATE rh_funcionario SET seccao_id = ? WHERE id = ?"
+  ],
+  [
+    "3ca6a2bd5e1d01daf48b86ad736c0bd695fbb19bb8918f37dd9124252c659213",
+    "UPDATE rh_funcionario SET utilizador_id = ? WHERE id = ?"
   ],
   [
     "1a4fe6b957191b66d3b2f3cbcb6c06db6e81ed418650bbdab93b0c397e4bd004",

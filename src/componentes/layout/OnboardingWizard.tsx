@@ -23,6 +23,7 @@ import { CLOUD_SYNC_BOOTSTRAP_KEY, startCloudSync, stopCloudSync, syncCloudNow }
 import { isCompanyActiveLocally, submitOnboardingCentral } from '@/servicos/ServicoIdentidadeEmpresa';
 import { acceptSystemTerms, setOnboardingOpen } from '@/bibliotecas/termos-sistema';
 import { LigacaoNuvemOnboarding } from '@/componentes/layout/LigacaoNuvemOnboarding';
+import { avisar, confirmar } from '@/bibliotecas/alerta';
 type StepMeta = { label: string; title: string; description: string; icon: React.ComponentType<{ className?: string }> };
 const STEP_META: Record<number, StepMeta> = {
     1: { label: 'Tipo de instalação', title: 'Como vai usar este computador?', description: 'Configure a empresa do zero, ligue-a à empresa que já existe na nuvem ou use um servidor da rede local.', icon: Server },
@@ -806,8 +807,8 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
 
                             <Button
                                 variant="outline"
-                                onClick={() => {
-                                    if (confirm("Isto irá reiniciar o assistente de configuração, mas manterá os dados dos seus clientes. Deseja continuar?")) {
+                                onClick={async () => {
+                                    if (await confirmar("Isto irá reiniciar o assistente de configuração, mas manterá os dados dos seus clientes. Deseja continuar?")) {
                                         localStorage.removeItem(ONBOARDING_KEY);
                                         localStorage.removeItem('tango_welcome_seen');
                                         window.location.reload();
@@ -822,7 +823,7 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                         <Button
                             variant="destructive"
                             onClick={async () => {
-                                if (confirm("Isto irá tentar reparar a base de dados criando as configurações em falta. Os seus dados (clientes, créditos) serão preservados. Continuar?")) {
+                                if (await confirmar("Isto irá tentar reparar a base de dados criando as configurações em falta. Os seus dados (clientes, créditos) serão preservados. Continuar?")) {
                                     try {
                                         console.log('🔧 [OnboardingWizard] Tentando reparar base de dados...');
 
@@ -834,14 +835,14 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                         `, ['Empresa', '', 'AOA', 20, new Date().toISOString()]);
 
                                         console.log('✅ [OnboardingWizard] Base de dados reparada!');
-                                        alert('Base de dados reparada com sucesso! A aplicação irá recarregar.');
+                                        await avisar('Base de dados reparada com sucesso! A aplicação irá recarregar.', 'success');
 
                                         // Clear onboarding flag to force reconfiguration
                                         localStorage.removeItem(ONBOARDING_KEY);
                                         window.location.reload();
                                     } catch (error) {
                                         console.error('❌ [OnboardingWizard] Falha ao reparar:', error);
-                                        alert(`Falha ao reparar a base de dados: ${error instanceof Error ? error.message : 'Erro desconhecido'}`);
+                                        void avisar(`Falha ao reparar a base de dados: ${error instanceof Error ? error.message : 'Erro desconhecido'}`, 'error');
                                     }
                                 }
                             }}
@@ -853,11 +854,11 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                         <Button
                             variant="ghost"
                             onClick={async () => {
-                                if (confirm("⚠️ AVISO CRÍTICO: Isto irá APAGAR PERMANENTEMENTE toda a base de dados (clientes, créditos, pagamentos). Esta ação não pode ser desfeita. Tem a certeza absoluta?")) {
+                                if (await confirmar("⚠️ AVISO CRÍTICO: Isto irá APAGAR PERMANENTEMENTE toda a base de dados (clientes, créditos, pagamentos). Esta ação não pode ser desfeita. Tem a certeza absoluta?")) {
                                     try {
                                         (window as any).electronAPI?.dbNuclearReset();
                                     } catch (e) {
-                                        alert("Não foi possível apagar a base de dados via App.");
+                                        void avisar("Não foi possível apagar a base de dados via App.", 'error');
                                     }
                                 }
                             }}
@@ -1080,15 +1081,15 @@ export const OnboardingWizard = ({ forceShow = false }: { forceShow?: boolean } 
                                     type="button"
                                     className="text-[11px] font-medium text-muted-foreground underline-offset-4 transition-colors hover:text-red-600 hover:underline"
                                     onClick={async () => {
-                                        if (confirm("ATENÇÃO: isto apaga completamente todos os dados e reinicia a aplicação como nova.\n\nUse apenas se tiver problemas técnicos graves.\n\nDeseja continuar?")) {
+                                        if (await confirmar("ATENÇÃO: isto apaga completamente todos os dados e reinicia a aplicação como nova.\n\nUse apenas se tiver problemas técnicos graves.\n\nDeseja continuar?")) {
                                             try {
                                                 if ((window as any).electronAPI?.dbNuclearReset) {
                                                     await (window as any).electronAPI.dbNuclearReset();
                                                 } else {
-                                                    alert("Esta funcionalidade não está disponível nesta versão.");
+                                                    void avisar("Esta funcionalidade não está disponível nesta versão.");
                                                 }
                                             } catch (e) {
-                                                alert("Erro ao tentar limpar dados.");
+                                                void avisar("Erro ao tentar limpar dados.", 'error');
                                             }
                                         }
                                     }}

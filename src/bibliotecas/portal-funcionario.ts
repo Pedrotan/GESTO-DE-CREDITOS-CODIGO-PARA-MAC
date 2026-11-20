@@ -1,8 +1,6 @@
 // Funcionário (perfil «Funcionário» só com o portal): não vê nada de créditos nem da gestão da empresa. O menu, as
 // páginas e os avisos do cabeçalho ficam reduzidos ao portal do funcionário (recibos, férias, dispensas, documentos).
-import { parsePermissionList } from './conta-principal.ts';
-
-const PERMISSOES_PORTAL = new Set(['hr_self', 'rh_portal.ver', 'rh_portal.criar']);
+import { PERMISSOES_PORTAL_FUNCIONARIO as PERMISSOES_PORTAL, parsePermissionList } from './conta-principal.ts';
 
 /** Perfil «Funcionário» sem outras permissões (uma excepção atribuída à mão devolve o sistema normal). */
 export const ehSoFuncionario = (user: { role?: unknown; permissions?: unknown } | null | undefined) =>

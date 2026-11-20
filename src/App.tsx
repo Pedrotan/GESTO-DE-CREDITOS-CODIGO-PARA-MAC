@@ -3,6 +3,7 @@ import { isChunkLoadError, lazyWithReload, reloadForNewVersion } from "@/bibliot
 import { TooltipProvider } from "@/componentes/ui/tooltip";
 import { HashRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { ehSoFuncionario, rotaPermitidaFuncionario } from "@/bibliotecas/portal-funcionario";
+import { TrocaSenhaObrigatoria, precisaTrocarSenha } from "@/componentes/autenticacao/TrocaSenhaObrigatoria";
 import { useData } from "@/contextos/ContextoDados";
 import { useAuth } from "@/contextos/ContextoAutenticacao";
 import { MaintenanceGuard } from "@/componentes/MaintenanceGuard";
@@ -90,6 +91,9 @@ const ProtectedRoute = ({ children, permission }: { children: JSX.Element; permi
   if (!isAuthenticated) {
     return <Navigate to="/entrar" replace />;
   }
+
+  // Senha temporária (ex.: acesso ao portal criado pelo RH): troca obrigatória antes de qualquer página.
+  if (precisaTrocarSenha(user)) return <TrocaSenhaObrigatoria />;
 
   // Funcionário: só o portal (nada de créditos nem da gestão). Qualquer outra página leva ao portal.
   if (ehSoFuncionario(user) && !rotaPermitidaFuncionario(location.pathname)) {

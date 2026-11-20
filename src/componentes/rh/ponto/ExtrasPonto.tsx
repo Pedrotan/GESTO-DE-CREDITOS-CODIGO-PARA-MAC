@@ -23,6 +23,7 @@ import { ServicoRelogiosPonto, relogioOnline, type Relogio } from '@/servicos/rh
 import type { ActorRH, Funcionario } from '@/servicos/rh/ServicoRH';
 import { executar, Indicador, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { toast } from '@/ganchos/usar-toast';
+import { confirmar } from '@/bibliotecas/alerta';
 
 const dataPt = (d: string) => d.split('-').reverse().join('/');
 const sinal = (m: number) => `${m > 0 ? '+' : m < 0 ? '−' : ''}${formatarMinutos(Math.abs(m))}`;
@@ -300,7 +301,7 @@ export function RelogiosPonto({ actor, onRecebido }: { actor: ActorRH; onRecebid
                                     <td className="text-right tabular-nums">{r.pendentes}</td>
                                     <td className="whitespace-nowrap px-2 text-right">
                                         <Button size="icon" variant="ghost" title="Nova chave" aria-label="Nova chave" onClick={() => void executar(async () => { const c = await ServicoRelogiosPonto.novaChave(r.device_id, actor); setChave({ nome: r.nome, deviceId: r.device_id, chave: c, serial: r.serial }); }, 'Nova chave criada (a anterior deixou de funcionar)')}><KeyRound className="h-4 w-4" /></Button>
-                                        <Button size="icon" variant="ghost" className="text-red-600" title="Remover" aria-label="Remover relógio" onClick={() => { if (window.confirm(`Remover o relógio «${r.nome}»? As marcações por recolher deste relógio perdem-se.`)) void executar(() => ServicoRelogiosPonto.remover(r.device_id, actor), 'Relógio removido').then(() => lista.recarregar()); }}><Trash2 className="h-4 w-4" /></Button>
+                                        <Button size="icon" variant="ghost" className="text-red-600" title="Remover" aria-label="Remover relógio" onClick={async () => { if (await confirmar(`Remover o relógio «${r.nome}»? As marcações por recolher deste relógio perdem-se.`)) void executar(() => ServicoRelogiosPonto.remover(r.device_id, actor), 'Relógio removido').then(() => lista.recarregar()); }}><Trash2 className="h-4 w-4" /></Button>
                                     </td>
                                 </tr>
                             );
@@ -358,7 +359,7 @@ export function CartoesQrPonto({ actor, funcionarios, empresa, onAlterado }: { a
     const [aGerar, setAGerar] = useState(false);
     const emitir = async (ids: string[]) => {
         if (!ids.length) return;
-        if (!window.confirm(`Emitir ${ids.length} cartão(ões) novo(s)? Os cartões anteriores destes funcionários deixam de funcionar.`)) return;
+        if (!await confirmar(`Emitir ${ids.length} cartão(ões) novo(s)? Os cartões anteriores destes funcionários deixam de funcionar.`)) return;
         setAGerar(true);
         try {
             const cartoes = [];

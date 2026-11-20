@@ -12,6 +12,7 @@ import type { Problema } from '@/bibliotecas/fiscal/tipos';
 import { descarregar, ErroFiscal, ficheiroSaft, gerarSaft, listarExportacoesSaft, prevalidarPeriodo } from '@/servicos/ServicoFiscal';
 import { Aviso, ListaProblemas, Vazio } from './comum';
 import { ContextoFiscal, dataPt, dataHoraPt } from './apoio';
+import { confirmar } from '@/bibliotecas/alerta';
 
 type Periodo = 'mensal' | 'trimestral' | 'semestral' | 'anual' | 'personalizado';
 const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
@@ -89,7 +90,7 @@ export default function SaftFiscal({ ctx, empresaPdf, clientesTotal }: { ctx: Co
             title={!validacao ? 'Pré-valide primeiro' : temErros ? 'Corrija os erros primeiro' : undefined}><Download className="h-4 w-4" />2. Gerar e baixar SAF-T (XML)</Button>
         </div>
         {temErros && ctx.isSuperAdmin && <button className="mt-2 text-[11px] text-red-700 underline"
-          onClick={() => window.confirm('Gerar com erros? O ficheiro pode ser recusado pela AGT; a operação fica registada na auditoria.') && gerar(true)}>Gerar mesmo assim (Super Administrador)</button>}
+          onClick={async () => await confirmar('Gerar com erros? O ficheiro pode ser recusado pela AGT; a operação fica registada na auditoria.') && gerar(true)}>Gerar mesmo assim (Super Administrador)</button>}
         <Button variant="ghost" size="sm" className="mt-3 gap-2" onClick={() => generateSaftReportPDF(empresaPdf, { fiscalYear: ano, startDate: new Date(`${r.inicio}T12:00:00`), endDate: new Date(`${r.fim}T12:00:00`) },
           { clients: ultimo?.estatisticas.clientes ?? clientesTotal, invoices: ultimo?.estatisticas.facturas ?? validacao?.documentos ?? 0, payments: ultimo?.estatisticas.recibos ?? 0 })}><Printer className="h-4 w-4" />Relatório síntese (PDF)</Button>
 

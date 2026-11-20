@@ -12,6 +12,7 @@ import { ServicoRH, type Funcionario } from '@/servicos/rh/ServicoRH';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { CapturaFoto } from '@/componentes/rh/ponto/PortalPonto';
 import { CameraQr, useLeitorTeclado } from '@/componentes/rh/ponto/LeitorQr';
+import { confirmar } from '@/bibliotecas/alerta';
 
 const ROTULO: Record<TipoMarcacao, string> = { entrada: 'Entrada', saida: 'Saída', inicio_pausa: 'Início de pausa', fim_pausa: 'Fim de pausa' };
 const ICONE: Record<TipoMarcacao, typeof LogIn> = { entrada: LogIn, saida: LogOut, inicio_pausa: Pause, fim_pausa: Play };
@@ -75,7 +76,7 @@ export default function QuiosquePonto() {
     return (
         <div className="fixed inset-0 z-[9000] flex flex-col items-center justify-center bg-slate-950 p-6 text-white">
             <button type="button" className="absolute right-4 top-4 rounded-full p-2 text-slate-500 hover:text-white" aria-label="Sair do quiosque"
-                onClick={() => { if (window.confirm('Sair do modo quiosque?')) navigate('/rh/ponto'); }}><X className="h-6 w-6" /></button>
+                onClick={async () => { if (await confirmar('Sair do modo quiosque?')) navigate('/rh/ponto'); }}><X className="h-6 w-6" /></button>
             <p className="font-mono text-7xl font-black tabular-nums">{relogio.slice(11, 16)}</p>
             <p className="mb-8 text-lg capitalize text-slate-400">{new Date().toLocaleDateString('pt-PT', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
             {mensagem ? (

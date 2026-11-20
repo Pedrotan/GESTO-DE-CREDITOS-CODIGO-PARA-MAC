@@ -26,6 +26,7 @@ import { LegalCaseForm } from '@/componentes/forms/LegalCaseForm';
 import { LegalCase } from '@/tipos/contencioso';
 import { ServicoContencioso } from '@/servicos/ServicoContencioso';
 import { porMaisRecente } from '@/bibliotecas/ordenacao';
+import { confirmar } from '@/bibliotecas/alerta';
 import {
     legalCandidates, legalCaseMetrics, nextLegalStage, appendTimelineEntry, parseTimeline, daysBetween,
     eligibleCollateralValue, LEGAL_STAGES, LEGAL_STALE_DAYS, LEGAL_NON_RECOVERY_OUTCOMES,
@@ -147,7 +148,7 @@ export default function Contencioso() {
     };
 
     const handleDelete = async (id: string) => {
-        if (confirm('Deseja mover este processo para a lixeira? Poderá restaurá-lo mais tarde se necessário.')) {
+        if (await confirmar('Deseja mover este processo para a lixeira? Poderá restaurá-lo mais tarde se necessário.')) {
             await deleteLegalCase(id, actor);
         }
     };
@@ -156,7 +157,7 @@ export default function Contencioso() {
         const next = nextLegalStage(c.stage);
         if (!next) return;
         if (next === 'closed') { setCloseForm({ outcome: CLOSE_OUTCOMES[0], text: '' }); setClosing(c); return; }
-        if (!confirm(`Avançar o processo ${c.id} para "${STAGE_META[next].label}"?`)) return;
+        if (!await confirmar(`Avançar o processo ${c.id} para "${STAGE_META[next].label}"?`)) return;
         await updateLegalCase(c.id, {
             stage: next,
             lastAction: `Avançou para ${STAGE_META[next].label}`,

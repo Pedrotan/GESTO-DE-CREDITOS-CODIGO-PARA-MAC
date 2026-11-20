@@ -22,6 +22,7 @@ import {
     CHAT_ACCEPT, CHAT_MAX_MESSAGE_BYTES, estadoPresenca, fichaCliente, lerAnexo, problemaFicheiro, resumoMensagem, rotuloDia, tamanhoLegivel,
 } from '@/bibliotecas/chat-interno';
 import type { ChatAttachment, ChatClientCard, ChatMessage } from '@/tipos/credito';
+import { confirmar } from '@/bibliotecas/alerta';
 
 const iniciais = (nome: string) => nome.split(/\s+/u).filter(Boolean).slice(0, 2).map(parte => parte[0]).join('').toUpperCase() || '?';
 const perfil = (role: string) => role === 'super_admin' ? 'Super Admin' : role === 'admin' ? 'Administrador' : role === 'manager' ? 'Gestor' : 'Utilizador';
@@ -296,7 +297,7 @@ export default function Chat() {
                                     </DropdownMenuTrigger>
                                     <DropdownMenuContent align="end">
                                         <DropdownMenuItem className="gap-2 text-destructive focus:text-destructive" onClick={async () => {
-                                            if (window.confirm('Tem a certeza que deseja limpar todo o histórico com este utilizador?')) await clearMessages(currentUser!.id, selectedUser.id);
+                                            if (await confirmar('Tem a certeza que deseja limpar todo o histórico com este utilizador?')) await clearMessages(currentUser!.id, selectedUser.id);
                                         }}>
                                             <Trash2 className="h-4 w-4" /> Limpar histórico
                                         </DropdownMenuItem>
