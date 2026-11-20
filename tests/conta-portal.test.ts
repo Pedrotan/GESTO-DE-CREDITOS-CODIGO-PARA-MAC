@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { senhaAleatoria, utilizadorDoNome } from '../src/bibliotecas/rh/conta-portal.ts';
+import { enderecoPortal, senhaAleatoria, utilizadorDoNome } from '../src/bibliotecas/rh/conta-portal.ts';
 import { checkUserMutation, ehContaPortalNova, ehContaSoPortal, ehReposicaoSenhaPortal } from '../src/bibliotecas/conta-principal.ts';
 import { ehSoFuncionario } from '../src/bibliotecas/portal-funcionario.ts';
 import { validatePasswordStrength } from '../src/bibliotecas/password-validator.ts';
@@ -60,4 +60,11 @@ test('troca obrigatória: a própria conta só a conclui com a nova senha', () =
     assert.match(so.error || '', /nova senha/u);
     const comSenha = checkUserMutation({ kind: 'update', sql: 'UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?', params: ['h', 0, 'u1'], actor: eu, target: alvo });
     assert.equal(comSenha.error, null);
+});
+
+test('ficha de acesso: endereço do portal é o da versão web; no computador, o domínio oficial', () => {
+    assert.equal(enderecoPortal({ protocol: 'https:', hostname: 'bravaldo.tangogestaoecreditos.tech', origin: 'https://bravaldo.tangogestaoecreditos.tech' }), 'https://bravaldo.tangogestaoecreditos.tech');
+    assert.equal(enderecoPortal({ protocol: 'file:', hostname: '', origin: 'null' }), 'https://tangogestaoecreditos.tech');
+    assert.equal(enderecoPortal({ protocol: 'http:', hostname: 'localhost', origin: 'http://localhost:5199' }), 'https://tangogestaoecreditos.tech');
+    assert.equal(enderecoPortal(null), 'https://tangogestaoecreditos.tech');
 });

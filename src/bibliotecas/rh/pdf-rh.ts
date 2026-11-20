@@ -543,3 +543,95 @@ export function gerarFichaIndividualPdf(nome: string, seccoes: SeccaoFicha[], se
     }
     return terminar(doc, `${prefixo}-${nome.replace(/[^\w]+/gu, '_')}.pdf`, saida);
 }
+
+export type DadosAcessoPortal = {
+    motivo: 'criacao' | 'reposicao';
+    funcionario: { nome: string; numero: string; cargo?: string; departamento?: string; seccao?: string; email?: string | null };
+    utilizador: string; senha: string; endereco: string; emitidoPor: string;
+};
+
+/**
+ * Ficha de acesso ao portal do funcionário: credenciais (utilizador e senha temporária), endereço, passos do primeiro
+ * acesso, regras da senha, o que o portal permite e cuidados de segurança, com recibo assinado. Não é arquivada no
+ * sistema (a senha só existe neste documento).
+ */
+export function gerarFichaAcessoPortalPdf(d: DadosAcessoPortal, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF();
+    const config = getCompanySettings(settings);
+    const cor = resolveBrandPrimary(config.primaryColor);
+    const rodape = () => applyBranding(doc, config, userName, true);
+    applyBranding(doc, config, userName);
+    let y = brandingHeaderBottom(doc) + 12;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.setTextColor(15, 23, 42);
+    doc.text('FICHA DE ACESSO AO PORTAL DO FUNCIONÁRIO', 105, y, { align: 'center' });
+    doc.setFontSize(9); doc.setTextColor(cor[0], cor[1], cor[2]);
+    doc.text(d.motivo === 'criacao' ? 'Criação do acesso · Documento pessoal e confidencial' : 'Reposição da senha · Documento pessoal e confidencial', 105, y + 6, { align: 'center' });
+    y += 12;
+    const f = d.funcionario;
+    const tabela = (titulo: string, linhas: Array<[string, string]>, destaque = false) => {
+        autoTable(doc, {
+            startY: y, theme: 'grid', styles: { fontSize: 9, cellPadding: 2.2 }, headStyles: { fillColor: cor },
+            head: [[{ content: titulo, colSpan: 2 }]], body: linhas,
+            columnStyles: { 0: { fontStyle: 'bold', cellWidth: 55, fillColor: [248, 250, 252] }, ...(destaque ? { 1: { font: 'courier', fontStyle: 'bold', fontSize: 12 } } : {}) },
+            didDrawPage: rodape,
+        });
+        y = ((doc as any).lastAutoTable?.finalY || y + 20) + 5;
+    };
+    tabela('Funcionário', [
+        ['Nome', f.nome],
+        ['N.º mecanográfico', f.numero || '—'],
+        ['Cargo', f.cargo || '—'],
+        ['Departamento / secção', [f.departamento, f.seccao].filter(Boolean).join(' · ') || '—'],
+        ['Email na ficha', f.email || '—'],
+    ]);
+    tabela('Credenciais de acesso', [
+        ['Endereço', d.endereco],
+        ['Utilizador', d.utilizador],
+        ['Senha temporária', d.senha],
+    ], true);
+    tabela('Emissão', [
+        ['Emitida em', formatLuandaDateTime(new Date().toISOString())],
+        ['Emitida por', d.emitidoPor],
+        ['Motivo', d.motivo === 'criacao' ? 'Criação do acesso ao portal' : 'Reposição da senha (a anterior deixou de funcionar)'],
+    ]);
+    const blocos: Array<[string, string[]]> = [
+        ['Primeiro acesso', [
+            `1. Abra ${d.endereco} no navegador (computador ou telemóvel).`,
+            '2. Num dispositivo novo, o sistema pode pedir a ligação à empresa (NIF e Código de Acesso): peça-a aos Recursos Humanos.',
+            `3. Em «Iniciar sessão», escreva o utilizador ${d.utilizador} e a senha temporária desta ficha.`,
+            '4. O sistema pede logo uma senha nova: só depois de a definir pode usar o portal. A senha temporária deixa de funcionar.',
+        ]],
+        ['Regras da senha nova', [
+            '• Pelo menos 8 caracteres, com letras maiúsculas e minúsculas, números e um símbolo (ex.: @ # $ % & * ! ?).',
+            '• Não use o nome, a data de nascimento, o BI nem senhas de outros serviços.',
+        ]],
+        ['O que pode fazer no portal', [
+            '• Consultar e descarregar os recibos de vencimento e confirmar a recepção do salário.',
+            '• Ver a folha de salários, o INSS, o IRT e os subsídios; apresentar reclamações.',
+            '• Pedir férias, justificar faltas e acompanhar os seus pedidos e o registo de ponto.',
+            '• Trocar mensagens com os Recursos Humanos pelo correio interno.',
+            '• O portal mostra só os seus dados: não dá acesso aos créditos nem à gestão da empresa.',
+        ]],
+        ['Segurança', [
+            '• A senha é pessoal e intransmissível. Os Recursos Humanos nunca lhe pedem a senha.',
+            '• Se a esquecer ou suspeitar que alguém a conhece, peça aos Recursos Humanos a reposição da senha.',
+            '• Depois de definir a senha nova, guarde esta ficha em local seguro ou destrua-a.',
+        ]],
+    ];
+    const altura = doc.internal.pageSize.getHeight();
+    for (const [titulo, linhas] of blocos) {
+        const texto = linhas.flatMap(linha => doc.splitTextToSize(linha, 168) as string[]);
+        if (y + 8 + texto.length * 4.6 > altura - 40) { doc.addPage(); rodape(); y = brandingHeaderBottom(doc) + 10; }
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10); doc.setTextColor(cor[0], cor[1], cor[2]);
+        doc.text(titulo, 20, y + 4);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(30, 41, 59);
+        doc.text(texto, 22, y + 10, { lineHeightFactor: 1.45 });
+        y += 10 + texto.length * 4.6 + 3;
+    }
+    if (y + 30 > altura - 20) { doc.addPage(); rodape(); y = brandingHeaderBottom(doc) + 10; }
+    doc.setFontSize(8.5); doc.setTextColor(71, 85, 105);
+    doc.text('Recebi esta ficha e as credenciais de acesso, que guardarei em segurança.', 20, y + 4);
+    assinaturas(doc, y + 24, ['O funcionário', 'Recursos Humanos']);
+    const nome = f.nome.normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^\w]+/gu, '_');
+    return terminar(doc, `Acesso_Portal_${nome}.pdf`, saida);
+}

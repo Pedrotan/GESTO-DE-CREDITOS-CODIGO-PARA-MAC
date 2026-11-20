@@ -21,3 +21,7 @@ export function senhaAleatoria(tamanho = 10) {
     for (let i = letras.length - 1; i > 0; i--) { const j = aleatorio(i + 1); [letras[i], letras[j]] = [letras[j], letras[i]]; }
     return letras.join('');
 }
+
+/** Endereço onde o funcionário entra no portal: o desta página na versão web; no computador, o domínio oficial. */
+export const enderecoPortal = (local: { protocol: string; hostname: string; origin: string } | null = typeof location === 'undefined' ? null : location) =>
+    local && /^https?:$/u.test(local.protocol) && !/^(localhost|127\.|\[::1\])/u.test(local.hostname) ? local.origin : 'https://tangogestaoecreditos.tech';

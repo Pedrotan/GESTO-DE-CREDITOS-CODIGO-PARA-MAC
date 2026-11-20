@@ -133,7 +133,7 @@ const USERS_SCHEMA = `
     CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, username TEXT UNIQUE,
         password TEXT NOT NULL, role TEXT NOT NULL, avatar TEXT, createdAt TEXT NOT NULL, lastLogin TEXT, lastSeen TEXT,
         permissions TEXT, status TEXT DEFAULT 'active', ip TEXT, signature TEXT, failedAttempts INTEGER DEFAULT 0,
-        twoFactorEnabled BOOLEAN DEFAULT 0, twoFactorSecret TEXT, blockedAt TEXT, mfaRecoveryCodes TEXT);
+        twoFactorEnabled BOOLEAN DEFAULT 0, twoFactorSecret TEXT, blockedAt TEXT, mfaRecoveryCodes TEXT, mustChangePassword INTEGER DEFAULT 0);
     CREATE TABLE sync_conflicts (id TEXT PRIMARY KEY, operation TEXT, entityType TEXT, entityId TEXT, status TEXT, createdAt TEXT, resolutionNote TEXT, resolvedAt TEXT);`;
 
 const sqliteFor = database => ({
@@ -705,6 +705,7 @@ test('integridade no PC: a pedido do servidor reenvia a cópia dos registos dos 
     for (let index = 0; index < 6; index++) database.run(`INSERT INTO clients VALUES ('c${index}', 'Cliente ${index}')`);
     // Sem cópia completa inicial: só a reparação pode enviar estes registos.
     for (const key of ['cloud_sync_bootstrap_v3', 'cloud_sync_repair_snapshot_v4', 'cloud_sync_heal_snapshot_v1']) localStorage.setItem(`${key}:default`, 'true');
+    localStorage.setItem('cloud_sync_users_full_roster_v2:default', '1');
     let asked = false;
     const result = await withFetch(previous => async (url, init) => {
         const response = await previous(url, init);
@@ -729,4 +730,33 @@ test('integridade no PC: a pedido do servidor reenvia a cópia dos registos dos 
     assert.equal(server.ops.length, 6, 'os 6 registos foram reenviados como cópias');
     assert.equal(cloud.getLastIntegrity()?.missingTables, 1);
     assert.ok(result.status.issues.some(issue => issue.kind === 'integrityMissing'));
+});
+
+test('conta criada no navegador (ex.: acesso ao portal): fica na lista do servidor e outro dispositivo entra logo', async () => {
+    server.ops = []; server.rosters.clear();
+    // Lista antiga do computador da empresa, sem a conta nova.
+    const pc = useDevice({ electronAPI: desktopApi });
+    pc.run(`INSERT INTO users (id, name, email, password, role, createdAt) VALUES ('admin', 'Admin', 'admin@empresa.ao', 'hash-a', 'super_admin', '2026-01-01')`);
+    const antiga = await desktopApi(pc).syncUsersPayload({ apiKey: SERVER_CODE, tenantId: TENANT, deviceId: 'pc', knownIds: [] });
+    server.rosters.set(sha256(TENANT), { operation_id: antiga.id, device_id: 'pc', payload: antiga.payload, updated_at: new Date(Date.now() - 86_400_000) });
+    // Navegador do RH: recebe a lista, cria a conta do portal e sincroniza.
+    const rh = useDevice();
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    try {
+        assert.equal((await cloud.receiveUsersFromCloud()).state, 'applied');
+        rh.run(`INSERT INTO users (id, name, email, username, password, role, createdAt, permissions, status, mustChangePassword)
+            VALUES ('portal', 'Fernanda Silva', 'fernanda.silva@portal.interno', 'fernanda.silva', 'hash-p', 'employee', '2026-11-20', '["hr_self"]', 'active', 1)`);
+        assert.equal((await cloud.syncCloudNow()).success, true);
+    } finally { cloud.stopCloudSync(); }
+    assert.equal(server.rosters.get(sha256(TENANT))?.device_id !== 'pc', true, 'a lista guardada passou a ser a do navegador');
+    // Telemóvel do funcionário, sem nada: no ecrã de entrada pede a lista e encontra a conta (pelo nome de utilizador).
+    const telemovel = useDevice();
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    try {
+        assert.equal((await cloud.receiveUsersFromCloud()).state, 'applied');
+    } finally { cloud.stopCloudSync(); }
+    const contas = await sqliteFor(telemovel).all('SELECT id, username, mustChangePassword FROM users ORDER BY id');
+    assert.deepEqual(contas.map(c => c.id), ['admin', 'portal'], 'a lista completa chegou (não só a conta alterada)');
+    assert.equal(contas.find(c => c.id === 'portal').username, 'fernanda.silva');
+    assert.equal(contas.find(c => c.id === 'portal').mustChangePassword, 1);
 });

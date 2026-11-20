@@ -775,6 +775,7 @@ const applyGroups = async (groups: RemoteGroup[]): Promise<ApplyResult> => {
 const LOCAL_USER_COLUMNS = new Set(['twoFactorEnabled', 'twoFactorSecret', 'mfaRecoveryCodes', 'failedAttempts', 'blockedAt', 'lastLogin', 'lastSeen', 'ip', 'avatar']);
 // Navegador: impressão de cada utilizador tal como foi sincronizado da última vez (só se envia o que mudou).
 const USERS_STATE_KEY = 'cloud_sync_users_state_v1';
+const USERS_FULL_ROSTER_KEY = 'cloud_sync_users_full_roster_v2';
 // Computador: utilizadores incluídos na última lista enviada (para comunicar as remoções).
 const USERS_IDS_KEY = 'cloud_sync_users_ids_v1';
 type UsersRoster = { kind: 'users'; columns: string[]; rows: unknown[][]; deleted?: string[]; createdAt: string };
@@ -973,8 +974,20 @@ const webUsersChange = async () => {
         return previous[id] !== fingerprints[id] && Boolean(row[columns.indexOf('password')]);
     });
     const deleted = Object.keys(previous).filter(id => !(id in fingerprints));
-    if (!changed.length && !deleted.length) return null;
-    return { columns, rows: changed, deleted, fingerprints };
+    // Uma vez por navegador (versões anteriores só enviavam as linhas alteradas): a lista completa vai para o servidor.
+    const listaCompletaEnviada = localStorage.getItem(scopedStorageKey(USERS_FULL_ROSTER_KEY)) === '1';
+    if (!changed.length && !deleted.length && listaCompletaEnviada) return null;
+    // Vai sempre a lista completa (como a do computador): o servidor guarda-a como a lista da empresa e um navegador
+    // ou telemóvel novo encontra logo, ao entrar, as contas criadas aqui (ex.: acesso ao portal do funcionário).
+    let enviar = columns;
+    let completas = rows.filter(row => Boolean(row[columns.indexOf('password')]));
+    if (JSON.stringify(completas).length > 1_500_000 && columns.includes('signature')) {
+        const semAssinatura = columns.indexOf('signature');
+        enviar = columns.filter(column => column !== 'signature');
+        completas = completas.map(row => row.filter((_, index) => index !== semAssinatura));
+    }
+    if (!completas.length && !deleted.length) return null;
+    return { columns: enviar, rows: completas, deleted, fingerprints };
 };
 
 const isUsersRoster = (operation: SyncOperation) => (operation as any).kind === 'users';
@@ -1498,12 +1511,13 @@ export const syncCloudNow = async () => {
                         headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
                 credentials: 'same-origin',
                         // O cursor fica igual: o que vier na resposta é recebido na próxima sincronização.
-                        body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, pull: false, operations: [{ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) }] }),
+                        body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, pull: false, operations: [{ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key), kind: 'users' }] }),
                         signal: AbortSignal.timeout(requestTimeout(JSON.stringify(change.rows).length * 2))
                     });
                     const acknowledgement = await response.json().catch(() => ({}));
                     if (response.ok && acknowledgement.success === true) {
                         localStorage.setItem(scopedStorageKey(USERS_STATE_KEY), JSON.stringify(change.fingerprints));
+                        localStorage.setItem(scopedStorageKey(USERS_FULL_ROSTER_KEY), '1');
                         totalPushed += 1;
                     }
                 }

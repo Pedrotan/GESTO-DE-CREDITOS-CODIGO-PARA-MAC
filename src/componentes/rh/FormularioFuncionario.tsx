@@ -23,17 +23,11 @@ import { cn } from '@/bibliotecas/utils';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { ServicoContaPortal, utilizadorDoNome } from '@/servicos/rh/ServicoContaPortal';
 import { ehContaSoPortal } from '@/bibliotecas/conta-principal';
-import { alertaSucesso, avisar, confirmar } from '@/bibliotecas/alerta';
+import customSwal, { avisar, confirmar } from '@/bibliotecas/alerta';
+import { enderecoPortal } from '@/bibliotecas/rh/conta-portal';
+import { gerarFichaAcessoPortalPdf } from '@/bibliotecas/rh/pdf-rh';
 
 const escHtml = (v: string) => v.replace(/[&<>"']/gu, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
-
-/** Mostra o utilizador e a senha temporária para entregar ao funcionário (a senha só aparece agora). */
-const mostrarCredenciais = (titulo: string, nome: string, utilizador: string, senha: string, nota: string) =>
-    alertaSucesso(titulo, `<p>Entregue estes dados a <b>${escHtml(nome)}</b>. A senha só aparece agora.</p>
-        <div style="margin-top:12px;text-align:left;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:14px">
-        <div>Utilizador: <b style="font-family:monospace">${escHtml(utilizador)}</b></div>
-        <div style="margin-top:6px">Senha temporária: <b style="font-family:monospace">${escHtml(senha)}</b></div></div>
-        <p style="margin-top:10px;font-size:13px">${escHtml(nota)}</p>`, { allowOutsideClick: false });
 import { useData } from '@/contextos/ContextoDados';
 import { toast } from '@/ganchos/usar-toast';
 import { deslocarDentro, executar, kz, lerFicheiro, paraMinor, seccaoVisivel } from './comum-rh';
@@ -122,12 +116,37 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
         try {
             const { senha } = await ServicoContaPortal.reporSenha(funcionario, actor);
             void reloadUsers();
-            await mostrarCredenciais('Senha do portal reposta', funcionario.nome, conta?.username || conta?.email || '', senha, 'No próximo acesso o funcionário tem de trocar esta senha.');
+            await entregarFichaAcesso('reposicao', funcionario, conta?.username || conta?.email || '', senha);
         } catch (e) {
             void avisar((e as Error)?.message || 'Não foi possível repor a senha.', 'error');
         }
     };
     const { companySettings } = useData();
+    // Credenciais do portal: em vez de aparecerem no ecrã, descarrega-se a ficha de acesso em PDF para entregar ao
+    // funcionário (a senha temporária só existe nesse documento; o sistema guarda apenas o hash).
+    const entregarFichaAcesso = async (motivo: 'criacao' | 'reposicao', ficha: Funcionario, utilizador: string, senha: string) => {
+        const gerar = () => gerarFichaAcessoPortalPdf({
+            motivo, utilizador, senha, endereco: enderecoPortal(), emitidoPor: actor.name,
+            funcionario: {
+                nome: ficha.nome, numero: ficha.numero_mecanografico, email: ficha.email,
+                cargo: cargos.find(c => c.id === ficha.cargo_id)?.nome, departamento: departamentos.find(d => d.id === ficha.departamento_id)?.nome,
+                seccao: seccoes.find(s => s.id === ficha.seccao_id)?.nome,
+            },
+        }, companySettings, actor.name);
+        let pdf = gerar();
+        for (;;) {
+            const r = await customSwal.fire({
+                icon: 'success', title: motivo === 'criacao' ? 'Acesso ao portal criado' : 'Senha do portal reposta',
+                html: `<p>A ficha de acesso de <b>${escHtml(ficha.nome)}</b> foi descarregada:<br><b>${escHtml(pdf.fileName)}</b></p>
+                    <p style="margin-top:10px;font-size:13px">Imprima-a e entregue-a ao funcionário. Tem o utilizador, a senha temporária, o endereço e os passos do primeiro acesso.
+                    A senha não fica guardada no sistema: só existe nesta ficha.</p>`,
+                confirmButtonText: 'Concluído', confirmButtonColor: '#059669', showDenyButton: true, denyButtonText: 'Descarregar de novo', denyButtonColor: '#475569',
+                allowOutsideClick: false, allowEscapeKey: false,
+            });
+            if (!r.isDenied) break;
+            pdf = gerar();
+        }
+    };
     const edicao = Boolean(funcionario);
     const hoje = luandaTodayKey();
     const provinciaEmpresa = provinciaDPA((companySettings as { location?: string })?.location) || provinciaDPA(companySettings?.address);
@@ -343,7 +362,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
             const c = credenciais as { username: string; senha: string };
             void reloadUsers();
             setPortalModo('existente');
-            await mostrarCredenciais('Acesso ao portal criado', dados.nome || '', c.username, c.senha, 'No primeiro acesso o funcionário tem de trocar a senha. Só vê o portal do funcionário.');
+            await entregarFichaAcesso('criacao', { ...f, ...dados } as Funcionario, c.username, c.senha);
         }
         if (!funcionario) { try { localStorage.removeItem(CHAVE_RASCUNHO); } catch { /* sem armazenamento */ } }
         onSaved();
