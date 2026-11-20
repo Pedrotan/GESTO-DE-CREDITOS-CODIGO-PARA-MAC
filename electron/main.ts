@@ -1083,6 +1083,8 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_modelo: "hr_settings",
   // Reclamações da folha de correcção: o funcionário reclama pelo portal (pedido do portal); responder é de quem processa.
   rh_reclamacao: "hr_payroll",
+  // Confirmação da recepção do salário: só pelo portal (pedido do funcionário); ninguém a altera.
+  rh_recebimento: "hr_payroll",
   rh_doc_auditoria: "hr_view",
   // rh_alerta fica sem permissão própria: os alertas são derivados e a tarefa diária corre para qualquer utilizador autenticado.
   rh_plano_ferias: "hr_manage",

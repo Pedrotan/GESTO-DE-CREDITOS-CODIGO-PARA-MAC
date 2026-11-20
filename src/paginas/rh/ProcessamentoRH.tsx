@@ -19,6 +19,7 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { useData } from '@/contextos/ContextoDados';
 import { ReclamacoesFolha } from '@/componentes/rh/ReclamacoesFolha';
+import { RecepcaoSalarios } from '@/componentes/rh/RecepcaoSalarios';
 import { NavegacaoRH, dataPt, executar, kz, paraMinor, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { useBaseRH } from './FuncionariosRH';
 
@@ -290,6 +291,8 @@ export default function ProcessamentoRH() {
                                     <AlertTriangle className="h-4 w-4 shrink-0" /> Há valores alterados desde o último cálculo. Carregue em «Recalcular salários».
                                 </div>
                             )}
+
+                            {(p.estado === 'pago' || p.estado === 'fechado') && <RecepcaoSalarios key={`rec-${p.id}`} processamentoId={p.id} recibos={detalhe.dados.recibos.map(r => ({ id: r.id, nome: r.nome }))} />}
 
                             <ReclamacoesFolha key={p.id} processamentoId={p.id} actor={actor} podeResponder={Boolean(calcular || aprovar)}
                                 nomeDe={id => base.dados.funcionarios.find(f => f.id === id)?.nome || 'Funcionário'} onMudou={() => void recarregar()} />

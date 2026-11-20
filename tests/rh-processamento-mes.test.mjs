@@ -35,6 +35,7 @@ async function loadModules() {
                 export { regraLeituraRH, carregamentoPortalPermitido } from '@/bibliotecas/rh/permissoes-rh';
                 export { ABAS_RH } from '@/componentes/rh/comum-rh';
                 export { ServicoReclamacoesRH } from '@/servicos/rh/ServicoReclamacoesRH';
+                export { ServicoRecebimentoRH, ultimaPorRecibo } from '@/servicos/rh/ServicoRecebimentoRH';
                 export { ServicoPortalRH } from '@/servicos/rh/ServicoPortalRH';
                 export { isPortalPedidoSql } from '@/bibliotecas/rh/portal-sql';
             `,
@@ -416,5 +417,30 @@ test('folha de correcção: o funcionário reclama, a aprovação espera pela re
         await assert.rejects(M.ServicoReclamacoesRH.reclamar({ funcionario_id: f, processamento_id: id, recibo_id: recibo.id, motivo: 'Depois de aprovada já não dá.' }, func), /antes da aprovação/u);
         assert.equal(M.isPortalPedidoSql(`INSERT INTO rh_reclamacao (id, funcionario_id, processamento_id, recibo_id, codigo, descricao, valor_minor, motivo, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)`), true);
         assert.equal(M.isPortalPedidoSql(`INSERT INTO rh_reclamacao (id, funcionario_id, processamento_id, recibo_id, codigo, descricao, valor_minor, motivo, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'aceite', ?, ?, ?)`), false, 'o funcionário não decide a própria reclamação');
+    } finally { db.close(); }
+});
+
+test('recepção do salário: só depois de pago, só do próprio recibo, e a última confirmação vale', async () => {
+    const M = await loadModules();
+    const db = await createDatabase(M);
+    try {
+        const f = await registar(M);
+        const func = { id: 'u-func', name: 'Pedro Tango', role: 'employee' };
+        const id = await M.ServicoSalariosRH.abrir({ ano: 2026, mes: 10, tipo: 'normal' }, RH);
+        await M.ServicoSalariosRH.calcular(await processamento(M, id), RH);
+        const recibo = db.prepare('SELECT * FROM rh_recibo WHERE funcionario_id = ?').get(f);
+        const confirmar = (estado, observacao) => M.ServicoRecebimentoRH.confirmar({ funcionario_id: f, recibo_id: recibo.id, processamento_id: id, estado, observacao }, func);
+        await M.ServicoSalariosRH.aprovar(await processamento(M, id), { ...RH, id: 'u-aprov' });
+        await assert.rejects(confirmar('recebido'), /depois de pago/u, 'aprovado mas ainda não pago');
+        // Pagamento marcado directamente (o lançamento contabilístico é testado à parte).
+        db.prepare(`UPDATE rh_processamento SET estado = 'pago', pago_por = 'u-aprov', pago_em = 'agora' WHERE id = ?`).run(id);
+        await assert.rejects(confirmar('nao_recebido', ''), /Diga ao RH/u);
+        await confirmar('nao_recebido', 'Ainda não entrou na conta.');
+        await confirmar('recebido');
+        const ultima = M.ultimaPorRecibo(await M.ServicoRecebimentoRH.doProcessamento(id)).get(recibo.id);
+        assert.equal(ultima.estado, 'recebido', 'a confirmação mais recente vale');
+        assert.throws(() => db.prepare(`INSERT INTO rh_recebimento (id, funcionario_id, recibo_id, processamento_id, estado, criado_em) VALUES ('x', 'outro', ?, ?, 'recebido', 'agora')`).run(recibo.id, id), /seu próprio salário/u);
+        assert.throws(() => db.prepare(`UPDATE rh_recebimento SET estado = 'nao_recebido'`).run(), /não se altera/u);
+        assert.equal(M.isPortalPedidoSql('INSERT INTO rh_recebimento (id, funcionario_id, recibo_id, processamento_id, estado, observacao, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'), true);
     } finally { db.close(); }
 });

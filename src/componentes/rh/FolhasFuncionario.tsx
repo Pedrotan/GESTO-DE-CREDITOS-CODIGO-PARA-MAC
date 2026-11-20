@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronUp, FileDown, MessageSquareWarning } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, FileDown, MessageSquareWarning, XCircle } from 'lucide-react';
 import { Button } from '@/componentes/ui/button';
 import { Label } from '@/componentes/ui/label';
 import { Textarea } from '@/componentes/ui/textarea';
@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { ServicoPortalRH } from '@/servicos/rh/ServicoPortalRH';
 import { ServicoSalariosRH, ROTULO_TIPO, type LinhaReciboRH } from '@/servicos/rh/ServicoSalariosRH';
 import { ServicoReclamacoesRH, type ReclamacaoRH } from '@/servicos/rh/ServicoReclamacoesRH';
+import { ServicoRecebimentoRH, ultimaPorRecibo, type RecebimentoRH } from '@/servicos/rh/ServicoRecebimentoRH';
 import { gerarReciboPdf, periodoPt } from '@/bibliotecas/rh/pdf-rh';
 import { useData } from '@/contextos/ContextoDados';
 import type { ActorRH, Funcionario } from '@/servicos/rh/ServicoRH';
@@ -27,9 +28,17 @@ const ROTULO_RECLAMACAO = { pendente: 'Por responder', aceite: 'Aceite', recusad
 export function FolhasFuncionario({ f, actor, finais }: { f: Funcionario; actor: ActorRH; finais: ReciboPortal[] }) {
     const { companySettings } = useData();
     const dados = useCarregar(async () => {
-        const [correccao, reclamacoes] = await Promise.all([ServicoPortalRH.minhaFolhaCorreccao(f.id), ServicoReclamacoesRH.doFuncionario(f.id)]);
-        return { correccao, reclamacoes };
-    }, { correccao: [] as ReciboPortal[], reclamacoes: [] as ReclamacaoRH[] }, [f.id]);
+        const [correccao, reclamacoes, recebimentos] = await Promise.all([ServicoPortalRH.minhaFolhaCorreccao(f.id), ServicoReclamacoesRH.doFuncionario(f.id), ServicoRecebimentoRH.doFuncionario(f.id)]);
+        return { correccao, reclamacoes, recebimentos };
+    }, { correccao: [] as ReciboPortal[], reclamacoes: [] as ReclamacaoRH[], recebimentos: [] as RecebimentoRH[] }, [f.id]);
+    const recepcao = ultimaPorRecibo(dados.dados.recebimentos);
+    const [naoRecebi, setNaoRecebi] = useState<ReciboPortal | null>(null);
+    const [observacao, setObservacao] = useState('');
+    const confirmarRecepcao = async (r: ReciboPortal, estado: 'recebido' | 'nao_recebido', obs?: string) => {
+        const ok = await executar(() => ServicoRecebimentoRH.confirmar({ funcionario_id: f.id, recibo_id: r.id, processamento_id: r.processamento_id, estado, observacao: obs }, actor),
+            estado === 'recebido' ? 'Recepção do salário confirmada' : 'Aviso enviado ao RH');
+        if (ok) { setNaoRecebi(null); setObservacao(''); void dados.recarregar(); }
+    };
     const [aberto, setAberto] = useState<string | null>(null);
     const linhas = useCarregar(() => (aberto ? ServicoSalariosRH.linhas(aberto) : Promise.resolve([] as LinhaReciboRH[])), [] as LinhaReciboRH[], [aberto]);
     const [reclamar, setReclamar] = useState<{ recibo: ReciboPortal; linha: LinhaReciboRH | null } | null>(null);
@@ -114,14 +123,30 @@ export function FolhasFuncionario({ f, actor, finais }: { f: Funcionario; actor:
             )}
 
             <h3 className="mb-2 mt-4 text-sm font-black text-slate-600 dark:text-slate-300">Folhas finais (aprovadas)</h3>
-            {finais.length === 0 ? <Vazio>Ainda não há folhas aprovadas.</Vazio> : finais.map(r => (
-                <div key={r.id} className="mb-1.5 flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
-                    <span><b>{periodoPt(r.ano, r.mes)}</b> · {ROTULO_TIPO[r.tipo]} · <span className="text-emerald-700 dark:text-emerald-300">{r.estado}</span></span>
-                    <span className="flex items-center gap-2 font-black">{kz(r.liquido_minor)}
-                        <Button size="icon" variant="ghost" title="Folha final (PDF)" onClick={() => pdf(r)}><FileDown className="h-4 w-4" /></Button>
-                    </span>
-                </div>
-            ))}
+            {finais.length === 0 ? <Vazio>Ainda não há folhas aprovadas.</Vazio> : finais.map(r => {
+                const pago = r.estado === 'pago' || r.estado === 'fechado';
+                const conf = recepcao.get(r.id);
+                return (
+                    <div key={r.id} className="mb-1.5 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
+                        <div className="flex items-center justify-between">
+                            <span><b>{periodoPt(r.ano, r.mes)}</b> · {ROTULO_TIPO[r.tipo]} · <span className="text-emerald-700 dark:text-emerald-300">{r.estado}</span></span>
+                            <span className="flex items-center gap-2 font-black">{kz(r.liquido_minor)}
+                                <Button size="icon" variant="ghost" title="Folha final (PDF)" onClick={() => pdf(r)}><FileDown className="h-4 w-4" /></Button>
+                            </span>
+                        </div>
+                        {/* Recepção do salário: só depois de o RH marcar como pago. */}
+                        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+                            {!pago ? <span className="text-slate-500">Aprovado · aguarda pagamento</span>
+                                : conf?.estado === 'recebido' ? <span className="flex items-center gap-1 font-bold text-emerald-700 dark:text-emerald-300"><CheckCircle2 className="h-3.5 w-3.5" /> Recepção confirmada em {dataPt(conf.criado_em)}</span>
+                                    : <>
+                                        {conf?.estado === 'nao_recebido' && <span className="flex items-center gap-1 font-bold text-red-600"><XCircle className="h-3.5 w-3.5" /> Avisou que não recebeu ({dataPt(conf.criado_em)})</span>}
+                                        <Button size="sm" className="h-7 bg-emerald-600 hover:bg-emerald-700" onClick={() => void confirmarRecepcao(r, 'recebido')}><CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Confirmar recepção</Button>
+                                        {conf?.estado !== 'nao_recebido' && <Button size="sm" variant="outline" className="h-7 border-red-200 text-red-700 hover:bg-red-50" onClick={() => setNaoRecebi(r)}>Não recebi</Button>}
+                                    </>}
+                        </div>
+                    </div>
+                );
+            })}
 
             {dados.dados.reclamacoes.some(x => !dados.dados.correccao.some(r => r.processamento_id === x.processamento_id)) && (
                 <>
@@ -129,6 +154,21 @@ export function FolhasFuncionario({ f, actor, finais }: { f: Funcionario; actor:
                     {dados.dados.reclamacoes.filter(x => !dados.dados.correccao.some(r => r.processamento_id === x.processamento_id)).map(x => <LinhaReclamacao key={x.id} r={x} />)}
                 </>
             )}
+
+            <Dialog open={Boolean(naoRecebi)} onOpenChange={o => { if (!o) setNaoRecebi(null); }}>
+                <DialogContent className="max-w-md">
+                    <DialogHeader>
+                        <DialogTitle>Não recebi o salário</DialogTitle>
+                        <DialogDescription>{naoRecebi ? `${periodoPt(naoRecebi.ano, naoRecebi.mes)} · ${kz(naoRecebi.liquido_minor)}` : ''}. O RH recebe o aviso no processamento do mês.</DialogDescription>
+                    </DialogHeader>
+                    <Label htmlFor="obs-recepcao">O que aconteceu?</Label>
+                    <Textarea id="obs-recepcao" rows={3} value={observacao} onChange={e => setObservacao(e.target.value)} placeholder="Ex.: o valor ainda não entrou na minha conta do BAI." />
+                    <DialogFooter>
+                        <Button variant="outline" onClick={() => setNaoRecebi(null)}>Cancelar</Button>
+                        <Button variant="destructive" disabled={observacao.trim().length < 5} onClick={() => naoRecebi && void confirmarRecepcao(naoRecebi, 'nao_recebido', observacao)}>Enviar aviso</Button>
+                    </DialogFooter>
+                </DialogContent>
+            </Dialog>
 
             <Dialog open={Boolean(reclamar)} onOpenChange={o => { if (!o) setReclamar(null); }}>
                 <DialogContent className="max-w-md">

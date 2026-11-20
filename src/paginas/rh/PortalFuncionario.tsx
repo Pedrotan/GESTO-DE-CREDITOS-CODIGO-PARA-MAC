@@ -20,6 +20,7 @@ import { Indicador, dataPt, executar, kz, useCarregar, Vazio } from '@/component
 import { MarcarPonto, MeuPonto } from '@/componentes/rh/ponto/PortalPonto';
 import { MeusDocumentos } from '@/componentes/rh/MeusDocumentos';
 import { FolhasFuncionario } from '@/componentes/rh/FolhasFuncionario';
+import { ResumoDescontosFuncionario } from '@/componentes/rh/ResumoDescontosFuncionario';
 
 /** Portal do funcionário: os seus recibos, o saldo de férias e os pedidos de férias e de dispensa. */
 export default function PortalFuncionario() {
@@ -62,6 +63,7 @@ export default function PortalFuncionario() {
             </div>
 
             <FolhasFuncionario f={f} actor={actor} finais={d.recibos} />
+            <ResumoDescontosFuncionario finais={d.recibos} />
 
             <div className="mt-5 grid gap-4 lg:grid-cols-2">
 
