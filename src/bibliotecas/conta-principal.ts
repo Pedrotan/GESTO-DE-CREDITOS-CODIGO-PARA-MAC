@@ -112,6 +112,20 @@ export const ehContaPortalNova = (sql: string, params: unknown[]) => {
         && String(insertedUserValue(sql, params, 'status')) === 'active'
         && Number(insertedUserValue(sql, params, 'mustchangepassword')) === 1;
 };
+/** Conta que só tem o portal do funcionário (perfil «employee», só permissões do portal, não é a conta principal). */
+export const ehContaSoPortal = (u: { role?: unknown; permissions?: unknown; isOwner?: unknown } | null | undefined) => {
+    if (!u || isPrimaryOwner(u) || String(u.role) !== 'employee') return false;
+    const permissoes = parsePermissionList(u.permissions);
+    return permissoes.length > 0 && permissoes.every(p => PERMISSOES_PORTAL_FUNCIONARIO.has(p));
+};
+
+/** Reposição da senha do portal pelo RH: só a senha e a troca obrigatória no próximo acesso (UPDATE ... WHERE id = ?). */
+export const ehReposicaoSenhaPortal = (sql: string, params: unknown[]) => {
+    const colunas = updatedUserColumns(sql);
+    return colunas.length === 2 && colunas.includes('password') && colunas.includes('mustchangepassword')
+        && Number(updatedUserValue(sql, params, 'mustchangepassword')) === 1;
+};
+
 const gereRH = (actor: { role?: unknown; permissions?: unknown }) => String(actor.role) === 'super_admin' || parsePermissionList(actor.permissions).includes('hr_manage');
 
 export type UserMutationCheck = {
@@ -120,7 +134,7 @@ export type UserMutationCheck = {
     params: unknown[];
     actor: { id: string; isOwner?: unknown; permissions?: unknown; role?: unknown };
     /** Utilizador alvo (UPDATE/DELETE ... WHERE id = ?), lido da base pelo processo principal. */
-    target?: { id: string; isOwner?: unknown; role?: string } | null;
+    target?: { id: string; isOwner?: unknown; role?: string; permissions?: unknown } | null;
     /** Administrador principal designado (shared_settings), lido da base pelo processo principal. */
     principal?: AdminPrincipal | null;
 };
@@ -175,6 +189,10 @@ export const checkUserMutation = (input: UserMutationCheck): { error: string | n
     if (columns.includes('isowner')) return { error: 'A conta principal não pode ser alterada.', changesPrivileges: true };
     const privileged = columns.filter(column => (PRIVILEGE_COLUMNS as readonly string[]).includes(column));
     const selfUpdate = input.target ? String(input.target.id) === String(input.actor.id) : false;
+    // A troca obrigatória da senha só desaparece com a nova senha (não basta desligar a marca).
+    if (selfUpdate && columns.includes('mustchangepassword') && Number(updatedUserValue(input.sql, input.params, 'mustchangepassword')) === 0 && !columns.includes('password')) {
+        return { error: 'Defina a nova senha para concluir a troca obrigatória.', changesPrivileges: false };
+    }
     // Desbloqueio depois de palavras-passe erradas: um Super Administrador pode reactivar outro (e só isso).
     const unblockOnly = columns.length > 0 && columns.every(column => ['status', 'failedattempts', 'blockedat'].includes(column))
         && String(updatedUserValue(input.sql, input.params, 'status')) === 'active';

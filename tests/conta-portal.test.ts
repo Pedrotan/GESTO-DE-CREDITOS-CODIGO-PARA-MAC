@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { senhaAleatoria, utilizadorDoNome } from '../src/bibliotecas/rh/conta-portal.ts';
-import { checkUserMutation, ehContaPortalNova } from '../src/bibliotecas/conta-principal.ts';
+import { checkUserMutation, ehContaPortalNova, ehContaSoPortal, ehReposicaoSenhaPortal } from '../src/bibliotecas/conta-principal.ts';
 import { ehSoFuncionario } from '../src/bibliotecas/portal-funcionario.ts';
 import { validatePasswordStrength } from '../src/bibliotecas/password-validator.ts';
 
@@ -40,4 +40,24 @@ test('conta do portal: quem gere o RH cria-a sem gerir utilizadores; nada além 
     assert.equal(ehContaPortalNova(SQL.replace("'employee'", "'manager'"), params(['hr_self'])), false);
     // A conta criada só vê o portal.
     assert.equal(ehSoFuncionario({ role: 'employee', permissions: ['hr_self', 'rh_portal.ver', 'rh_portal.criar'] }), true);
+});
+
+test('conta do portal: o RH só repõe a senha (com troca obrigatória) de contas só do portal', () => {
+    const repor = 'UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?';
+    assert.equal(ehReposicaoSenhaPortal(repor, ['$2a$hash', 1, 'u1']), true);
+    assert.equal(ehReposicaoSenhaPortal(repor, ['$2a$hash', 0, 'u1']), false, 'sem troca obrigatória não é reposição');
+    assert.equal(ehReposicaoSenhaPortal('UPDATE users SET password = ?, mustChangePassword = ?, role = ? WHERE id = ?', ['h', 1, 'admin', 'u1']), false);
+    assert.equal(ehContaSoPortal({ role: 'employee', permissions: '["hr_self","rh_portal.ver"]' }), true);
+    assert.equal(ehContaSoPortal({ role: 'employee', permissions: '["hr_self","view_credits"]' }), false);
+    assert.equal(ehContaSoPortal({ role: 'manager', permissions: '["hr_self"]' }), false);
+    assert.equal(ehContaSoPortal({ role: 'employee', permissions: '["hr_self"]', isOwner: 1 }), false);
+});
+
+test('troca obrigatória: a própria conta só a conclui com a nova senha', () => {
+    const eu = { id: 'u1', role: 'employee', permissions: '["hr_self"]' };
+    const alvo = { id: 'u1', role: 'employee' };
+    const so = checkUserMutation({ kind: 'update', sql: 'UPDATE users SET mustChangePassword = ? WHERE id = ?', params: [0, 'u1'], actor: eu, target: alvo });
+    assert.match(so.error || '', /nova senha/u);
+    const comSenha = checkUserMutation({ kind: 'update', sql: 'UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?', params: ['h', 0, 'u1'], actor: eu, target: alvo });
+    assert.equal(comSenha.error, null);
 });

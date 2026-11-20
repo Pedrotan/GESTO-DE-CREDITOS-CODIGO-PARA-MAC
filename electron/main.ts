@@ -26,7 +26,7 @@ import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
 import { MASTER_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-licencas';
-import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, ehContaPortalNova, isPrimaryOwner, PAGE_PERMISSIONS, parsePermissionList } from '../src/bibliotecas/conta-principal';
+import { ALL_ASSIGNABLE_PERMISSIONS, checkUserMutation, ehContaPortalNova, ehContaSoPortal, ehReposicaoSenhaPortal, isPrimaryOwner, updatedUserColumns, updatedUserValue, PAGE_PERMISSIONS, parsePermissionList } from '../src/bibliotecas/conta-principal';
 import { CHAVE_ADMIN_PRINCIPAL, lerAdminPrincipal, motivoRecusaDesignar } from '../src/bibliotecas/administrador-principal';
 import { LICENSE_TOKEN_PUBLIC_KEYS } from '../src/bibliotecas/chave-publica-tokens';
 import { DEFAULT_LICENSE_SERVER, evaluateCloudLicense, heartbeatDue, isCloudLicenseKey, isLicenseRefusal, legacyMachineHash, machineFingerprint, recordFromToken, verifyCloudToken, type CloudLicenseRecord, type CloudLicenseStatus } from './licenca-nuvem';
@@ -3219,6 +3219,15 @@ app.whenReady().then(async () => {
   let cloudLinkGrant: { senderId: number; tenantId: string; expiresAt: number } | null = null;
   const hasCloudLinkGrant = (event: Electron.IpcMainInvokeEvent) =>
     Boolean(cloudLinkGrant && cloudLinkGrant.senderId === event.sender.id && Date.now() < cloudLinkGrant.expiresAt);
+  // Depois de a própria conta trocar a senha temporária, a sessão deixa de pedir a troca (também ao recarregar).
+  const actualizarTrocaSenhaDaSessao = (senderId: number, request: { sql: string; params?: unknown[] }) => {
+    if (mutationTable(request.sql) !== 'users' || !/^\s*UPDATE\b/iu.test(request.sql)) return;
+    if (!updatedUserColumns(request.sql).includes('mustchangepassword')) return;
+    const params = Array.isArray(request.params) ? request.params : [];
+    const sessao: any = userAuth.status(senderId).user;
+    if (!sessao || String(params[params.length - 1] ?? '') !== String(sessao.id)) return;
+    userAuth.updateSessionUser(senderId, { mustChangePassword: Number(updatedUserValue(request.sql, params, 'mustchangepassword')) === 1 ? 1 : 0 });
+  };
   const assertUserSqlAuthorized = async (event: Electron.IpcMainInvokeEvent, statements: Array<{ sql: string; params?: unknown[] }>) => {
     let reservedHere = false;
     try {
@@ -3275,7 +3284,12 @@ app.whenReady().then(async () => {
         const params = Array.isArray(statement.params) ? statement.params : [];
         const byId = /\bWHERE\s+id\s*=\s*\?\s*$/iu.test(statement.sql.trim());
         if (kind !== 'insert' && !byId) throw new Error("Alterações a utilizadores têm de indicar o utilizador (WHERE id = ?).");
-        const target: any = kind === 'insert' ? null : await runQuery("get", "SELECT id, role, isOwner FROM users WHERE id = ? LIMIT 1", [params[params.length - 1]]);
+        const target: any = kind === 'insert' ? null : await runQuery("get", "SELECT id, role, isOwner, permissions FROM users WHERE id = ? LIMIT 1", [params[params.length - 1]]);
+        // Repor a senha de uma conta só do portal (fica com troca obrigatória): basta gerir o RH.
+        if (kind === 'update' && ehReposicaoSenhaPortal(statement.sql, params) && ehContaSoPortal(target) && hasPermission(currentUser, 'hr_manage')) {
+          pendingPrivilegeAudits.push({ actor: currentUser, kind, targetId: target.id, sql: statement.sql, params });
+          continue;
+        }
         // A conta da sessão é relida da base: a marca de conta principal nunca vem do renderer.
         const actorRow: any = await runQuery("get", "SELECT id, role, isOwner, permissions FROM users WHERE id = ? LIMIT 1", [currentUser.id]);
         const principalRow: any = await runQuery('get', 'SELECT value FROM shared_settings WHERE key = ? LIMIT 1', [CHAVE_ADMIN_PRINCIPAL]).catch(() => null);
@@ -3710,6 +3724,7 @@ app.whenReady().then(async () => {
     try {
       const r = await runQuery("execute", request.sql, request.params);
       await flushPrivilegeAudits();
+      actualizarTrocaSenhaDaSessao(event.sender.id, request);
       if (insertsAccountingEntries([request])) sealAfterWrite("local");
       if (insertsAuditLogs([request])) sealAuditAfterWrite();
       broadcastToClients("db-update", { timestamp: (/* @__PURE__ */ new Date()).toISOString() });

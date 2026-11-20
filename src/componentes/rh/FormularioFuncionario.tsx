@@ -10,7 +10,7 @@ import { Switch } from '@/componentes/ui/switch';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
-import { Camera, CheckCircle2, FileUp, Plus, Trash2, X } from 'lucide-react';
+import { Camera, CheckCircle2, FileUp, KeyRound, Plus, Trash2, X } from 'lucide-react';
 import { ServicoRH, CATEGORIAS_DOCUMENTO, type AbonoInicial, type ActorRH, type Cargo, type CategoriaDocumento, type Contrato, type Departamento, type Funcionario, type FuncionarioRubrica, type Rubrica, type Seccao } from '@/servicos/rh/ServicoRH';
 import { chefeSugerido } from '@/bibliotecas/rh/hierarquia-rh';
 import { RH_VINCULOS, FORMATO_BI } from '@/bibliotecas/rh/esquema-rh';
@@ -22,13 +22,23 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { cn } from '@/bibliotecas/utils';
 import { useAuth } from '@/contextos/ContextoAutenticacao';
 import { ServicoContaPortal, utilizadorDoNome } from '@/servicos/rh/ServicoContaPortal';
-import { alertaSucesso } from '@/bibliotecas/alerta';
+import { ehContaSoPortal } from '@/bibliotecas/conta-principal';
+import { alertaSucesso, avisar, confirmar } from '@/bibliotecas/alerta';
+
+const escHtml = (v: string) => v.replace(/[&<>"']/gu, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
+
+/** Mostra o utilizador e a senha temporária para entregar ao funcionário (a senha só aparece agora). */
+const mostrarCredenciais = (titulo: string, nome: string, utilizador: string, senha: string, nota: string) =>
+    alertaSucesso(titulo, `<p>Entregue estes dados a <b>${escHtml(nome)}</b>. A senha só aparece agora.</p>
+        <div style="margin-top:12px;text-align:left;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:14px">
+        <div>Utilizador: <b style="font-family:monospace">${escHtml(utilizador)}</b></div>
+        <div style="margin-top:6px">Senha temporária: <b style="font-family:monospace">${escHtml(senha)}</b></div></div>
+        <p style="margin-top:10px;font-size:13px">${escHtml(nota)}</p>`, { allowOutsideClick: false });
 import { useData } from '@/contextos/ContextoDados';
 import { toast } from '@/ganchos/usar-toast';
 import { deslocarDentro, executar, kz, lerFicheiro, paraMinor, seccaoVisivel } from './comum-rh';
 import { DialogoContrato } from './DialogosFuncionario';
 import { calculoRubrica } from './CatalogoSubsidios';
-import { confirmar } from '@/bibliotecas/alerta';
 
 export type SeccaoFormulario = 'pessoais' | 'identificacao' | 'contactos' | 'empresa' | 'contrato' | 'subsidios' | 'documentos';
 /** Onde abrir a edição: secção e, opcionalmente, o campo a focar (ex.: «Completar agora» da ficha). */
@@ -103,6 +113,20 @@ function Campo({ id, label, obrig, erro, dica, className, children }: { id: stri
 
 export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionario, seccaoInicial, departamentos, cargos, seccoes = [], funcionarios = [], contratos = [], rubricas: rubricasProp, anosValidadeBI, maxMb = 2, horarios = [] }: Props) {
     const { users, reloadUsers } = useAuth();
+    // O funcionário esqueceu a senha do portal: nova senha temporária, trocada obrigatoriamente no próximo acesso.
+    const reporSenhaPortal = async () => {
+        if (!funcionario?.utilizador_id) return;
+        const conta = (users || []).find(u => u.id === funcionario.utilizador_id);
+        if (!await confirmar(`A senha actual de ${funcionario.nome} deixa de funcionar. O sistema gera uma senha temporária, que o funcionário troca no próximo acesso.`,
+            { titulo: 'Repor a senha do portal', confirmar: 'Repor senha', cancelar: 'Cancelar', perigo: true })) return;
+        try {
+            const { senha } = await ServicoContaPortal.reporSenha(funcionario, actor);
+            void reloadUsers();
+            await mostrarCredenciais('Senha do portal reposta', funcionario.nome, conta?.username || conta?.email || '', senha, 'No próximo acesso o funcionário tem de trocar esta senha.');
+        } catch (e) {
+            void avisar((e as Error)?.message || 'Não foi possível repor a senha.', 'error');
+        }
+    };
     const { companySettings } = useData();
     const edicao = Boolean(funcionario);
     const hoje = luandaTodayKey();
@@ -317,14 +341,9 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
         setSujo(false);
         if (credenciais) {
             const c = credenciais as { username: string; senha: string };
-            const esc = (v: string) => v.replace(/[&<>"']/gu, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[ch]!);
             void reloadUsers();
             setPortalModo('existente');
-            await alertaSucesso('Acesso ao portal criado', `<p>Entregue estes dados a <b>${esc(dados.nome || '')}</b>. A senha só aparece agora.</p>
-                <div style="margin-top:12px;text-align:left;border:1px solid #e2e8f0;border-radius:12px;padding:12px;font-size:14px">
-                <div>Utilizador: <b style="font-family:monospace">${esc(c.username)}</b></div>
-                <div style="margin-top:6px">Senha temporária: <b style="font-family:monospace">${esc(c.senha)}</b></div></div>
-                <p style="margin-top:10px;font-size:13px">No primeiro acesso o funcionário tem de trocar a senha. Só vê o portal do funcionário.</p>`, { allowOutsideClick: false });
+            await mostrarCredenciais('Acesso ao portal criado', dados.nome || '', c.username, c.senha, 'No primeiro acesso o funcionário tem de trocar a senha. Só vê o portal do funcionário.');
         }
         if (!funcionario) { try { localStorage.removeItem(CHAVE_RASCUNHO); } catch { /* sem armazenamento */ } }
         onSaved();
@@ -588,6 +607,12 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                                     {portalModo === 'existente' && (
                                         <SearchableSelect className={cn(inp, 'flex-1')} value={f.utilizador_id || ''} placeholder="Escolher utilizador" searchPlaceholder="Pesquisar utilizador…"
                                             options={(users || []).map(u => ({ value: u.id, label: u.name, subLabel: u.username || u.email || undefined }))} onValueChange={v => set('utilizador_id', v || null)} />
+                                    )}
+                                    {portalModo === 'existente' && funcionario?.utilizador_id && f.utilizador_id === funcionario.utilizador_id
+                                        && ehContaSoPortal((users || []).find(u => u.id === funcionario.utilizador_id)) && (
+                                        <Button type="button" variant="outline" className="shrink-0" onClick={() => void reporSenhaPortal()}>
+                                            <KeyRound className="mr-1.5 h-4 w-4" /> Repor senha
+                                        </Button>
                                     )}
                                 </div>
                             </Campo>

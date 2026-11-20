@@ -801,9 +801,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const ip = await getIP();
 
         await db.run(
-            `INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) 
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            [id, userData.name, userData.email.trim().toLowerCase(), userData.username?.trim().toLowerCase() || null, hashedPassword, userData.role, userData.avatar, now, JSON.stringify(permissions), 'active', ip, userData.signature || null]
+            `INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature, mustChangePassword)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            [id, userData.name, userData.email.trim().toLowerCase(), userData.username?.trim().toLowerCase() || null, hashedPassword, userData.role, userData.avatar, now, JSON.stringify(permissions), 'active', ip, userData.signature || null, userData.mustChangePassword ? 1 : 0]
         );
 
         const newUser: User = {
@@ -816,7 +816,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             createdAt: now,
             status: 'active',
             permissions: permissions,
-            ip: ip
+            ip: ip,
+            mustChangePassword: Boolean(userData.mustChangePassword)
         };
 
         setUsers(prev => [newUser, ...prev]);
@@ -1023,7 +1024,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
         if (newPassword) {
             const hashedPassword = bcrypt.hashSync(newPassword.trim(), 10);
-            await db.run('UPDATE users SET password = ? WHERE id = ?', [hashedPassword, request.userId]);
+            // A senha provisória tem de ser trocada no próximo acesso.
+            await db.run('UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?', [hashedPassword, 1, request.userId]);
         }
 
         await db.run("UPDATE password_reset_requests SET status = 'completed' WHERE id = ?", [requestId]);

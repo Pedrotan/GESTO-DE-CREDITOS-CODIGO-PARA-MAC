@@ -90,6 +90,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "cfc731c9be02a2a7d51e20d9a8bca9e76c85319cb6b9747ca1664ed7531b17aa",
+    "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "fbdc230669f718dc458fb8227e03e5d1f133c8747cdaa82e2dff17463b713ed7",
     "INSERT OR IGNORE INTO"
   ],

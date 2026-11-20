@@ -12,6 +12,8 @@ export { utilizadorDoNome, senhaAleatoria } from '@/bibliotecas/rh/conta-portal'
 export const CONTA_PORTAL_SQL = `INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, mustChangePassword)
                 VALUES (?, ?, ?, ?, ?, 'employee', ?, ?, ?, 'active', 1)`;
 
+export const REPOR_SENHA_SQL = 'UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?';
+
 export class ServicoContaPortal {
     /**
      * Cria a conta do portal e liga-a à ficha. Devolve o utilizador e a senha temporária (só mostrada agora: a base
@@ -33,5 +35,14 @@ export class ServicoContaPortal {
             auditoriaRH(actor, 'create', `Criou o acesso ao portal de ${f.nome} (utilizador ${username})`, { funcionarioId: f.id, utilizadorId: id }, undefined, undefined, agora),
         ]);
         return { id, username, email, senha };
+    }
+
+    /** Nova senha temporária para a conta do portal (o funcionário esqueceu-a): troca obrigatória no próximo acesso. */
+    static async reporSenha(f: Pick<Funcionario, 'id' | 'nome' | 'utilizador_id'>, actor: ActorRH) {
+        if (!f.utilizador_id) throw new Error(`${f.nome} não tem acesso ao portal.`);
+        const senha = senhaAleatoria();
+        await db.run(REPOR_SENHA_SQL, [bcrypt.hashSync(senha, 10), 1, f.utilizador_id]);
+        await db.transaction([auditoriaRH(actor, 'update', `Repôs a senha do portal de ${f.nome}`, { funcionarioId: f.id, utilizadorId: f.utilizador_id })]);
+        return { senha };
     }
 }

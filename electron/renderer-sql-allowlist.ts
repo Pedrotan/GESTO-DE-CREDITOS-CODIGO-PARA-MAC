@@ -498,7 +498,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "INSERT INTO simulations ( id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO simulations_flat_v2 (id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt) SELECT id, reference, date, clientName, clientIncome, amount, term, interestRate, method, riskProfile, totalPayment, monthlyPayment, aiAnalysis, usuario_id, createdAt, status, clientId, productId, verificationCode, expiresAt, details, convertedCreditId, updatedAt FROM simulations",
   "INSERT INTO suppliers (id, name, phone, email, nif, address, notes, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)",
-  "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature, mustChangePassword) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, mustChangePassword) VALUES (?, ?, ?, ?, ?, 'employee', ?, ?, ?, 'active', 1)",
   "INSERT INTO warranties (id, clientId, creditId, type, description, marketValue, status, location, photos, documents, notes, createdAt, updatedAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
   "INSERT OR IGNORE INTO accounting_bank_imports (id, fileName, movements, actorId, actorName, importedAt) VALUES (?,?,?,?,?,?)",
@@ -1128,6 +1128,7 @@ export const RENDERER_SQL_ALLOWLIST = new Set<string>([
   "UPDATE users SET lastLogin = ?, lastSeen = ?, status = ?, ip = ? WHERE id = ?",
   "UPDATE users SET lastSeen = ?, status = 'active', ip = COALESCE(NULLIF(ip, ''), ?) WHERE id = ?",
   "UPDATE users SET password = ? WHERE id = ?",
+  "UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?",
   "UPDATE users SET password = ?, status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?",
   "UPDATE users SET status = 'active', failedAttempts = 0, blockedAt = NULL WHERE id = ?",
   "UPDATE users SET status = ? WHERE id = ?",
@@ -3143,8 +3144,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO suppliers (id, name, phone, email, nif, address, notes, status, createdAt, usuario_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)"
   ],
   [
-    "cfc731c9be02a2a7d51e20d9a8bca9e76c85319cb6b9747ca1664ed7531b17aa",
-    "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    "c90d2c50a1d8b8acd3ea42ab4d28d7e5be9480a5d1bc87cea9f3f28c2e3c6dbc",
+    "INSERT INTO users (id, name, email, username, password, role, avatar, createdAt, permissions, status, ip, signature, mustChangePassword) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "c73eca9923a175493035422c4236db3e5be51f9d2213120177a7d1cec0706a83",
@@ -5661,6 +5662,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "33a01fd1fd065b0e2f00a7d19b82f90b4aae9c461803db1ce895515dbf35cfc7",
     "UPDATE users SET password = ? WHERE id = ?"
+  ],
+  [
+    "0ba6bf7f7676435c6e0be70a50328fe30720acd136addddeebb4b5b0d47bd930",
+    "UPDATE users SET password = ?, mustChangePassword = ? WHERE id = ?"
   ],
   [
     "528b08f60ad8123e7c3a2e52648dea6b40c040547a9e67108be1a83cf03066dc",

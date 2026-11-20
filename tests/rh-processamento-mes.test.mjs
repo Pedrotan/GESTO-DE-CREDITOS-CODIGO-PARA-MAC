@@ -204,6 +204,13 @@ test('portal: criar acesso a partir da ficha gera utilizador pelo nome, senha te
         assert.ok(require_bcrypt().compareSync(c.senha, u.password));
         assert.equal(db.prepare('SELECT utilizador_id FROM rh_funcionario WHERE id = ?').get(id).utilizador_id, c.id);
         await assert.rejects(M.ServicoContaPortal.criar(await M.ServicoRH.funcionario(id), RH, []), /já tem acesso/u);
+        const antes = db.prepare('SELECT password FROM users WHERE id = ?').get(c.id).password;
+        db.prepare('UPDATE users SET mustChangePassword = 0 WHERE id = ?').run(c.id);
+        const r = await M.ServicoContaPortal.reporSenha(await M.ServicoRH.funcionario(id), RH);
+        const depois = db.prepare('SELECT password, mustChangePassword FROM users WHERE id = ?').get(c.id);
+        assert.notEqual(depois.password, antes);
+        assert.ok(require_bcrypt().compareSync(r.senha, depois.password));
+        assert.equal(depois.mustChangePassword, 1, 'nova senha temporária: troca obrigatória outra vez');
     } finally { db.close(); }
 });
 

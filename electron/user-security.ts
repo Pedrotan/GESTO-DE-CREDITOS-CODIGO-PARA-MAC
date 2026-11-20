@@ -145,6 +145,12 @@ export class UserSessionService {
     return this.verifySecretToken(String(user.id), secret, token, true);
   }
 
+  /** Actualiza campos não sensíveis da conta guardada na sessão (ex.: a troca obrigatória da senha concluída). */
+  updateSessionUser(senderId: number, patch: Record<string, unknown>) {
+    const session = this.sessions.get(senderId);
+    if (session) session.user = { ...session.user, ...patch };
+  }
+
   updateMfaState(senderId: number, enabled: boolean) {
     const session = this.sessions.get(senderId);
     if (!session) throw new Error('Sessão inexistente ou expirada.');
