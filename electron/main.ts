@@ -37,6 +37,7 @@ import { isInstallingUpdate, startUpdater } from './actualizador';
 import { assinarDocumento as agtAssinarDocumento, chamarAgt, descreverChave as agtDescreverChave, hashSaft as agtHashSaft, lerChavePrivada as agtLerChave, AGT_CAMPOS_ASSINATURA } from '../vercel-api/_agt-nucleo.js';
 import bcrypt from 'bcryptjs';
 import { assertFinancialPermission, financialStatementTarget, userReadExposesSecrets, userStatementKind, userUpdateTouchesPrivileges, UserSessionService } from './user-security';
+import { CloudSessionStore, cloudTargetFromSettings, type CloudTarget } from './sessao-nuvem';
 installStructuredConsole('tango-electron-main');
 if (!app.isPackaged) {
   process.env.ELECTRON_DISABLE_SECURITY_WARNINGS = "true";
@@ -161,6 +162,18 @@ let server = null;
 let iconPath;
 let masterAuth: MasterAuthService | null = null;
 const userAuth = new UserSessionService();
+// Sessão de cada utilizador também no servidor da empresa (tokens só na memória deste processo). Quando o servidor
+// a revoga (administrador, senha mudada, refresh token roubado), a sessão local termina e o ecrã volta ao login.
+const cloudSessions = new CloudSessionStore(undefined, (senderId, code) => {
+  userAuth.revokeSender(senderId);
+  const contents = electron.webContents.fromId(senderId);
+  if (contents && !contents.isDestroyed()) contents.send("user-session-revoked", { code });
+});
+/** Fim da sessão local e da sessão no servidor (sem esperar pela rede). */
+const endUserSession = (senderId: number) => {
+  userAuth.revokeSender(senderId);
+  void cloudSessions.logout(senderId);
+};
 const userLoginAttempts = new Map<string, { failures: number; blockedUntil: number }>();
 let financialSchemaBootstrapOpen = true;
 let firstUserCreationReserved = false;
@@ -647,8 +660,8 @@ function createWindow() {
   const masterSenderId = mainWindow.webContents.id;
   mainWindow.webContents.once("destroyed", () => masterAuth?.revokeSender(masterSenderId));
   mainWindow.webContents.on("render-process-gone", () => masterAuth?.revokeSender(masterSenderId));
-  mainWindow.webContents.once("destroyed", () => userAuth.revokeSender(masterSenderId));
-  mainWindow.webContents.on("render-process-gone", () => userAuth.revokeSender(masterSenderId));
+  mainWindow.webContents.once("destroyed", () => endUserSession(masterSenderId));
+  mainWindow.webContents.on("render-process-gone", () => endUserSession(masterSenderId));
   // Janelas novas nunca abrem dentro da aplicação: https, email e telefone vão para o programa do sistema;
   // qualquer outro destino (file:, smb:, javascript:, ms-*) é recusado e registado.
   const openOutside = (target: string, origin: string) => {
@@ -2757,7 +2770,7 @@ app.whenReady().then(async () => {
     );
     writeAccountsRegistry(accountsRegistry);
     await switchAccountRuntime(target.id);
-    userAuth.revokeSender(event.sender.id);
+    endUserSession(event.sender.id);
     return { success: true, activeAccountId: target.id, relaunching: false, reloadRequired: true };
   });
   ipcMain.handle("accounts-delete", async (event, payload) => {
@@ -2784,7 +2797,7 @@ app.whenReady().then(async () => {
       const wasActive = accountsRegistry.activeAccountId === target.id;
       if (wasActive) {
         await switchAccountRuntime(DEFAULT_ACCOUNT_ID);
-        userAuth.revokeSender(event.sender.id);
+        endUserSession(event.sender.id);
       }
       const sourceDir = getAccountBaseDir(target.id);
       let archivedPath;
@@ -3411,6 +3424,74 @@ app.whenReady().then(async () => {
     }
     userColumnsReadyForPath = dbPath;
   };
+  // ── Sessões no servidor da empresa ──────────────────────────────────────────────────────────────
+  const readCloudTarget = async (): Promise<CloudTarget | null> => {
+    const row: any = await runQuery("get", "SELECT syncEnabled, syncUrl, syncApiKey, syncPasskey, nif FROM company_settings WHERE id = 1 LIMIT 1").catch(() => null);
+    return cloudTargetFromSettings(row);
+  };
+  // Verificadores (hash bcrypt) dos utilizadores para o servidor validar o login: enviados pelo processo principal
+  // (o renderer nunca vê as senhas), só quando a lista muda, sempre completa (quem sai da lista deixa de entrar).
+  let lastCredentialsDigest = "";
+  let credentialsPushTimer: ReturnType<typeof setTimeout> | null = null;
+  let credentialsPushRunning: Promise<boolean> | null = null;
+  const pushUserCredentials = async (force = false): Promise<boolean> => {
+    const target = await readCloudTarget();
+    if (!target) return false;
+    const rows: any[] = ((await runQuery("query", "SELECT id, name, email, username, password, role, permissions, status, isOwner FROM users").catch(() => [])) || []) as any[];
+    const users = rows.map((row: any) => {
+      let permissions: unknown = [];
+      try { permissions = typeof row.permissions === "string" ? JSON.parse(row.permissions || "[]") : row.permissions || []; } catch { permissions = []; }
+      // Presença (online/offline) não interessa ao servidor: só o bloqueio ou a remoção da conta.
+      const status = ["blocked", "deleted", "inactive", "suspended", "disabled"].includes(String(row.status || "").toLowerCase()) ? String(row.status).toLowerCase() : "active";
+      return { id: String(row.id), name: row.name || null, email: row.email || null, username: row.username || null,
+        passwordHash: String(row.password || ""), role: String(row.role || ""), permissions, status, isOwner: Number(row.isOwner) === 1 };
+    }).sort((a, b) => a.id.localeCompare(b.id));
+    const digest = crypto.createHash("sha256").update(JSON.stringify([target.url, target.tenantId, users])).digest("hex");
+    if (!force && digest === lastCredentialsDigest) return true;
+    try {
+      const response = await fetch(`${target.url}/api/v1/auth/credentials`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-sync-passkey": target.apiKey },
+        body: JSON.stringify({ tenantId: target.tenantId, complete: true, users }),
+        signal: AbortSignal.timeout(20_000),
+      });
+      const data: any = await response.json().catch(() => ({}));
+      if (!response.ok || data?.success !== true) {
+        console.warn("[Sessões] O servidor não aceitou os utilizadores:", response.status, data?.code || data?.message || "");
+        return false;
+      }
+      lastCredentialsDigest = digest;
+      return true;
+    } catch (error: any) {
+      console.warn("[Sessões] Utilizadores não enviados ao servidor:", error?.name || error?.message || error);
+      return false;
+    }
+  };
+  const runCredentialsPush = (force = false) => {
+    if (!credentialsPushRunning) credentialsPushRunning = pushUserCredentials(force).finally(() => { credentialsPushRunning = null; });
+    return credentialsPushRunning;
+  };
+  const scheduleCredentialsPush = (delayMs = 3_000) => {
+    if (credentialsPushTimer) clearTimeout(credentialsPushTimer);
+    credentialsPushTimer = setTimeout(() => { credentialsPushTimer = null; void runCredentialsPush(); }, delayMs);
+    (credentialsPushTimer as any)?.unref?.();
+  };
+  // Rede de segurança: volta a confirmar a lista a cada 30 minutos (só envia se tiver mudado).
+  setInterval(() => scheduleCredentialsPush(0), 30 * 60_000).unref?.();
+  /** Login no servidor depois do login local; em segundo plano, nunca impede o login local (offline-first). */
+  const startCloudUserSession = async (senderId: number, login: string, password: string, userId: string, pendingMfa: boolean) => {
+    const target = await readCloudTarget();
+    if (!target) return;
+    let outcome = await cloudSessions.login(senderId, target, { login, password, userId, pendingMfa });
+    // Primeiro login depois da actualização: o servidor ainda não tem os utilizadores. Envia-os e tenta de novo.
+    if (!outcome.ok && outcome.code === "CREDENTIALS_NOT_PROVISIONED" && await runCredentialsPush(true)) {
+      outcome = await cloudSessions.login(senderId, target, { login, password, userId, pendingMfa });
+    }
+    if (!outcome.ok && !["NO_CLOUD", "NETWORK", "TIMEOUT"].includes(outcome.code)) {
+      console.warn("[Sessões] Sem sessão no servidor:", outcome.code);
+    }
+    scheduleCredentialsPush();
+  };
   ipcMain.handle("user-auth-login", async (event, credentials) => {
     assertTrustedIpcSender(event);
     financialSchemaBootstrapOpen = false;
@@ -3481,6 +3562,10 @@ app.whenReady().then(async () => {
     if (result.authenticated) {
       await writeAuthAudit(foundUser, "login", "Login efetuado com sucesso.", { method: "password" });
     }
+    // O servidor entrega o conjunto de tokens desta sessão (com 2FA, só passa a valer depois do código).
+    cloudSessions.drop(event.sender.id);
+    void startCloudUserSession(event.sender.id, login, password, String(foundUser.id), Boolean(result.requires2FA))
+      .catch(error => console.warn("[Sessões] Login no servidor falhou:", error?.message || error));
     return result;
   });
   ipcMain.handle("user-auth-verify-totp", async (event, payload) => {
@@ -3504,6 +3589,8 @@ app.whenReady().then(async () => {
         result = userAuth.completeMfaRecovery(event.sender.id, userId);
       } else result = { authenticated: false, reason: "invalid_code" };
     } else result = { authenticated: false, reason: userAuth.hasPendingMfa(event.sender.id, userId) ? "invalid_code" : "challenge_expired" };
+    if (result.authenticated) cloudSessions.confirmMfa(event.sender.id, userId);
+    else if (result.reason === "challenge_expired") void cloudSessions.logout(event.sender.id);
     const auditUser = result.user || await runQuery("get", "SELECT id, name FROM users WHERE id = ? LIMIT 1", [userId]);
     await writeAuthAudit(auditUser, result.authenticated ? "login" : "login_failure",
       result.authenticated ? "Login com segundo fator efetuado com sucesso." : "Verificacao do segundo fator falhou.",
@@ -3513,6 +3600,25 @@ app.whenReady().then(async () => {
   ipcMain.handle("user-auth-status", async (event) => {
     assertTrustedIpcSender(event);
     return userAuth.status(event.sender.id);
+  });
+  // Estado da sessão no servidor (sem nenhum token: estes nunca saem do processo principal).
+  ipcMain.handle("user-auth-cloud-status", async (event) => {
+    assertTrustedIpcSender(event);
+    userAuth.assertAuthenticated(event.sender.id);
+    return cloudSessions.status(event.sender.id);
+  });
+  // Sessões abertas no servidor e fim de sessões (a própria, as outras, ou as de outro utilizador).
+  ipcMain.handle("user-auth-cloud-sessions", async (event, payload) => {
+    assertTrustedIpcSender(event);
+    const actor: any = userAuth.assertAuthenticated(event.sender.id);
+    const op = String(payload?.op || "list");
+    if (!["list", "revoke", "revoke-user", "revoke-others"].includes(op)) throw new TypeError("Operação inválida.");
+    const userId = payload?.userId ? String(payload.userId).slice(0, 100) : undefined;
+    if ((userId && userId !== String(actor.id)) || payload?.all === true) assertUserPermission(event, "manage_users");
+    const reply = await cloudSessions.sessionsRequest(event.sender.id, {
+      op, userId, all: payload?.all === true, sessionId: payload?.sessionId ? String(payload.sessionId).slice(0, 100) : undefined,
+    });
+    return { success: reply.ok, ...reply.data };
   });
   ipcMain.handle("user-auth-bootstrap-status", async (event) => {
     assertTrustedIpcSender(event);
@@ -3602,7 +3708,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("user-auth-logout", async (event) => {
     assertTrustedIpcSender(event);
-    userAuth.revokeSender(event.sender.id);
+    endUserSession(event.sender.id);
     return { authenticated: false };
   });
   ipcMain.handle("user-auth-mfa-begin", async (event) => {
@@ -3787,6 +3893,7 @@ app.whenReady().then(async () => {
     const reservedFirstUser = await assertUserSqlAuthorized(event, safeStatements);
     try {
       const r = await runTransaction(safeStatements);
+      if (safeStatements.some((statement: any) => userStatementKind(String(statement?.sql || "")))) scheduleCredentialsPush();
       await flushPrivilegeAudits();
       if (insertsAccountingEntries(safeStatements)) sealAfterWrite("local");
       if (insertsAuditLogs(safeStatements)) sealAuditAfterWrite();
@@ -3970,6 +4077,8 @@ app.whenReady().then(async () => {
       }
       if (!written) throw error;
     }
+    // Contas criadas ou alteradas na web: o servidor passa a validá-las com o verificador vindo deste computador.
+    scheduleCredentialsPush();
     await writeAuthAudit(currentUser, "users_synced_from_web",
       `Sincronização de utilizadores da versão web: ${applied} criado(s)/actualizado(s), ${removed} removido(s).`);
     return { applied, deleted: removed, clashes };

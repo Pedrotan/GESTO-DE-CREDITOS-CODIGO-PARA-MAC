@@ -58,7 +58,7 @@ export const applyCors = (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   }
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret, x-master-session, x-tenant-id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-api-key, x-sync-passkey, x-master-secret, x-master-session, x-tenant-id, x-csrf-token');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   return allowed;
 };

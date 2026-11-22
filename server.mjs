@@ -365,7 +365,8 @@ const server = http.createServer(async (req, res) => {
     apiMatch = handlers['auth-forgot-password'];
   } else if (pathname === '/api/v1/auth/reset-password') {
     apiMatch = handlers['auth-reset-password'];
-  } else if (pathname === '/api/v1/auth/login') {
+  } else if (/^\/api\/v1\/auth\/(login|refresh|logout|sessions|credentials)\/?$/.test(pathname)) {
+    // Sessões dos utilizadores (o handler lê a acção do caminho).
     apiMatch = handlers['auth-login'];
   } else if (pathname.startsWith('/api/')) {
     const endpointName = pathname.replace('/api/', '').split('/')[0];

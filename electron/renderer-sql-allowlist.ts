@@ -4501,6 +4501,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE users SET isOwner = 1 WHERE role = 'super_admin'"
   ],
   [
+    "4a60d0aa2da4bd3ead533f6567e353bc2b9abf259294f2ae189ecaae012f471f",
+    "UPDATE users SET lastLogin = ?, lastSeen = ?, status = ? WHERE id = ?"
+  ],
+  [
     "71afed51b7d3de3684d3fa807de4f93f642a1192c1387b32a1688ca8218a10a4",
     "UPDATE users SET lastLogin = ?, lastSeen = ?, status = ?, ip = ? WHERE id = ?"
   ],

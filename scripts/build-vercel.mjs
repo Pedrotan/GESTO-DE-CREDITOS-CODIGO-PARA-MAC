@@ -92,7 +92,8 @@ const vercelConfig = {
     { source: '/api/v1/companies/onboarding', destination: '/api/encaminhar?rota=onboarding' },
     { source: '/api/v1/auth/forgot-password', destination: '/api/encaminhar?rota=auth-forgot-password' },
     { source: '/api/v1/auth/reset-password', destination: '/api/encaminhar?rota=auth-reset-password' },
-    { source: '/api/v1/auth/login', destination: '/api/encaminhar?rota=auth-login' },
+    // Sessões dos utilizadores: login, renovação, fim de sessão, sessões abertas e envio dos verificadores.
+    ...['login', 'refresh', 'logout', 'sessions', 'credentials'].map(acao => ({ source: `/api/v1/auth/${acao}`, destination: `/api/encaminhar?rota=auth-login&acao=${acao}` })),
     { source: '/api/licencas/:acao', destination: '/api/encaminhar?rota=licencas&acao=:acao' },
     ...routeNames.map(name => ({ source: `/api/${name}`, destination: `/api/encaminhar?rota=${name}` }))
   ],
@@ -140,7 +141,7 @@ writeFileSync(
     name: 'tango-gestao-creditos-web',
     private: true,
     type: 'module',
-    dependencies: { '@neondatabase/serverless': '^1.0.0' }
+    dependencies: { '@neondatabase/serverless': '^1.0.0', bcryptjs: '^3.0.3' }
   }, null, 2)}\n`,
   'utf8'
 );

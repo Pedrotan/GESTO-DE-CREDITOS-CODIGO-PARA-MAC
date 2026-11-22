@@ -142,21 +142,34 @@ test('4. Redefinição de Senha: POST /api/v1/auth/reset-password valida token e
     assert.equal(weakPassRes2.statusCode, 400);
 });
 
-test('5. Login Central: POST /api/v1/auth/login nunca autentica sem utilizadores no servidor', async () => {
+test('5. Login Central: POST /api/v1/auth/login nunca autentica uma empresa não registada', async () => {
     const loginHandler = await loadHandler('auth-login.js');
 
-    // Campos obrigatórios
-    const emptyRes = createMockResponse();
-    await loginHandler(req({ method: 'POST', body: {} }), emptyRes);
-    assert.equal(emptyRes.statusCode, 400);
+    // Sem chave de assinatura configurada o servidor não emite tokens.
+    const unsignedRes = createMockResponse();
+    await loginHandler(req({ method: 'POST', body: { email: 'a@b.ao', password: 'x', tenantId: 'TG-TEST-0001' } }), unsignedRes);
+    assert.equal(unsignedRes.statusCode, 503);
+    assert.equal(unsignedRes.body.accessToken, undefined);
 
-    // Qualquer credencial é recusada e nenhum token é emitido
-    const res = createMockResponse();
-    await loginHandler(req({
-        method: 'POST',
-        body: { email: 'admin@tango.ao', password: 'MinhaSenhaSegura123', tenantId: 'TG-TEST-0001' }
-    }), res);
-    assert.equal(res.statusCode, 501);
-    assert.equal(res.body.success, false);
-    assert.equal(res.body.token, undefined);
+    const { privateKey } = crypto.generateKeyPairSync('ed25519');
+    process.env.TANGO_SESSION_SIGNING_KEY = privateKey.export({ format: 'pem', type: 'pkcs8' });
+    try {
+        // Campos obrigatórios
+        const emptyRes = createMockResponse();
+        await loginHandler(req({ method: 'POST', body: {} }), emptyRes);
+        assert.equal(emptyRes.statusCode, 400);
+
+        // Empresa desconhecida: recusado e nenhum token é emitido
+        const res = createMockResponse();
+        await loginHandler(req({
+            method: 'POST',
+            body: { email: 'admin@tango.ao', password: 'MinhaSenhaSegura123', tenantId: 'TG-TEST-0001' }
+        }), res);
+        assert.equal(res.statusCode, 403);
+        assert.equal(res.body.success, false);
+        assert.equal(res.body.accessToken, undefined);
+        assert.equal(res.headers['set-cookie'], undefined);
+    } finally {
+        delete process.env.TANGO_SESSION_SIGNING_KEY;
+    }
 });

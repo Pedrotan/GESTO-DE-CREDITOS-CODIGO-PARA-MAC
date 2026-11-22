@@ -4,6 +4,9 @@ export interface ElectronAPI {
     userAuthStatus: () => Promise<{ authenticated: boolean; user?: any; expiresAt?: string }>;
     userAuthBootstrapStatus: () => Promise<{ hasUsers: boolean }>;
     userAuthLogout: () => Promise<{ authenticated: false }>;
+    userAuthCloudStatus?: () => Promise<{ connected: boolean; sessionId?: string; accessTokenExpiresAt?: string; sessionExpiresAt?: string; pendingMfa?: boolean }>;
+    userAuthCloudSessions?: (input: { op: 'list' | 'revoke' | 'revoke-user' | 'revoke-others'; userId?: string; sessionId?: string; all?: boolean }) => Promise<{ success: boolean; code?: string; message?: string; revoked?: number; currentSessionId?: string; sessions?: Array<{ sessionId: string; userId: string; name: string | null; email: string | null; client: string; deviceId: string | null; ip: string | null; userAgent: string | null; createdAt: string; lastUsedAt: string; expiresAt: string }> }>;
+    onUserSessionRevoked?: (callback: (data: { code: string }) => void) => () => void;
     userAuthConfirmPassword?: (password: string) => Promise<{ confirmed: boolean }>;
     accountingSealVerify?: () => Promise<import('@/bibliotecas/selo-contabilistico').SealVerification>;
     auditSealVerify?: () => Promise<{ available: boolean; reason?: string; sealedCount: number; keyFingerprint?: string; tampered: string[]; broken: string[]; missing: string[]; unsealed: number; checkedAt: string }>;

@@ -39,6 +39,7 @@ O banco local é cifrado e aberto pelo worker. Pagamentos, estornos, restauraç�
 | chave por tenant | apenas hash no PostgreSQL; valor mostrado uma vez | por empresa e após suspeita |
 | chave RSA de licença | `safeStorage` local no Master; KMS/HSM em produção | por `kid`, mantendo chave pública anterior durante migração |
 | certificados de assinatura | cofre do CI/provedor de assinatura | conforme validade e após incidente |
+| `TANGO_SESSION_SIGNING_KEY` (Ed25519, PKCS#8) | secret store da plataforma cloud; sem ela usa `TANGO_LICENSE_SIGNING_KEY` | após incidente: trocar a chave invalida todos os access tokens (15 min) |
 
 Nenhum valor real foi encontrado no workspace. A revogação de credenciais já distribuídas exige acesso às contas externas e deve ser registada no relatório do incidente.
 
@@ -74,3 +75,19 @@ BI/NIF só pode ser consultado por utilizadores autorizados, com finalidade oper
 ## Dependências externas obrigatórias
 
 Não podem ser concluídas apenas no workspace: rotação em provedores, configuração de KMS/HSM, PostgreSQL e object storage geridos, DNS/TLS, proteção de branch no GitHub, certificados Windows, notarização Apple, publicação alpha/beta/stable, pentest independente, teste com utilizadores, validação do Product Owner e exercícios organizacionais mensais/semestrais. O código e os workflows deixam os pontos de integração preparados; cada execução requer credenciais e autoridade do respetivo proprietário.
+
+## Sessões dos utilizadores no servidor
+
+Em cada login o servidor valida a senha e entrega um conjunto de tokens (`vercel-api/_sessao-utilizador.js`, rotas `/api/v1/auth/{login,refresh,logout,sessions,credentials}`):
+
+| Token | Formato | Validade | Onde fica |
+|---|---|---|---|
+| access token | JWT Ed25519, `typ: at+jwt`, `aud: tango-api` (utilizador, empresa, perfil, permissões, sessão) | 15 min; cada uso confirma que a sessão continua aberta | web: só em memória; computador: processo principal |
+| refresh token | `trt_` + 256 bits aleatórios; servidor guarda só o SHA-256 | trocado em cada uso; 8 h sem uso, 24 h no máximo | web: cookie `__Host-tango_refresh` (HttpOnly, Secure, SameSite=Strict); computador: memória do processo principal |
+| token CSRF | `tcs_` + 256 bits | a sessão inteira | web: `sessionStorage` do separador; exigido para renovar e terminar |
+
+- **Verificadores**: o computador da empresa envia ao servidor o hash bcrypt de cada utilizador (lista completa, só quando muda). Senha mudada, conta bloqueada ou removida revoga as sessões dessa conta.
+- **Reutilização de refresh token**: dentro de 30 s é tratada como corrida entre separadores (409, sem revogar); depois disso revoga a sessão inteira e gera o alerta `refresh_token_reuse`.
+- **Bloqueio**: 5 senhas erradas por conta em 15 min (30 por IP) bloqueiam o login no servidor durante 15 min.
+- **Terminar sessões**: "terminar sessão" de um utilizador revoga todas as sessões dele no servidor; cada dispositivo volta ao login na renovação seguinte (menos de 15 min) e logo no próximo pedido que use o access token.
+- **Transição**: enquanto o computador da empresa não enviar os utilizadores (versão anterior), o servidor responde `CREDENTIALS_NOT_PROVISIONED` e a versão web usa o login anterior. Sem Internet, o computador continua a entrar só com a sessão local.

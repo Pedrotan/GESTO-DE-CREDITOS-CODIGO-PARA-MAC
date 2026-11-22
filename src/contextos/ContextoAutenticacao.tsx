@@ -4,7 +4,8 @@ import { User, Role, AVAILABLE_PERMISSIONS } from '@/tipos/autenticacao';
 import { db } from '@/bibliotecas/bd';
 import { usersListSqlFromColumns } from '@/bibliotecas/sql-utilizadores';
 import bcrypt from 'bcryptjs';
-import { republishSignedInUser } from '@/servicos/ServicoSincronizacaoCloud';
+import { getDeviceId, republishSignedInUser } from '@/servicos/ServicoSincronizacaoCloud';
+import { iniciarSessaoServidor, retomarSessaoServidor, revogarSessoesUtilizador, SERVER_SESSION_ENDED_EVENT, terminarSessaoServidor } from '@/servicos/ServicoSessaoServidor';
 import { ServicoPresenca } from '@/servicos/ServicoPresenca';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
@@ -231,7 +232,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                         sessionStorage.removeItem('user');
                     }
                 }
-                const savedUserStr = window.electronAPI?.userAuthStatus ? null : sessionStorage.getItem('user');
+                let savedUserStr = window.electronAPI?.userAuthStatus ? null : sessionStorage.getItem('user');
+                if (savedUserStr && await retomarSessaoServidor() === 'ended') {
+                    setUser(null);
+                    sessionStorage.removeItem('user');
+                    savedUserStr = null;
+                }
                 if (savedUserStr) {
                     const savedUser = JSON.parse(savedUserStr);
                     const dbUser = await db.get<any>('SELECT * FROM users WHERE id = ?', [savedUser.id]);
@@ -297,6 +303,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
      */
     const logout = useCallback(async () => {
         const leaving = user;
+        const serverLogout = terminarSessaoServidor();
         ServicoPresenca.stop(true);
         const background = (async () => {
             await pendingLogout.current?.catch(() => undefined);
@@ -312,6 +319,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 ServicoAuditoria.endSession();
             }
             if (window.electronAPI?.userAuthLogout) await window.electronAPI.userAuthLogout();
+            await serverLogout;
         })();
         const tracked = background.catch(error => console.warn('[Auth] Fecho da sessão em segundo plano:', error));
         pendingLogout.current = tracked;
@@ -510,6 +518,55 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 }
                 if (!nativeResult.notFound) return false;
                 retryNativeAfterRemoteImport = true;
+            }
+
+            // Versão web: o servidor valida a senha, aplica o bloqueio por tentativas e entrega os tokens da sessão.
+            // O login anterior (hash no navegador) só se usa quando o servidor não pode validar: empresa cujo
+            // computador ainda não enviou os utilizadores, servidor antigo ou sem ligação.
+            if (!window.electronAPI) {
+                const server = await iniciarSessaoServidor(cleanInput, cleanPassword, getDeviceId());
+                if (server.state === 'invalid') return false;
+                if (server.state === 'refused') throw new Error(server.message);
+                if (server.state === 'ok') {
+                    const serverUser = server.user;
+                    const local = await db.get<any>('SELECT * FROM users WHERE id = ?', [serverUser.id]).catch(() => null);
+                    const { password: _hash, twoFactorSecret: _secret, mfaRecoveryCodes: _codes, permissions: _localPermissions, ...profile } = local || {};
+                    const isSuperAdmin = serverUser.role === 'super_admin' || serverUser.isOwner === 1;
+                    const now = new Date().toISOString();
+                    const accessDenial = await accessDenialFor({ id: serverUser.id, role: serverUser.role });
+                    if (accessDenial) {
+                        await terminarSessaoServidor();
+                        throw new Error(accessDenial);
+                    }
+                    // Perfil e permissões vêm do servidor (a cópia local só completa o resto da ficha).
+                    const signedIn = {
+                        ...profile,
+                        id: serverUser.id,
+                        name: profile.name || serverUser.name || serverUser.email || serverUser.username,
+                        email: profile.email || serverUser.email,
+                        username: profile.username || serverUser.username,
+                        role: serverUser.role,
+                        isOwner: isSuperAdmin ? 1 : (profile.isOwner ?? serverUser.isOwner),
+                        permissions: isSuperAdmin
+                            ? AVAILABLE_PERMISSIONS.map(p => p.id)
+                            : (serverUser.permissions.length > 0 ? serverUser.permissions : DEFAULT_PERMISSIONS[serverUser.role as Role]),
+                        lastLogin: now,
+                        lastSeen: now,
+                        status: 'active',
+                    } as User;
+                    if (local) await db.run('UPDATE users SET lastLogin = ?, lastSeen = ?, status = ? WHERE id = ?', [now, now, 'active', serverUser.id]).catch(() => undefined);
+                    setUser(signedIn);
+                    setHasUsers(true);
+                    sessionStorage.setItem('user', JSON.stringify(signedIn));
+                    republishSignedInUser(serverUser.id);
+                    void reloadUsers();
+                    const ip = await getIP();
+                    ServicoAuditoria.startSession(ip);
+                    await ServicoAuditoria.addLog('login', 'user',
+                        `Login efetuado com sucesso (sessão no servidor) para utilizador: ${signedIn.name} (${signedIn.email})`,
+                        signedIn.id, signedIn.name, null, null, { ip, userAgent: navigator.userAgent, method: 'server_session' }).catch(() => undefined);
+                    return true;
+                }
             }
 
             // 1. NORMAL LOGIN - Try both email and username
@@ -825,12 +882,15 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
 
     /**
-     * Termina a sessão de outro utilizador.
-     * Não há sessões no servidor para invalidar: o estado do utilizador é a
-     * fonte de verdade, e a sessão visada apanha a mudança no seu próximo
-     * heartbeat (até 2 minutos).
+     * Termina a sessão de outro utilizador: revoga no servidor todas as sessões dessa conta (os tokens deixam de
+     * valer de imediato e cada dispositivo volta ao login na renovação seguinte, em menos de 15 minutos) e marca o
+     * estado local, que as sessões sem ligação ao servidor apanham no seu heartbeat.
      */
     const forceLogoutUser = async (id: string) => {
+        const revoked = await revogarSessoesUtilizador(id).catch(() => null);
+        if (revoked && !revoked.success && revoked.code !== 'NO_CLOUD_SESSION') {
+            console.warn('[Auth] O servidor não terminou as sessões do utilizador:', revoked.message || revoked.code);
+        }
         await db.run('UPDATE users SET status = ? WHERE id = ?', ['offline', id]);
         setUsers(prev => prev.map(u => (u.id === id ? { ...u, status: 'offline' as const } : u)));
     };
@@ -1196,6 +1256,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             }
         };
 
+        const endedByServer = async () => {
+            console.warn('[Auth] Sessão terminada no servidor.');
+            sessionStorage.setItem('sessionExpired', 'true');
+            sessionStorage.setItem('expiredUserEmail', user.email || '');
+            await logout();
+            window.location.hash = '/entrar';
+        };
+        window.addEventListener(SERVER_SESSION_ENDED_EVENT, endedByServer);
+        const stopRevokedListener = window.electronAPI?.onUserSessionRevoked?.(() => { void endedByServer(); });
+
         // Atualização imediata e periódica a cada 30 segundos
         updateActivity();
         const interval = setInterval(updateActivity, 30 * 1000);
@@ -1211,6 +1281,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return () => {
             clearInterval(interval);
             window.removeEventListener('focus', onFocus);
+            window.removeEventListener(SERVER_SESSION_ENDED_EVENT, endedByServer);
+            stopRevokedListener?.();
         };
     }, [user?.id, logout]);
 

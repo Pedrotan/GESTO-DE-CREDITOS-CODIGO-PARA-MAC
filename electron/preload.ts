@@ -142,6 +142,13 @@ const api = Object.freeze({
     userAuthStatus: () => ipcRenderer.invoke('user-auth-status'),
     userAuthBootstrapStatus: () => ipcRenderer.invoke('user-auth-bootstrap-status'),
     userAuthLogout: () => ipcRenderer.invoke('user-auth-logout'),
+    // Sessão no servidor da empresa: só o estado (os tokens ficam no processo principal).
+    userAuthCloudStatus: () => ipcRenderer.invoke('user-auth-cloud-status'),
+    userAuthCloudSessions: (input: { op: 'list' | 'revoke' | 'revoke-user' | 'revoke-others'; userId?: string; sessionId?: string; all?: boolean }) => ipcRenderer.invoke('user-auth-cloud-sessions', {
+        op: String(input?.op || 'list'), userId: input?.userId ? ensureIdentifier(input.userId, 'Utilizador') : undefined,
+        sessionId: input?.sessionId ? ensureText(input.sessionId, 'Sessão', 100) : undefined, all: input?.all === true
+    }),
+    onUserSessionRevoked: (callback: (data: { code: string }) => void) => subscribe('user-session-revoked', callback),
     userAuthConfirmPassword: (password: string) => ipcRenderer.invoke('user-auth-confirm-password', ensureText(password, 'Palavra-passe', 256)),
     accountingSealVerify: () => ipcRenderer.invoke('accounting-seal-verify'),
     auditSealVerify: () => ipcRenderer.invoke('audit-seal-verify'),
