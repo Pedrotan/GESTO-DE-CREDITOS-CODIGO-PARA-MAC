@@ -41,6 +41,9 @@ let state = {
     adapter: getInitialAdapter()
 };
 
+/** A base em uso é a deste dispositivo (no Electron, a do processo principal)? */
+export const dbUsaBaseLocal = () => state.adapter === sqlite;
+
 export interface DBResult {
     lastInsertRowid?: number | string;
     changes?: number;

@@ -147,6 +147,10 @@ export const AVAILABLE_PERMISSIONS = [
     { id: 'view_chat', label: 'Chat Interno', description: 'Usar o chat interno da equipa' },
     { id: 'manage_suppliers', label: 'Página Fornecedores', description: 'Ver e gerir fornecedores' },
     { id: 'edit_credit_rate', label: 'Alterar a taxa do crédito', description: 'Mudar à mão a taxa do prazo ao conceder um crédito (fica registado na auditoria)' },
+    // Agenda de contactos dos clientes (dados pessoais: verificadas no processo principal).
+    { id: 'clients_reveal_id', label: 'Clientes: Revelar NIF/BI', description: 'Ver o NIF/BI completo na agenda de contactos (fica registado na auditoria)' },
+    { id: 'clients_export_lists', label: 'Clientes: Exportar listas de contactos', description: 'Exportar a agenda por filtro, período, selecção ou todos os clientes' },
+    { id: 'clients_export_id', label: 'Clientes: Incluir NIF/BI nas exportações', description: 'Incluir o NIF/BI nos ficheiros exportados da agenda de contactos' },
     // Recursos Humanos (módulo activável por licença).
     { id: 'hr_view', label: 'RH: Consultar', description: 'Ver o painel de RH, funcionários, livro de ponto e calendário' },
     { id: 'hr_manage', label: 'RH: Gerir funcionários', description: 'Registar e editar funcionários, contratos, documentos, ponto e ausências' },

@@ -1501,6 +1501,10 @@ const createTables = async () => {
     // Naturalidade e morada (província, município, bairro, zona) do cliente e do cônjuge.
     // Carteira e documento do cliente: sem estas colunas perdiam-se ao gravar e todos voltavam a «comum».
     await safeAddColumn("clients", "clientCategory", "TEXT");
+    // Agenda de contactos: telefone alternativo e índices dos filtros (tipo e província; createdAt já tem índice).
+    await safeAddColumn("clients", "alternativePhone", "TEXT");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(clientCategory)");
+    await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_province ON clients(province)");
     await safeAddColumn("clients", "clientType", "TEXT");
     await safeAddColumn("clients", "documentType", "TEXT");
     await safeAddColumn("clients", "countryCode", "TEXT");

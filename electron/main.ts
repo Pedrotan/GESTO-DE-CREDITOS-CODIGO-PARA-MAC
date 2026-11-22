@@ -15,6 +15,7 @@ import * as nodemailer from 'nodemailer';
 import { MasterAuthService } from './master-security';
 import { assertRendererSqlAllowlisted, mutationTable } from './sql-policy';
 import { SYNC_SQL_BY_ID } from './sync-sql';
+import { registarAgendaContactos } from './agenda-contactos';
 import { applyRemoteGroups, RETAINED_FOR_ROW_SQL, type RemoteGroup } from '../src/bibliotecas/sync-operacoes';
 import { executarManutencaoSync } from '../src/bibliotecas/manutencao-sync';
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
@@ -3868,6 +3869,13 @@ app.whenReady().then(async () => {
       await assertLeituraRH(event, request.sql, request.params, runQuery);
     }
     return runQuery("get", request.sql, request.params);
+  });
+  // Agenda de contactos dos clientes: consultas, NIF/BI e exportações com permissões e auditoria verificadas aqui.
+  registarAgendaContactos({
+    ipcMain, assertTrustedIpcSender, runQuery,
+    autenticado: (event) => userAuth.assertAuthenticated(event.sender.id),
+    aposAuditoria: () => sealAuditAfterWrite(),
+    ip: () => getLocalNetworkInfo()?.ips?.[0] || "",
   });
   ipcMain.handle("db-exec", async (event, sql) => {
     assertTrustedIpcSender(event);

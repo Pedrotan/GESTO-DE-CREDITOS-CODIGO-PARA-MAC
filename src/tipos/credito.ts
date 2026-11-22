@@ -43,6 +43,8 @@ export interface Client {
   clientType?: 'PARTICULAR' | 'EMPRESA';
   // Carteira a que o cliente pertence. Ausente = cliente comum (registos antigos).
   clientCategory?: 'COMUM' | 'APOSENTADO' | 'ESTRANGEIRO';
+  /** Telefone alternativo (agenda de contactos). */
+  alternativePhone?: string;
   // --- Identificação do documento (nacional ou estrangeiro) ---
   /** Documento usado na identificação. Ausente = BI (registos anteriores). */
   documentType?: 'BI' | 'PASSAPORTE';

@@ -1,0 +1,8 @@
+// Classes da agenda de contactos (cores do guia: verde sóbrio só nas acções).
+export const btn = 'inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#D0D5DD] bg-white px-3.5 text-sm font-semibold text-[#344054] transition-colors hover:bg-[#F9FAFB] disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800';
+export const btnPrimario = 'inline-flex h-10 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-[#0B4A2F] bg-[#0B4A2F] px-3.5 text-sm font-semibold text-white transition-colors hover:bg-[#064E30] disabled:cursor-not-allowed disabled:opacity-50 dark:border-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600';
+export const btnIcone = 'inline-flex h-[34px] w-[34px] items-center justify-center rounded-lg border border-[#E4E7EC] bg-white text-[#344054] transition-colors hover:bg-[#F9FAFB] disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800';
+export const btnWhatsApp = 'border-[#ABEFC6] bg-[#ECFDF3] text-[#067647] hover:bg-[#D1FADF] dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300';
+export const linkAccao = 'border-0 bg-transparent p-0 text-[13px] font-semibold text-[#0B6B43] hover:underline dark:text-emerald-400';
+export const campo = 'h-10 rounded-lg border border-[#D0D5DD] bg-white px-3 text-sm text-[#101828] dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100';
+export const cartao = 'rounded-xl border border-[#E4E7EC] bg-white dark:border-slate-800 dark:bg-slate-900';

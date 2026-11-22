@@ -89,6 +89,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_calendar_tasks_usuario ON calendar_tasks(usuario_id)"
   ],
   [
+    "85a9421ce32845aea97401a9613fcd47cbc38a19dfb5a6851b167f35e26386c0",
+    "CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(clientCategory)"
+  ],
+  [
     "48dba12af3b1f5b216a74f88036134c9849723a7e6a51eca27e5ba1c2971977d",
     "CREATE INDEX IF NOT EXISTS idx_clients_createdAt ON clients(createdAt)"
   ],
@@ -107,6 +111,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "fbd6b0585e0c0951af55aa03095120e8b86877f3d461f1e53fcf1266667554da",
     "CREATE INDEX IF NOT EXISTS idx_clients_phone ON clients(phone)"
+  ],
+  [
+    "b3b87c7de8c35058e98d1dca8d0921caa46af45677f858c91e3a53285322cfb1",
+    "CREATE INDEX IF NOT EXISTS idx_clients_province ON clients(province)"
   ],
   [
     "96299303e3d38664eba27b4f101a4901d150a668c8b152dc6b567652194827f7",
@@ -2837,6 +2845,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COUNT(*) AS n FROM users"
   ],
   [
+    "95109b16d3e515717015767fb31536cb8a015927a6990051987cb7cbd6a8e255",
+    "SELECT COUNT(*) AS total FROM clients WHERE deletedAt IS NULL"
+  ],
+  [
     "771579d0a55575f2aefd9dcad891f906a9ad82833692c76e404ded412695038c",
     "SELECT COUNT(*) AS total FROM credit_import_batches WHERE number LIKE ?"
   ],
@@ -2871,6 +2883,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "9861e3ed1f73a0e476f0229d7766503584f58883741440c5fd182326faa27571",
     "SELECT COUNT(*) as count FROM warranties WHERE status = ?"
+  ],
+  [
+    "edf2c600002bad2e7899a86eb18fc58cd2f76cf8a44f01ec5fb1ff80a0b7664d",
+    "SELECT DISTINCT TRIM(province) AS v FROM clients WHERE deletedAt IS NULL AND TRIM(COALESCE(province, '')) <> '' ORDER BY v COLLATE NOCASE"
+  ],
+  [
+    "1e4109130e3028183e56bc426166098a06e76593b6ff305263bfbb8bb61293ca",
+    "SELECT DISTINCT u.id, u.name FROM clients c JOIN users u ON u.id = c.usuario_id WHERE c.deletedAt IS NULL ORDER BY u.name COLLATE NOCASE"
   ],
   [
     "6384bfb684344aa5866977bd1f431dd92e26afa1f282d68c33b9834fa4a9e835",
@@ -3565,6 +3585,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT name FROM users WHERE id = ?"
   ],
   [
+    "e4781b852ac381974746dc007e2c269a7aa88a80f0025a3831dced24751780bd",
+    "SELECT name, nif FROM clients WHERE deletedAt IS NULL AND id = ?"
+  ],
+  [
     "22488534dfe722c430a6d902ab8a33cf231f623862608ff4b99cf735a72dda9f",
     "SELECT operation FROM sync_conflicts WHERE status = 'pending'"
   ],
@@ -3737,6 +3761,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE audit_alerts SET status = ?, assignedTo = ?, assignedToName = ?, dueAt = ?, updatedAt = ?, closedBy = ?, closedByName = ?, closedAt = ? WHERE id = ?"
   ],
   [
+    "c9764e9db4a2030ba8466e575ae078967ceba64a323b553f839a1d5656496dc9",
+    "UPDATE clients SET address = ?, updatedAt = ? WHERE id = ?"
+  ],
+  [
+    "a6e4f19a77a351e537aa025b2530f6ea37cf984685b38ff72cbf8d62ea0fd3e2",
+    "UPDATE clients SET alternativePhone = ?, updatedAt = ? WHERE id = ?"
+  ],
+  [
     "98f7ba0796f967601d96798e87462ec12ac81586c6ac343f9d4e31831e541dfc",
     "UPDATE clients SET biAlertSentAt = ? WHERE id = ?"
   ],
@@ -3759,6 +3791,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "10a08f13ce9e90b31b90dfc1de77a8b96e3fd512db2cd3a51d4e8f9d3249f999",
     "UPDATE clients SET deletedBy = ?, originalState = NULL WHERE id = ? AND deletedAt IS NOT NULL"
+  ],
+  [
+    "45dee3680429075c4f86b5176fa70a9a1723e8ba44516bfbb5d35b608680fa4e",
+    "UPDATE clients SET email = ?, updatedAt = ? WHERE id = ?"
   ],
   [
     "ba50bf729e0a7dd52c768839404370d7b8b4ae2c23a3492e3c8fbea2cd321e7a",

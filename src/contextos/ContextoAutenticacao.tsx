@@ -13,8 +13,8 @@ import { hasFullAuthority } from '@/bibliotecas/conta-principal';
 
 const DEFAULT_PERMISSIONS: Record<Role, string[]> = {
     super_admin: AVAILABLE_PERMISSIONS.map(p => p.id),
-    admin: ['manage_clients', 'view_credits', 'approve_loans', 'manage_payments', 'view_reports', 'manage_settings', 'view_audit_logs', 'manage_limits', 'manage_fiscal', 'generate_fiscal_docs', 'view_market', 'use_simulator', 'view_chat', 'manage_suppliers'],
-    manager: ['manage_clients', 'view_credits', 'manage_payments', 'view_market', 'use_simulator', 'view_chat']
+    admin: ['manage_clients', 'view_credits', 'approve_loans', 'manage_payments', 'view_reports', 'manage_settings', 'view_audit_logs', 'manage_limits', 'manage_fiscal', 'generate_fiscal_docs', 'view_market', 'use_simulator', 'view_chat', 'manage_suppliers', 'clients_reveal_id', 'clients_export_lists', 'clients_export_id'],
+    manager: ['manage_clients', 'view_credits', 'manage_payments', 'view_market', 'use_simulator', 'view_chat', 'clients_reveal_id', 'clients_export_lists']
 };
 
 let cachedIP: string | null = null;

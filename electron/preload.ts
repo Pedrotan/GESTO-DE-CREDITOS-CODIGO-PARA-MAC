@@ -333,6 +333,9 @@ const api = Object.freeze({
     generateLicenseKeypair: () => ipcRenderer.invoke('generate-license-keypair'),
     signLicensePayload: (payload: string) => ipcRenderer.invoke('sign-license-payload', ensureText(payload, 'Payload da licenca', 64_000)),
 
+    // Agenda de contactos dos clientes (permissões e auditoria no processo principal)
+    agendaContactos: (accao: string, payload?: Record<string, unknown>) => ipcRenderer.invoke('agenda-contactos', ensureText(accao, 'Accao', 40), payload ?? {}),
+
     // Facturação Electrónica AGT (chaves e assinaturas ficam no processo principal)
     agtEstado: () => ipcRenderer.invoke('agt-estado'),
     agtImportarChave: (payload: { tipo: 'contribuinte' | 'saft'; pem: string; nif?: string }) => ipcRenderer.invoke('agt-importar-chave', {
