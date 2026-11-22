@@ -7,7 +7,7 @@ import { Button } from '@/componentes/ui/button';
 import { downloadDataUrl, renderReportExcel, renderReportPdf } from '@/bibliotecas/relatorios-pagamentos';
 import { annualReportDef } from '@/bibliotecas/relatorios-creditos';
 import { ServicoPagamentos } from '@/servicos/ServicoPagamentos';
-import { MONTHS_LONG } from './CabecalhoCarteira';
+import { MONTH_LONG as MONTHS_LONG } from '@/bibliotecas/periodos';
 import type { CarteiraState } from './useCarteira';
 
 const kz = (minor: number) => formatCurrency(minor / 100);

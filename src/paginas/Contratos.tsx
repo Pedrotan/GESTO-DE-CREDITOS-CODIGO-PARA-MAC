@@ -80,6 +80,8 @@ import { ClientDocument } from '@/tipos/credito';
 import { v4 as uuidv4 } from 'uuid';
 import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
 import { SeletorPeriodo } from '@/componentes/comum/SeletorPeriodo';
+import type { MonthDot } from '@/componentes/comum/FaixaMeses';
+import { luandaMonthKey } from '@/bibliotecas/fuso-angola';
 import { defaultPeriod, isInPeriod, periodRange, type PeriodSelection } from '@/bibliotecas/periodos';
 import { ServicoAuditoria } from '@/servicos/ServicoAuditoria';
 import { useNavigate } from 'react-router-dom';
@@ -114,7 +116,7 @@ type EditorState = { open: boolean; title: string; clauses: string; dirty: boole
 const contractDate = (contract: any) => contract.createdAt || contract.startDate;
 
 export default function Contracts() {
-    const { contracts, companySettings, clients, credits, deletedCredits, updateCompanySettings, addDocumentToClient, deleteDocumentFromClient, updateContract, deleteCredit, refreshData } = useData();
+    const { contracts, companySettings, clients, credits, deletedCredits, closedMonths, updateCompanySettings, addDocumentToClient, deleteDocumentFromClient, updateContract, deleteCredit, refreshData } = useData();
     const { user } = useAuth();
     // Número do contrato (BV-CRT/2026/001): conta todos os créditos que já existiram, para nunca se repetir.
     const [numberingVersion, setNumberingVersion] = useState(0);
@@ -216,9 +218,19 @@ export default function Contracts() {
 
     // Contratos do período seleccionado (os cartões e as tabelas usam sempre o mesmo período).
     const range = useMemo(() => periodRange(period), [period]);
-    const monthsWithContracts = useMemo(() => new Set(contracts
-        .filter(contract => new Date(contractDate(contract)).getFullYear() === period.year)
-        .map(contract => new Date(contractDate(contract)).getMonth())), [contracts, period.year]);
+    // Pontos da faixa de meses, com o mesmo significado da página de Créditos: verde = contratos sem atrasos,
+    // laranja = algum contrato do mês com prestações em atraso, cinzento = mês sem contratos; meses futuros sem ponto.
+    const monthDots = useMemo<MonthDot[]>(() => {
+        const currentMonth = data.today.slice(0, 7);
+        return Array.from({ length: 12 }, (_, index) => {
+            const month = `${period.year}-${String(index + 1).padStart(2, '0')}`;
+            if (month > currentMonth) return null;
+            const rows = data.rows.filter(row => luandaMonthKey(contractDate(row.contract)) === month);
+            if (!rows.length) return 'grey';
+            return rows.some(row => row.overdueMinor > 0) ? 'orange' : 'green';
+        });
+    }, [data.rows, data.today, period.year]);
+    const closedMonthIds = useMemo(() => (closedMonths || []).map((item: { id: string }) => item.id), [closedMonths]);
 
     // Linhas com os valores do plano de prestações: período → filtros (pesquisa, produto, gestor, risco) → filtro rápido.
     const periodRows = useMemo(() => data.rows.filter(row => isInPeriod(contractDate(row.contract), range)), [data.rows, range]);
@@ -617,7 +629,7 @@ export default function Contracts() {
 
             {/* Período: o mesmo seletor da página de Créditos (dia, semana, mês, trimestre, semestre, ano, personalizado) */}
             <div className="mb-4">
-                <SeletorPeriodo value={period} onChange={setPeriod} kinds={['day', 'week', 'month', 'quarter', 'semester', 'year', 'custom', 'all']} monthsWithData={monthsWithContracts} />
+                <SeletorPeriodo value={period} onChange={setPeriod} kinds={['day', 'week', 'month', 'quarter', 'semester', 'year', 'custom', 'all']} monthDots={monthDots} closedMonths={closedMonthIds} />
             </div>
 
             {/* Indicadores do período (clicáveis: filtram a tabela) */}

@@ -3,19 +3,24 @@ import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { cn } from '@/bibliotecas/utils';
+import { FaixaMeses, type MonthDot } from '@/componentes/comum/FaixaMeses';
 import { MONTH_SHORT, PERIOD_KIND_LABELS, defaultPeriod, type PeriodKind, type PeriodSelection } from '@/bibliotecas/periodos';
 
 // Seletor de período com a faixa de meses igual à da página de Créditos, mais os modos diário, semanal,
 // semestral, anual, personalizado e todo o período.
 
 export function SeletorPeriodo({
-    value, onChange, kinds = ['day', 'week', 'month', 'semester', 'year', 'custom', 'all'], monthsWithData,
+    value, onChange, kinds = ['day', 'week', 'month', 'semester', 'year', 'custom', 'all'], monthsWithData, monthDots, closedMonths,
 }: {
     value: PeriodSelection;
     onChange: (value: PeriodSelection) => void;
     kinds?: PeriodKind[];
     /** Meses (do ano seleccionado) com registos: marcados com um ponto. */
     monthsWithData?: Set<number>;
+    /** Estado de cada mês (verde, laranja, cinzento), como na página de Créditos; mostra também a legenda. */
+    monthDots?: MonthDot[];
+    /** Meses fechados (AAAA-MM), com cadeado. */
+    closedMonths?: string[];
 }) {
     const now = new Date();
     const set = (changes: Partial<PeriodSelection>) => onChange({ ...value, ...changes });
@@ -79,24 +84,14 @@ export function SeletorPeriodo({
                 )}
             </div>
             {value.kind === 'month' && (
-                <div className="flex gap-2 overflow-x-auto pb-1">
-                    {MONTH_SHORT.map((name, month) => {
-                        const active = month === value.month;
-                        const current = month === now.getMonth() && value.year === now.getFullYear();
-                        return (
-                            <button
-                                key={name} type="button" onClick={() => set({ month })}
-                                className={cn('relative flex min-w-[52px] flex-col items-center rounded-lg px-3 py-1.5 text-xs font-semibold transition-all',
-                                    active ? 'scale-[1.03] bg-sidebar-primary font-bold text-sidebar-primary-foreground shadow-gold'
-                                        : 'bg-background text-foreground/80 shadow-sm hover:-translate-y-0.5 hover:shadow-md dark:bg-white/10',
-                                    current && !active && 'ring-1 ring-sidebar-primary/60')}
-                            >
-                                {name}
-                                <span className={cn('mt-0.5 h-1.5 w-1.5 rounded-full', monthsWithData?.has(month) ? (active ? 'bg-sidebar-primary-foreground' : 'bg-emerald-500') : 'bg-transparent')} />
-                            </button>
-                        );
-                    })}
-                </div>
+                <FaixaMeses
+                    year={value.year}
+                    activeMonth={value.month}
+                    onSelect={month => set({ month })}
+                    dots={monthDots ?? MONTH_SHORT.map((_, month) => (monthsWithData?.has(month) ? 'green' : null))}
+                    closedMonths={closedMonths}
+                    legend={Boolean(monthDots)}
+                />
             )}
         </div>
     );

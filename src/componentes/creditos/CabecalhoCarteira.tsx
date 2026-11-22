@@ -1,11 +1,10 @@
-import { Briefcase, CalendarDays, ChevronLeft, ChevronRight, Lock, PieChart } from 'lucide-react';
+import { Briefcase, CalendarDays, ChevronLeft, ChevronRight, PieChart } from 'lucide-react';
 import { cn } from '@/bibliotecas/utils';
 import { Button } from '@/componentes/ui/button';
+import { FaixaMeses } from '@/componentes/comum/FaixaMeses';
+import { MONTH_LONG as MONTHS_LONG } from '@/bibliotecas/periodos';
 import type { CarteiraState, CarteiraView } from './useCarteira';
 
-const MONTHS = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-export const MONTHS_LONG = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
-const DOT = { green: 'bg-green-500', orange: 'bg-orange-500', grey: 'bg-slate-400' } as const;
 
 const VIEWS: Array<{ id: CarteiraView; label: string; help: string; icon: typeof Briefcase }> = [
     { id: 'carteira', label: 'Carteira', help: 'Créditos em curso hoje, seja qual for o mês de concessão', icon: Briefcase },
@@ -18,7 +17,6 @@ export function CabecalhoCarteira({ state, years, closedMonths, taskMonths, onOp
 }) {
     const index = years.indexOf(state.year);
     const today = state.today;
-    const currentMonth = today.slice(0, 7);
     const title = state.view === 'carteira' ? 'Carteira de crédito em curso'
         : state.view === 'producao' ? `Produção de ${MONTHS_LONG[state.month]} de ${state.year}` : `Visão anual de ${state.year}`;
     return (
@@ -48,39 +46,16 @@ export function CabecalhoCarteira({ state, years, closedMonths, taskMonths, onOp
             </div>
 
             {state.view !== 'anual' && (
-                <div>
-                    <div className="flex gap-2.5 overflow-x-auto rounded-2xl border border-primary/15 bg-primary/10 p-2 shadow-sm" style={{ scrollbarWidth: 'thin' }}>
-                        {MONTHS.map((name, monthIndex) => {
-                            const key = `${state.year}-${String(monthIndex + 1).padStart(2, '0')}`;
-                            const active = state.view === 'producao' && monthIndex === state.month;
-                            const closed = closedMonths.includes(key);
-                            const past = key < currentMonth;
-                            const dot = state.dots[monthIndex];
-                            return (
-                                <button key={name} type="button"
-                                    onClick={() => { if (active) onOpenTasks(); else { state.setMonth(monthIndex); state.setView('producao'); state.setCard('all'); } }}
-                                    title={active ? 'Abrir agenda de tarefas do mês' : `Ver a produção de ${MONTHS_LONG[monthIndex]}`}
-                                    className={cn('relative flex min-w-[64px] flex-col items-center gap-1 whitespace-nowrap rounded-xl px-3.5 py-2.5 text-xs transition-all duration-200',
-                                        active ? (closed ? 'scale-[1.03] bg-slate-700 font-bold text-white shadow-md' : 'scale-[1.03] bg-sidebar-primary font-bold text-sidebar-primary-foreground shadow-gold')
-                                            : closed ? 'bg-background/70 text-muted-foreground/60 shadow-sm hover:bg-muted/60'
-                                                : 'bg-background text-foreground/80 shadow-sm hover:-translate-y-0.5 hover:shadow-md dark:bg-white/10 dark:hover:bg-white/15',
-                                        !active && past && 'text-red-600 dark:text-red-400')}>
-                                    {taskMonths.has(key) && <span className={cn('absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-400 ring-2', active ? 'ring-primary' : 'ring-background')} title="Há tarefas agendadas neste mês" />}
-                                    <span className="font-semibold tracking-wide">{name}</span>
-                                    {closed ? <Lock className="h-3 w-3 opacity-70" /> : dot ? <span className={cn('inline-block h-1.5 w-1.5 rounded-full', DOT[dot], key === currentMonth && 'animate-pulse')} /> : <span className="inline-block h-1.5 w-1.5" />}
-                                </button>
-                            );
-                        })}
-                    </div>
-                    <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 px-1 text-[11px] text-muted-foreground">
-                        <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-green-500" /> Sem atrasos</span>
-                        <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-orange-500" /> Com prestações em atraso</span>
-                        <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-slate-400" /> Sem operações</span>
-                        <span className="flex items-center gap-1.5"><Lock className="h-3 w-3" /> Mês fechado</span>
-                        <span className="flex items-center gap-1.5"><span className="font-bold text-red-600 dark:text-red-400">Mês</span> já passado</span>
-                        <span>Os meses futuros não têm ponto.</span>
-                    </div>
-                </div>
+                <FaixaMeses
+                    year={state.year}
+                    activeMonth={state.view === 'producao' ? state.month : null}
+                    today={today}
+                    dots={state.dots}
+                    closedMonths={closedMonths}
+                    taskMonths={taskMonths}
+                    titleFor={(monthIndex, active) => active ? 'Abrir agenda de tarefas do mês' : `Ver a produção de ${MONTHS_LONG[monthIndex]}`}
+                    onSelect={(monthIndex, active) => { if (active) onOpenTasks(); else { state.setMonth(monthIndex); state.setView('producao'); state.setCard('all'); } }}
+                />
             )}
         </div>
     );
