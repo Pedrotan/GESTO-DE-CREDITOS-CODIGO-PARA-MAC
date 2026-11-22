@@ -4,7 +4,8 @@
 import { db } from '@/bibliotecas/bd';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { validarDatasBI } from '@/bibliotecas/rh/bi-validade';
-import { validarEscaloes, type IrtEscalao, type IrtTabela, type ParametroRH } from '@/bibliotecas/rh/parametros-rh';
+import { parametroEmVigor, validarEscaloes, valorTexto, type IrtEscalao, type IrtTabela, type ParametroRH } from '@/bibliotecas/rh/parametros-rh';
+import { CHAVE_FORMATO_NUMERO, CHAVE_SIGLA_EMPRESA, FORMATO_OMISSAO, gerarNumeroUnico, normalizarSigla, sugerirSigla, validarSigla, type FormatoNumero } from '@/bibliotecas/rh/numero-mecanografico';
 import { FORMATO_BI } from '@/bibliotecas/rh/esquema-rh';
 import { cicloChefia } from '@/bibliotecas/rh/hierarquia-rh';
 
@@ -209,7 +210,17 @@ export class ServicoRH {
         return db.get<Funcionario>('SELECT * FROM rh_funcionario WHERE id = ?', [id]);
     }
 
-    static async proximoNumero() {
+    /**
+     * Próximo n.º mecanográfico, no formato das Configurações de RH: 0000-SIGLA-0000 com algarismos aleatórios
+     * (por omissão) ou sequencial (0001, 0002…). Nunca repete um número da base local, mesmo de um funcionário cessado;
+     * entre dispositivos, o espaço de 10^8 combinações por sigla torna a repetição improvável e o índice único da
+     * tabela recusa-a (a sincronização mostra-a nos conflitos em vez de a gravar).
+     */
+    static async proximoNumero(nomeEmpresa?: string | null) {
+        const definicoes = await this.definicoesNumeracao(nomeEmpresa);
+        if (definicoes.formato === 'sigla') {
+            return gerarNumeroUnico(definicoes.sigla, async numero => Boolean(await db.get<{ id: string }>('SELECT id FROM rh_funcionario WHERE numero_mecanografico = ?', [numero]).catch(() => undefined)));
+        }
         const row = await db.get<{ total: number }>('SELECT COUNT(*) AS total FROM rh_funcionario').catch(() => undefined);
         let n = Number(row?.total || 0) + 1;
         for (;;) {
@@ -218,6 +229,46 @@ export class ServicoRH {
             if (!existe) return numero;
             n += 1;
         }
+    }
+
+    /** Formato do n.º mecanográfico e sigla da empresa (guardados em rh_parametro; a sigla, sem valor, vem do nome da empresa). */
+    static async definicoesNumeracao(nomeEmpresa?: string | null): Promise<{ formato: FormatoNumero; sigla: string; siglaSugerida: string; siglaGuardada: boolean }> {
+        const parametros = await this.parametros();
+        const hoje = luandaTodayKey();
+        const formato = valorTexto(parametros, CHAVE_FORMATO_NUMERO, hoje, FORMATO_OMISSAO) === 'sequencial' ? 'sequencial' : 'sigla';
+        const guardada = normalizarSigla(valorTexto(parametros, CHAVE_SIGLA_EMPRESA, hoje, ''));
+        const siglaSugerida = sugerirSigla(nomeEmpresa);
+        const valida = guardada && !validarSigla(guardada);
+        return { formato, sigla: valida ? guardada : siglaSugerida, siglaSugerida, siglaGuardada: Boolean(valida) };
+    }
+
+    /** Guarda o formato e a sigla (a partir de hoje). Só afecta os funcionários criados depois: os números existentes mantêm-se. */
+    static async guardarNumeracao(definicoes: { formato: FormatoNumero; sigla: string }, actor: ActorRH) {
+        const sigla = normalizarSigla(definicoes.sigla);
+        const erro = validarSigla(sigla);
+        if (definicoes.formato === 'sigla' && erro) throw new Error(erro);
+        if (definicoes.formato !== 'sigla' && definicoes.formato !== 'sequencial') throw new Error('Formato desconhecido.');
+        const parametros = await this.parametros();
+        const hoje = luandaTodayKey();
+        const when = agora();
+        const vespera = new Date(Date.parse(`${hoje}T00:00:00Z`) - 86_400_000).toISOString().slice(0, 10);
+        const statements: Statement[] = [];
+        const definir = (chave: string, valor: string, descricao: string) => {
+            const vigente = parametroEmVigor(parametros, chave, hoje);
+            if (vigente?.valor === valor) return;
+            if (vigente && vigente.vigencia_inicio.slice(0, 10) >= hoje) {
+                statements.push({ sql: 'UPDATE rh_parametro SET valor = ? WHERE id = ?', params: [valor, vigente.id], expectChanges: 1 });
+                return;
+            }
+            if (vigente) statements.push({ sql: 'UPDATE rh_parametro SET vigencia_fim = ? WHERE id = ? AND vigencia_fim IS NULL', params: [vespera, vigente.id], expectChanges: 1 });
+            statements.push({ sql: `INSERT INTO rh_parametro (id, chave, valor, descricao, vigencia_inicio, vigencia_fim, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, NULL, ?, ?)`,
+                params: [crypto.randomUUID(), chave, valor, descricao, hoje, when, actor.id], expectChanges: 1 });
+        };
+        definir(CHAVE_FORMATO_NUMERO, definicoes.formato, 'Formato do n.º mecanográfico dos funcionários novos (sigla ou sequencial)');
+        if (sigla && !erro) definir(CHAVE_SIGLA_EMPRESA, sigla, 'Sigla da empresa usada no n.º mecanográfico (0000-SIGLA-0000)');
+        if (!statements.length) return;
+        statements.push(auditoriaRH(actor, 'update', `Numeração dos funcionários: formato ${definicoes.formato === 'sigla' ? `0000-${sigla}-0000` : 'sequencial'}`, { formato: definicoes.formato, sigla }, undefined, undefined, when));
+        await db.transaction(statements);
     }
 
     private static validarFuncionario(f: Partial<Funcionario>) {

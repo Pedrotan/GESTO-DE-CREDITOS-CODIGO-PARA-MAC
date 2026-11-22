@@ -193,7 +193,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
             return;
         }
         setF(vazio()); setContrato(contratoVazio()); setComContrato(true); setSubsidios([]); setPortalModo('sem');
-        void ServicoRH.proximoNumero().then(numero => setF(prev => ({ ...prev, numero_mecanografico: prev.numero_mecanografico || numero })));
+        void ServicoRH.proximoNumero(companySettings?.name).then(numero => setF(prev => ({ ...prev, numero_mecanografico: prev.numero_mecanografico || numero })));
         try { const r = JSON.parse(localStorage.getItem(CHAVE_RASCUNHO) || 'null'); setRascunho(r?.f ? { guardadoEm: r.guardadoEm } : null); } catch { setRascunho(null); }
     }, [open, funcionario]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -369,7 +369,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
         if (outro && !funcionario) {
             setF(vazio()); setContrato(contratoVazio()); setComContrato(true); setSubsidios([]); setDocumentos([]); setContratoAssinado(null);
             setVisitados(new Set()); setMostrarTodos(false); setTocados({ inicio: false, experimental: false });
-            void ServicoRH.proximoNumero().then(numero => setF(prev => ({ ...prev, numero_mecanografico: numero })));
+            void ServicoRH.proximoNumero(companySettings?.name).then(numero => setF(prev => ({ ...prev, numero_mecanografico: numero })));
             corpo.current?.scrollTo({ top: 0 });
             return;
         }
@@ -453,7 +453,7 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                             </div>
                         </div>
                         <div className={grelha}>
-                            <Campo id="numero_mecanografico" label="N.º mecanográfico" obrig erro={erro('numero_mecanografico')} dica={edicao ? 'Não se altera na edição' : 'Gerado automaticamente'}>
+                            <Campo id="numero_mecanografico" label="N.º mecanográfico" obrig erro={erro('numero_mecanografico')} dica={edicao ? 'Não se altera na edição' : 'Gerado automaticamente no formato das Configurações de RH'}>
                                 <Input id="ff-numero_mecanografico" className={inp} value={f.numero_mecanografico || ''} disabled={edicao} onBlur={() => visitar('numero_mecanografico')} onChange={e => set('numero_mecanografico', e.target.value)} />
                             </Campo>
                             <Campo id="nome" label="Nome completo" obrig erro={erro('nome')} className="sm:col-span-2 lg:col-span-3">

@@ -24,12 +24,16 @@ import { CatalogoSubsidios } from '@/componentes/rh/CatalogoSubsidios';
 import { ModelosDeclaracao } from '@/componentes/rh/ModelosDeclaracao';
 import { type FuncionarioRubrica } from '@/servicos/rh/ServicoRH';
 import { CalendarDays } from 'lucide-react';
+import { useData } from '@/contextos/ContextoDados';
+import { CHAVES_NUMERACAO } from '@/bibliotecas/rh/numero-mecanografico';
+import { NumeracaoFuncionarios } from '@/componentes/rh/NumeracaoFuncionarios';
 
 const NENHUM = '__nenhum__';
 const pct = (valor: number) => `${(valor * 100).toLocaleString('pt-PT', { maximumFractionDigits: 2 })}%`;
 
 export default function ConfiguracoesRH() {
     const { actor, configurar, gerir } = useActorRH();
+    const { companySettings } = useData();
     const base = useBaseRH();
     const irt = useCarregar(async () => ({ tabelas: await ServicoRH.tabelasIrt(), escaloes: await ServicoRH.escaloesIrt() }), { tabelas: [], escaloes: [] as IrtEscalao[] });
     const { parametros, rubricas, departamentos, cargos, seccoes } = base.dados;
@@ -43,7 +47,7 @@ export default function ConfiguracoesRH() {
     const tiposAusencia = useCarregar(() => ServicoTempoRH.tiposAusencia(), [] as TipoAusencia[]);
     const [tipoAusencia, setTipoAusencia] = useState<Partial<TipoAusencia> | null>(null);
 
-    const chaves = useMemo(() => [...new Set(parametros.map(p => p.chave))], [parametros]);
+    const chaves = useMemo(() => [...new Set(parametros.map(p => p.chave))].filter(chave => !CHAVES_NUMERACAO.has(chave)), [parametros]);
     const atribuicoes = useCarregar(() => ServicoRH.todasRubricasFuncionarios(), [] as FuncionarioRubrica[]);
     // Secção aberta na URL (?seccao=…), para os atalhos «Gerir catálogo →» abrirem já em Subsídios e abonos.
     const [url, setUrl] = useSearchParams();
@@ -63,6 +67,7 @@ export default function ConfiguracoesRH() {
                     <Link to="/rh/calendario" className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"><CalendarDays className="h-4 w-4" aria-hidden="true" /> Horários e calendário</Link>
                     <TabsTrigger className={item} value="subsidios">Subsídios e abonos</TabsTrigger>
                     <TabsTrigger className={item} value="rubricas">Descontos e rubricas do sistema</TabsTrigger>
+                    <TabsTrigger className={item} value="numeracao">Numeração dos funcionários</TabsTrigger>
                     <TabsTrigger className={item} value="parametros">Parâmetros legais</TabsTrigger>
                     <TabsTrigger className={item} value="irt">Tabela do IRT</TabsTrigger>
                     <TabsTrigger className={item} value="ausencias">Tipos de ausência</TabsTrigger>
@@ -76,6 +81,10 @@ export default function ConfiguracoesRH() {
 
                 <TabsContent value="subsidios" className="mt-0">
                     <CatalogoSubsidios rubricas={rubricas} atribuicoes={atribuicoes.dados} actor={actor} podeEditar={configurar} onChange={() => { void base.recarregar(); void atribuicoes.recarregar(); }} />
+                </TabsContent>
+
+                <TabsContent value="numeracao" className="mt-0">
+                    <NumeracaoFuncionarios actor={actor} podeEditar={configurar} nomeEmpresa={companySettings?.name} onSaved={() => void base.recarregar()} />
                 </TabsContent>
 
                 <TabsContent value="parametros" className="mt-0">
