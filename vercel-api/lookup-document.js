@@ -1,4 +1,4 @@
-import { authorizeTenant } from './_autorizacao-empresa.js';
+import { authorizeTenant, isAccessTokenShaped, tenantCredentialFrom } from './_autorizacao-empresa.js';
 import { lookupConfiguredProvider } from './_document-provider.js';
 import { applyCors, enforceDistributedRateLimit, requireSecret } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
@@ -30,7 +30,9 @@ export default async function handler(req, res) {
   }
   // Aceita a chave dedicada de consulta ou a chave mestra usada pelo painel Tango Master. Quem enviou uma
   // chave (Authorization ou x-master-secret) e falhou conta para o mesmo bloqueio da chave mestra.
-  const sentSecret = Boolean(req.headers.authorization || req.headers['x-master-secret'] || req.headers['x-api-key']);
+  // O access token de um utilizador (Bearer) não é uma chave de API: não conta para o bloqueio da chave mestra.
+  const bearerIsUserToken = isAccessTokenShaped(String(req.headers.authorization || '').replace(/^Bearer\s+/iu, ''));
+  const sentSecret = Boolean((req.headers.authorization && !bearerIsUserToken) || req.headers['x-master-secret'] || req.headers['x-api-key']);
   if (sentSecret) {
     const remaining = await lockoutRemaining(sql, req, { scope: 'master' });
     if (remaining > 0) {
@@ -45,8 +47,8 @@ export default async function handler(req, res) {
       details: 'Pedido à consulta de BI/NIF com uma chave de API ou chave mestra inválida.', ipPolicy: LOCKOUT_POLICIES.master });
   }
   // Empresa ligada: pelo Código de Acesso (computador) ou pela sessão HttpOnly (versão web, sem cabeçalho).
-  if (!authorized && req.headers['x-tenant-id'] && (req.headers['x-sync-passkey'] || req.headers.cookie)) {
-    const access = await authorizeTenant(sql, String(req.headers['x-tenant-id']), String(req.headers['x-sync-passkey'] || ''), req);
+  if (!authorized && req.headers['x-tenant-id'] && (tenantCredentialFrom(req) || req.headers.cookie)) {
+    const access = await authorizeTenant(sql, String(req.headers['x-tenant-id']), tenantCredentialFrom(req), req);
     if (!access.ok) return send(res, access.status, { success: false, code: access.code, message: access.message });
     authorized = true;
   }

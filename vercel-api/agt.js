@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { authorizeTenant } from './_autorizacao-empresa.js';
+import { authorizeTenant, tenantCredentialFrom } from './_autorizacao-empresa.js';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { recordRejectedOrigin, recordSecurityEvent } from './_alertas.js';
 import { assinarDocumento, chamarAgt, descreverChave, hashSaft, lerChavePrivada, AGT_CAMPOS_ASSINATURA } from './_agt-nucleo.js';
@@ -59,11 +59,11 @@ export default async function handler(req, res) {
   }
 
   const tenantId = String(req.headers['x-tenant-id'] || '').trim();
-  if (!tenantId || !(req.headers['x-sync-passkey'] || req.headers.cookie)) {
+  if (!tenantId || !(tenantCredentialFrom(req) || req.headers.cookie)) {
     await recordSecurityEvent(req, { type: 'unauthenticated_request', severity: 'medium', title: 'Ponte AGT sem autenticação', details: 'Pedido à ponte AGT sem empresa ligada.' }, sql);
     return send(res, 401, { success: false, message: 'Ligue primeiro a empresa para usar a facturação electrónica.' });
   }
-  const acesso = await authorizeTenant(sql, tenantId, String(req.headers['x-sync-passkey'] || ''), req);
+  const acesso = await authorizeTenant(sql, tenantId, tenantCredentialFrom(req), req);
   if (!acesso.ok) return send(res, acesso.status, { success: false, code: acesso.code, message: acesso.message });
 
   const body = req.body || {};

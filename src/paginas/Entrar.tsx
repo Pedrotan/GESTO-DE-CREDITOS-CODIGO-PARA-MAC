@@ -35,6 +35,7 @@ import { receiveUsersFromCloud, type UsersRosterOutcome } from '@/servicos/Servi
 import { db } from '@/bibliotecas/bd';
 import { useWebMultiTenant } from '@/ganchos/usar-multi-empresa-web';
 import { ModalTermosSistema } from '@/componentes/legal/ModalTermosSistema';
+import { ultimoLoginServidor } from '@/servicos/ServicoSessaoServidor';
 
 // Versão web: os utilizadores são os do Tango ERP do computador da empresa, que os envia pela sincronização.
 const webUserExists = async (login: string) => Boolean(await db.get<{ id: string }>(
@@ -201,7 +202,9 @@ export default function Login() {
 
             // Versão web: o utilizador pode ainda não ter chegado do computador da empresa. Pede já a lista
             // ao servidor e tenta de novo; se continuar a faltar, explica o motivo em vez de "password errada".
-            if (!success && isPublicWebBuild && isCompanyActiveLocally() && !await webUserExists(cleanEmail)) {
+            // Com o servidor a validar a senha (resposta definitiva), a lista local de utilizadores já não interessa.
+            const serverAnswered = ['invalid', 'refused', 'ok'].includes(String(ultimoLoginServidor()));
+            if (!success && !serverAnswered && isPublicWebBuild && isCompanyActiveLocally() && !await webUserExists(cleanEmail)) {
                 setLoadingLabel('A receber os utilizadores da empresa...');
                 const outcome = await receiveUsersFromCloud();
                 if (await webUserExists(cleanEmail)) {

@@ -1,4 +1,5 @@
 import { scopedStorageKey } from '@/bibliotecas/contas';
+import { cabecalhoSessaoUtilizador, SERVER_PASSWORD_PLACEHOLDER, SERVER_SESSION_STARTED_EVENT } from '@/bibliotecas/sessao-utilizador-cabecalho';
 import { publishCompanyProfile, readCompanyProfile } from '@/bibliotecas/identidade-empresa-sync';
 import { portableCompanyImage } from '@/bibliotecas/imagem-portatil';
 import { lerChavesSincronizacao, lerSegredo, SEGREDO_CHAVE_SINCRONIZACAO, SEGREDO_CODIGO_EMPRESA } from '@/bibliotecas/cofre-segredos';
@@ -60,9 +61,12 @@ type CloudSyncConfig = {
     onRemoteApplied?: () => void | Promise<void>;
 };
 
-/** Autenticação de cada pedido: o Código de Acesso no cabeçalho, ou nada (o cookie HttpOnly da sessão vai sozinho). */
-const authHeaders = (config: CloudSyncConfig): Record<string, string> =>
-    config.sessionAuth ? {} : { 'x-sync-passkey': config.apiKey };
+/**
+ * Autenticação de cada pedido: o Código de Acesso no cabeçalho (computador) ou, na versão web, o access token do
+ * utilizador com sessão no servidor (o cookie HttpOnly da empresa vai sozinho e, sem utilizador, já não basta).
+ */
+const authHeaders = async (config: CloudSyncConfig): Promise<Record<string, string>> =>
+    config.sessionAuth ? cabecalhoSessaoUtilizador() : { 'x-sync-passkey': config.apiKey };
 
 const DB_NAME = 'TangoCloudSyncQueue';
 const STORE_NAME = 'operations';
@@ -218,6 +222,7 @@ const INCOMPLETE_GROUP_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const SYNCABLE_SQL = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
 
 let activeConfig: CloudSyncConfig | null = null;
+let sessionStartedHandler: (() => void) | null = null;
 let syncPromise: Promise<{ success: boolean; pushed?: number; pulled?: number; conflicts?: number; skipped?: number; message?: string; usersRoster?: UsersRosterOutcome }> | null = null;
 let timer: ReturnType<typeof setInterval> | null = null;
 let onlineHandler: (() => void) | null = null;
@@ -855,12 +860,15 @@ const applyUserRoster = async (roster: UsersRoster) => {
     const local = new Set(await sharedUserColumns());
     const incoming = Array.isArray(roster.columns) ? roster.columns.map(String) : [];
     const columns = incoming.filter(column => local.has(column));
-    if (!columns.includes('id') || !columns.includes('password') || !columns.includes('email')) return 0;
-    // Colunas obrigatórias neste navegador que o outro dispositivo pode não ter (bases antigas).
-    const missing = ['name', 'createdAt'].filter(column => local.has(column) && !columns.includes(column));
+    const withoutPasswords = !columns.includes('password');
+    if (!columns.includes('id') || !columns.includes('email')) return 0;
+    // Colunas obrigatórias neste navegador que o outro dispositivo pode não ter (bases antigas). Lista sem senhas:
+    // a senha guardada aqui passa à marca do servidor (o login deste navegador é feito no servidor).
+    const missing = ['name', 'createdAt', ...(withoutPasswords ? ['password'] : [])].filter(column => local.has(column) && !columns.includes(column));
     const target = [...columns, ...missing];
     const list = target.map(quoteIdentifier).join(', ');
-    const updates = columns.filter(column => column !== 'id').map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ');
+    const updates = [...columns, ...(withoutPasswords && local.has('password') ? ['password'] : [])].filter(column => column !== 'id')
+        .map(column => `${quoteIdentifier(column)} = excluded.${quoteIdentifier(column)}`).join(', ');
     const upsert = `INSERT INTO users (${list}) VALUES (${target.map(() => '?').join(', ')}) ON CONFLICT(id) DO UPDATE SET ${updates}`;
     const statements: SqlTransactionStatement[] = [];
     // Alterações feitas neste navegador e ainda não enviadas (ex.: nova palavra-passe) ganham à lista recebida:
@@ -878,7 +886,7 @@ const applyUserRoster = async (roster: UsersRoster) => {
         if (hasSentBefore && localNow[id] && sentState[id] !== localNow[id]) continue;
         const email = String(value('email') || '').trim().toLowerCase();
         // Sem perfil (role) não se sabe que permissões dar: o utilizador não entra.
-        if (!id || !email || !value('password') || !value('role')) continue;
+        if (!id || !email || (!withoutPasswords && !value('password')) || !value('role')) continue;
         // Email já usado por outro utilizador deste navegador: não se sobrepõe.
         const clash = await sqlite.all<{ id: string }>('SELECT id FROM users WHERE LOWER(email) = ? AND id <> ? LIMIT 1', [email, id]);
         if (clash.length) {
@@ -895,6 +903,7 @@ const applyUserRoster = async (roster: UsersRoster) => {
         const params = target.map(column => {
             const current = column === 'username' && usernameTaken ? null : value(column);
             if (current !== null && current !== '') return typeof current === 'object' ? JSON.stringify(current) : current;
+            if (column === 'password' && withoutPasswords) return SERVER_PASSWORD_PLACEHOLDER;
             if (column === 'createdAt') return new Date().toISOString();
             if (column === 'name') return email;
             if (column === 'status') return 'active';
@@ -1367,7 +1376,7 @@ export const syncCloudNow = async () => {
             for (let round = 0; round < MAX_PULL_ROUNDS; round++) {
                 const { batch: queued, more } = await getQueuedOperations(pushLimit);
                 const supported = queued.filter(operation => ['statement', 'snapshot', 'dynamic'].includes(operation.kind));
-                const outgoing: Array<{ id: string; deviceId: string; payload: string; kind?: 'users' }> = await Promise.all(
+                const outgoing: Array<{ id: string; deviceId: string; payload: string; kind?: 'users' | 'users-web' }> = await Promise.all(
                     supported.map(async operation => ({ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key) })));
                 // Alteração que, cifrada, não cabe no servidor: fica de parte (guardada) e o resto segue já.
                 const tooLarge = outgoing.filter(item => item.payload.length > MAX_OPERATION_BYTES).map(item => item.id);
@@ -1379,6 +1388,7 @@ export const syncCloudNow = async () => {
                 }
                 // Lista completa: o servidor guarda também a última à parte, para a versão web a pedir directamente.
                 if (round === 0 && usersOut?.payload && usersOut.id) outgoing.push({ id: usersOut.id, deviceId: getDeviceId(), payload: usersOut.payload, kind: 'users' });
+                if (round === 0 && usersOut?.webPayload && usersOut.webId) outgoing.push({ id: usersOut.webId, deviceId: getDeviceId(), payload: usersOut.webPayload, kind: 'users-web' });
                 const diagnostics = round === 0 ? await syncDiagnostics(previousError) : undefined;
                 const requestBody = JSON.stringify({
                     tenantId: config.tenantId, deviceId: getDeviceId(), cursor, operations: outgoing, maxBytes: MAX_PULL_BYTES,
@@ -1388,7 +1398,7 @@ export const syncCloudNow = async () => {
                 });
                 const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+                    headers: { 'Content-Type': 'application/json', ...(await authHeaders(config)) },
                 credentials: 'same-origin',
                     body: requestBody,
                     signal: AbortSignal.timeout(requestTimeout(requestBody.length + MAX_PULL_BYTES))
@@ -1508,7 +1518,7 @@ export const syncCloudNow = async () => {
                     } as unknown as SyncOperation;
                     const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
                         method: 'POST',
-                        headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+                        headers: { 'Content-Type': 'application/json', ...(await authHeaders(config)) },
                 credentials: 'same-origin',
                         // O cursor fica igual: o que vier na resposta é recebido na próxima sincronização.
                         body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), cursor, pull: false, operations: [{ id: operation.id, deviceId: operation.deviceId, payload: await encryptOperation(operation, key), kind: 'users' }] }),
@@ -1588,6 +1598,11 @@ export const syncCloudNow = async () => {
             if (hasMoreRemote || counts.pending) scheduleSync(1000);
             return result;
         } catch (error: any) {
+            if (error?.code === 'USER_SESSION_REQUIRED') {
+                retryNotBefore = Date.now() + 5 * 60_000;
+                emitStatus({ state: 'idle', message: 'A sincronização continua depois de iniciar sessão.', at: new Date().toISOString() });
+                return { success: false, message: 'A sincronização continua depois de iniciar sessão.' };
+            }
             const message = error?.name === 'TimeoutError' ? 'O servidor demorou muito a responder.'
                 : error?.message === 'Failed to fetch' ? 'Não foi possível contactar o servidor da nuvem.'
                     : (error?.message || (error?.name ? `Falha na sincronização (${error.name}).` : 'Falha na sincronização.'));
@@ -1641,7 +1656,7 @@ const startRealtime = (config: CloudSyncConfig) => {
             let waitMs = REALTIME_RETRY_MS[Math.min(attempt, REALTIME_RETRY_MS.length - 1)];
             try {
                 const url = `${normalizeBaseUrl(config.url)}/api/sync/events?tenantId=${encodeURIComponent(config.tenantId)}&deviceId=${encodeURIComponent(getDeviceId())}`;
-                const response = await fetch(url, { headers: authHeaders(config), credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
+                const response = await fetch(url, { headers: await authHeaders(config), credentials: 'same-origin', cache: 'no-store', signal: controller.signal });
                 // Código recusado: não insiste (a sincronização normal mostra o erro); tenta de novo mais tarde.
                 if (response.status === 401 || response.status === 403) waitMs = 5 * 60_000;
                 else if (response.ok && response.body) {
@@ -1697,6 +1712,13 @@ export const startCloudSync = (config: CloudSyncConfig) => {
     window.addEventListener('online', onlineHandler);
     window.addEventListener('focus', focusHandler);
     window.addEventListener('tango-local-db-write', writeHandler);
+    // Login no servidor (versão web): o access token passa a existir; sincroniza já e volta a ligar o tempo real.
+    sessionStartedHandler = () => {
+        retryNotBefore = 0;
+        scheduleSync(100);
+        if (activeConfig && !realtimeConnected) { stopRealtime(); startRealtime(activeConfig); }
+    };
+    window.addEventListener(SERVER_SESSION_STARTED_EVENT, sessionStartedHandler);
     timer = setInterval(() => {
         if (Date.now() < retryNotBefore) return;
         // Com o aviso em tempo real ligado, a sondagem periódica é só uma rede de segurança.
@@ -1723,6 +1745,8 @@ export const stopCloudSync = () => {
     if (onlineHandler) window.removeEventListener('online', onlineHandler);
     if (writeHandler) window.removeEventListener('tango-local-db-write', writeHandler);
     if (focusHandler) window.removeEventListener('focus', focusHandler);
+    if (sessionStartedHandler) window.removeEventListener(SERVER_SESSION_STARTED_EVENT, sessionStartedHandler);
+    sessionStartedHandler = null;
     timer = null;
     focusHandler = null;
     syncDebounce = null;
@@ -1782,7 +1806,7 @@ export const receiveUsersFromCloud = async (): Promise<UsersRosterOutcome> => {
         });
         const response = await fetch(`${normalizeBaseUrl(config.url)}/api/sync`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+            headers: { 'Content-Type': 'application/json', ...(await authHeaders(config)) },
                 credentials: 'same-origin',
             body: requestBody,
             signal: AbortSignal.timeout(requestTimeout(MAX_PULL_BYTES)),
@@ -1831,7 +1855,7 @@ export const pedidoNuvem = async <T,>(caminho: string, corpo: Record<string, unk
     if (!config || (typeof navigator !== 'undefined' && navigator.onLine === false)) return null;
     const response = await fetch(`${normalizeBaseUrl(config.url)}${caminho}`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders(config)) },
         credentials: 'same-origin',
         body: JSON.stringify({ tenantId: config.tenantId, ...corpo }),
         signal: AbortSignal.timeout(timeoutMs),
@@ -1851,7 +1875,7 @@ export const sendPresence = async (userId: string, active = true): Promise<{ ten
     const userKey = await presenceUserKey(config.tenantId, userId);
     const response = await fetch(`${normalizeBaseUrl(config.url)}/api/presence`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders(config) },
+        headers: { 'Content-Type': 'application/json', ...(await authHeaders(config)) },
         credentials: 'same-origin',
         body: JSON.stringify({ tenantId: config.tenantId, deviceId: getDeviceId(), userKey, platform: window.electronAPI ? 'pc' : 'web', active }),
         keepalive: !active,

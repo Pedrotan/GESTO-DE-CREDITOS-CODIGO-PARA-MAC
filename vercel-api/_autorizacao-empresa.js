@@ -3,6 +3,7 @@ import { clearAuthFailures, isTrustedClient, lockoutRemaining, registerAuthFailu
 import { licenseGate } from './_licencas.js';
 import { isCompromisedSecret } from './_security.js';
 import { companySessionTenant, sameCompany } from './_sessao-empresa.js';
+import { tenantHasCredentials, verifyAccessToken } from './_sessao-utilizador.js';
 
 // Autorização de uma empresa (tenant) pelo seu código de acesso. Partilhada pela sincronização e
 // pelo envio dos relatórios de utilização.
@@ -17,6 +18,17 @@ export const sha256 = (value) => crypto.createHash('sha256').update(String(value
 
 export const normalizeCode = (val) => String(val || '').trim().replace(/[-\s]/g, '').toUpperCase();
 
+/** Access token de utilizador (JWT compacto); nunca é um Código de Acesso. */
+export const isAccessTokenShaped = (value) => /^eyJ[\w-]+\.[\w-]+\.[\w-]+$/u.test(String(value || '').trim());
+
+/** Credencial da empresa num pedido: o Código de Acesso (x-sync-passkey) ou o access token do utilizador (Bearer). */
+export const tenantCredentialFrom = (req) => {
+  const passkey = String(req?.headers?.['x-sync-passkey'] || '').trim();
+  if (passkey) return passkey;
+  const bearer = String(req?.headers?.authorization || '').replace(/^Bearer\s+/iu, '').trim();
+  return isAccessTokenShaped(bearer) ? bearer : '';
+};
+
 // Modo multi-empresa da empresa: definido no cadastro do Tango Master e actualizado pelo executável da empresa.
 // NULL = ainda desconhecido (a versão web mantém o comportamento das suas definições locais).
 export const ensureTenantProfileColumns = async (sql) => {
@@ -27,7 +39,11 @@ export const ensureTenantProfileColumns = async (sql) => {
 // Se a empresa estiver registada no Painel Master (tabela tango_tenants),
 // valida a chave/código individual dela + estado + expiração. Caso contrário,
 // mantém a compatibilidade com a chave global TANGO_SYNC_SECRET.
-export const authorizeTenant = async (sql, tenantId, providedKey, req = null) => {
+// Formas de acesso (`via` no resultado): 'key' (Código de Acesso ou chave global: computador), 'user-token' (access
+// token de um utilizador com sessão no servidor) e 'company-session' (cookie da empresa na versão web). Numa empresa
+// cujos utilizadores já estão no servidor, o cookie da empresa sozinho deixa de bastar: é preciso o utilizador
+// (`allowCompanySession` só para o próprio login).
+export const authorizeTenant = async (sql, tenantId, providedKey, req = null, { allowCompanySession = false } = {}) => {
   await sql(`
     CREATE TABLE IF NOT EXISTS tango_tenants (
       tenant_id TEXT PRIMARY KEY,
@@ -81,10 +97,20 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
   }
 
   const tenant = rows[0];
+  const canonicalHash = tenant.tenant_hash || sha256(tenantId);
+  // Access token de utilizador: assinatura, validade, sessão aberta e a mesma empresa.
+  let userClaims = null;
+  if (isAccessTokenShaped(providedKey)) {
+    userClaims = await verifyAccessToken(sql, String(providedKey).trim());
+    if (!userClaims || userClaims.tenantHash !== canonicalHash) {
+      return { ok: false, status: 401, code: 'ACCESS_TOKEN_INVALID', message: 'A sessão do utilizador expirou. Inicie sessão novamente.' };
+    }
+  }
   // Versão web: sem código no pedido, vale a sessão HttpOnly da empresa (o navegador já não guarda o código).
-  const sessionTenant = !String(providedKey || '').trim() && req ? await companySessionTenant(sql, req) : null;
+  const sessionTenant = !userClaims && !String(providedKey || '').trim() && req ? await companySessionTenant(sql, req) : null;
   const normProvided = normalizeCode(providedKey);
-  const isTenantKeyValid = Boolean(sessionTenant && sameCompany(sessionTenant, tenantId)) ||
+  const viaCompanySession = Boolean(sessionTenant && sameCompany(sessionTenant, tenantId));
+  const isTenantKeyValid = Boolean(userClaims) || viaCompanySession ||
     safeEqual(sha256(providedKey), tenant.key_hash) ||
     safeEqual(sha256(normProvided), tenant.key_hash) ||
     (tenant.access_code && (
@@ -103,6 +129,10 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
   if (tenant.status !== 'active') {
     return { ok: false, status: 403, message: 'O acesso desta empresa está bloqueado no Tango Master. Contacte o administrador.' };
   }
+  const via = userClaims ? 'user-token' : viaCompanySession && !isGlobalSecretValid ? 'company-session' : 'key';
+  if (via === 'company-session' && !allowCompanySession && await tenantHasCredentials(sql, canonicalHash)) {
+    return { ok: false, status: 401, code: 'USER_SESSION_REQUIRED', message: 'Inicie sessão com o seu utilizador para continuar.' };
+  }
   if (tenant.expires_at && new Date(tenant.expires_at).getTime() < Date.now()) {
     return { ok: false, status: 403, message: 'A chave ou código de acesso desta empresa expirou. Contacte o administrador.' };
   }
@@ -116,5 +146,5 @@ export const authorizeTenant = async (sql, tenantId, providedKey, req = null) =>
   }
   // Identificação canónica da empresa (a registada no Tango Master): todos os dispositivos da mesma empresa partilham
   // o mesmo histórico, mesmo que enviem o NIF noutro formato (maiúsculas, por exemplo).
-  return { ok: true, tenantHash: tenant.tenant_hash || sha256(tenantId) };
+  return { ok: true, tenantHash: canonicalHash, via, user: userClaims };
 };

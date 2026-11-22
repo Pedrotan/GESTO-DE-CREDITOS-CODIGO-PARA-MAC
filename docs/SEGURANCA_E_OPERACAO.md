@@ -91,3 +91,11 @@ Em cada login o servidor valida a senha e entrega um conjunto de tokens (`vercel
 - **Bloqueio**: 5 senhas erradas por conta em 15 min (30 por IP) bloqueiam o login no servidor durante 15 min.
 - **Terminar sessões**: "terminar sessão" de um utilizador revoga todas as sessões dele no servidor; cada dispositivo volta ao login na renovação seguinte (menos de 15 min) e logo no próximo pedido que use o access token.
 - **Transição**: enquanto o computador da empresa não enviar os utilizadores (versão anterior), o servidor responde `CREDENTIALS_NOT_PROVISIONED` e a versão web usa o login anterior. Sem Internet, o computador continua a entrar só com a sessão local.
+
+### Fase 2: rotas da empresa por utilizador e navegadores sem hashes
+
+- **Access token nas rotas da empresa**: `/api/sync` (e o canal de avisos), presença, ponto, AGT, cobrança, consulta de documentos e relatório de uso aceitam `Authorization: Bearer <access token>`. Numa empresa cujos utilizadores já estão no servidor, o cookie da empresa sozinho deixa de bastar (`401 USER_SESSION_REQUIRED`); só o login aceita o cookie da empresa. O computador continua a usar o Código de Acesso.
+- **Navegadores sem hashes**: o computador envia duas listas de utilizadores, a completa (`kind: users`, para os outros computadores, no histórico) e uma sem a coluna da senha (`kind: users-web`, guardada à parte, fora do histórico). Os navegadores dessas empresas não recebem as operações `users` e gravam a marca `!sessao-no-servidor` no lugar da senha, apagando hashes antigos.
+- **Alterações feitas na web**: uma conta com a marca na senha que chega da web actualiza o resto da ficha no computador e mantém a senha que lá está.
+- **Limitação conhecida**: as listas `users` gravadas no histórico antes desta versão não têm tipo e continuam a ser entregues a quem sincroniza desde o início. Depois de os computadores actualizarem, recomenda-se pedir a troca das senhas (ou aplicar a retenção do histórico) para que esses hashes deixem de valer.
+- **2FA na web**: continua por implementar (o segredo TOTP fica só no computador).

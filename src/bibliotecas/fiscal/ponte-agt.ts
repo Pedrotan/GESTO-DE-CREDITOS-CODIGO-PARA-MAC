@@ -5,6 +5,7 @@
  */
 import { lerSegredo, SEGREDO_CODIGO_EMPRESA } from '../cofre-segredos.ts';
 import type { AgtAmbiente } from './tipos.ts';
+import { cabecalhoSessaoUtilizador } from '../sessao-utilizador-cabecalho.ts';
 
 export interface InfoChave { carregada: boolean; bits?: number; impressao?: string; erro?: string }
 export interface EstadoPonte { success: boolean; nif?: string; contribuinte: InfoChave; saft: InfoChave; erro?: string }
@@ -22,7 +23,7 @@ async function web<T>(corpo: Record<string, unknown>): Promise<T> {
   const codigo = lerSegredo(SEGREDO_CODIGO_EMPRESA);
   const resposta = await fetch('/api/agt', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-tenant-id': tenantId, ...(codigo ? { 'x-sync-passkey': codigo } : {}) },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'x-tenant-id': tenantId, ...(codigo ? { 'x-sync-passkey': codigo } : await cabecalhoSessaoUtilizador()) },
     credentials: 'same-origin',
     body: JSON.stringify(corpo),
     signal: AbortSignal.timeout(45_000),

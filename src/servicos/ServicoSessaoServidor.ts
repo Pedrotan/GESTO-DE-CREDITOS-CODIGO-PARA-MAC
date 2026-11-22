@@ -4,6 +4,9 @@
 //   - token CSRF: guardado na sessão do separador e enviado em cada renovação ou fim de sessão.
 // No computador os tokens ficam no processo principal (ver electron/sessao-nuvem.ts); aqui só se pede o estado.
 import { webCloudSyncConfig } from '@/servicos/ServicoSincronizacaoCloud';
+import { registarCabecalhoSessao, SERVER_PASSWORD_PLACEHOLDER, SERVER_SESSION_STARTED_EVENT } from '@/bibliotecas/sessao-utilizador-cabecalho';
+
+export { SERVER_PASSWORD_PLACEHOLDER, SERVER_SESSION_STARTED_EVENT };
 
 export const SERVER_SESSION_ENDED_EVENT = 'tango-server-session-ended';
 const CSRF_KEY = 'tango_server_csrf';
@@ -25,6 +28,9 @@ export type ServerLoginOutcome =
 type Tokens = { accessToken: string; accessTokenExpiresAt: string; csrfToken?: string | null; sessionId: string; user: ServerUser };
 
 let accessToken: string | null = null;
+// Resultado do último login no servidor (o ecrã de login decide se ainda faz sentido o login anterior).
+let lastLoginState: ServerLoginOutcome['state'] | null = null;
+export const ultimoLoginServidor = () => lastLoginState;
 let accessExpiresAt = 0;
 let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 let refreshing: Promise<boolean> | null = null;
@@ -61,6 +67,7 @@ const clearLocal = () => {
 };
 
 const keep = (tokens: Tokens) => {
+    const started = !accessToken;
     accessToken = tokens.accessToken;
     accessExpiresAt = Date.parse(tokens.accessTokenExpiresAt) || Date.now() + 14 * 60_000;
     if (tokens.csrfToken) storage()?.setItem(CSRF_KEY, tokens.csrfToken);
@@ -68,6 +75,7 @@ const keep = (tokens: Tokens) => {
     if (refreshTimer) clearTimeout(refreshTimer);
     // Renovar antes de caducar: é também assim que uma revogação no servidor chega a este separador.
     refreshTimer = setTimeout(() => { void renovarSessaoServidor(); }, Math.max(5_000, accessExpiresAt - Date.now() - REFRESH_MARGIN_MS));
+    if (started && typeof window !== 'undefined') window.dispatchEvent(new Event(SERVER_SESSION_STARTED_EVENT));
 };
 
 const ended = (code: string, message?: string) => {
@@ -77,6 +85,12 @@ const ended = (code: string, message?: string) => {
 
 /** Login no servidor (versão web). Nunca lança: sem ligação devolve `unavailable`. */
 export const iniciarSessaoServidor = async (login: string, password: string, deviceId?: string): Promise<ServerLoginOutcome> => {
+    const outcome = await loginNoServidor(login, password, deviceId);
+    lastLoginState = outcome.state;
+    return outcome;
+};
+
+const loginNoServidor = async (login: string, password: string, deviceId?: string): Promise<ServerLoginOutcome> => {
     if (isDesktop()) return { state: 'unavailable', reason: 'desktop' };
     const company = target();
     if (!company) return { state: 'unavailable', reason: 'no_company' };
@@ -148,6 +162,14 @@ export const tokenAcessoServidor = async (): Promise<string | null> => {
     if (!accessToken || accessExpiresAt - Date.now() < REFRESH_MARGIN_MS) await renovarSessaoServidor();
     return accessToken;
 };
+
+/** Cabeçalho de autenticação do utilizador para as rotas da empresa (vazio sem sessão no servidor ou no computador). */
+export const cabecalhoSessaoUtilizador = async (): Promise<Record<string, string>> => {
+    const token = await tokenAcessoServidor();
+    return token ? { Authorization: `Bearer ${token}` } : {};
+};
+
+registarCabecalhoSessao(cabecalhoSessaoUtilizador);
 
 /** Fim de sessão no servidor (revoga o refresh token e apaga o cookie). Não lança. */
 export const terminarSessaoServidor = async () => {

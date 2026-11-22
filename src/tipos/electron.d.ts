@@ -35,7 +35,7 @@ export interface ElectronAPI {
     dbTransaction: (statements: Array<{ sql: string; params?: any[]; type?: 'execute' | 'exec'; expectChanges?: number }>) => Promise<any[]>;
     syncApplyRemote?: (groups: import('@/bibliotecas/sync-operacoes').RemoteGroup[]) => Promise<import('@/bibliotecas/sync-operacoes').ApplyResult>;
     syncMaintenance?: () => Promise<import('@/bibliotecas/manutencao-sync').ResultadoManutencao & { erros: string[] }>;
-    syncUsersPayload?: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null; knownIds?: string[] }) => Promise<{ digest: string; id: string | null; payload: string | null; ids: string[] }>;
+    syncUsersPayload?: (input: { apiKey: string; tenantId: string; deviceId: string; knownDigest?: string | null; knownIds?: string[] }) => Promise<{ digest: string; id: string | null; payload: string | null; ids: string[]; webId?: string | null; webPayload?: string | null }>;
     syncUsersApply?: (roster: { columns: string[]; rows: unknown[][]; deleted?: string[] }) => Promise<{ applied: number; deleted: number; clashes?: Array<{ email: string; name: string; localId: string; remoteId: string }> }>;
     cloudLinkBegin?: (input: { nif: string; accessCode: string; urls: string[] }) => Promise<{ url: string; tenantId: string; companyName: string; syncPasskey: string; multiTenant: boolean | null }>;
     cloudLinkEnd?: () => Promise<{ success: boolean }>;

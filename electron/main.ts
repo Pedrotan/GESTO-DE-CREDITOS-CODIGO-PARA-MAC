@@ -3998,9 +3998,20 @@ app.whenReady().then(async () => {
       { name: "PBKDF2", salt: encoder.encode(`tango-sync:${tenantId}`), iterations: 120_000, hash: "SHA-256" },
       material, { name: "AES-GCM", length: 256 }, false, ["encrypt"]
     );
-    const iv = crypto.webcrypto.getRandomValues(new Uint8Array(12));
-    const encrypted = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(JSON.stringify(operation))));
-    return { digest, id: operation.id, payload: `${Buffer.from(iv).toString("base64")}.${Buffer.from(encrypted).toString("base64")}`, ids };
+    const encryptOperation = async (value: unknown) => {
+      const iv = crypto.webcrypto.getRandomValues(new Uint8Array(12));
+      const encrypted = new Uint8Array(await subtle.encrypt({ name: "AES-GCM", iv }, key, encoder.encode(JSON.stringify(value))));
+      return `${Buffer.from(iv).toString("base64")}.${Buffer.from(encrypted).toString("base64")}`;
+    };
+    // Lista para os navegadores: a mesma, sem a coluna da senha. Os navegadores entram pelo servidor (que tem os
+    // verificadores) e nunca recebem os hashes; a lista completa continua a servir os outros computadores.
+    const passwordIndex = columns.indexOf("password");
+    const webOperation = {
+      ...operation, id: crypto.randomUUID(), withoutPasswords: true,
+      columns: columns.filter((_name: string, index: number) => index !== passwordIndex),
+      rows: values.map((row: unknown[]) => row.filter((_value, index) => index !== passwordIndex)),
+    };
+    return { digest, id: operation.id, payload: await encryptOperation(operation), webId: webOperation.id, webPayload: await encryptOperation(webOperation), ids };
   });
   // Utilizadores criados, alterados ou removidos na versão web (já decifrados pelo renderer com a chave da
   // empresa). Só entram com palavra-passe protegida (bcrypt); nunca se remove a conta em uso nem o último
@@ -4028,7 +4039,11 @@ app.whenReady().then(async () => {
       const id = String(at(row, "id") || "");
       const email = String(at(row, "email") || "").trim().toLowerCase();
       if (!/^[\w.:-]{1,100}$/.test(id) || !email || email.length > 254) continue;
-      if (!/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(String(at(row, "password") || ""))) continue;
+      const incomingPassword = String(at(row, "password") || "");
+      // Conta que o navegador recebeu sem senha (marca do servidor) e alterou lá: actualiza o resto, mantém a senha daqui.
+      const keepLocalPassword = incomingPassword === "!sessao-no-servidor";
+      if (!keepLocalPassword && !/^\$2[aby]\$\d{2}\$[./A-Za-z0-9]{53}$/.test(incomingPassword)) continue;
+      if (keepLocalPassword && !await runQuery("get", "SELECT 1 AS found FROM users WHERE id = ? LIMIT 1", [id]).catch(() => null)) continue;
       if (!/^[a-z_]{2,40}$/.test(String(at(row, "role") || ""))) continue;
       const localOwner: any = await runQuery("get", "SELECT isOwner FROM users WHERE id = ? LIMIT 1", [id]).catch(() => null);
       if (isPrimaryOwner(localOwner)) continue;
@@ -4038,14 +4053,20 @@ app.whenReady().then(async () => {
         clashes.push({ email, name: String(at(row, "name") || email).slice(0, 120), localId: String(sameEmail.id), remoteId: id });
         continue;
       }
-      const values = columns.map(name => {
+      const rowColumns = keepLocalPassword ? columns.filter(name => name !== "password") : columns;
+      const values = rowColumns.map(name => {
         const value = at(row, name);
         return value === undefined ? null : value !== null && typeof value === "object" ? JSON.stringify(value) : value;
       });
-      statements.push({
-        sql: `INSERT INTO users (${columns.map(name => `"${name}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) ON CONFLICT(id) DO UPDATE SET ${columns.filter(name => name !== "id").map(name => `"${name}" = excluded."${name}"`).join(", ")}`,
-        params: values,
-      });
+      statements.push(keepLocalPassword
+        ? {
+          sql: `UPDATE users SET ${rowColumns.filter(name => name !== "id").map(name => `"${name}" = ?`).join(", ")} WHERE id = ?`,
+          params: [...rowColumns.filter(name => name !== "id").map(name => values[rowColumns.indexOf(name)]), id],
+        }
+        : {
+          sql: `INSERT INTO users (${columns.map(name => `"${name}"`).join(", ")}) VALUES (${columns.map(() => "?").join(", ")}) ON CONFLICT(id) DO UPDATE SET ${columns.filter(name => name !== "id").map(name => `"${name}" = excluded."${name}"`).join(", ")}`,
+          params: values,
+        });
       applied += 1;
     }
     let removed = 0;

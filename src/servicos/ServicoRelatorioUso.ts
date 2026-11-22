@@ -1,3 +1,4 @@
+import { cabecalhoSessaoUtilizador } from '../bibliotecas/sessao-utilizador-cabecalho.ts';
 // Resumo mensal de utilização enviado ao Tango Master (relatórios de volume de negócio do SaaS).
 // Só contém números agregados: contagens e totais em cêntimos. Nenhum nome, documento ou contacto
 // de clientes sai do dispositivo por esta via.
@@ -105,7 +106,7 @@ export const reportUsageIfDue = async (config: {
         const response = await fetch(`${config.url}/api/usage-report`, {
             method: 'POST',
             // Sem chave (versão web com sessão), o servidor reconhece a empresa pelo cookie HttpOnly.
-            headers: { 'Content-Type': 'application/json', ...(config.apiKey ? { 'x-sync-passkey': config.apiKey } : {}) },
+            headers: { 'Content-Type': 'application/json', ...(config.apiKey ? { 'x-sync-passkey': config.apiKey } : await cabecalhoSessaoUtilizador()) },
             credentials: 'same-origin',
             body: JSON.stringify({ tenantId: config.tenantId, deviceId: config.deviceId, appVersion: config.appVersion, reports }),
             signal: AbortSignal.timeout(15_000),

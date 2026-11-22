@@ -62,7 +62,7 @@ const handleLogin = async (sql, req, res, signingKey) => {
     return send(res, 400, { success: false, code: 'BAD_REQUEST', message: 'Empresa, utilizador e senha são obrigatórios.' });
   }
   const providedKey = String(req.headers['x-sync-passkey'] || '').trim();
-  const auth = await authorizeTenant(sql, tenantId, providedKey, req);
+  const auth = await authorizeTenant(sql, tenantId, providedKey, req, { allowCompanySession: true });
   if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code || 'TENANT_UNAUTHORIZED', message: auth.message });
   const tenantHash = auth.tenantHash;
   const subject = `${tenantHash}:${login}`;
@@ -187,6 +187,7 @@ const handleCredentials = async (sql, req, res) => {
   }
   const auth = await authorizeTenant(sql, tenantId, providedKey, req);
   if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code || 'TENANT_UNAUTHORIZED', message: auth.message });
+  if (auth.via !== 'key') return send(res, 403, { success: false, code: 'TENANT_KEY_REQUIRED', message: 'O envio de utilizadores exige o código da empresa.' });
   const result = await storeCredentials(sql, auth.tenantHash, body.users, { complete: body.complete === true });
   return send(res, 200, { success: true, ...result });
 };

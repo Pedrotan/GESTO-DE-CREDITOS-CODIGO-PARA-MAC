@@ -301,6 +301,29 @@ test('a web recebe os utilizadores do computador e o login aceita a palavra-pass
     assert.equal(again.usersRoster?.state, 'current');
 });
 
+test('lista sem senhas (empresa com sessões no servidor): a web grava as contas e apaga os hashes que tinha', async () => {
+    // Lista do computador sem a coluna da senha (a que vai para os navegadores).
+    const desktop = useDevice({ electronAPI: desktopApi });
+    desktop.run('DROP TABLE users');
+    desktop.run('CREATE TABLE users (id TEXT PRIMARY KEY, name TEXT, email TEXT, username TEXT, role TEXT, createdAt TEXT, permissions TEXT, status TEXT)');
+    desktop.run('INSERT INTO users VALUES (?, ?, ?, ?, ?, ?, ?, ?)', ['u-admin', 'Administradora Nova', 'admin@empresa.ao', 'admin', 'super_admin', '2026-01-01T00:00:00.000Z', '[]', 'active']);
+    const roster = await desktopApi(desktop).syncUsersPayload({ apiKey: SERVER_CODE, tenantId: TENANT, deviceId: 'pc-hashless', knownIds: [] });
+    server.rosters.set(sha256(TENANT), { operation_id: roster.id, device_id: 'pc-hashless', payload: roster.payload, updated_at: new Date() });
+
+    // Navegador que ainda tinha o hash de uma lista anterior.
+    const web = useDevice();
+    globalThis.localStorage.setItem('tango_active_tenant_id', TENANT);
+    globalThis.localStorage.setItem('tango_active_tenant_code', SERVER_CODE);
+    await sqliteFor(web).run('INSERT INTO users (id, name, email, password, role, createdAt) VALUES (?, ?, ?, ?, ?, ?)',
+        ['u-admin', 'Antiga', 'admin@empresa.ao', bcrypt.hashSync(PASSWORD, 4), 'super_admin', '2026-01-01T00:00:00.000Z']);
+    const outcome = await cloud.receiveUsersFromCloud();
+    assert.equal(outcome.state, 'applied', outcome.message);
+    const [row] = await sqliteFor(web).all('SELECT name, password FROM users WHERE id = ?', ['u-admin']);
+    assert.equal(row.name, 'Administradora Nova');
+    assert.equal(row.password, '!sessao-no-servidor', 'o hash antigo deixa de existir neste navegador');
+    assert.equal(bcrypt.compareSync(PASSWORD, row.password), false);
+});
+
 test('empresa cujo computador ainda não enviou utilizadores: a web explica em vez de falhar', async () => {
     useDevice();
     server.rosters.clear();

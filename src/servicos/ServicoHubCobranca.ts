@@ -8,6 +8,7 @@ import type { CollectionEvent } from '@/bibliotecas/cobranca-operacional';
 import type { Payment } from '@/tipos/credito';
 import type { User } from '@/tipos/autenticacao';
 import { ServicoControloAcesso } from './ServicoControloAcesso';
+import { cabecalhoSessaoUtilizador } from '@/bibliotecas/sessao-utilizador-cabecalho';
 
 type Actor = Pick<User, 'id' | 'name' | 'role'> & Partial<Pick<User, 'permissions'>>;
 const parse = <T>(s: string, fallback: T): T => { try { return JSON.parse(s) as T; } catch { return fallback; } };
@@ -22,7 +23,7 @@ export async function apiCobranca(accao: string, dados: Record<string, unknown> 
   const tenant = localStorage.getItem('tango_active_tenant_id');
   if (!tenant) throw new Error('Ligue a empresa à nuvem em Definições › Sincronização.');
   const segredo = codigo || lerSegredo(SEGREDO_CODIGO_EMPRESA);
-  const response = await fetch(`${baseHubApi()}/api/cobranca`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenant, ...(segredo ? { 'x-sync-passkey': segredo } : {}) }, body: JSON.stringify({ accao, ...dados }), signal: AbortSignal.timeout(45000) });
+  const response = await fetch(`${baseHubApi()}/api/cobranca`, { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json', 'x-tenant-id': tenant, ...(segredo ? { 'x-sync-passkey': segredo } : await cabecalhoSessaoUtilizador()) }, body: JSON.stringify({ accao, ...dados }), signal: AbortSignal.timeout(45000) });
   const body = await response.json().catch(() => null);
   if (!response.ok || !body?.success) throw new Error(body?.message || `Serviço de cobrança indisponível (${response.status}).`);
   return body;

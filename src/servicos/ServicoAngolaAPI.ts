@@ -50,6 +50,7 @@ export interface BIDataResult {
 import { detetarGeneroPorNome } from '../bibliotecas/genero.ts';
 import { lerChavesSincronizacao, lerSegredo, SEGREDO_CODIGO_EMPRESA } from '../bibliotecas/cofre-segredos.ts';
 import { calcularIdade, normalizarDataISO, inferirProvinciaDoBI } from '../bibliotecas/formatadores.ts';
+import { cabecalhoSessaoUtilizador } from '../bibliotecas/sessao-utilizador-cabecalho.ts';
 
 function normalizeGender(raw: any): string {
     if (!raw) return "";
@@ -128,7 +129,7 @@ export class ServicoAngolaAPI {
                 const response = await fetch(lookupServer.trim().replace(/\/+$/, '') + '/api/lookup-document?' + params, {
                     headers: { Accept: 'application/json',
                         ...(server?.secret ? { Authorization: 'Bearer ' + server.secret.trim() } :
-                            { 'x-tenant-id': tenantId!, ...(tenantCode ? { 'x-sync-passkey': tenantCode } : {}) }) },
+                            { 'x-tenant-id': tenantId!, ...(tenantCode ? { 'x-sync-passkey': tenantCode } : await cabecalhoSessaoUtilizador()) }) },
                     credentials: 'same-origin',
                     signal: AbortSignal.timeout(12_000)
                 });

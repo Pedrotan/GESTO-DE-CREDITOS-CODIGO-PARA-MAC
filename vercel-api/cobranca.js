@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { authorizeTenant } from './_autorizacao-empresa.js';
+import { authorizeTenant, tenantCredentialFrom } from './_autorizacao-empresa.js';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { ensureHub, accountCredentials, approvedTemplates, encryptCredentials, validateCredentials, validateApprovedTemplate, metaRequest, optOut, processQueue } from './_cobranca-cloud.js';
 import { telefoneAngola, validarPolitica, POLITICA_COBRANCA_PADRAO, diaValido } from './_cobranca-regras.js';
@@ -10,7 +10,7 @@ export async function handleHub(req, res, sql) {
   if (req.method === 'OPTIONS') return send(res, 200, { success: true });
   if (req.method !== 'POST') return send(res, 405, { success: false, message: 'Use POST.' });
   if (!await enforceDistributedRateLimit(sql, req, res, { limit: 180, windowMs: 60000, scope: 'hub_cobranca' })) return;
-  const tenant = small(req.headers['x-tenant-id'], 100).toUpperCase(), code = String(req.headers['x-sync-passkey'] || '');
+  const tenant = small(req.headers['x-tenant-id'], 100).toUpperCase(), code = tenantCredentialFrom(req);
   if (!tenant || (!code && !req.headers.cookie)) return send(res, 401, { success: false, message: 'Ligue primeiro a empresa.' });
   const auth = await authorizeTenant(sql, tenant, code, req);
   if (!auth.ok) return send(res, auth.status, { success: false, message: auth.message });

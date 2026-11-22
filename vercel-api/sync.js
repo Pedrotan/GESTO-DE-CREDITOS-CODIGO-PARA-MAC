@@ -2,6 +2,7 @@ import { neon } from '@neondatabase/serverless';
 import { applyCors, enforceDistributedRateLimit } from './_security.js';
 import { clearAuthFailures, LOCKOUT_POLICIES, lockoutRemaining, recordRejectedOrigin, recordSecurityEvent, registerAuthFailure } from './_alertas.js';
 import { authorizeTenant, sha256 } from './_autorizacao-empresa.js';
+import { tenantHasCredentials } from './_sessao-utilizador.js';
 import { recordSyncDevice } from './_dispositivos-sync.js';
 import { notifySyncChange, openSyncEvents } from './_avisos-sync.js';
 import { syncIntegrity } from './_integridade-sync.js';
@@ -42,8 +43,8 @@ const adoptStream = async (sql, fromHash, toHash) => {
   if (!pending) return;
   await sql(
     `${tenantLockCte('$1')}
-     INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload, created_at)
-     SELECT $1, o.operation_id, o.device_id, o.payload, o.created_at FROM tenant_lock, tango_sync_operations o
+     INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload, created_at, kind)
+     SELECT $1, o.operation_id, o.device_id, o.payload, o.created_at, o.kind FROM tenant_lock, tango_sync_operations o
      WHERE o.tenant_hash = $2 ORDER BY o.seq
      ON CONFLICT (tenant_hash, operation_id) DO NOTHING`, [toHash, fromHash]);
   await sql(
@@ -114,9 +115,12 @@ export default async function handler(req, res) {
 
   const bearer = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
   const providedKey = req.headers['x-sync-passkey'] || bearer;
+  // Navegador (sessão de utilizador ou cookie da empresa): não recebe a lista de utilizadores com os hashes.
+  let browserClient = false;
   try {
     const auth = await authorizeTenant(sql, tenantId, providedKey, req);
     if (!auth.ok) return send(res, auth.status, { success: false, code: auth.code, message: auth.message });
+    browserClient = auth.via !== 'key';
     // Histórico da empresa registada (não do texto enviado): um NIF noutro formato não abre uma «empresa» à parte.
     const sentHash = tenantHash;
     tenantHash = auth.tenantHash || tenantHash;
@@ -154,6 +158,8 @@ export default async function handler(req, res) {
       )
     `);
     await sql(`CREATE INDEX IF NOT EXISTS tango_sync_tenant_seq_idx ON tango_sync_operations (tenant_hash, seq)`);
+    // Tipo da alteração (só 'users' interessa): a lista com hashes das senhas fica fora do que os navegadores recebem.
+    await sql(`ALTER TABLE tango_sync_operations ADD COLUMN IF NOT EXISTS kind TEXT`);
     // Última lista completa de utilizadores enviada pelo computador da empresa (cifrada, ilegível aqui).
     // A versão web pede-a directamente: não depende do cursor nem de ter estado ligada quando foi enviada.
     await sql(`
@@ -165,9 +171,12 @@ export default async function handler(req, res) {
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       )
     `);
+    // 'users-web': lista sem senhas enviada pelo computador da empresa; tem prioridade sobre a lista com hashes.
+    await sql(`ALTER TABLE tango_sync_rosters ADD COLUMN IF NOT EXISTS kind TEXT`);
 
     const validatedOperations = [];
     let roster = null;
+    let webRoster = null;
     // Alterações maiores do que o limite: o dispositivo põe-nas de parte (sem as perder) e envia as restantes.
     const tooLarge = operations.filter(operation => String(operation?.payload || '').length > MAX_PAYLOAD_LENGTH).map(operation => String(operation?.id || ''));
     if (tooLarge.length) {
@@ -184,28 +193,42 @@ export default async function handler(req, res) {
         logRejected(req, tenantId, deviceId, operations.length, 'alteração inválida');
         return send(res, 400, { success: false, message: 'Alteração de sincronização inválida.' });
       }
-      validatedOperations.push({ operation_id: id, device_id: sourceDevice, payload });
-      if (operation?.kind === 'users') roster = { id, device: sourceDevice, payload };
+      // Lista de utilizadores para os navegadores (sem senhas): só fica guardada à parte, fora do histórico.
+      if (operation?.kind === 'users-web') { webRoster = { id, device: sourceDevice, payload }; continue; }
+      const kind = operation?.kind === 'users' ? 'users' : null;
+      validatedOperations.push({ operation_id: id, device_id: sourceDevice, payload, kind });
+      if (kind === 'users') roster = { id, device: sourceDevice, payload };
     }
     if (validatedOperations.length) {
       // Bloqueio por empresa (ver _bloqueio-empresa.js): um número visível garante que os anteriores também estão.
       await sql(
         `${tenantLockCte('$1')}
-         INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload)
-         SELECT $1, item.operation_id, item.device_id, item.payload
-         FROM tenant_lock, jsonb_to_recordset($2::jsonb) AS item(operation_id TEXT, device_id TEXT, payload TEXT)
+         INSERT INTO tango_sync_operations (tenant_hash, operation_id, device_id, payload, kind)
+         SELECT $1, item.operation_id, item.device_id, item.payload, item.kind
+         FROM tenant_lock, jsonb_to_recordset($2::jsonb) AS item(operation_id TEXT, device_id TEXT, payload TEXT, kind TEXT)
          ON CONFLICT (tenant_hash, operation_id) DO NOTHING`,
         [tenantHash, JSON.stringify(validatedOperations)]
       );
       // Tempo real: os outros dispositivos ligados da empresa vão buscar já o que chegou.
       notifySyncChange(tenantHash, deviceId);
     }
-    if (roster) {
+    if (webRoster) {
       await sql(
-        `INSERT INTO tango_sync_rosters (tenant_hash, operation_id, device_id, payload, updated_at)
-         VALUES ($1, $2, $3, $4, NOW())
+        `INSERT INTO tango_sync_rosters (tenant_hash, operation_id, device_id, payload, kind, updated_at)
+         VALUES ($1, $2, $3, $4, 'users-web', NOW())
          ON CONFLICT (tenant_hash) DO UPDATE SET operation_id = EXCLUDED.operation_id, device_id = EXCLUDED.device_id,
-           payload = EXCLUDED.payload, updated_at = NOW()`,
+           payload = EXCLUDED.payload, kind = 'users-web', updated_at = NOW()`,
+        [tenantHash, webRoster.id, webRoster.device, webRoster.payload]
+      );
+    } else if (roster) {
+      // A lista com hashes só é a lista dos navegadores enquanto nenhum computador tiver enviado a versão sem senhas
+      // (empresas só com versão web ou computadores ainda na versão anterior).
+      await sql(
+        `INSERT INTO tango_sync_rosters (tenant_hash, operation_id, device_id, payload, kind, updated_at)
+         VALUES ($1, $2, $3, $4, 'users', NOW())
+         ON CONFLICT (tenant_hash) DO UPDATE SET operation_id = EXCLUDED.operation_id, device_id = EXCLUDED.device_id,
+           payload = EXCLUDED.payload, kind = 'users', updated_at = NOW()
+         WHERE tango_sync_rosters.kind IS DISTINCT FROM 'users-web'`,
         [tenantHash, roster.id, roster.device, roster.payload]
       );
     }
@@ -232,6 +255,8 @@ export default async function handler(req, res) {
     }
 
     const pullBytes = Math.min(MAX_PULL_BYTES, Math.max(MIN_PULL_BYTES, Number(body.maxBytes) || DEFAULT_PULL_BYTES));
+    // Empresa com os utilizadores no servidor: os navegadores entram pelo servidor e não recebem os hashes.
+    const hideUsers = browserClient && await tenantHasCredentials(sql, tenantHash);
     let rows;
     let fetched;
     try {
@@ -239,7 +264,7 @@ export default async function handler(req, res) {
         `WITH page AS (
            SELECT seq, operation_id, device_id, payload
            FROM tango_sync_operations
-           WHERE tenant_hash = $1 AND seq > $2
+           WHERE tenant_hash = $1 AND seq > $2 AND ($5::boolean IS FALSE OR kind IS DISTINCT FROM 'users')
            ORDER BY seq ASC
            LIMIT $3
          ), sized AS (
@@ -251,7 +276,7 @@ export default async function handler(req, res) {
          SELECT seq, operation_id, device_id, payload, fetched FROM sized
          WHERE running - payload_size < $4
          ORDER BY seq ASC`,
-        [tenantHash, cursor, PULL_LIMIT + 1, pullBytes]
+        [tenantHash, cursor, PULL_LIMIT + 1, pullBytes, hideUsers]
       );
       fetched = rows.length ? Number(rows[0].fetched) : 0;
     } catch (error) {
@@ -259,8 +284,8 @@ export default async function handler(req, res) {
       console.warn('[sync] Página por tamanho indisponível:', error?.message);
       rows = await sql(
         `SELECT seq, operation_id, device_id, payload FROM tango_sync_operations
-         WHERE tenant_hash = $1 AND seq > $2 ORDER BY seq ASC LIMIT $3`,
-        [tenantHash, cursor, PULL_LIMIT + 1]
+         WHERE tenant_hash = $1 AND seq > $2 AND ($4::boolean IS FALSE OR kind IS DISTINCT FROM 'users') ORDER BY seq ASC LIMIT $3`,
+        [tenantHash, cursor, PULL_LIMIT + 1, hideUsers]
       );
       fetched = rows.length;
     }

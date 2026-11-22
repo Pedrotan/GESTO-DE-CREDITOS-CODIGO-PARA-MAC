@@ -53,10 +53,11 @@ const invoke = async (handler, { action, ip = freshIp(), body = {}, headers = {}
     return response;
 };
 
-const [tenants, verify, auth] = await Promise.all([
+const [tenants, verify, auth, sync] = await Promise.all([
     bundleHandler('vercel-api/tenants.js'),
     bundleHandler('vercel-api/verify-company.js'),
     bundleHandler('vercel-api/auth-login.js'),
+    bundleHandler('vercel-api/sync.js'),
 ]);
 
 const NIF = '5001122334';
@@ -250,4 +251,64 @@ test('um access token forjado, de outro tipo ou com a assinatura de outra chave 
         const reply = await invoke(auth, { action: 'sessions', body: { op: 'list' }, headers: { authorization: `Bearer ${token}` } });
         assert.equal(reply.statusCode, 401);
     }
+});
+
+// ── Fase 2: a sincronização exige o utilizador e os navegadores não recebem os hashes ───────────────
+
+const syncCall = (body, headers) => invoke(sync, { body: { tenantId: NIF, cursor: 0, operations: [], ...body }, headers });
+const fakePayload = (label) => `${Buffer.from(label).toString('base64')}.${Buffer.from(`cifrado:${label}`).toString('base64')}`;
+let webAccess = '';
+
+test('fase 2: na versão web, o cookie da empresa sozinho já não sincroniza; o access token do utilizador sim', async () => {
+    const withWeb = [...users(), { id: 'u-web', name: 'Wanda Web', email: 'wanda@empresa.ao', passwordHash: hash('SenhaWeb#3'), role: 'manager', permissions: [] }];
+    await invoke(auth, { action: 'credentials', headers: desktop(), body: { tenantId: NIF, complete: true, users: withWeb } });
+
+    const cookieOnly = await syncCall({ deviceId: 'browser-1' }, { cookie: webCookie });
+    assert.equal(cookieOnly.statusCode, 401);
+    assert.equal(cookieOnly.body.code, 'USER_SESSION_REQUIRED');
+
+    const login = await invoke(auth, { action: 'login', headers: { cookie: webCookie }, body: { tenantId: NIF, login: 'wanda@empresa.ao', password: 'SenhaWeb#3' } });
+    assert.equal(login.statusCode, 200, JSON.stringify(login.body));
+    webAccess = login.body.accessToken;
+    const withToken = await syncCall({ deviceId: 'browser-1' }, { cookie: webCookie, authorization: `Bearer ${webAccess}` });
+    assert.equal(withToken.statusCode, 200, JSON.stringify(withToken.body));
+
+    const forged = await syncCall({ deviceId: 'browser-1' }, { authorization: `Bearer ${webAccess.slice(0, -4)}AAAA` });
+    assert.equal(forged.statusCode, 401);
+    assert.equal(forged.body.code, 'ACCESS_TOKEN_INVALID');
+
+    // Um utilizador da web nunca envia verificadores, nem com um access token válido.
+    const push = await invoke(auth, { action: 'credentials', headers: { 'x-sync-passkey': webAccess }, body: { tenantId: NIF, users: withWeb } });
+    assert.equal(push.statusCode, 403);
+});
+
+test('fase 2: a lista com hashes fica só para os computadores; os navegadores recebem a lista sem senhas', async () => {
+    const usersOp = crypto.randomUUID();
+    const webOp = crypto.randomUUID();
+    const dataOp = crypto.randomUUID();
+    const sent = await syncCall({ deviceId: 'pc-1', pull: false, operations: [
+        { id: usersOp, deviceId: 'pc-1', payload: fakePayload('lista-com-hashes'), kind: 'users' },
+        { id: webOp, deviceId: 'pc-1', payload: fakePayload('lista-sem-senhas'), kind: 'users-web' },
+        { id: dataOp, deviceId: 'pc-1', payload: fakePayload('cliente') },
+    ] }, desktop());
+    assert.equal(sent.statusCode, 200, JSON.stringify(sent.body));
+
+    const browser = await syncCall({ deviceId: 'browser-2', usersRoster: true }, { authorization: `Bearer ${webAccess}` });
+    assert.equal(browser.statusCode, 200, JSON.stringify(browser.body));
+    const browserIds = browser.body.operations.map(item => item.id);
+    assert.ok(browserIds.includes(dataOp));
+    assert.ok(!browserIds.includes(usersOp), 'o navegador não recebe a lista com hashes');
+    assert.ok(!browserIds.includes(webOp), 'a lista sem senhas não entra no histórico');
+    assert.equal(browser.body.usersRoster.id, webOp);
+
+    const otherPc = await syncCall({ deviceId: 'pc-2' }, desktop());
+    const pcIds = otherPc.body.operations.map(item => item.id);
+    assert.ok(pcIds.includes(usersOp), 'os outros computadores continuam a receber a lista completa');
+
+    // Uma lista com hashes vinda de outro dispositivo não substitui a lista sem senhas dos navegadores.
+    await syncCall({ deviceId: 'browser-3', pull: false, operations: [
+        { id: crypto.randomUUID(), deviceId: 'browser-3', payload: fakePayload('lista-da-web'), kind: 'users' },
+    ] }, { authorization: `Bearer ${webAccess}` });
+    const again = await syncCall({ deviceId: 'browser-2', usersRoster: true, pull: false }, { authorization: `Bearer ${webAccess}` });
+    assert.equal(again.body.usersRoster.id, webOp);
 });
