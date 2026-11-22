@@ -214,7 +214,10 @@ export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, set
 
     const unidadeDe = (i: ItemFolha) => i.enquadramento?.unidade_organica?.trim() || i.recibo.departamento || config.name || 'Sem unidade orgânica';
     const unidades = [...new Set(itens.map(unidadeDe))].sort((a, b) => a.localeCompare(b, 'pt'));
-    const ordenados = (u: string) => itens.filter(i => unidadeDe(i) === u).sort((a, b) => a.recibo.nome.localeCompare(b.recibo.nome, 'pt'));
+    // Todos os funcionários numa só lista, por ordem alfabética (sem acentos nem maiúsculas a pesar): a página só
+    // muda quando enche. A unidade orgânica vai no bloco de cada funcionário e os totais por unidade no fim.
+    const ordenados = [...itens].sort((a, b) => a.recibo.nome.localeCompare(b.recibo.nome, 'pt', { sensitivity: 'base' }));
+    const variasUnidades = unidades.length > 1;
 
     const cabecalho = (unidade: string) => {
         if (logo) {
@@ -296,7 +299,7 @@ export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, set
         doc.line(174, y0 + 3.6, dir - 0.5, y0 + 3.6);
         // Linha 2: Cargo / Vinc. e total líquido.
         const rotulo = /quadro/iu.test(e.vinculo || '') && !/tempor/iu.test(e.vinculo || '') ? 'Vinc.:' : 'Cargo:';
-        const enquadramento = [e.vinculo, e.carreira, r.cargo, e.categoria, e.escalao].map(x => (x || '').trim()).filter(Boolean).join('   ') || '—';
+        const enquadramento = [e.vinculo, e.carreira, r.cargo, e.categoria, e.escalao, variasUnidades ? `U.O.: ${unidadeDe(i)}` : ''].map(x => (x || '').trim()).filter(Boolean).join('   ') || '—';
         doc.setFont('times', 'bold'); doc.setFontSize(6.8);
         doc.text(rotulo, esq + 1, y0 + 6.6);
         doc.setFont('times', 'normal');
@@ -342,27 +345,40 @@ export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, set
         doc.setFont('times', 'italic'); doc.setFontSize(9);
         doc.text('Sem funcionários neste processamento.', largura / 2, 45, { align: 'center' });
     }
-    unidades.forEach((unidade, indice) => {
-        if (indice > 0) doc.addPage();
-        cabecalho(unidade);
+    if (itens.length) {
+        const rotuloUnidade = variasUnidades ? 'Todas (por ordem alfabética)' : unidades[0];
+        cabecalho(rotuloUnidade);
         let y = 31;
-        const soma = { a: 0, d: 0, l: 0 };
-        for (const item of ordenados(unidade)) {
-            if (y + alturaBloco(item) > limite) { doc.addPage(); cabecalho(unidade); y = 31; }
+        const porUnidade = new Map<string, { a: number; d: number; l: number; n: number }>();
+        for (const item of ordenados) {
+            if (y + alturaBloco(item) > limite) { doc.addPage(); cabecalho(rotuloUnidade); y = 31; }
             const t = bloco(item, y);
             y += t.h;
-            soma.a += t.totalAbonos; soma.d += t.totalDescontos; soma.l += t.liquido;
+            geral.a += t.totalAbonos; geral.d += t.totalDescontos; geral.l += t.liquido;
+            const u = porUnidade.get(unidadeDe(item)) || { a: 0, d: 0, l: 0, n: 0 };
+            porUnidade.set(unidadeDe(item), { a: u.a + t.totalAbonos, d: u.d + t.totalDescontos, l: u.l + t.liquido, n: u.n + 1 });
         }
-        geral.a += soma.a; geral.d += soma.d; geral.l += soma.l;
-        const ultima = indice === unidades.length - 1;
-        if (y + (ultima ? 22 : 8) > limite) { doc.addPage(); cabecalho(unidade); y = 31; }
-        linhaTotal('Total da Unidade Orgânica:', y + 5, soma.a, soma.d, soma.l);
-        if (ultima) {
-            linhaTotal('Total Geral:', y + 11, geral.a, geral.d, geral.l);
-            doc.text('Total de Agentes:', esq + 2, y + 18.5);
-            doc.text(String(itens.length), 80, y + 17.5, { align: 'right' });
+        // Resumo por unidade orgânica (só com mais de uma) e o total geral.
+        const linhasResumo = variasUnidades ? unidades.length + 1 : 0;
+        if (y + 22 + linhasResumo * 5 > limite) { doc.addPage(); cabecalho(rotuloUnidade); y = 31; }
+        if (variasUnidades) {
+            doc.setFont('times', 'bold'); doc.setFontSize(7.2);
+            doc.text('Totais por Unidade Orgânica', esq + 2, y + 5);
+            doc.text('Abonos', 80, y + 5, { align: 'right' }); doc.text('Descontos', 140, y + 5, { align: 'right' }); doc.text('Líquido', dir - 1, y + 5, { align: 'right' });
+            y += 5;
+            for (const u of unidades) {
+                const t = porUnidade.get(u)!;
+                y += 4.6;
+                doc.setFont('times', 'normal'); doc.setFontSize(7);
+                doc.text(doc.splitTextToSize(`${u} (${t.n})`, 56)[0] as string, esq + 4, y);
+                doc.text(valorFolha(t.a), 80, y, { align: 'right' }); doc.text(valorFolha(t.d), 140, y, { align: 'right' }); doc.text(valorFolha(t.l), dir - 1, y, { align: 'right' });
+            }
+            y += 2;
         }
-    });
+        linhaTotal('Total Geral:', y + 6, geral.a, geral.d, geral.l);
+        doc.text('Total de Agentes:', esq + 2, y + 13.5);
+        doc.text(String(itens.length), 80, y + 12.5, { align: 'right' });
+    }
 
     // «Página : n de N» em todas as páginas.
     const total = doc.getNumberOfPages();
