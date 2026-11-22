@@ -1320,7 +1320,7 @@ export const buildClientProfileDoc = (
     doc.setTextColor(charcoal[0], charcoal[1], charcoal[2]);
     doc.setFont("helvetica", "bold");
     doc.setFontSize(18);
-    doc.text('FICHA CADASTRAL DO CLIENTE', 105, 44, { align: 'center' });
+    doc.text('FICHA DE CADASTRO DO CLIENTE', 105, 44, { align: 'center' });
 
     doc.setFontSize(8.5);
     doc.setFont("helvetica", "normal");
@@ -1371,7 +1371,8 @@ export const buildClientProfileDoc = (
         : (client.age ? `${client.age} anos` : '—');
 
     const identificationRows: Array<[string, string, string, string]> = [
-        ['Nome Completo:', client.name || '—', 'NIF / Documento:', client.nif || 'N/A'],
+        ['Nome Completo:', client.name || '—', 'N.º do Cliente:', (client as { clientNumber?: string }).clientNumber || '—'],
+        ['NIF / Documento:', client.nif || 'N/A', 'Cadastrado em:', client.createdAt && !Number.isNaN(new Date(client.createdAt).getTime()) ? new Date(client.createdAt).toLocaleDateString('pt-AO', { timeZone: 'Africa/Luanda' }) : '—'],
         ['Telefone:', client.phone || '—', 'Email:', client.email || '—'],
         ['Morada / Residência:', client.address || '—', 'Tipo de Titular:', clientTypeLabel],
         ['Estado Civil / Género:', maritalGender, 'Data Nasc. / Idade:', birthAge],

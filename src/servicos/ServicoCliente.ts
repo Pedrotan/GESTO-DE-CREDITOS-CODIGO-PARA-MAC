@@ -2,6 +2,7 @@ import { Client } from '@/tipos/credito';
 import { RepositorioCliente } from '@/repositorios/RepositorioCliente';
 import { db } from '@/bibliotecas/bd';
 import { clientCategoryOf } from '@/bibliotecas/carteira-cliente';
+import { atribuirNumerosEmFalta, prefixoCliente, proximoNumeroCliente } from '@/bibliotecas/numero-cliente';
 
 export class ServicoCliente {
     private static safeStr(val: any): string {
@@ -39,6 +40,29 @@ export class ServicoCliente {
 
     static async add(client: Client): Promise<void> {
         await RepositorioCliente.insert(client);
+    }
+
+    /** Todos os números de cliente já usados (também de clientes apagados: nunca se reutilizam). */
+    private static async numerosUsados() {
+        const rows = await db.all<{ clientNumber: string }>('SELECT clientNumber FROM clients WHERE clientNumber IS NOT NULL').catch(() => [] as Array<{ clientNumber: string }>);
+        return rows.map(r => r.clientNumber);
+    }
+
+    /** Atribui o n.º ao cliente acabado de cadastrar (00 + ano + mês + sequência do mês). */
+    static async atribuirNumero(id: string, createdAt: Date | string): Promise<string> {
+        const numero = proximoNumeroCliente(prefixoCliente(createdAt), await this.numerosUsados());
+        await db.run('UPDATE clients SET clientNumber = ? WHERE id = ? AND clientNumber IS NULL', [numero, id]);
+        return numero;
+    }
+
+    /** Clientes ainda sem número (cadastrados antes desta versão): recebem-no pela ordem de cadastro. */
+    static async atribuirNumerosEmFalta(): Promise<Array<{ id: string; numero: string }>> {
+        const rows = await db.all<{ id: string; createdAt: string; clientNumber: string | null }>('SELECT id, createdAt, clientNumber FROM clients').catch(() => [] as Array<{ id: string; createdAt: string; clientNumber: string | null }>);
+        const { atribuidos, semEspaco } = atribuirNumerosEmFalta(rows);
+        if (semEspaco.length) console.warn(`[Clientes] ${semEspaco.length} cliente(s) sem n.º: o mês de cadastro já tem 99 números.`);
+        if (!atribuidos.length) return [];
+        await db.transaction(atribuidos.map(a => ({ sql: 'UPDATE clients SET clientNumber = ? WHERE id = ? AND clientNumber IS NULL', params: [a.numero, a.id] })));
+        return atribuidos;
     }
 
     static async update(id: string, updates: Partial<Client>): Promise<void> {

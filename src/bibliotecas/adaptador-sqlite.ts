@@ -1505,6 +1505,11 @@ const createTables = async () => {
     await safeAddColumn("clients", "alternativePhone", "TEXT");
     await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_category ON clients(clientCategory)");
     await executeSql("CREATE INDEX IF NOT EXISTS idx_clients_province ON clients(province)");
+    // N.º do cliente (00 + ano + mês + sequência): único, nunca reutilizado.
+    await safeAddColumn("clients", "clientNumber", "TEXT");
+    await executeSql("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_number ON clients(clientNumber) WHERE clientNumber IS NOT NULL");
+    // RH: n.º mecanográfico anterior à numeração com a sigla (o relógio de ponto continua a reconhecê-lo).
+    if ((await querySql("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rh_funcionario'")).length) await safeAddColumn("rh_funcionario", "numero_anterior", "TEXT");
     await safeAddColumn("clients", "clientType", "TEXT");
     await safeAddColumn("clients", "documentType", "TEXT");
     await safeAddColumn("clients", "countryCode", "TEXT");

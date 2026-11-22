@@ -304,7 +304,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
         return maisRecentePrimeiro(categoryClients, client => client.createdAt).filter(
             (client) =>
                 ((client.name?.toLowerCase() || '').includes(searchTerm.toLowerCase()) ||
-                    (client.nif || '').includes(searchTerm)) &&
+                    (client.nif || '').includes(searchTerm) || (client.clientNumber || '').includes(searchTerm.trim())) &&
                 (statusFilter === 'all' ? true : client.status === statusFilter) &&
                 (tableStatus === 'all' ? true : clientDisplayStatus(client, credits) === tableStatus) &&
                 (biFilter === 'all' ? true : biFilter === 'contactar'
@@ -1117,6 +1117,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                                 <TableCell>
                                     <div>
                                         <p className="font-medium text-foreground">{client.name}</p>
+                                        {client.clientNumber && <p className="font-mono text-[11px] font-bold tracking-wide text-primary" title="N.º do cliente">N.º {client.clientNumber}</p>}
                                         <p className="text-sm text-muted-foreground">{client.address}</p>
                                     </div>
                                 </TableCell>
@@ -1258,7 +1259,7 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                 <DialogContent className="max-w-[96vw] w-full xl:max-w-7xl 2xl:max-w-[1440px] h-[92vh] max-h-[96vh] flex flex-col overflow-hidden p-0 gap-0 border-slate-200 shadow-2xl rounded-2xl bg-white">
                     <DialogHeader className="px-8 py-5 bg-[#0B1527] text-white border-b border-slate-800 shrink-0 m-0 relative">
                         <DialogTitle className="text-2xl font-bold tracking-tight text-white">
-                            {editingClient ? `Editar ${labels.singular}` : `Cadastrar ${labels.singular}`}
+                            {editingClient ? 'Editar ficha de cadastro do cliente' : 'Ficha de cadastro do cliente'}
                         </DialogTitle>
                         <DialogDescription className="text-sm text-slate-300 mt-1">
                             Preencha os dados abaixo para {editingClient ? 'atualizar' : 'registar'} um cliente.

@@ -825,6 +825,14 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
                     });
 
                 setClients(normalizedClients);
+                // Clientes cadastrados antes do n.º de cliente: recebem-no uma vez, pela ordem de cadastro.
+                if (normalizedClients.some(c => !c.clientNumber)) {
+                    void ServicoCliente.atribuirNumerosEmFalta().then(atribuidos => {
+                        if (!atribuidos.length) return;
+                        const porId = new Map(atribuidos.map(a => [a.id, a.numero]));
+                        setClients(prev => prev.map(c => (porId.has(c.id) && !c.clientNumber ? { ...c, clientNumber: porId.get(c.id) } : c)));
+                    }).catch(err => console.warn('[ContextoDados] N.º de cliente em falta não atribuído:', err));
+                }
                 setPayments(loadedPayments);
                 setNotifications(loadedNotifications);
                 setLegalCases(loadedLegalCases);
@@ -1314,6 +1322,9 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
         const targetUserId = activeContextUserId || actor?.id || authUser?.id;
         const clientWithUser = withCalculatedClientLimit({ ...client, usuario_id: targetUserId }, credits, payments);
         await ServicoCliente.add(clientWithUser);
+        // N.º do cliente (00 + ano + mês + sequência). Um mês cheio (99) não impede o cadastro: fica sem número e avisa.
+        try { clientWithUser.clientNumber = await ServicoCliente.atribuirNumero(clientWithUser.id, clientWithUser.createdAt); }
+        catch (error) { console.warn('[Clientes] N.º de cliente não atribuído:', error); }
         setClients(prev => [...prev, clientWithUser]);
         await addLog('create', 'client', `Cadastrou cliente ${client.name}`, actor?.id, actor?.name);
 
