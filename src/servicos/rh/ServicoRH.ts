@@ -5,7 +5,7 @@ import { db } from '@/bibliotecas/bd';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { validarDatasBI } from '@/bibliotecas/rh/bi-validade';
 import { parametroEmVigor, validarEscaloes, valorTexto, type IrtEscalao, type IrtTabela, type ParametroRH } from '@/bibliotecas/rh/parametros-rh';
-import { CHAVE_FORMATO_NUMERO, CHAVE_SIGLA_EMPRESA, FORMATO_OMISSAO, gerarNumeroUnico, normalizarSigla, sugerirSigla, validarSigla, type FormatoNumero } from '@/bibliotecas/rh/numero-mecanografico';
+import { CHAVE_FORMATO_NUMERO, CHAVE_SIGLA_EMPRESA, eNumeroComSigla, FORMATO_OMISSAO, gerarNumeroUnico, normalizarSigla, sugerirSigla, validarSigla, type FormatoNumero } from '@/bibliotecas/rh/numero-mecanografico';
 import { FORMATO_BI } from '@/bibliotecas/rh/esquema-rh';
 import { cicloChefia } from '@/bibliotecas/rh/hierarquia-rh';
 
@@ -17,7 +17,7 @@ export type Cargo = { id: string; nome: string; departamento_id: string | null; 
 export type Seccao = { id: string; departamento_id: string; nome: string; responsavel_id: string | null; activo: number };
 export type EstadoFuncionario = 'activo' | 'suspenso' | 'cessado';
 export type Funcionario = {
-    id: string; numero_mecanografico: string; nome: string; data_nascimento: string | null; sexo: string | null; estado_civil: string | null;
+    id: string; numero_mecanografico: string; numero_anterior?: string | null; nome: string; data_nascimento: string | null; sexo: string | null; estado_civil: string | null;
     nif: string | null; bi_numero: string | null; bi_emissao: string | null; bi_validade: string | null; numero_inss: string | null;
     morada: string | null; telefone: string | null; email: string | null; iban: string | null; banco: string | null;
     data_admissao: string; data_saida: string | null; cargo_id: string | null; departamento_id: string | null; horario_id: string | null;
@@ -231,6 +231,33 @@ export class ServicoRH {
         }
     }
 
+    /**
+     * Passa os funcionários já registados para o formato com sigla (0000-SIGLA-0000). O número antigo fica em
+     * numero_anterior (o relógio de ponto e as importações continuam a reconhecê-lo). Devolve quantos mudaram.
+     */
+    static async converterNumeracao(nomeEmpresa: string | null | undefined, actor: ActorRH) {
+        const definicoes = await this.definicoesNumeracao(nomeEmpresa);
+        if (definicoes.formato !== 'sigla') return 0;
+        const todos = await this.funcionarios();
+        const antigos = todos.filter(f => !eNumeroComSigla(f.numero_mecanografico || ''));
+        if (!antigos.length) return 0;
+        const usados = new Set(todos.map(f => f.numero_mecanografico));
+        const when = agora();
+        const statements: Statement[] = [];
+        const mudancas: Array<{ id: string; de: string; para: string }> = [];
+        for (const f of antigos) {
+            const novo = await gerarNumeroUnico(definicoes.sigla, async numero => usados.has(numero)
+                || Boolean(await db.get<{ id: string }>('SELECT id FROM rh_funcionario WHERE numero_mecanografico = ?', [numero]).catch(() => undefined)));
+            usados.add(novo);
+            mudancas.push({ id: f.id, de: f.numero_mecanografico, para: novo });
+            statements.push({ sql: 'UPDATE rh_funcionario SET numero_anterior = ?, numero_mecanografico = ?, actualizado_em = ? WHERE id = ? AND numero_mecanografico = ?',
+                params: [f.numero_mecanografico, novo, when, f.id, f.numero_mecanografico], expectChanges: 1 });
+        }
+        statements.push(auditoriaRH(actor, 'update', `Nova numeração aplicada a ${mudancas.length} funcionário(s) (0000-${definicoes.sigla}-0000)`, { mudancas }, undefined, undefined, when));
+        await db.transaction(statements);
+        return mudancas.length;
+    }
+
     /** Formato do n.º mecanográfico e sigla da empresa (guardados em rh_parametro; a sigla, sem valor, vem do nome da empresa). */
     static async definicoesNumeracao(nomeEmpresa?: string | null): Promise<{ formato: FormatoNumero; sigla: string; siglaSugerida: string; siglaGuardada: boolean }> {
         const parametros = await this.parametros();
@@ -351,9 +378,11 @@ export class ServicoRH {
     }
 
     static async actualizarFuncionario(id: string, f: Partial<Funcionario>, actor: ActorRH) {
-        this.validarFuncionario({ ...f, id });
         const anterior = await this.funcionario(id);
         if (!anterior) throw new Error('Funcionário não encontrado.');
+        // O n.º mecanográfico é atribuído pelo sistema e não se altera na edição.
+        f = { ...f, numero_mecanografico: anterior.numero_mecanografico };
+        this.validarFuncionario({ ...f, id });
         const conflitos = await this.duplicados(f, id);
         if (conflitos.length) throw new Error(conflitos.map(c => c.mensagem).join(' '));
         await this.validarChefia(id, f);

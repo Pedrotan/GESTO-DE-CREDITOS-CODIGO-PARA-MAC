@@ -39,7 +39,7 @@ export function NumeracaoFuncionarios({ actor, podeEditar, nomeEmpresa, onSaved 
     return (
         <div className="space-y-4">
             <p className="text-xs text-slate-500">
-                Formato do n.º mecanográfico dos funcionários novos. Os números já atribuídos mantêm-se. Nenhum número se repete:
+                Formato do n.º mecanográfico. Com a sigla, os funcionários já registados também passam ao formato novo e o número anterior continua a ser aceite pelo relógio de ponto. Nenhum número se repete:
                 o sistema confirma na base antes de o atribuir e a base recusa números iguais, também os que chegam de outros dispositivos pela sincronização.
             </p>
             <div className="grid gap-3 md:grid-cols-2">
@@ -73,7 +73,10 @@ export function NumeracaoFuncionarios({ actor, podeEditar, nomeEmpresa, onSaved 
             {formato === 'sequencial' && <p className="rounded-xl bg-slate-50 px-3 py-2 font-mono text-sm dark:bg-slate-900">{exemplo}</p>}
             {podeEditar && actor ? (
                 <Button disabled={!alterado || Boolean(erroSigla)} onClick={async () => {
-                    const ok = await executar(() => ServicoRH.guardarNumeracao({ formato, sigla }, actor), 'Numeração guardada');
+                    const ok = await executar(async () => {
+                        await ServicoRH.guardarNumeracao({ formato, sigla }, actor);
+                        await ServicoRH.converterNumeracao(nomeEmpresa, actor);
+                    }, 'Numeração guardada e aplicada aos funcionários');
                     if (ok) { void definicoes.recarregar(); onSaved(); }
                 }}>Guardar numeração</Button>
             ) : (

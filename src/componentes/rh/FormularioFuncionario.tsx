@@ -453,8 +453,9 @@ export function FormularioFuncionario({ open, onClose, onSaved, actor, funcionar
                             </div>
                         </div>
                         <div className={grelha}>
-                            <Campo id="numero_mecanografico" label="N.º mecanográfico" obrig erro={erro('numero_mecanografico')} dica={edicao ? 'Não se altera na edição' : 'Gerado automaticamente no formato das Configurações de RH'}>
-                                <Input id="ff-numero_mecanografico" className={inp} value={f.numero_mecanografico || ''} disabled={edicao} onBlur={() => visitar('numero_mecanografico')} onChange={e => set('numero_mecanografico', e.target.value)} />
+                            <Campo id="numero_mecanografico" label="N.º mecanográfico" obrig erro={erro('numero_mecanografico')} dica={edicao ? 'Atribuído pelo sistema: não se altera' : 'Gerado automaticamente: não se edita'}>
+                                <Input id="ff-numero_mecanografico" readOnly aria-readonly="true" tabIndex={-1} value={f.numero_mecanografico || 'A gerar…'}
+                                    className={`${inp} cursor-not-allowed border-indigo-300 bg-indigo-50 font-mono font-bold tracking-wide text-indigo-900 focus-visible:ring-0 dark:border-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-200`} />
                             </Campo>
                             <Campo id="nome" label="Nome completo" obrig erro={erro('nome')} className="sm:col-span-2 lg:col-span-3">
                                 <Input id="ff-nome" className={inp} value={f.nome || ''} placeholder="Ex.: Maria da Conceição Neto" onBlur={() => visitar('nome')} onChange={e => set('nome', e.target.value)} />

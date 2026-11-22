@@ -65,7 +65,7 @@ export function normalizarTipo(valor: string | undefined): TipoMarcacao | null {
     return null;
 }
 
-type FuncionarioCsv = { id: string; nome: string; numero_mecanografico: string; horario: Horario };
+type FuncionarioCsv = { id: string; nome: string; numero_mecanografico: string; numero_anterior?: string | null; horario: Horario };
 type Existente = { funcionario_id: string; data_hora: string; tipo: TipoMarcacao | null };
 
 /**
@@ -79,6 +79,8 @@ export function previsualizarCsv(texto: string, mapa: MapeamentoCsv, funcionario
     for (const f of funcionarios) {
         porNumero.set(f.numero_mecanografico, f);
         porNumero.set(f.numero_mecanografico.replace(/^0+/u, ''), f);
+        // O relógio pode ter ficado com o número anterior à nova numeração: continua a corresponder.
+        if (f.numero_anterior) { porNumero.set(f.numero_anterior, f); porNumero.set(f.numero_anterior.replace(/^0+/u, ''), f); }
     }
     const linhas: LinhaPrevia[] = [];
     tabela.forEach((colunas, indice) => {

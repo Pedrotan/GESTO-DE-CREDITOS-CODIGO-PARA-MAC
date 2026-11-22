@@ -101,6 +101,13 @@ export default function FuncionariosRH() {
     const exportar = (formato: 'excel' | 'pdf', alvo = lista) => actor && void executar(async () => exportarFuncionarios(alvo, ctx, formato, companySettings, actor, salarios, descricaoFiltros), 'Lista exportada');
     const declaracoes = (alvo: Funcionario[]) => actor && void executar(async () => { for (const f of alvo) await emitirDeclaracaoServico(f, ctx, companySettings, actor); }, alvo.length > 1 ? `${alvo.length} declarações geradas` : 'Declaração gerada');
     const recarregar = () => void base.recarregar();
+    // Funcionários ainda com o número antigo passam à numeração com a sigla da empresa (uma vez, por quem gere o RH).
+    const [conversaoFeita, setConversaoFeita] = useState(false);
+    useEffect(() => {
+        if (!actor || !gerir || conversaoFeita || !base.dados.funcionarios.length) return;
+        setConversaoFeita(true);
+        void ServicoRH.converterNumeracao(companySettings?.name, actor).then(n => { if (n > 0) void base.recarregar(); }).catch(error => console.warn('[RH] Nova numeração não aplicada:', error));
+    }, [actor, gerir, conversaoFeita, base.dados.funcionarios.length]); // eslint-disable-line react-hooks/exhaustive-deps
     const vinculos = [...new Set([...RH_VINCULOS, ...funcionarios.map(f => f.vinculo).filter((v): v is string => Boolean(v))])];
 
     const menuAccoes = (f: Funcionario) => (
