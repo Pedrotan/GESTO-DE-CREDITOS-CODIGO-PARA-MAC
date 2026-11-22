@@ -274,7 +274,8 @@ export class ServicoFinanceiro {
 
     /** Administradores, directores de crédito e quem tiver a permissão própria; o valor fica sujeito à alçada. */
     static canForgiveLateInterest(actor: Record<string, any> | null | undefined): boolean {
-        return ['admin', 'super_admin', 'credit_director'].includes(String(actor?.role))
+        // Super Administrador (e o principal), Gestor de Crédito, Administrador e Director de Crédito.
+        return ['admin', 'super_admin', 'credit_director', 'manager'].includes(String(actor?.role)) || Boolean(actor?.isOwner)
             || ServicoControloAcesso.temPermissao(actor as any, 'pagamentos.perdoar_juros');
     }
 

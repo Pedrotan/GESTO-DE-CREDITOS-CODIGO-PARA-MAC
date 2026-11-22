@@ -372,8 +372,8 @@ export class ServicoAlcadas {
     /** Utilizador (perfil e agência) a partir do id, para aplicar as alçadas nos serviços. */
     static async actorOf(userId?: string | null): Promise<A.LimitActor | null> {
         if (!userId) return null;
-        const row = await db.get<{ id: string; name: string; role: string; branchId?: string | null }>('SELECT id, name, role, branchId FROM users WHERE id = ?', [userId]).catch(() => undefined);
-        return row ? { id: row.id, name: row.name, role: row.role, branchId: row.branchId || null } : null;
+        const row = await db.get<{ id: string; name: string; role: string; branchId?: string | null; isOwner?: number | null }>('SELECT id, name, role, branchId, isOwner FROM users WHERE id = ?', [userId]).catch(() => undefined);
+        return row ? { id: row.id, name: row.name, role: row.role, branchId: row.branchId || null, isOwner: Number(row.isOwner) === 1 } : null;
     }
 
     /**

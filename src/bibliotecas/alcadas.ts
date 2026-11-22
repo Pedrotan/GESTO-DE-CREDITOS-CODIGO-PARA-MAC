@@ -494,6 +494,9 @@ export type EvaluationInput = {
 
 const remainingOf = (limit: number | null | undefined, used: number) => limit === null || limit === undefined ? null : Math.max(0, limit - used);
 
+/** Perfis que perdoam juros de mora sem limite: Super Administrador (e o principal) e Gestor de Crédito. */
+export const INTEREST_WAIVER_FREE_ROLES = new Set(['super_admin', 'manager']);
+
 /**
  * Decide se o utilizador pode executar a operação sozinho (`allow`), se tem de subir na cadeia (`escalate`)
  * ou se é recusada (`block`). Os guardas devolvidos são verificados na base de dados, na mesma transacção.
@@ -521,7 +524,12 @@ export function evaluateOperation(input: EvaluationInput): Evaluation {
     const escalate = (reason: string) => { reasons.push(reason); if (decision === 'allow') decision = 'escalate'; };
     const block = (reason: string) => { reasons.push(reason); decision = 'block'; blockOnly = true; };
 
-    if (!limit.allowed) {
+    // Perdão de juros de mora: o Super Administrador (incluindo o principal) e o Gestor de Crédito perdoam sem limite
+    // de percentagem nem de valor (a decisão fica na auditoria com o motivo).
+    const waiverFree = operationType === 'interest_waiver' && (Boolean(actor.isOwner) || INTEREST_WAIVER_FREE_ROLES.has(String(actor.role)));
+    if (waiverFree) {
+        // Sem limites a aplicar.
+    } else if (!limit.allowed) {
         const text = `O perfil ${actor.role} não tem limite definido para ${OPERATION_LABELS[operationType].toLowerCase()}: a operação fica bloqueada por defeito`;
         if (isCredit || operationType === 'payment_reversal' || operationType === 'write_off') escalate(text); else block(text);
     } else if (!disabled) {
