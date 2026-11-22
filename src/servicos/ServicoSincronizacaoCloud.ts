@@ -96,6 +96,19 @@ const HEAL_JOURNAL_MAX = 5000;
 const USERS_DIGEST_KEY = 'cloud_sync_users_digest_v2';
 // Navegador: data da última lista completa de utilizadores recebida do computador da empresa.
 const USERS_ROSTER_AT_KEY = 'cloud_sync_users_roster_at_v1';
+/**
+ * Data da lista de utilizadores mais recente já aplicada neste navegador. As listas antigas que chegam no histórico
+ * (ex.: num navegador novo, que recebe tudo desde o início) não podem desfazer uma mais recente: traziam senhas
+ * antigas e o login deixava de aceitar a senha actual.
+ */
+const USERS_APPLIED_AT_KEY = 'cloud_sync_users_applied_at_v1';
+const usersAppliedAt = () => Date.parse(localStorage.getItem(scopedStorageKey(USERS_APPLIED_AT_KEY)) || '') || 0;
+const markUsersApplied = (at: string | number | undefined) => {
+    const time = typeof at === 'number' ? at : Date.parse(String(at || ''));
+    if (Number.isFinite(time) && time > usersAppliedAt()) localStorage.setItem(scopedStorageKey(USERS_APPLIED_AT_KEY), new Date(time).toISOString());
+};
+/** Há um utilizador com sessão iniciada neste separador (só então o navegador publica a sua lista de utilizadores). */
+const hasSignedInUser = () => { try { return Boolean(sessionStorage.getItem('user')); } catch { return false; } };
 // Impressão digital da chave com que este computador já enviou a fotografia completa dos dados.
 const KEY_FINGERPRINT_KEY = 'cloud_sync_key_fingerprint_v1';
 /** Avisa o login de que chegaram utilizadores (versão web). */
@@ -1051,7 +1064,14 @@ const applyOperations = async (operations: SyncOperation[], caughtUp = true): Pr
     const retryRosters: SyncOperation[] = [];
     let rosterApplied = 0;
     for (const roster of rosters) {
-        try { rosterApplied += await applyUserRoster(roster as unknown as UsersRoster) ? 1 : 0; }
+        // Navegador: uma lista do histórico mais antiga do que a já aplicada fica de fora (tinha senhas antigas).
+        const rosterAt = Date.parse(String(roster.createdAt || '')) || 0;
+        if (!window.electronAPI && rosterAt && rosterAt <= usersAppliedAt()) continue;
+        try {
+            const applied = await applyUserRoster(roster as unknown as UsersRoster);
+            rosterApplied += applied ? 1 : 0;
+            if (applied && !window.electronAPI) markUsersApplied(rosterAt);
+        }
         catch (error) {
             console.warn('[CloudSync] Utilizadores recebidos não aplicados:', error);
             // No computador a recusa costuma ser falta de sessão: tenta de novo nas próximas sincronizações.
@@ -1095,6 +1115,8 @@ const receiveUsersRoster = async (config: CloudSyncConfig, saved: any, keys: Cry
         // Nada gravado (ex.: base deste navegador ainda a preparar): não marcar como recebida, volta a pedir.
         if (!applied) return { state: 'error', at: saved.updatedAt, message: 'A base de dados deste navegador ainda não está pronta.' };
         localStorage.setItem(scopedStorageKey(USERS_ROSTER_AT_KEY), String(saved.updatedAt || ''));
+        // Data da própria lista (relógio de quem a criou), a mesma escala das listas que chegam no histórico.
+        markUsersApplied((roster as any).createdAt);
         return { state: 'applied', at: saved.updatedAt, applied };
     } catch (error: any) {
         return { state: 'error', at: saved.updatedAt, message: error?.message || 'Os utilizadores recebidos não puderam ser gravados.' };
@@ -1509,7 +1531,9 @@ export const syncCloudNow = async () => {
             if (usersRoster) lastUsersRoster = usersRoster;
 
             // Navegador: envia os utilizadores criados/alterados/removidos aqui (depois de receber os dos outros).
-            if (!window.electronAPI) {
+            // Só com o histórico todo recebido e um utilizador com sessão: um navegador novo, a meio da primeira
+            // recepção, ainda tem listas antigas e publicá-las trocava as senhas de todos os outros navegadores.
+            if (!window.electronAPI && !hasMoreRemote && hasSignedInUser()) {
                 const change = await webUsersChange().catch(error => { console.warn('[CloudSync] Utilizadores locais:', error); return null; });
                 if (change) {
                     const operation = {

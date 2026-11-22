@@ -213,7 +213,7 @@ globalThis.fetch = async (url, init) => {
     return { ok: res.statusCode < 400, status: res.statusCode, json: async () => res.body };
 };
 
-const useDevice = ({ electronAPI } = {}) => {
+const useDevice = ({ electronAPI, sessao } = {}) => {
     const database = new SQL.Database();
     database.run(USERS_SCHEMA);
     const values = new Map();
@@ -223,6 +223,9 @@ const useDevice = ({ electronAPI } = {}) => {
         removeItem: key => values.delete(key),
     };
     globalThis.indexedDB = memoryIndexedDB();
+    // Utilizador com sessão iniciada no separador (o navegador só publica a sua lista de utilizadores com sessão).
+    const separador = new Map(sessao ? [['user', JSON.stringify(sessao)]] : []);
+    globalThis.sessionStorage = { getItem: key => separador.get(key) ?? null, setItem: (key, value) => separador.set(key, String(value)), removeItem: key => separador.delete(key) };
     globalThis.__sqlite = sqliteFor(database);
     if (electronAPI) globalThis.electronAPI = electronAPI(database);
     else delete globalThis.electronAPI;
@@ -763,7 +766,7 @@ test('conta criada no navegador (ex.: acesso ao portal): fica na lista do servid
     const antiga = await desktopApi(pc).syncUsersPayload({ apiKey: SERVER_CODE, tenantId: TENANT, deviceId: 'pc', knownIds: [] });
     server.rosters.set(sha256(TENANT), { operation_id: antiga.id, device_id: 'pc', payload: antiga.payload, updated_at: new Date(Date.now() - 86_400_000) });
     // Navegador do RH: recebe a lista, cria a conta do portal e sincroniza.
-    const rh = useDevice();
+    const rh = useDevice({ sessao: { id: 'admin' } });
     cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
     try {
         assert.equal((await cloud.receiveUsersFromCloud()).state, 'applied');
@@ -782,4 +785,27 @@ test('conta criada no navegador (ex.: acesso ao portal): fica na lista do servid
     assert.deepEqual(contas.map(c => c.id), ['admin', 'portal'], 'a lista completa chegou (não só a conta alterada)');
     assert.equal(contas.find(c => c.id === 'portal').username, 'fernanda.silva');
     assert.equal(contas.find(c => c.id === 'portal').mustChangePassword, 1);
+});
+
+test('navegador novo: listas antigas do histórico não desfazem a actual e sem sessão não publica a sua', async () => {
+    server.ops = []; server.rosters.clear();
+    const pc = useDevice({ electronAPI: desktopApi });
+    pc.run(`INSERT INTO users (id, name, email, username, password, role, createdAt) VALUES ('paulo', 'Paulo', 'paulo@empresa.ao', 'paulo benchimol', 'hash-antiga', 'super_admin', '2026-01-01')`);
+    // Lista antiga (senha anterior) no histórico; depois a senha muda e a lista nova fica como a lista da empresa.
+    const antiga = await desktopApi(pc).syncUsersPayload({ apiKey: SERVER_CODE, tenantId: TENANT, deviceId: 'pc', knownIds: [] });
+    server.ops.push({ seq: ++server.seq, tenant_hash: sha256(TENANT), operation_id: antiga.id, device_id: 'pc', payload: antiga.payload, kind: 'users' });
+    await new Promise(resolve => setTimeout(resolve, 5));
+    pc.run(`UPDATE users SET password = 'hash-actual' WHERE id = 'paulo'`);
+    const actual = await desktopApi(pc).syncUsersPayload({ apiKey: SERVER_CODE, tenantId: TENANT, deviceId: 'pc', knownIds: ['paulo'] });
+    server.rosters.set(sha256(TENANT), { operation_id: actual.id, device_id: 'pc', payload: actual.payload, updated_at: new Date() });
+    // iPhone novo, sem ninguém com sessão: recebe a lista e o histórico desde o início.
+    const iphone = useDevice();
+    cloud.startCloudSync({ url: location.origin, apiKey: SERVER_CODE, tenantId: TENANT });
+    try {
+        assert.equal((await cloud.receiveUsersFromCloud()).state, 'applied');
+        assert.equal((await cloud.syncCloudNow()).success, true);
+    } finally { cloud.stopCloudSync(); }
+    const [conta] = await sqliteFor(iphone).all("SELECT password FROM users WHERE id = 'paulo'");
+    assert.equal(conta.password, 'hash-actual', 'a lista antiga do histórico não trocou a senha actual');
+    assert.equal(server.rosters.get(sha256(TENANT))?.device_id, 'pc', 'sem sessão iniciada o navegador não publicou a sua lista');
 });
