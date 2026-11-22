@@ -1221,6 +1221,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_accounting_requests_pending ON accounting_requests(kind, targetId) WHERE status = 'pending'"
   ],
   [
+    "417a269724d6d7f0886e2fef712239d15071bde01bff0f5fe314dad5ce442887",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_number ON clients(clientNumber) WHERE clientNumber IS NOT NULL"
+  ],
+  [
     "98ef793ae9c9e227203aa1ea7c9b62ba503858622b98230fb7a106c3e90761ab",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_collection_promise_decision ON collection_events(relatedId) WHERE kind IN ('promise_kept','promise_broken')"
   ],
@@ -2985,6 +2989,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT clientId, version FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
   [
+    "3f674c6ed3824d44a09c03195095af83503c0c689f4c61646f6e457dbba09bbf",
+    "SELECT clientNumber FROM clients WHERE clientNumber IS NOT NULL"
+  ],
+  [
     "00f13408432a1eda6723a565bfc26cfab8b493452a0e3fc7fd1d5b39fd561da4",
     "SELECT convertedCreditId, productId FROM simulations WHERE convertedCreditId IS NOT NULL AND productId IS NOT NULL"
   ],
@@ -3317,6 +3325,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientName, deletedAt FROM credits WHERE deletedAt IS NOT NULL"
   ],
   [
+    "a66ea9ec583044ceb9619f2aea84d48fed179475cd40ef457833fc65bbb4246a",
+    "SELECT id, createdAt, clientNumber FROM clients"
+  ],
+  [
     "463f0161a81c45d9b44e81bb00da9c1d600a8475d6e0916fba7a26d628571e1c",
     "SELECT id, createdAt, startDate FROM credits"
   ],
@@ -3425,8 +3437,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, name, role FROM users WHERE LOWER(email) = ?"
   ],
   [
-    "26982f30dbd6f126b861c3a8a2ea6da2e5416443b34c249f0e5a15bfc4ff2abb",
-    "SELECT id, name, role, branchId FROM users WHERE id = ?"
+    "f7b91a29b7e4b03b21e4786bb0156c7f9d2246979479526295b314b51e2eee31",
+    "SELECT id, name, role, branchId, isOwner FROM users WHERE id = ?"
   ],
   [
     "bad640298ec792ac9d37a3a6726214b02f5ba61e260a28806dded3c988cebee3",
@@ -3575,6 +3587,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "09cf62af1af1f956cab85182ff520870d326746e8673b1b86554ee1f2b8db809",
     "SELECT lateInterestRate FROM credits WHERE id = ? AND deletedAt IS NULL"
+  ],
+  [
+    "18914e2545002ed88b864c5b8083a8c0d2d5d5073ac8bdbb06279b53e01e32c2",
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'rh_funcionario'"
   ],
   [
     "6a707e8fd2fbe3b8dd9ffc84cbf26503d5a00c4b788d58991c23e20252d00e10",
@@ -3771,6 +3787,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "98f7ba0796f967601d96798e87462ec12ac81586c6ac343f9d4e31831e541dfc",
     "UPDATE clients SET biAlertSentAt = ? WHERE id = ?"
+  ],
+  [
+    "92d8b7ca3cffb5f336e2d8b194f30ad06a6229f5f87d355d6403a2f899fd1468",
+    "UPDATE clients SET clientNumber = ? WHERE id = ? AND clientNumber IS NULL"
   ],
   [
     "7b34b8c9a3bf8f4de98752190284240b321a44636de583dd3b86796447af9e1f",
@@ -4299,6 +4319,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "cd71cc4bcf85df8fab0dd7c4bddc2aeb7b0a03780673c869e2b642347ecaf783",
     "UPDATE rh_funcionario SET estado = ?, actualizado_em = ? WHERE id = ? AND estado <> 'cessado'"
+  ],
+  [
+    "ceffa4697b772c8017715c6af5a094d93c107994acfa919bf33e2a3c6a025e92",
+    "UPDATE rh_funcionario SET numero_anterior = ?, numero_mecanografico = ?, actualizado_em = ? WHERE id = ? AND numero_mecanografico = ?"
   ],
   [
     "dad7a372bcdd4cfa7a4e289e81bd25b2164a3adea15e1b1c916a963fb45d289b",

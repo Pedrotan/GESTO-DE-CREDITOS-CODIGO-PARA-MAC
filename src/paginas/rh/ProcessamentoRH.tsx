@@ -9,7 +9,7 @@ import { Textarea } from '@/componentes/ui/textarea';
 import { CurrencyInput } from '@/componentes/ui/CurrencyInput';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
-import { AlertTriangle, Calculator, CalendarDays, CalendarX, CheckCircle2, ChevronLeft, ChevronRight, Eye, FileDown, Lock, Play, Plus, Trash2, Undo2, Wallet, Banknote } from 'lucide-react';
+import { AlertTriangle, Calculator, CalendarDays, CalendarX, CheckCircle2, ChevronLeft, ChevronRight, Eye, FileDown, Lock, Play, Plus, Send, Trash2, Undo2, Wallet, Banknote } from 'lucide-react';
 import { ServicoSalariosRH, ROTULO_TIPO, type EntradaMes, type Processamento, type Recibo, type LinhaReciboRH, type RubricaPontual } from '@/servicos/rh/ServicoSalariosRH';
 import { ServicoRH, type FuncionarioRubrica } from '@/servicos/rh/ServicoRH';
 import { valorNumerico, valorTexto } from '@/bibliotecas/rh/parametros-rh';
@@ -20,6 +20,7 @@ import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { useData } from '@/contextos/ContextoDados';
 import { ReclamacoesFolha } from '@/componentes/rh/ReclamacoesFolha';
 import { RecepcaoSalarios } from '@/componentes/rh/RecepcaoSalarios';
+import { ServicoEnvioFolha } from '@/servicos/rh/ServicoEnvioFolha';
 import { NavegacaoRH, dataPt, executar, kz, paraMinor, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { useBaseRH } from './FuncionariosRH';
 
@@ -93,11 +94,23 @@ export default function ProcessamentoRH() {
         const f = base.dados.funcionarios.find(x => x.id === funcionarioId);
         return f ? { vinculo: f.vinculo, carreira: f.carreira, categoria: f.categoria, escalao: f.escalao, unidade_organica: f.unidade_organica } : undefined;
     };
-    const pdfFolhaDe = async (proc: Processamento) => {
-        if (!actor) return;
+    /** Folha final (sem marca, só depois de aprovada) ou de correcção (marca CORREÇÃO); 'enviar' manda-a ao portal. */
+    const pdfFolhaDe = async (proc: Processamento, marca: 'final' | 'correcao', saida: 'save' | 'datauri' = 'save') => {
+        if (!actor) return null;
         const [recibos, todas] = await Promise.all([ServicoSalariosRH.recibos(proc.id), ServicoSalariosRH.linhasProcessamento(proc.id)]);
-        if (!recibos.length) { void executar(async () => { throw new Error('Este mês ainda não foi calculado.'); }, ''); return; }
-        gerarFolhaPdf(recibos.map(r => ({ recibo: r, linhas: todas.filter(l => l.recibo_id === r.id), enquadramento: enquadramentoDe(r.funcionario_id) })), cabecalhoPdf(proc), companySettings, actor.name);
+        if (!recibos.length) throw new Error('Este mês ainda não foi calculado.');
+        return gerarFolhaPdf(recibos.map(r => ({ recibo: r, linhas: todas.filter(l => l.recibo_id === r.id), enquadramento: enquadramentoDe(r.funcionario_id) })), cabecalhoPdf(proc), companySettings, actor.name, saida, marca);
+    };
+    const [aEnviarFolha, setAEnviarFolha] = useState(false);
+    const enviarFolhaCorreccao = async (proc: Processamento) => {
+        if (!actor) return;
+        setAEnviarFolha(true);
+        await executar(async () => {
+            const pdf = await pdfFolhaDe(proc, 'correcao', 'datauri');
+            if (!pdf) return;
+            await ServicoEnvioFolha.enviar(proc, pdf.dataUrl, actor);
+        }, 'Folha de correção enviada ao painel dos funcionários');
+        setAEnviarFolha(false);
     };
     const pdfRecibos = async () => {
         if (!p || !actor) return;
@@ -278,7 +291,14 @@ export default function ProcessamentoRH() {
                                     {actor && aprovar && p.estado === 'pago' && <Button className="bg-emerald-700 hover:bg-emerald-800" onClick={() => void accao(() => ServicoSalariosRH.fechar(p, actor), 'Mês fechado e lançado na contabilidade')}><Lock className="mr-1.5 h-4 w-4" /> Fechar e lançar</Button>}
                                     {actor && ['calculado', 'aprovado', 'pago'].includes(p.estado) && (calcular || aprovar) && <Button variant="outline" onClick={() => setReabrir(true)}><Undo2 className="mr-1.5 h-4 w-4" /> Reabrir</Button>}
                                     {detalhe.dados.recibos.length > 0 && actor && <>
-                                        <Button variant="outline" onClick={() => void pdfFolhaDe(p)}><FileDown className="mr-1.5 h-4 w-4" /> Baixar folha de salário</Button>
+                                        <Button className="bg-emerald-600 text-white hover:bg-emerald-700 disabled:bg-emerald-600/50" disabled={!['aprovado', 'pago', 'fechado'].includes(p.estado)}
+                                            title={['aprovado', 'pago', 'fechado'].includes(p.estado) ? 'Folha aprovada, sem marca de água' : 'Disponível depois de a folha ser aprovada'}
+                                            onClick={() => void executar(() => pdfFolhaDe(p, 'final'), 'Folha final descarregada')}><FileDown className="mr-1.5 h-4 w-4" /> Baixar folha final</Button>
+                                        <Button className="bg-orange-500 text-white hover:bg-orange-600" title="Com a marca de água CORREÇÃO, para conferir"
+                                            onClick={() => void executar(() => pdfFolhaDe(p, 'correcao'), 'Folha de correção descarregada')}><FileDown className="mr-1.5 h-4 w-4" /> Baixar folha de correção</Button>
+                                        {(calcular || aprovar) && <Button variant="outline" className="border-orange-300 text-orange-700 hover:bg-orange-50 dark:border-orange-800 dark:text-orange-300" disabled={aEnviarFolha}
+                                            title="Os funcionários activos recebem-na no painel do portal (só para ver) e podem reclamar"
+                                            onClick={() => void enviarFolhaCorreccao(p)}><Send className="mr-1.5 h-4 w-4" /> {aEnviarFolha ? 'A enviar…' : 'Enviar folha de correção'}</Button>}
                                         <Button variant="outline" onClick={() => void pdfRecibos()}><FileDown className="mr-1.5 h-4 w-4" /> Todos os recibos</Button>
                                         {['aprovado', 'pago', 'fechado'].includes(p.estado) && <Button variant="outline" onClick={transferencias}><Banknote className="mr-1.5 h-4 w-4" /> Ficheiro de transferências</Button>}
                                     </>}

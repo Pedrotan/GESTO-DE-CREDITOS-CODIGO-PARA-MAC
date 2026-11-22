@@ -64,6 +64,7 @@ import {
   Plane,
   Banknote,
   ReceiptText as ReciboIcon,
+  FileSignature,
 } from 'lucide-react';
 import { useModuloRH } from '@/ganchos/usar-modulo-rh';
 import {
@@ -164,12 +165,13 @@ const menuItems: MenuItem[] = [
     path: '/rh',
     licensedModule: 'rh',
     children: [
-      // As mesmas 8 entradas das abas do módulo (as páginas agrupadas abrem com a sub-navegação dentro da aba).
+      // As mesmas 9 entradas das abas do módulo (as páginas agrupadas abrem com a sub-navegação dentro da aba).
       { icon: LayoutDashboard, label: 'Painel de RH', path: '/rh/painel', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Users, label: 'Funcionários', path: '/rh/funcionarios', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Clock, label: 'Livro de Ponto', path: '/rh/ponto', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Plane, label: 'Férias e Ausências', path: '/rh/ferias', permission: 'hr_view', licensedModule: 'rh', alsoActive: ['/rh/ausencias'] },
       { icon: Banknote, label: 'Salários', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh', alsoActive: ['/rh/recibos'] },
+      { icon: FileSignature, label: 'Declarações', path: '/rh/declaracoes', permission: 'hr_view', licensedModule: 'rh' },
       { icon: FolderOpen, label: 'Gestão Documental', path: '/rh/documentos', permission: 'hr_view', licensedModule: 'rh' },
       { icon: BarChart, label: 'Relatórios de RH', path: '/rh/relatorios', permission: 'hr_view', licensedModule: 'rh' },
       { icon: SlidersHorizontal, label: 'Configurações de RH', path: '/rh/configuracoes', permission: 'hr_view', licensedModule: 'rh', alsoActive: ['/rh/calendario'] },

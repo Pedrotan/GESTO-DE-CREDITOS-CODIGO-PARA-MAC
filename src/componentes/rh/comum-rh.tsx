@@ -21,6 +21,7 @@ export const ABAS_RH: Array<{ path: string; label: string; subs?: Sub[] }> = [
     { path: '/rh/ponto', label: 'Livro de ponto' },
     { path: '/rh/ferias', label: 'Férias e ausências', subs: [{ path: '/rh/ferias', label: 'Férias' }, { path: '/rh/ausencias', label: 'Dispensas, licenças e faltas' }] },
     { path: '/rh/processamento', label: 'Salários', subs: [{ path: '/rh/processamento', label: 'Processamento' }, { path: '/rh/recibos', label: 'Recibos e declarações' }] },
+    { path: '/rh/declaracoes', label: 'Declarações' },
     { path: '/rh/documentos', label: 'Gestão documental' },
     { path: '/rh/relatorios', label: 'Relatórios' },
     { path: '/rh/configuracoes', label: 'Configurações', subs: [{ path: '/rh/configuracoes', label: 'Departamentos, cargos e parâmetros' }, { path: '/rh/calendario', label: 'Horários e calendário' }] },

@@ -13,7 +13,7 @@ import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
 import { conflitoDepartamento, dataRegresso, diasDoPlano, estadoEfectivo, saldoFerias, type EstadoFerias } from '@/bibliotecas/rh/ferias';
 import { HORARIO_OMISSAO, type Feriado, type Horario } from '@/bibliotecas/rh/ponto';
 import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
-import { gerarGuiaFeriasPdf } from '@/bibliotecas/rh/pdf-rh';
+import { emitirGuiaFerias } from '@/componentes/rh/guia-ferias';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { useData } from '@/contextos/ContextoDados';
@@ -66,15 +66,9 @@ export default function FeriasRH() {
 
     const guia = async (p: PlanoFeriasRH) => {
         if (!actor || !p.data_inicio || !p.data_fim) return;
-        const f = base.dados.funcionarios.find(x => x.id === p.funcionario_id);
         try {
-            const saldo = saldoFerias(planos, p.funcionario_id, p.ano, direitoDe(p.funcionario_id), hoje, direitoDe(p.funcionario_id), f?.data_admissao).saldo;
-            const regresso = dataRegresso(p.data_fim, horarioDe(f), feriados);
-            const emitido = await ServicoFeriasRH.emitirGuia(p, { inicio: p.data_inicio, fim: p.data_fim, dias: p.dias, regresso, saldo }, actor);
-            gerarGuiaFeriasPdf({ numero: emitido.numero, emitidoEm: emitido.emitido_em, ano: p.ano, inicio: p.data_inicio, fim: p.data_fim, dias: p.dias, regresso, saldoRestante: saldo,
-                aprovadoPor: p.aprovado_por_nome, funcionario: { nome: f?.nome || '—', numero: f?.numero_mecanografico || '—',
-                    cargo: base.dados.cargos.find(c => c.id === f?.cargo_id)?.nome, departamento: base.dados.departamentos.find(d => d.id === f?.departamento_id)?.nome } },
-                companySettings, actor.name);
+            await emitirGuiaFerias(p, { planos, horarios, feriados, funcionarios: base.dados.funcionarios, contratos: base.dados.contratos, parametros: base.dados.parametros,
+                cargos: base.dados.cargos, departamentos: base.dados.departamentos }, companySettings, actor);
             recarregar();
         } catch (error) { toast({ variant: 'destructive', title: 'Não foi possível emitir a guia', description: (error as Error).message }); }
     };

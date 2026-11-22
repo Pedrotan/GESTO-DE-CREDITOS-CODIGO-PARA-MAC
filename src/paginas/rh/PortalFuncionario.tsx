@@ -16,6 +16,7 @@ import { ServicoRH } from '@/servicos/rh/ServicoRH';
 import { ServicoRecebimentoRH, ultimaPorRecibo } from '@/servicos/rh/ServicoRecebimentoRH';
 import { ServicoReclamacoesRH } from '@/servicos/rh/ServicoReclamacoesRH';
 import { ServicoPortalComunicacao, ROTULO_PEDIDO, destinatariosRH } from '@/servicos/rh/ServicoPortalComunicacao';
+import { FolhaCorreccaoPortal } from '@/componentes/rh/FolhaCorreccaoPortal';
 import { ServicoAdminPrincipal } from '@/servicos/ServicoAdminPrincipal';
 import { estadoEfectivo, saldoFerias } from '@/bibliotecas/rh/ferias';
 import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
@@ -122,6 +123,8 @@ export default function PortalFuncionario() {
 
             {aba === 'painel' && (
                 <>
+                    <FolhaCorreccaoPortal f={f} actor={actor} correio={d.correio} onMudou={recarregar}
+                        destinatarios={[...destinatarios, ...(users as Array<{ id: string; role?: unknown; status?: unknown }>).filter(u => String(u.role) === 'super_admin' && !['blocked', 'inactive'].includes(String(u.status || 'active'))).map(u => u.id)]} />
                     <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                         <Indicador titulo="Saldo de férias" valor={`${saldo.saldo} dias`} nota={`Direito ${saldo.direito} + transitados ${saldo.transitados}`} tom="emerald" />
                         <Indicador titulo="Férias marcadas / gozadas" valor={`${saldo.marcados} / ${saldo.gozados}`} />

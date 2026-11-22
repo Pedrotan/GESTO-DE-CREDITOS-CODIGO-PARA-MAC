@@ -6,6 +6,7 @@ import { Label } from '@/componentes/ui/label';
 import { Textarea } from '@/componentes/ui/textarea';
 import { ServicoPortalComunicacao, type MensagemRH } from '@/servicos/rh/ServicoPortalComunicacao';
 import { dataPt, executar, Vazio } from './comum-rh';
+import { semMarcaFolha } from '@/servicos/rh/ServicoEnvioFolha';
 
 /**
  * Correio interno entre um funcionário e o RH. Do lado do funcionário escreve «para o RH»; do lado do RH escreve
@@ -47,7 +48,7 @@ export function CorreioInterno({ mensagens, lado, onEnviar, onMudou, vazio }: {
                             </button>
                             {aberta === m.id && (
                                 <div className="mt-2 border-t border-slate-100 pt-2 dark:border-slate-800">
-                                    <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-200">{m.corpo}</p>
+                                    <p className="whitespace-pre-wrap text-slate-700 dark:text-slate-200">{semMarcaFolha(m.corpo)}</p>
                                     {recebida(m) && <Button size="sm" variant="ghost" className="mt-1 h-7 px-2" onClick={() => responder(m)}><Reply className="mr-1 h-3.5 w-3.5" /> Responder</Button>}
                                 </div>
                             )}

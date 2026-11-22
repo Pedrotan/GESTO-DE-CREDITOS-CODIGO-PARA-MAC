@@ -193,7 +193,11 @@ function logotipoEmpresa(config: ReturnType<typeof getCompanySettings>): string 
  * exercício, emissão e paginação; um bloco por funcionário (número, nome, IBAN, cargo/vínculo, abonos, descontos e líquido);
  * totais por unidade orgânica, total geral e número de agentes. O mês e o ano são os do processamento.
  */
-export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+/**
+ * Folha de salário. `marca`: «correcao» (marca de água CORREÇÃO, para conferir) ou «final» (sem marca: só depois de
+ * aprovada); sem marca indicada, os meses por aprovar levam RASCUNHO.
+ */
+export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, settings: unknown, userName: string, saida: SaidaPdf = 'save', marca?: 'correcao' | 'final'): FicheiroPdf {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const config = getCompanySettings(settings);
     const largura = doc.internal.pageSize.getWidth();
@@ -205,7 +209,8 @@ export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, set
     const empresa = (config.name || 'Empresa').toUpperCase();
     const mesAno = `${MESES[p.mes - 1]}/${p.ano}`;
     const emissao = formatLuandaDateTime(new Date()).replace(' ', ' - ');
-    const rascunho = p.estado === 'aberto' || p.estado === 'calculado';
+    const rascunho = !marca && (p.estado === 'aberto' || p.estado === 'calculado');
+    if (marca === 'final' && !['aprovado', 'pago', 'fechado'].includes(String(p.estado))) throw new Error('A folha final só existe depois de a folha ser aprovada.');
 
     const unidadeDe = (i: ItemFolha) => i.enquadramento?.unidade_organica?.trim() || i.recibo.departamento || config.name || 'Sem unidade orgânica';
     const unidades = [...new Set(itens.map(unidadeDe))].sort((a, b) => a.localeCompare(b, 'pt'));
@@ -244,6 +249,14 @@ export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, set
         doc.text('Fonte: Tango ERP - Sistema Integrado de Gestão de Recursos Humanos', esq, altura - 6);
         doc.text(`Utilizador: ${userName}`, dir, altura - 6, { align: 'right' });
         doc.setTextColor(0, 0, 0);
+        if (marca === 'correcao') {
+            doc.saveGraphicsState();
+            try { doc.setGState(new (doc.GState as unknown as { new (o: { opacity: number }): any })({ opacity: 0.13 })); } catch { /* sem transparência */ }
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(84); doc.setTextColor(234, 88, 12);
+            doc.text('CORREÇÃO', largura / 2, altura / 2 + 20, { align: 'center', angle: 28 });
+            doc.restoreGraphicsState();
+            doc.setTextColor(0, 0, 0);
+        }
         if (rascunho) {
             doc.saveGraphicsState();
             try { doc.setGState(new (doc.GState as unknown as { new (o: { opacity: number }): any })({ opacity: 0.12 })); } catch { /* sem transparência */ }
@@ -359,7 +372,8 @@ export function gerarFolhaPdf(itens: ItemFolha[], p: CabecalhoProcessamento, set
         doc.text(`:   ${n}  de ${total}`, 157, 14.8);
     }
     const nomeEmpresa = (config.name || 'Empresa').normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^\w]+/gu, '_').replace(/^_+|_+$/gu, '');
-    return terminar(doc, `Folha de salario_${MESES[p.mes - 1]}_${p.ano}_${nomeEmpresa}.pdf`, saida);
+    const tipoFolha = marca === 'correcao' ? 'Folha de correcao' : marca === 'final' ? 'Folha final' : 'Folha de salario';
+    return terminar(doc, `${tipoFolha}_${MESES[p.mes - 1]}_${p.ano}_${nomeEmpresa}.pdf`, saida);
 }
 
 export type DadosDeclaracao = {
@@ -432,6 +446,95 @@ function declaracaoDeModelo(d: DadosDeclaracao, settings: unknown, userName: str
     return terminar(doc, `Declaracao-${d.numero.replace(/[^\w]+/gu, '-')}.pdf`, saida);
 }
 
+export type DadosDeclaracaoEmpresa = {
+    /** Título (ex.: DECLARAÇÃO DE SERVIÇO E SALÁRIO ou MODELO DE DECLARAÇÃO). */
+    titulo: string; subtitulo?: string | null; referencia?: string | null;
+    /** Destinatário (modelo para outras instituições). */
+    destinatario?: { instituicao?: string | null; ac?: string | null; assunto?: string | null } | null;
+    /** Texto final (parágrafos separados por linha em branco), já editado. */
+    texto: string; local: string; dataExtenso: string;
+    representante?: string | null; cargoRepresentante?: string | null;
+};
+
+/**
+ * Declaração no layout dos modelos da empresa: cabeçalho com logótipo, nome, NIF e contactos; título, referência,
+ * destinatário (quando há), o texto, local e data, «Pela EMPRESA», linha de assinatura, cargo e carimbo.
+ */
+export function gerarDeclaracaoEmpresaPdf(d: DadosDeclaracaoEmpresa, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const config = getCompanySettings(settings) as ReturnType<typeof getCompanySettings> & { phone?: string; email?: string };
+    const largura = doc.internal.pageSize.getWidth();
+    const altura = doc.internal.pageSize.getHeight();
+    const esq = 22; const dir = largura - 22; const util = dir - esq;
+    const empresa = (config.name || 'Empresa').toUpperCase();
+    const logo = logotipoEmpresa(config);
+    let y = 18;
+    if (logo) {
+        try {
+            const prop = doc.getImageProperties(logo);
+            const escala = Math.min(18 / prop.width, 18 / prop.height);
+            doc.addImage(logo, prop.fileType || 'PNG', largura / 2 - (prop.width * escala) / 2, y - 4, prop.width * escala, prop.height * escala, undefined, 'FAST');
+            y += 18;
+        } catch { /* logótipo ilegível: segue sem ele */ }
+    }
+    doc.setTextColor(15, 23, 42);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12.5);
+    doc.text(empresa, largura / 2, y, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+    if (config.nif) doc.text(`NIF ${config.nif}`, largura / 2, y + 5, { align: 'center' });
+    const contactos = [config.phone ? `Tel.: ${config.phone}` : '', config.email ? `E-mail: ${config.email}` : ''].filter(Boolean).join('  |  ');
+    if (contactos) doc.text(contactos, largura / 2, y + 10, { align: 'center' });
+    y += 14;
+    doc.setDrawColor(15, 23, 42); doc.setLineWidth(0.4); doc.line(esq, y, dir, y);
+    y += 12;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(14);
+    doc.text(d.titulo.toUpperCase(), largura / 2, y, { align: 'center' });
+    y += 6;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+    if (d.subtitulo) { doc.text(d.subtitulo, largura / 2, y, { align: 'center' }); y += 6; }
+    if (d.referencia) { doc.text(`Referência: ${d.referencia}`, largura / 2, y, { align: 'center' }); y += 6; }
+    y += 6;
+    if (d.destinatario) {
+        doc.setFontSize(10.5);
+        const linhas: Array<[string, string | null | undefined]> = [['À(ao): ', d.destinatario.instituicao], ['A/C: ', d.destinatario.ac], ['Assunto: ', d.destinatario.assunto]];
+        for (const [rotulo, valor] of linhas) {
+            if (!valor || !valor.trim()) continue;
+            doc.setFont('helvetica', 'bold'); doc.text(rotulo, esq, y);
+            doc.setFont('helvetica', 'normal');
+            const texto = doc.splitTextToSize(valor.trim(), util - doc.getTextWidth(rotulo)) as string[];
+            doc.text(texto, esq + doc.getTextWidth(rotulo), y);
+            y += texto.length * 5.2 + 1;
+        }
+        y += 5;
+    }
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(11);
+    for (const paragrafo of d.texto.split(/\n{2,}/u).map(t => t.replace(/\n/gu, ' ').trim()).filter(Boolean)) {
+        const linhas = doc.splitTextToSize(paragrafo, util) as string[];
+        if (y + linhas.length * 6 > altura - 70) { doc.addPage(); y = 25; }
+        doc.text(linhas, esq, y, { align: 'justify', maxWidth: util, lineHeightFactor: 1.5 });
+        y += linhas.length * 6 + 5;
+    }
+    if (y > altura - 75) { doc.addPage(); y = 30; }
+    y += 4;
+    doc.text(`${d.local}, ${d.dataExtenso}.`, esq, y);
+    y += 14;
+    doc.text(`Pela ${empresa}`, largura / 2, y, { align: 'center' });
+    y += 20;
+    doc.setLineWidth(0.3); doc.line(largura / 2 - 45, y, largura / 2 + 45, y);
+    y += 5;
+    doc.setFontSize(10);
+    doc.text(d.representante?.trim() || 'Nome e assinatura do representante autorizado', largura / 2, y, { align: 'center' });
+    y += 5;
+    doc.text(d.cargoRepresentante?.trim() ? d.cargoRepresentante.trim() : 'Cargo: __________________________________', largura / 2, y, { align: 'center' });
+    y += 10;
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(9.5); doc.setTextColor(100, 116, 139);
+    doc.text('Carimbo da empresa', largura / 2, y, { align: 'center' });
+    doc.setFontSize(6.5);
+    doc.text(`Emitido no Tango ERP por ${userName}`, esq, altura - 10);
+    const nome = (d.referencia || d.titulo).replace(/[^\w]+/gu, '-').replace(/^-+|-+$/gu, '');
+    return terminar(doc, `Declaracao-${nome}.pdf`, saida);
+}
+
 /** Ficheiro de transferências (CSV): IBAN, nome, valor e descrição, um funcionário por linha. */
 export function ficheiroTransferencias(recibos: ReciboPdf[], descricao: string) {
     const linhas = [['IBAN', 'Beneficiario', 'Valor', 'Descricao', 'NumeroRecibo'].join(';'),
@@ -440,41 +543,84 @@ export function ficheiroTransferencias(recibos: ReciboPdf[], descricao: string) 
 }
 
 export type DadosGuiaFerias = {
-    numero: string; emitidoEm: string; funcionario: { nome: string; numero: string; cargo?: string; departamento?: string };
+    numero: string; emitidoEm: string; funcionario: { nome: string; numero: string; cargo?: string; departamento?: string; bi?: string | null; admissao?: string | null };
     ano: number; inicio: string; fim: string; dias: number; regresso: string; saldoRestante: number; aprovadoPor?: string | null;
+    /** Dias úteis de férias a que tem direito no ano (contrato ou parâmetro; 22 por omissão). */
+    direito?: number;
+    /** Subsídio de férias: salário base e percentagem em vigor (parâmetro subsidio_ferias_pct). */
+    salarioBaseMinor?: number | null; subsidioPct?: number | null;
 };
 
-/** Guia de férias numerada: período de gozo, dias úteis, data de regresso, saldo restante e assinaturas. */
+/**
+ * Guia de férias segundo a Lei Geral do Trabalho de Angola (Lei n.º 12/23, de 27 de Dezembro): identificação do
+ * trabalhador, período de gozo em dias úteis, data de regresso, saldo, subsídio de férias, enquadramento legal,
+ * tomada de conhecimento e assinaturas do trabalhador, do chefe directo e dos Recursos Humanos.
+ */
 export function gerarGuiaFeriasPdf(d: DadosGuiaFerias, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
     const doc = new jsPDF();
     const config = getCompanySettings(settings);
     const cor = resolveBrandPrimary(config.primaryColor);
     applyBranding(doc, config, userName);
-    let y = brandingHeaderBottom(doc) + 14;
+    const direito = d.direito || 22;
+    let y = brandingHeaderBottom(doc) + 12;
     doc.setFont('helvetica', 'bold'); doc.setFontSize(16); doc.setTextColor(15, 23, 42);
     doc.text('GUIA DE FÉRIAS', 105, y, { align: 'center' });
-    doc.setFontSize(10); doc.setTextColor(cor[0], cor[1], cor[2]);
-    doc.text(`N.º ${d.numero}`, 105, y + 7, { align: 'center' });
-    y += 16;
-    autoTable(doc, {
-        startY: y, theme: 'grid', styles: { fontSize: 9.5, cellPadding: 2.4 },
-        columnStyles: { 0: { fontStyle: 'bold', cellWidth: 60, fillColor: [248, 250, 252] } },
-        body: [
-            ['Funcionário', `${d.funcionario.nome} (n.º ${d.funcionario.numero})`],
-            ['Cargo / departamento', [d.funcionario.cargo, d.funcionario.departamento].filter(Boolean).join(' · ') || '—'],
-            ['Férias do ano', String(d.ano)],
-            ['Período de gozo', `${dataPt(d.inicio)} a ${dataPt(d.fim)}`],
-            ['Dias úteis', String(d.dias)],
-            ['Data de regresso', dataPt(d.regresso)],
-            ['Saldo restante', `${d.saldoRestante} dia(s) útil(eis)`],
-            ['Aprovado por', d.aprovadoPor || '—'],
-            ['Emitida em', dataPt(d.emitidoEm)],
-        ],
-        didDrawPage: () => applyBranding(doc, config, userName, true),
-    });
-    const fim = (doc as any).lastAutoTable?.finalY || y + 70;
-    assinaturas(doc, fim + 32, ['O funcionário', 'O chefe', 'Recursos Humanos']);
-    writeClosingNote(doc, `Guia ${d.numero} emitida pelo sistema; os dias ficam marcados como férias no livro de ponto.`, fim + 40, config, userName, { line: false });
+    doc.setFontSize(9.5); doc.setTextColor(cor[0], cor[1], cor[2]);
+    doc.text(`N.º ${d.numero} · Férias referentes a ${d.ano}`, 105, y + 6, { align: 'center' });
+    y += 12;
+    const tabela = (titulo: string, linhas: Array<[string, string]>) => {
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(15, 23, 42);
+        doc.text(titulo.toUpperCase(), 20, y + 4);
+        autoTable(doc, {
+            startY: y + 6, theme: 'grid', styles: { fontSize: 8.6, cellPadding: 1.35 }, margin: { left: 20, right: 20 },
+            columnStyles: { 0: { fontStyle: 'bold', cellWidth: 58, fillColor: [248, 250, 252] } }, body: linhas,
+            didDrawPage: () => applyBranding(doc, config, userName, true),
+        });
+        y = ((doc as any).lastAutoTable?.finalY || y + 30) + 4;
+    };
+    tabela('1. Identificação do trabalhador', [
+        ['Nome', d.funcionario.nome],
+        ['N.º mecanográfico', d.funcionario.numero],
+        ...(d.funcionario.bi ? [['Bilhete de Identidade', d.funcionario.bi] as [string, string]] : []),
+        ['Cargo / departamento', [d.funcionario.cargo, d.funcionario.departamento].filter(Boolean).join(' · ') || '—'],
+        ...(d.funcionario.admissao ? [['Data de admissão', dataPt(d.funcionario.admissao)] as [string, string]] : []),
+    ]);
+    tabela('2. Período de férias', [
+        ['Direito anual', `${direito} dias úteis`],
+        ['Período de gozo', `De ${dataPt(d.inicio)} a ${dataPt(d.fim)}`],
+        ['Dias úteis gozados nesta guia', String(d.dias)],
+        ['Apresentação ao serviço', dataPt(d.regresso)],
+        ['Saldo de férias restante', `${d.saldoRestante} dia(s) útil(eis)`],
+        ['Aprovado por', d.aprovadoPor || '—'],
+    ]);
+    if (d.salarioBaseMinor && d.subsidioPct) {
+        tabela('3. Subsídio de férias', [
+            ['Salário base mensal', kz(d.salarioBaseMinor)],
+            ['Percentagem', `${(d.subsidioPct * 100).toLocaleString('pt-PT', { maximumFractionDigits: 2 })}% do salário base`],
+            ['Valor do subsídio', kz(Math.round(d.salarioBaseMinor * d.subsidioPct))],
+        ]);
+    }
+    const legal = [
+        `Nos termos da Lei Geral do Trabalho (Lei n.º 12/23, de 27 de Dezembro), o trabalhador tem direito, em cada ano civil, a um período de férias remuneradas, que nesta empresa é de ${direito} dias úteis. Durante as férias mantém a remuneração que receberia se estivesse ao serviço e recebe o subsídio de férias, que não pode ser inferior a 50% do salário base.`,
+        'As férias são gozadas de forma efectiva e não podem ser substituídas por compensação económica, salvo nos casos previstos na lei. O período foi marcado por acordo com a entidade empregadora, tendo em conta as necessidades do serviço.',
+        `O trabalhador deve apresentar-se ao serviço no dia ${dataPt(d.regresso)}. A falta de apresentação nessa data, sem motivo justificado, é tratada como falta injustificada.`,
+    ];
+    if (y > 200) { doc.addPage(); applyBranding(doc, config, userName, true); y = brandingHeaderBottom(doc) + 10; }
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(15, 23, 42);
+    doc.text(`${d.salarioBaseMinor && d.subsidioPct ? '4' : '3'}. ENQUADRAMENTO LEGAL`, 20, y + 4);
+    y += 9;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(8.8); doc.setTextColor(30, 41, 59);
+    for (const paragrafo of legal) {
+        const linhas = doc.splitTextToSize(paragrafo, 170) as string[];
+        doc.text(linhas, 20, y, { lineHeightFactor: 1.45 });
+        y += linhas.length * 4.6 + 2.5;
+    }
+    if (y > 235) { doc.addPage(); applyBranding(doc, config, userName, true); y = brandingHeaderBottom(doc) + 10; }
+    doc.setFont('helvetica', 'italic'); doc.setFontSize(8.8);
+    doc.text('Tomei conhecimento do período de férias acima indicado e da data em que devo apresentar-me ao serviço.', 20, y + 3);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`${config.address || config.location || ''}, ${dataPt(d.emitidoEm)}`, 20, y + 10);
+    assinaturas(doc, y + 30, ['O trabalhador', 'O chefe directo', 'Recursos Humanos']);
     return terminar(doc, `Guia-ferias-${d.numero.replace(/[^\w]+/gu, '-')}.pdf`, saida);
 }
 
