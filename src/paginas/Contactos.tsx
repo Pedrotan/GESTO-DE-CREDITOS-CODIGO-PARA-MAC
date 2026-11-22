@@ -226,7 +226,7 @@ export default function Contactos() {
 
     return (
         <MainLayout title="Clientes" subtitle="Agenda de contactos">
-            <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-[18px] pb-12 text-[#101828] dark:text-slate-100">
+            <div className="flex w-full flex-col gap-[18px] pb-12 text-[#101828] dark:text-slate-100">
                 <div className="flex flex-wrap items-end justify-between gap-4">
                     <div>
                         <nav aria-label="Caminho" className="text-[13px] text-[#5B6474] dark:text-slate-400">Clientes › Agenda de contactos</nav>

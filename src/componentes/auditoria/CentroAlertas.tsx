@@ -10,6 +10,9 @@ import { cn } from '@/bibliotecas/utils';
 import { formatAuditTimestamp, relativeTime, type AuditEvent, type Severity } from '@/bibliotecas/auditoria-analise';
 import { ALERT_STATUS_LABELS, CLOSED_ALERT_STATUSES, ServicoAuditoriaAvancada, type AlertComment, type AlertStatus, type StoredAlert } from '@/servicos/ServicoAuditoriaAvancada';
 import { SeverityBadge } from './TabelaAuditoria';
+import { TabelaDados } from '@/componentes/comum/TabelaDados';
+
+const SEVERIDADES = ['critical', 'high', 'medium', 'low', 'info'];
 
 const STATUS_TONE: Record<AlertStatus, string> = {
     open: 'bg-red-500/10 text-red-700 border-red-300 dark:text-red-300', in_review: 'bg-amber-400/20 text-amber-800 border-amber-300 dark:text-amber-300',
@@ -152,23 +155,36 @@ export function CentroAlertas({ alerts, actor, responsibles, onChanged, events, 
                     ))}
                 </div>
             </div>
-            {!list.length ? <p className="py-8 text-center text-sm text-muted-foreground">Sem alertas {filter === 'active' ? 'por tratar' : 'com este estado'}.</p> : (
-                <div className="space-y-2">
-                    {list.map(alert => (
-                        <button key={alert.id} type="button" onClick={() => setSelected(alert)} className="flex w-full flex-wrap items-center gap-3 rounded-lg border bg-background px-3 py-2 text-left hover:bg-muted/50">
-                            <SeverityBadge severity={alert.severity as Severity} />
-                            <div className="min-w-0 flex-1">
-                                <p className="truncate text-sm font-semibold">{alert.title}</p>
-                                <p className="truncate text-xs text-muted-foreground" title={alert.description || ''}>{alert.description}</p>
-                            </div>
-                            <div className="flex flex-col items-end gap-1 text-xs">
-                                <span className={cn('rounded-full border px-2 py-0.5 font-bold', STATUS_TONE[alert.status])}>{ALERT_STATUS_LABELS[alert.status]}</span>
-                                <span className={cn('text-muted-foreground', overdue(alert) && 'font-bold text-destructive')}>{overdue(alert) ? 'Prazo ultrapassado' : relativeTime(alert.occurredAt)}</span>
-                            </div>
-                        </button>
-                    ))}
-                </div>
-            )}
+            <TabelaDados<StoredAlert>
+                rotulo="Centro de Alertas"
+                linhas={list}
+                chave={alert => alert.id}
+                onLinha={setSelected}
+                vazio={`Sem alertas ${filter === 'active' ? 'por tratar' : 'com este estado'}.`}
+                pesquisaDe={alert => [alert.title, alert.description, alert.originUserName, alert.assignedToName, ALERT_STATUS_LABELS[alert.status]].filter(Boolean).join(' ')}
+                destaque={alert => (overdue(alert) ? 'bg-red-50/60 dark:bg-red-950/20' : undefined)}
+                colunas={[
+                    { id: 'gravidade', titulo: 'Gravidade', className: 'w-[110px]', celula: alert => <SeverityBadge severity={alert.severity as Severity} />,
+                        ordenar: alert => SEVERIDADES.indexOf(alert.severity) },
+                    { id: 'alerta', titulo: 'Alerta', ordenar: alert => alert.title, celula: alert => (
+                        <div className="min-w-[260px] max-w-[560px]">
+                            <p className="font-semibold">{alert.title}</p>
+                            <p className="line-clamp-2 text-xs text-muted-foreground" title={alert.description || ''}>{alert.description}</p>
+                        </div>
+                    ) },
+                    { id: 'origem', titulo: 'Originado por', ordenar: alert => alert.originUserName || '', celula: alert => <span className="whitespace-nowrap">{alert.originUserName || '—'}</span> },
+                    { id: 'data', titulo: 'Data', ordenar: alert => alert.occurredAt, celula: alert => (
+                        <span className="whitespace-nowrap" title={formatAuditTimestamp(alert.occurredAt)}>{relativeTime(alert.occurredAt)}</span>
+                    ) },
+                    { id: 'responsavel', titulo: 'Responsável', ordenar: alert => alert.assignedToName || '', celula: alert => <span className="whitespace-nowrap">{alert.assignedToName || '—'}</span> },
+                    { id: 'prazo', titulo: 'Prazo', ordenar: alert => alert.dueAt || '9999', celula: alert => (
+                        <span className={cn('whitespace-nowrap', overdue(alert) && 'font-bold text-destructive')}>{alert.dueAt ? (overdue(alert) ? 'Ultrapassado' : formatAuditTimestamp(alert.dueAt).slice(0, 10)) : '—'}</span>
+                    ) },
+                    { id: 'estado', titulo: 'Estado', ordenar: alert => ALERT_STATUS_LABELS[alert.status], celula: alert => (
+                        <span className={cn('whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-bold', STATUS_TONE[alert.status])}>{ALERT_STATUS_LABELS[alert.status]}</span>
+                    ) },
+                ]}
+            />
             <GerirAlerta alert={selected} actor={actor} responsibles={responsibles} onClose={() => setSelected(null)} onSaved={onChanged} events={events} onOpenEvent={event => { setSelected(null); onOpenEvent(event); }} />
         </div>
     );

@@ -98,7 +98,7 @@ export function TabelaContactos({
         ? <a href={`mailto:${l.email}`} className="text-sm text-[#0B6B43] hover:underline dark:text-emerald-400">{l.email}</a>
         : <EdicaoRapida rotulo="email" tipo="email" placeholder="nome@exemplo.ao" disabled={!podeEditar} onGuardar={v => accoes.editar(l, 'email', v)} />;
     const celulaMorada = (l: LinhaContacto) => l.morada
-        ? <span className="block max-w-[260px] truncate" title={l.morada}>{l.morada}</span>
+        ? <span className="block max-w-[260px] truncate xl:max-w-[420px] 2xl:max-w-[640px]" title={l.morada}>{l.morada}</span>
         : <EdicaoRapida rotulo="morada" placeholder="Ex.: Luanda - Samba, Rua 31 de Janeiro" disabled={!podeEditar} onGuardar={v => accoes.editar(l, 'address', v)} />;
     const nif = (l: LinhaContacto) => nifs[l.id] || l.nifMascarado || '—';
 
