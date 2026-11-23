@@ -11,6 +11,8 @@ import { ChevronLeft, ChevronRight, Edit, Plus } from 'lucide-react';
 import { ServicoTempoRH, type AusenciaRH } from '@/servicos/rh/ServicoTempoRH';
 import { datasDoMes, diaSemana, feriadoNaData, horasSemanais, type Feriado, type Horario, type TipoAusencia, type TipoHorario } from '@/bibliotecas/rh/ponto';
 import { cicloDoHorario } from '@/bibliotecas/rh/ponto-escalas';
+import { calendarioDoAno, categoriaDe, type DiaCalendario, type FeriadoRegistado, type OpcoesCalendario, type TipoDiaCalendario } from '@/bibliotecas/rh/calendario-laboral';
+import { ServicoFeriasRH } from '@/servicos/rh/ServicoFeriasRH';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { NavegacaoRH, dataPt, executar, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
@@ -27,14 +29,15 @@ export default function CalendarioRH() {
     const base = useBaseRH();
     const dados = useCarregar(async () => ({
         horarios: await ServicoTempoRH.horarios(), feriados: await ServicoTempoRH.feriados(), ausencias: await ServicoTempoRH.ausencias(), tipos: await ServicoTempoRH.tiposAusencia(),
-    }), { horarios: [] as Horario[], feriados: [] as Feriado[], ausencias: [] as AusenciaRH[], tipos: [] as TipoAusencia[] });
-    const { horarios, feriados, ausencias, tipos } = dados.dados;
+        registados: await ServicoTempoRH.feriadosRegistados(), opcoes: await ServicoTempoRH.opcoesCalendario(),
+    }), { horarios: [] as Horario[], feriados: [] as Feriado[], ausencias: [] as AusenciaRH[], tipos: [] as TipoAusencia[], registados: [] as FeriadoRegistado[], opcoes: {} as OpcoesCalendario });
+    const { horarios, feriados, ausencias, tipos, registados, opcoes } = dados.dados;
     const hoje = luandaTodayKey();
     const [ano, setAno] = useState(Number(hoje.slice(0, 4)));
     const [mes, setMes] = useState(Number(hoje.slice(5, 7)));
     const [departamento, setDepartamento] = useState(TODOS);
     const [horario, setHorario] = useState<Partial<Horario> | null>(null);
-    const [feriado, setFeriado] = useState<Partial<Feriado> | null>(null);
+    const [feriado, setFeriado] = useState<Partial<FeriadoRegistado> | null>(null);
     const mover = (delta: number) => { const d = new Date(Date.UTC(ano, mes - 1 + delta, 1)); setAno(d.getUTCFullYear()); setMes(d.getUTCMonth() + 1); };
 
     const funcionarios = base.dados.funcionarios.filter(f => f.estado === 'activo' && (departamento === TODOS || f.departamento_id === departamento));
@@ -96,16 +99,8 @@ export default function CalendarioRH() {
                 </TabsContent>
 
                 <TabsContent value="feriados" className="space-y-2">
-                    <div className="flex items-center justify-between">
-                        <p className="text-xs text-slate-500">Nos feriados não se contam faltas; o trabalho nesses dias conta todo como hora extra (acréscimo de feriado). Carnaval e Sexta-feira Santa mudam todos os anos: acrescente-os com a data do ano.</p>
-                        {configurar && <Button size="sm" onClick={() => setFeriado({ data: hoje, tipo: 'empresa', recorrente: 0 })}><Plus className="mr-1.5 h-4 w-4" /> Feriado ou dia da empresa</Button>}
-                    </div>
-                    {feriados.map(f => (
-                        <div key={f.id} className={`flex items-center justify-between rounded-xl border border-slate-200 px-4 py-2 text-sm dark:border-slate-800 ${f.activo ? '' : 'opacity-50'}`}>
-                            <span><b>{f.recorrente ? f.data.slice(5).split('-').reverse().join('/') : dataPt(f.data)}</b> · {f.nome} · {f.tipo === 'nacional' ? 'nacional' : 'da empresa'}{f.recorrente ? ' · todos os anos' : ''}</span>
-                            {configurar && <Button size="icon" variant="ghost" onClick={() => setFeriado(f)}><Edit className="h-4 w-4" /></Button>}
-                        </div>
-                    ))}
+                    <FeriadosDoAno registados={registados} opcoes={opcoes} configurar={configurar} actor={actor} onEditar={setFeriado}
+                        onNovo={() => setFeriado({ data: hoje, tipo: 'empresa', recorrente: 0, categoria: 'tolerancia' })} onMudou={() => void dados.recarregar()} />
                 </TabsContent>
             </Tabs>
             {actor && horario && <DialogoHorario horario={horario} horarios={horarios} actor={actor} onClose={() => setHorario(null)} onSaved={() => void dados.recarregar()} />}
@@ -194,24 +189,100 @@ function DialogoHorario({ horario, horarios, actor, onClose, onSaved }: Base & {
     );
 }
 
-function DialogoFeriado({ feriado, actor, onClose, onSaved }: Base & { feriado: Partial<Feriado> }) {
-    const [f, setF] = useState(feriado);
+const ROTULO_CATEGORIA: Record<TipoDiaCalendario, string> = {
+    nacional: 'Feriado nacional', ponte: 'Ponte', tolerancia: 'Tolerância de ponto', local: 'Feriado municipal / local', empresa: 'Dia da empresa', data_internacional: 'Data internacional (não é folga)',
+};
+const COR_CATEGORIA: Record<TipoDiaCalendario, string> = {
+    nacional: 'bg-red-500', ponte: 'bg-amber-500', tolerancia: 'bg-violet-500', local: 'bg-teal-500', empresa: 'bg-slate-500', data_internacional: 'bg-indigo-500',
+};
+
+/** Feriados do ano: os gerados pela lei (com as pontes, que o RH activa ou desactiva) e os acrescentados. */
+function FeriadosDoAno({ registados, opcoes, configurar, actor, onEditar, onNovo, onMudou }: {
+    registados: FeriadoRegistado[]; opcoes: OpcoesCalendario; configurar: boolean; actor: ActorRH | null;
+    onEditar: (f: Partial<FeriadoRegistado>) => void; onNovo: () => void; onMudou: () => void;
+}) {
+    const [ano, setAno] = useState(Number(hojeAno()));
+    const dias = [...calendarioDoAno(ano, registados, opcoes).values()];
+    const pontes = dias.filter(d => d.tipo === 'ponte');
+    const alternar = (d: DiaCalendario, activo: boolean) => actor && void executar(async () => {
+        await ServicoTempoRH.alternarDiaGerado(d, activo, actor);
+        // Sem «gerir RH» o recálculo não corre aqui (fica para quem gere as férias).
+        await ServicoFeriasRH.recalcularPlanos(actor).catch(() => 0);
+    }, activo ? 'Dia activado' : 'Dia desactivado').then(ok => ok && onMudou());
+    return (
+        <>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                    <Button size="icon" variant="outline" aria-label="Ano anterior" onClick={() => setAno(a => a - 1)}><ChevronLeft className="h-4 w-4" /></Button>
+                    <span className="min-w-[64px] text-center text-lg font-black">{ano}</span>
+                    <Button size="icon" variant="outline" aria-label="Ano seguinte" onClick={() => setAno(a => a + 1)}><ChevronRight className="h-4 w-4" /></Button>
+                    <span className="text-xs text-slate-500">{dias.filter(d => d.folga && d.activo && d.tipo !== 'ponte').length} feriados · {pontes.filter(d => d.activo).length} de {pontes.length} pontes activas</span>
+                </div>
+                {configurar && <Button size="sm" onClick={onNovo}><Plus className="mr-1.5 h-4 w-4" /> Tolerância, feriado local ou data</Button>}
+            </div>
+            <p className="text-xs text-slate-500">
+                Os feriados nacionais (Lei n.º 11/18), o Carnaval e a Sexta-Feira Santa são gerados todos os anos. As pontes (feriado à terça → segunda; à quinta → sexta)
+                {opcoes.pontesDesde ? ` geram-se a partir de ${opcoes.pontesDesde}` : ' geram-se automaticamente'} e confirmam-se com o decreto do Governo: desactive as que não forem concedidas.
+                Nos dias sem trabalho não se contam faltas nem dias de férias; mudar um dia recalcula os planos de férias ainda não aprovados.
+            </p>
+            <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-slate-800">
+                {dias.map(d => (
+                    <div key={d.data} className={`flex items-center gap-3 border-b border-slate-100 px-4 py-2 text-sm last:border-0 dark:border-slate-800 ${d.activo ? '' : 'opacity-50'}`}>
+                        <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${COR_CATEGORIA[d.tipo]}`} aria-hidden="true" />
+                        <span className="w-28 shrink-0 font-bold tabular-nums">{dataPt(d.data)} · {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][new Date(`${d.data}T12:00:00Z`).getUTCDay()]}</span>
+                        <span className="min-w-0 flex-1">{d.nome}{d.internacional ? ' (internacional)' : ''}{d.local ? ` · ${d.local}` : ''}
+                            <span className="ml-2 text-xs text-slate-500">{ROTULO_CATEGORIA[d.tipo]}{d.origem === 'gerado' ? ' · gerado' : ''}</span></span>
+                        {configurar && actor && d.origem === 'gerado' && (d.tipo === 'ponte' || d.tipo === 'nacional') && (
+                            <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={d.activo} onCheckedChange={v => alternar(d, v)} aria-label={`${d.activo ? 'Desactivar' : 'Activar'} ${d.nome}`} /> {d.activo ? 'Activo' : 'Desactivado'}</label>
+                        )}
+                        {configurar && d.origem === 'manual' && d.registoId && (
+                            <Button size="icon" variant="ghost" aria-label={`Editar ${d.nome}`} onClick={() => onEditar(registados.find(r => r.id === d.registoId) || {})}><Edit className="h-4 w-4" /></Button>
+                        )}
+                    </div>
+                ))}
+            </div>
+            {registados.some(r => r.activo === 0 && categoriaDe(r) !== 'ponte' && !r.id.startsWith('excepcao-')) && (
+                <div className="space-y-1">
+                    <p className="text-xs font-bold text-slate-500">Desactivados</p>
+                    {registados.filter(r => r.activo === 0 && categoriaDe(r) !== 'ponte' && !r.id.startsWith('excepcao-')).map(r => (
+                        <div key={r.id} className="flex items-center justify-between rounded-xl border border-slate-200 px-4 py-1.5 text-sm opacity-60 dark:border-slate-800">
+                            <span>{r.recorrente ? r.data.slice(5).split('-').reverse().join('/') : dataPt(r.data)} · {r.nome}</span>
+                            {configurar && <Button size="icon" variant="ghost" aria-label={`Editar ${r.nome}`} onClick={() => onEditar(r)}><Edit className="h-4 w-4" /></Button>}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </>
+    );
+}
+
+function DialogoFeriado({ feriado, actor, onClose, onSaved }: Base & { feriado: Partial<FeriadoRegistado> }) {
+    const [f, setF] = useState<Partial<FeriadoRegistado>>({ ...feriado, categoria: feriado.categoria || (feriado.tipo === 'nacional' ? 'nacional' : 'empresa') });
+    const categoria = (f.categoria || 'empresa') as TipoDiaCalendario;
     return (
         <Dialog open onOpenChange={v => !v && onClose()}>
             <DialogContent className="max-w-md">
-                <DialogHeader><DialogTitle>{f.id ? 'Editar feriado' : 'Novo feriado ou dia da empresa'}</DialogTitle></DialogHeader>
+                <DialogHeader><DialogTitle>{f.id ? 'Editar dia do calendário' : 'Novo dia do calendário'}</DialogTitle></DialogHeader>
                 <div className="grid gap-3">
-                    <div><Label className="text-xs font-bold">Nome</Label><Input className="mt-1" value={f.nome || ''} onChange={e => setF(p => ({ ...p, nome: e.target.value }))} /></div>
+                    <div><Label className="text-xs font-bold">Tipo</Label>
+                        <Select value={categoria} onValueChange={v => setF(p => ({ ...p, categoria: v }))}>
+                            <SelectTrigger className="mt-1"><SelectValue /></SelectTrigger>
+                            <SelectContent>{(['tolerancia', 'local', 'empresa', 'ponte', 'nacional', 'data_internacional'] as const).map(c => <SelectItem key={c} value={c}>{ROTULO_CATEGORIA[c]}</SelectItem>)}</SelectContent>
+                        </Select>
+                    </div>
+                    <div><Label className="text-xs font-bold">Nome</Label><Input className="mt-1" value={f.nome || ''} placeholder={categoria === 'tolerancia' ? 'Ex.: Tolerância de ponto (decreto presidencial)' : categoria === 'local' ? 'Ex.: Dia do município' : ''} onChange={e => setF(p => ({ ...p, nome: e.target.value }))} /></div>
                     <div><Label className="text-xs font-bold">Data</Label><Input className="mt-1" type="date" value={f.data?.startsWith('2000-') ? `${hojeAno()}${f.data.slice(4)}` : f.data || ''} onChange={e => setF(p => ({ ...p, data: e.target.value }))} /></div>
-                    <Select value={f.tipo || 'empresa'} onValueChange={v => setF(p => ({ ...p, tipo: v as Feriado['tipo'] }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent><SelectItem value="nacional">Feriado nacional</SelectItem><SelectItem value="empresa">Dia da empresa</SelectItem></SelectContent>
-                    </Select>
+                    {categoria === 'local' && <div><Label className="text-xs font-bold">Local de trabalho / município</Label><Input className="mt-1" value={f.local || ''} onChange={e => setF(p => ({ ...p, local: e.target.value }))} /></div>}
+                    {categoria === 'data_internacional' && <p className="text-xs text-slate-500">Aparece a azul no calendário só para informação: conta como dia normal de trabalho.</p>}
                     <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={Boolean(f.recorrente)} onCheckedChange={v => setF(p => ({ ...p, recorrente: v ? 1 : 0 }))} /> Repete-se todos os anos</label>
                     {f.id && <label className="flex items-center gap-2 text-xs font-bold"><Switch checked={f.activo !== 0} onCheckedChange={v => setF(p => ({ ...p, activo: v ? 1 : 0 }))} /> Activo</label>}
                 </div>
                 <DialogFooter><Button variant="outline" onClick={onClose}>Cancelar</Button>
-                    <Button onClick={() => void executar(() => ServicoTempoRH.guardarFeriado({ id: f.id, data: f.data || '', nome: f.nome || '', tipo: f.tipo || 'empresa', recorrente: Boolean(f.recorrente), activo: f.activo !== 0 }, actor), 'Feriado guardado').then(ok => { if (ok) { onSaved(); onClose(); } })}>Guardar</Button></DialogFooter>
+                    <Button onClick={() => void executar(async () => {
+                        await ServicoTempoRH.guardarFeriado({ id: f.id, data: f.data || '', nome: f.nome || '', tipo: f.tipo || 'empresa', recorrente: Boolean(f.recorrente), activo: f.activo !== 0, categoria, local: f.local ?? null }, actor);
+                        // Sem «gerir RH» o recálculo não corre aqui (fica para quem gere as férias).
+                        await ServicoFeriasRH.recalcularPlanos(actor).catch(() => 0);
+                    }, 'Dia do calendário guardado').then(ok => { if (ok) { onSaved(); onClose(); } })}>Guardar</Button></DialogFooter>
             </DialogContent>
         </Dialog>
     );

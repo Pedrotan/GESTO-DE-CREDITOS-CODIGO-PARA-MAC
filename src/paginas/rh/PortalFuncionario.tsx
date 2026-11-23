@@ -86,7 +86,7 @@ export default function PortalFuncionario() {
     // Os pedidos também avisam o chefe directo (se tiver conta no sistema).
     const chefeUtilizador: string | null = dados.dados?.chefe?.utilizador_id || null;
     const avisarPedidos = chefeUtilizador && chefeUtilizador !== actor?.id ? [...new Set([...destinatarios, chefeUtilizador])] : destinatarios;
-    const [ferias, setFerias] = useState({ inicio: '', fim: '', obs: '' });
+    const [ferias, setFerias] = useState({ inicio: '', dias: 22, obs: '' });
     const [subsidio, setSubsidio] = useState({ ano: Number(hoje.slice(0, 4)), obs: '' });
     const [outro, setOutro] = useState({ assunto: '', descricao: '' });
     const [dispensa, setDispensa] = useState({ tipo_id: 'ausencia-D', inicio: hoje, fim: hoje, porHoras: false, horas: 2, motivo: '' });
@@ -165,11 +165,11 @@ export default function PortalFuncionario() {
                             <h2 className="mb-3 flex items-center gap-2 font-black"><Plane className="h-4 w-4" /> Pedir férias</h2>
                             <div className="grid gap-3 sm:grid-cols-2">
                                 <div><Label className="text-xs font-bold">Início</Label><Input className="mt-1" type="date" min={hoje} value={ferias.inicio} onChange={e => setFerias(x => ({ ...x, inicio: e.target.value }))} /></div>
-                                <div><Label className="text-xs font-bold">Fim</Label><Input className="mt-1" type="date" min={ferias.inicio || hoje} value={ferias.fim} onChange={e => setFerias(x => ({ ...x, fim: e.target.value }))} /></div>
+                                <div><Label className="text-xs font-bold">Dias úteis</Label><Input className="mt-1" type="number" min={1} value={ferias.dias} onChange={e => setFerias(x => ({ ...x, dias: Number(e.target.value) }))} /></div>
                                 <div className="sm:col-span-2"><Label className="text-xs font-bold">Observações</Label><Input className="mt-1" value={ferias.obs} onChange={e => setFerias(x => ({ ...x, obs: e.target.value }))} /></div>
                             </div>
                             <p className="mt-2 text-xs text-slate-500">Saldo disponível: {saldo.saldo} dias.</p>
-                            <Button className="mt-3" onClick={() => void executar(() => ServicoPortalRH.pedirFerias(f, ferias.inicio, ferias.fim, ferias.obs, actor, avisarPedidos), 'Pedido de férias enviado ao RH').then(ok => { if (ok) { setFerias({ inicio: '', fim: '', obs: '' }); recarregar(); } })}>
+                            <Button className="mt-3" onClick={() => void executar(() => ServicoPortalRH.pedirFerias(f, ferias.inicio, ferias.dias, ferias.obs, actor, avisarPedidos), 'Pedido de férias enviado ao RH').then(ok => { if (ok) { setFerias({ inicio: '', dias: 22, obs: '' }); recarregar(); } })}>
                                 <Send className="mr-1.5 h-4 w-4" /> Enviar pedido
                             </Button>
                         </div>

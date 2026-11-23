@@ -511,3 +511,19 @@ export const rhSeedFaltaStatements = (now: string) => RH_PARAMETROS_FALTA.map(p 
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
 }));
 export const RH_VINCULOS = ['Comissão de Serviço', 'Pessoal do Quadro', 'Quadro Temporário', 'Contratado', 'Prestador de Serviços'];
+// Calendário laboral e férias por dias úteis: categoria e local dos feriados registados (pontes, tolerâncias,
+// feriados locais, datas internacionais) e, no plano de férias, a data de regresso, a aprovação do chefe directo,
+// a recusa e a interrupção.
+export const RH_CALENDARIO_COLUNAS: Array<[string, string, string]> = [
+    ['rh_feriado', 'categoria', 'TEXT'], ['rh_feriado', 'local', 'TEXT'],
+    ['rh_plano_ferias', 'data_regresso', 'TEXT'], ['rh_plano_ferias', 'dias_calendario', 'INTEGER'],
+    ['rh_plano_ferias', 'chefe_aprovado_por', 'TEXT'], ['rh_plano_ferias', 'chefe_aprovado_por_nome', 'TEXT'], ['rh_plano_ferias', 'chefe_aprovado_em', 'TEXT'],
+    ['rh_plano_ferias', 'recusado', 'INTEGER NOT NULL DEFAULT 0'], ['rh_plano_ferias', 'motivo_recusa', 'TEXT'], ['rh_plano_ferias', 'interrompido_em', 'TEXT'],
+];
+export const RH_PARAMETROS_CALENDARIO: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'pontes_desde_ano', valor: '2027', descricao: 'Ano a partir do qual o calendário gera as pontes (feriado à terça → segunda; à quinta → sexta)' },
+    { chave: 'ferias_periodo_minimo', valor: '15', descricao: 'Férias divididas: um dos períodos deve ter pelo menos estes dias úteis (0 = sem regra; confirmar com a LGT)' },
+];
+export const rhSeedCalendarioStatements = (now: string) => RH_PARAMETROS_CALENDARIO.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));

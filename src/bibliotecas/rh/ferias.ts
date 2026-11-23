@@ -1,5 +1,5 @@
 // Regras do plano de férias: estados pelas datas, saldo de dias úteis, regresso e conflitos por departamento.
-import { diasUteis, ehDiaUtil, somarDias, type Feriado, type Horario } from './ponto.ts';
+import { diasUteis, ehDiaUtil, feriadoNaData, somarDias, type Feriado, type Horario } from './ponto.ts';
 
 export type EstadoFerias = 'planeado' | 'aprovado' | 'em_gozo' | 'gozado' | 'anulado';
 export type PlanoFerias = {
@@ -64,4 +64,90 @@ export function conflitoDepartamento(p: { inicio: string; fim: string; funcionar
         if (pct > pior.pct) pior = { pct, dia: d };
     }
     return pior.pct > p.limitePct ? pior : null;
+}
+
+// ── Cálculo das férias por dias úteis (início + N dias → último dia e regresso) ──
+
+export type ResultadoFerias = {
+    /** Primeiro dia de férias (o dia útil seguinte, se o escolhido não for útil). */
+    inicio: string; ultimoDia: string; regresso: string;
+    diasUteis: number; diasCalendario: number;
+    /** Feriados, pontes e tolerâncias dentro do período (não contam como férias). */
+    feriadosNoPeriodo: Array<{ data: string; nome: string }>;
+    /** O dia escolhido não era útil e o início passou para o seguinte. */
+    ajustado: boolean;
+    saldoDepois: number | null;
+    /** Cada dia do período: «u» dia útil de férias, «n» fim-de-semana ou feriado dentro do período. */
+    dias: Record<string, 'u' | 'n'>;
+};
+
+const LIMITE_DIAS = 800;
+
+/**
+ * Férias de N dias úteis a começar num dia (Lei Geral do Trabalho: as férias contam-se em dias úteis; fins-de-semana
+ * do horário, feriados, pontes e tolerâncias não contam). Função pura: o serviço passa o horário do funcionário e as
+ * folgas do calendário laboral (do ano do início e do seguinte, para períodos que atravessam o ano).
+ */
+export function simularFerias(p: { inicio: string; dias: number; horario: Horario; feriados: Feriado[]; saldo?: number | null }): ResultadoFerias {
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(p.inicio)) throw new Error('Indique o início das férias.');
+    const n = Math.floor(Number(p.dias));
+    if (!Number.isFinite(n) || n < 1) throw new Error('As férias têm de ter pelo menos 1 dia útil.');
+    const util = (d: string) => ehDiaUtil(d, p.horario, p.feriados);
+    let inicio = p.inicio;
+    let ajustado = false;
+    for (let g = 0; !util(inicio); g++) {
+        if (g > 60) throw new Error('O horário do funcionário não tem dias de trabalho.');
+        inicio = somarDias(inicio, 1);
+        ajustado = true;
+    }
+    const dias: Record<string, 'u' | 'n'> = {};
+    const feriadosNoPeriodo: Array<{ data: string; nome: string }> = [];
+    let contador = 0;
+    let ultimoDia = inicio;
+    for (let d = inicio, g = 0; contador < n; d = somarDias(d, 1), g++) {
+        if (g > LIMITE_DIAS) throw new Error('Período de férias demasiado longo.');
+        if (util(d)) { contador += 1; ultimoDia = d; dias[d] = 'u'; continue; }
+        dias[d] = 'n';
+        const feriado = feriadoNaData(p.feriados, d);
+        if (feriado) feriadosNoPeriodo.push({ data: d, nome: feriado.nome });
+    }
+    // Os dias não úteis depois do último dia não fazem parte do período.
+    for (const d of Object.keys(dias)) if (d > ultimoDia) delete dias[d];
+    for (let i = feriadosNoPeriodo.length - 1; i >= 0; i--) if (feriadosNoPeriodo[i].data > ultimoDia) feriadosNoPeriodo.splice(i, 1);
+    let regresso = somarDias(ultimoDia, 1);
+    for (let g = 0; !util(regresso) && g < 60; g++) regresso = somarDias(regresso, 1);
+    const diasCalendario = Math.round((Date.parse(`${ultimoDia}T00:00:00Z`) - Date.parse(`${inicio}T00:00:00Z`)) / 86_400_000) + 1;
+    return { inicio, ultimoDia, regresso, diasUteis: n, diasCalendario, feriadosNoPeriodo, ajustado, saldoDepois: p.saldo == null ? null : p.saldo - n, dias };
+}
+
+export type AvisoFerias = { nivel: 'erro' | 'aviso' | 'info'; codigo: string; texto: string };
+
+/**
+ * Validações do plano (secção 5.3): excede o saldo (bloqueia a aprovação), sobreposição com outras férias do
+ * funcionário (bloqueia), com ausências já lançadas (aviso), início no passado (só o RH), colegas do departamento
+ * de férias ao mesmo tempo (aviso) e divisão em períodos (um com pelo menos `periodoMinimo` dias úteis).
+ */
+export function avisosFerias(p: {
+    resultado: ResultadoFerias; funcionarioId: string; planoId?: string | null; saldo: number; hoje: string;
+    planos: PlanoFerias[]; ausencias?: Array<{ funcionario_id: string; data_inicio: string; data_fim: string; estado: string; tipo_id?: string }>;
+    conflito?: { pct: number; dia: string } | null; limitePct?: number; periodoMinimo?: number; direito?: number;
+}): AvisoFerias[] {
+    const r = p.resultado;
+    const avisos: AvisoFerias[] = [];
+    if (r.ajustado) avisos.push({ nivel: 'info', codigo: 'ajustado', texto: `O dia escolhido não é dia útil: o início passou para ${r.inicio.split('-').reverse().join('/')}.` });
+    if (r.diasUteis > p.saldo) avisos.push({ nivel: 'aviso', codigo: 'excede', texto: `Excede o saldo disponível (${p.saldo} dias). Pode guardar como previsto, mas não aprovar.` });
+    if (r.inicio < p.hoje) avisos.push({ nivel: 'aviso', codigo: 'passado', texto: 'O início é no passado: só o RH o pode registar, indicando o motivo nas observações.' });
+    const meus = p.planos.filter(x => x.funcionario_id === p.funcionarioId && x.id !== p.planoId && x.estado !== 'anulado' && x.data_inicio && x.data_fim);
+    const sobreposto = meus.find(x => x.data_inicio! <= r.ultimoDia && x.data_fim! >= r.inicio);
+    if (sobreposto) avisos.push({ nivel: 'erro', codigo: 'sobreposicao', texto: `Sobrepõe-se a outras férias deste funcionário (${sobreposto.data_inicio!.split('-').reverse().join('/')} a ${sobreposto.data_fim!.split('-').reverse().join('/')}).` });
+    const ausencia = (p.ausencias || []).find(a => a.funcionario_id === p.funcionarioId && a.estado !== 'anulada' && a.tipo_id !== 'ausencia-FE' && a.data_inicio <= r.ultimoDia && a.data_fim >= r.inicio);
+    if (ausencia) avisos.push({ nivel: 'aviso', codigo: 'ausencia', texto: `Já há uma licença, dispensa ou falta lançada no período (${ausencia.data_inicio.split('-').reverse().join('/')}). O RH decide.` });
+    if (p.conflito) avisos.push({ nivel: 'aviso', codigo: 'departamento', texto: `A ${p.conflito.dia.split('-').reverse().join('/')} ficariam ${p.conflito.pct}% do departamento de férias (limite ${p.limitePct ?? 30}%).` });
+    const minimo = p.periodoMinimo ?? 0;
+    if (minimo > 0 && r.diasUteis < minimo && (p.direito ?? minimo) >= minimo) {
+        const ano = Number(r.inicio.slice(0, 4));
+        const temLongo = meus.some(x => x.ano === ano && Number(x.dias) >= minimo);
+        if (!temLongo) avisos.push({ nivel: 'info', codigo: 'divisao', texto: `Férias divididas: um dos períodos do ano deve ter pelo menos ${minimo} dias úteis.` });
+    }
+    return avisos;
 }

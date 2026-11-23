@@ -3,6 +3,9 @@
 // «aberto») fica só de leitura: para corrigir, reabre-se o processamento.
 import { db } from '@/bibliotecas/bd';
 import { calcularDia, codigoAusencia, diasUteis, ehDiaUtil, HORARIO_OMISSAO, type Ausencia, type Feriado, type Horario, type RegistoPonto, type TipoAusencia } from '@/bibliotecas/rh/ponto';
+import { anosDoCalendario, calendarioDoAno, folgasComoFeriados, type DiaCalendario, type FeriadoRegistado, type OpcoesCalendario, type TipoDiaCalendario } from '@/bibliotecas/rh/calendario-laboral';
+import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { auditoriaRH, ServicoRH, type ActorRH } from './ServicoRH';
 
 type Statement = { sql: string; params?: unknown[]; expectChanges?: number };
@@ -94,26 +97,66 @@ export class ServicoTempoRH {
         return id;
     }
 
-    // ── Feriados ──────────────────────────────────────────────────────────────────
-    static feriados() {
-        return db.all<Feriado>('SELECT * FROM rh_feriado ORDER BY substr(data, 6, 5)').catch(() => [] as Feriado[]);
+    // ── Feriados (calendário laboral) ─────────────────────────────────────────────
+    /** Linhas guardadas em rh_feriado (o que o RH acrescentou ou alterou), para a configuração. */
+    static feriadosRegistados() {
+        return db.all<FeriadoRegistado>('SELECT * FROM rh_feriado ORDER BY substr(data, 6, 5)').catch(() => [] as FeriadoRegistado[]);
     }
 
-    static async guardarFeriado(f: { id?: string; data: string; nome: string; tipo: 'nacional' | 'empresa'; recorrente: boolean; activo?: boolean }, actor: ActorRH) {
+    /** Ano a partir do qual se geram as pontes (parâmetro «pontes_desde_ano»). */
+    static async opcoesCalendario(): Promise<OpcoesCalendario> {
+        const parametros = await ServicoRH.parametros().catch(() => []);
+        return { pontesDesde: valorNumerico(parametros, 'pontes_desde_ano', luandaTodayKey(), 2027) };
+    }
+
+    /** Calendário de um ano (feriados, pontes, tolerâncias, locais e datas internacionais), para pintar o calendário. */
+    static async calendario(ano: number) {
+        const [registados, opcoes] = await Promise.all([this.feriadosRegistados(), this.opcoesCalendario()]);
+        return calendarioDoAno(ano, registados, opcoes);
+    }
+
+    /**
+     * Dias sem trabalho, no formato do livro de ponto: feriados nacionais gerados (com Carnaval e Sexta-Feira Santa),
+     * pontes activas, tolerâncias, feriados locais e dias da empresa. Usado pelo ponto, férias e processamento.
+     */
+    static async feriados(): Promise<Feriado[]> {
+        const [registados, opcoes] = await Promise.all([this.feriadosRegistados(), this.opcoesCalendario()]);
+        return folgasComoFeriados(anosDoCalendario(luandaTodayKey()), registados, opcoes);
+    }
+
+    static async guardarFeriado(f: { id?: string; data: string; nome: string; tipo: 'nacional' | 'empresa'; recorrente: boolean; activo?: boolean; categoria?: TipoDiaCalendario; local?: string | null }, actor: ActorRH) {
         if (!data(f.data) || !f.nome?.trim()) throw new Error('Indique a data e o nome do feriado.');
+        const categoria = f.categoria || (f.tipo === 'nacional' ? 'nacional' : 'empresa');
+        const tipo = categoria === 'nacional' || categoria === 'ponte' ? 'nacional' : 'empresa';
         const when = agora();
         if (f.id) {
             await db.transaction([
-                { sql: 'UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?',
-                    params: [data(f.data), f.nome.trim(), f.tipo, f.recorrente ? 1 : 0, f.activo === false ? 0 : 1, f.id], expectChanges: 1 },
+                { sql: 'UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ?, categoria = ?, local = ? WHERE id = ?',
+                    params: [data(f.data), f.nome.trim(), tipo, f.recorrente ? 1 : 0, f.activo === false ? 0 : 1, categoria, f.local?.trim() || null, f.id], expectChanges: 1 },
                 auditoriaRH(actor, 'update', `Alterou o feriado ${f.nome.trim()}`, { feriadoId: f.id }, undefined, f, when),
             ]);
             return;
         }
         await db.transaction([
-            { sql: `INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)`,
-                params: [crypto.randomUUID(), data(f.data), f.nome.trim(), f.tipo, f.recorrente ? 1 : 0, when, actor.id], expectChanges: 1 },
+            { sql: `INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, categoria, local, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+                params: [crypto.randomUUID(), data(f.data), f.nome.trim(), tipo, f.recorrente ? 1 : 0, categoria, f.local?.trim() || null, when, actor.id], expectChanges: 1 },
             auditoriaRH(actor, 'create', `Acrescentou o feriado ${f.nome.trim()} (${data(f.data)})`, {}, undefined, f, when),
+        ]);
+    }
+
+    /**
+     * Activa ou desactiva um dia gerado (ponte ou feriado nacional) guardando a escolha em rh_feriado, só para essa
+     * data (id fixo, igual em todos os computadores).
+     */
+    static async alternarDiaGerado(dia: Pick<DiaCalendario, 'data' | 'nome' | 'tipo'>, activo: boolean, actor: ActorRH) {
+        if (!data(dia.data) || !['ponte', 'nacional'].includes(dia.tipo)) throw new Error('Só as pontes e os feriados gerados se activam ou desactivam aqui.');
+        const id = `${dia.tipo === 'ponte' ? 'ponte' : 'excepcao'}-${dia.data}`;
+        const when = agora();
+        await db.transaction([
+            { sql: `INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, categoria, local, criado_em, criado_por) VALUES (?, ?, ?, 'nacional', 0, ?, ?, NULL, ?, ?)
+                    ON CONFLICT(id) DO UPDATE SET activo = excluded.activo, nome = excluded.nome`,
+                params: [id, dia.data, dia.nome, activo ? 1 : 0, dia.tipo === 'ponte' ? 'ponte' : 'nacional', when, actor.id] },
+            auditoriaRH(actor, 'update', `${activo ? 'Activou' : 'Desactivou'} ${dia.tipo === 'ponte' ? 'a ponte' : 'o feriado'} de ${dia.data} (${dia.nome})`, { feriadoId: id }, undefined, { activo }, when),
         ]);
     }
 

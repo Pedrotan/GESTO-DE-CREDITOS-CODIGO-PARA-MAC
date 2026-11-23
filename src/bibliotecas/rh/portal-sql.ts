@@ -20,3 +20,18 @@ export const isPortalPedidoSql = (sql: string) => {
 
 /** Marcar uma mensagem do correio interno como lida (quem a recebe; não muda o conteúdo). */
 export const isMarcarCorreioLidoSql = (sql: string) => /^\s*UPDATE rh_correio SET lida = 1 WHERE id = \?\s*$/iu.test(sql.replace(/\s+/gu, ' '));
+
+// Férias pelo portal: o funcionário cancela o seu pedido por decidir (ficha no 3.º parâmetro) e o chefe directo dá
+// parecer (aprova: o próprio no 1.º parâmetro; recusa: no 2.º). O processo principal confirma a ficha e a chefia.
+const PORTAL_CANCELAR_FERIAS_SQL = /^\s*UPDATE rh_plano_ferias SET estado = 'anulado', observacoes = 'Cancelado pelo funcionário', actualizado_em = \? WHERE id = \? AND funcionario_id = \? AND estado = 'planeado' AND pedido_funcionario = 1\s*$/iu;
+const CHEFE_APROVA_FERIAS_SQL = /^\s*UPDATE rh_plano_ferias SET chefe_aprovado_por = \?, chefe_aprovado_por_nome = \?, chefe_aprovado_em = \?, actualizado_em = \? WHERE id = \? AND estado = 'planeado' AND pedido_funcionario = 1 AND chefe_aprovado_em IS NULL\s*$/iu;
+const CHEFE_RECUSA_FERIAS_SQL = /^\s*UPDATE rh_plano_ferias SET estado = 'anulado', recusado = 1, motivo_recusa = \?, chefe_aprovado_por = \?, chefe_aprovado_por_nome = \?, chefe_aprovado_em = \?, actualizado_em = \? WHERE id = \? AND estado = 'planeado' AND pedido_funcionario = 1\s*$/iu;
+
+export type FeriasPortalSql = { tipo: 'cancelar'; funcionarioParam: number } | { tipo: 'chefe'; actorParam: number; planoParam: number };
+export const feriasPortalSql = (sql: string): FeriasPortalSql | null => {
+    const texto = sql.replace(/\s+/gu, ' ');
+    if (PORTAL_CANCELAR_FERIAS_SQL.test(texto)) return { tipo: 'cancelar', funcionarioParam: 2 };
+    if (CHEFE_APROVA_FERIAS_SQL.test(texto)) return { tipo: 'chefe', actorParam: 0, planoParam: 4 };
+    if (CHEFE_RECUSA_FERIAS_SQL.test(texto)) return { tipo: 'chefe', actorParam: 1, planoParam: 5 };
+    return null;
+};

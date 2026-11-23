@@ -2,11 +2,12 @@
 // conta, os seus recibos aprovados, o saldo de férias e faz pedidos (férias e dispensas) que o RH aprova. O processo
 // principal só aceita estes dois pedidos e confirma que a ficha é mesmo de quem pede.
 import { db } from '@/bibliotecas/bd';
-import { diasDoPlano } from '@/bibliotecas/rh/ferias';
 import { diasUteis, HORARIO_OMISSAO } from '@/bibliotecas/rh/ponto';
 import { auditoriaRH, type ActorRH, type Funcionario } from './ServicoRH';
 import { ServicoTempoRH } from './ServicoTempoRH';
 import { ServicoSalariosRH } from './ServicoSalariosRH';
+import { ServicoFeriasRH } from './ServicoFeriasRH';
+import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { avisos } from './ServicoPortalComunicacao';
 
 const agora = () => new Date().toISOString();
@@ -31,19 +32,37 @@ export class ServicoPortalRH {
         return horarios.find(h => h.id === f.horario_id) || horarios.find(h => h.id === 'horario-normal') || HORARIO_OMISSAO;
     }
 
-    /** Pedido de férias: fica «planeado» e marcado como pedido do funcionário até o RH o aprovar. */
-    static async pedirFerias(f: Funcionario, inicio: string, fim: string, observacoes: string, actor: ActorRH, destinatarios: string[] = []) {
-        if (!/^\d{4}-\d{2}-\d{2}$/u.test(inicio) || !/^\d{4}-\d{2}-\d{2}$/u.test(fim) || fim < inicio) throw new Error('Indique o início e o fim das férias.');
-        const dias = diasDoPlano(inicio, fim, await this.horario(f), await ServicoTempoRH.feriados());
-        if (!dias) throw new Error('O período escolhido não tem dias úteis.');
+    /**
+     * Pedido de férias: o funcionário escolhe o início e os dias úteis; o fim e o regresso calculam-se aqui pelo
+     * calendário laboral. Fica «planeado» e marcado como pedido do funcionário (chefe directo → RH).
+     */
+    static async pedirFerias(f: Funcionario, inicio: string, dias: number, observacoes: string, actor: ActorRH, destinatarios: string[] = []) {
+        if (!/^d{4}-d{2}-d{2}$/u.test(inicio)) throw new Error('Indique o início das férias.');
+        if (inicio < luandaTodayKey()) throw new Error('O início das férias tem de ser hoje ou depois.');
+        const sim = await ServicoFeriasRH.simular({ funcionario_id: f.id, data_inicio: inicio, dias });
+        const erro = sim.avisos.find(a => a.nivel === 'erro');
+        if (erro) throw new Error(erro.texto);
+        if (sim.resultado.diasUteis > sim.saldo) throw new Error(`Pede mais dias do que o seu saldo (${sim.saldo}).`);
+        const r = sim.resultado;
         const id = crypto.randomUUID();
         const when = agora();
         await db.transaction([
-            { sql: `INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)`,
-                params: [id, f.id, Number(inicio.slice(0, 4)), Number(inicio.slice(5, 7)), inicio, fim, dias, observacoes.trim() || null, when, actor.id, actor.name], expectChanges: 1 },
-            auditoriaRH(actor, 'create', `Pedido de férias no portal: ${inicio} a ${fim} (${dias} dias úteis)`, { funcionarioId: f.id, planoId: id }, undefined, undefined, when),
-            ...avisos(destinatarios, `Pedido de férias de ${f.nome}`, `${inicio} a ${fim} (${dias} dias úteis). Aprove em Férias e ausências.`, when),
+            { sql: `INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, data_regresso, dias_calendario, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)`,
+                params: [id, f.id, Number(r.inicio.slice(0, 4)), Number(r.inicio.slice(5, 7)), r.inicio, r.ultimoDia, r.diasUteis, r.regresso, r.diasCalendario, observacoes.trim() || null, when, actor.id, actor.name], expectChanges: 1 },
+            auditoriaRH(actor, 'create', `Pedido de férias no portal: ${r.inicio} a ${r.ultimoDia} (${r.diasUteis} dias úteis, regresso ${r.regresso})`, { funcionarioId: f.id, planoId: id }, undefined, undefined, when),
+            ...avisos(destinatarios, `Pedido de férias de ${f.nome}`, `${r.inicio.split('-').reverse().join('/')} a ${r.ultimoDia.split('-').reverse().join('/')} (${r.diasUteis} dias úteis). Regressa a ${r.regresso.split('-').reverse().join('/')}.`, when),
+        ]);
+        return r;
+    }
+
+    /** Cancelar um pedido de férias ainda por decidir (o próprio funcionário). */
+    static async cancelarPedidoFerias(f: Funcionario, planoId: string, actor: ActorRH) {
+        const when = agora();
+        await db.transaction([
+            { sql: `UPDATE rh_plano_ferias SET estado = 'anulado', observacoes = 'Cancelado pelo funcionário', actualizado_em = ? WHERE id = ? AND funcionario_id = ? AND estado = 'planeado' AND pedido_funcionario = 1`,
+                params: [when, planoId, f.id], expectChanges: 1 },
+            auditoriaRH(actor, 'cancel', `Cancelou o pedido de férias ${planoId} no portal`, { funcionarioId: f.id, planoId }, undefined, undefined, when),
         ]);
     }
 

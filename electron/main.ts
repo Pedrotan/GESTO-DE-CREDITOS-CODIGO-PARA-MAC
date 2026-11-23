@@ -21,7 +21,7 @@ import { executarManutencaoSync } from '../src/bibliotecas/manutencao-sync';
 import { describeDenial, evaluateAccess, normalizeAccessSchedule } from '../src/bibliotecas/horario-acesso';
 import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado';
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
-import { isMarcarCorreioLidoSql, isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
+import { feriasPortalSql, isMarcarCorreioLidoSql, isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
 import { carregamentoPortalPermitido, regraLeituraRH } from '../src/bibliotecas/rh/permissoes-rh';
 import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
@@ -1270,6 +1270,14 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if (operator !== actor.id) throw new Error('Só pode abrir ou fechar o seu próprio caixa.');
     }
     if (table === 'rh_processamento') assertPayrollSqlAuthorized(event, statement);
+    // Férias pelo portal sem «gerir RH»: o funcionário cancela o seu pedido; o chefe directo dá o parecer (a ficha e
+    // a chefia confirmam-se em assertApprovalBatch).
+    const feriasPortal = feriasPortalSql(statement.sql);
+    if (feriasPortal && !hasPermission(userAuth.assertAuthenticated(event.sender.id), "hr_manage")) {
+      const actor = assertUserPermission(event, feriasPortal.tipo === "cancelar" ? "hr_self" : undefined);
+      if (feriasPortal.tipo === "chefe" && statement.params?.[feriasPortal.actorParam] !== actor.id) throw new Error("O parecer do chefe tem de ser do utilizador autenticado.");
+      continue;
+    }
     if (isPortalPedido(statement)) {
       const actor = assertUserPermission(event, "hr_self");
       if (statement.params?.[statement.params.length - 2] !== actor.id) throw new Error("O pedido tem de ser feito pelo utilizador autenticado.");
@@ -1308,6 +1316,25 @@ const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:
   if(financialSchemaBootstrapOpen)return;
   for(const statement of statements){
     await assertPontoAutorizado(event,statement,query);
+    const feriasPortal=feriasPortalSql(statement.sql);
+    if(feriasPortal){
+      const actor:any=userAuth.assertAuthenticated(event.sender.id);
+      if(!hasPermission(actor,'hr_manage')){
+        if(feriasPortal.tipo==='cancelar'){
+          const ficha=await query('get','SELECT utilizador_id FROM rh_funcionario WHERE id = ?',[statement.params?.[feriasPortal.funcionarioParam]]);
+          if(!ficha || ficha.utilizador_id!==actor.id)throw new Error('Só pode cancelar os seus próprios pedidos de férias.');
+        }else{
+          // Chefe directo: o da ficha; sem ele, o responsável da secção e depois o do departamento (nunca o próprio).
+          const plano=await query('get','SELECT funcionario_id FROM rh_plano_ferias WHERE id = ?',[statement.params?.[feriasPortal.planoParam]]);
+          const f=plano?await query('get','SELECT id, chefe_id, departamento_id, seccao_id FROM rh_funcionario WHERE id = ?',[plano.funcionario_id]):null;
+          const seccao=f?.seccao_id?await query('get','SELECT responsavel_id FROM rh_seccao WHERE id = ?',[f.seccao_id]):null;
+          const dep=f?.departamento_id?await query('get','SELECT responsavel_id FROM rh_departamento WHERE id = ?',[f.departamento_id]):null;
+          const chefeId=[f?.chefe_id,seccao?.responsavel_id,dep?.responsavel_id].find(id=>id && id!==f?.id);
+          const chefe=chefeId?await query('get','SELECT utilizador_id FROM rh_funcionario WHERE id = ?',[chefeId]):null;
+          if(!chefe || chefe.utilizador_id!==actor.id)throw new Error('Só o chefe directo do funcionário dá parecer ao pedido de férias.');
+        }
+      }
+    }
     if(isPortalPedido(statement)){
       // A ficha do pedido tem de estar ligada à conta de quem pede (ou quem pede gere o RH).
       const actor:any=userAuth.assertAuthenticated(event.sender.id);

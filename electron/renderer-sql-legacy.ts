@@ -66,6 +66,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "INSERT INTO rh_documento (id, funcionario_id, categoria, nome, ficheiro_nome, mime, tamanho, data_emissao, data_validade, confidencial, estado, carregado_por, carregado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?, ?)"
   ],
   [
+    "7cd1f6c4a628fd86f2f2690f0bb6b5de78b0cd747b2d4902fad96ad5d8e8b3b1",
+    "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)"
+  ],
+  [
     "50c7a85dd159988cf3805e7f28f223e3af10359786a402b4991053767e086afa",
     "INSERT INTO rh_funcionario (id, numero_mecanografico, nome, data_nascimento, sexo, estado_civil, nif, bi_numero, bi_emissao, bi_validade, numero_inss, morada, telefone, email, iban, banco, data_admissao, data_saida, cargo_id, departamento_id, horario_id, estado, foto_url, utilizador_id, reformado, observacoes, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -76,6 +80,14 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
   [
     "e446b6625fe19a9cb51cde871d1d9b70c3d4cf2deeec2e5928fb3f626ee48d44",
     "INSERT INTO rh_horario (id, nome, entrada, saida, intervalo_min, dias_semana, tolerancia_min, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)"
+  ],
+  [
+    "0ddf99aa8e465ce334d3990eb596a8811afb9e9f9b2a996074cfa049e67c763a",
+    "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, estado, observacoes, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, 'planeado', ?, ?, ?, ?)"
+  ],
+  [
+    "29c81c76cf8fbff6544578a330802e1155e419d24dead5d0ad5f16d9d9fbbd15",
+    "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)"
   ],
   [
     "8bedcc28bed45fd045bca2cb593ac4687cba1769066133b4954bfaa9754cc121",
@@ -170,6 +182,10 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
     "UPDATE rh_documento SET estado = 'arquivado', actualizado_em = ? WHERE id = ? AND estado <> 'arquivado'"
   ],
   [
+    "ccfe9f9dafb2bd15a93d3fa2c30d35c1722bfd1d868d60f4658e8ff790e70e62",
+    "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?"
+  ],
+  [
     "443db8e17413940e67a56041d89d2541fc325019f8c8207ad99943e207749deb",
     "UPDATE rh_funcionario SET numero_mecanografico = ?, nome = ?, data_nascimento = ?, sexo = ?, estado_civil = ?, nif = ?, bi_numero = ?, bi_emissao = ?, bi_validade = ?, numero_inss = ?, morada = ?, telefone = ?, email = ?, iban = ?, banco = ?, data_admissao = ?, data_saida = ?, cargo_id = ?, departamento_id = ?, horario_id = ?, estado = ?, foto_url = ?, utilizador_id = ?, reformado = ?, observacoes = ?, actualizado_em = ? WHERE id = ?"
   ],
@@ -180,6 +196,14 @@ export const RENDERER_SQL_LEGACY_BY_ID = new Map<string, string>([
   [
     "68302ce31775e48c49ff7d2e78566a71649e827b5bbd3a0693ee878dde64c49c",
     "UPDATE rh_horario SET nome = ?, entrada = ?, saida = ?, intervalo_min = ?, dias_semana = ?, tolerancia_min = ?, activo = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "4c66b909a5d8d94c93333f71c9d8482bc43a7a938a4ec3531c6ec292cf896221",
+    "UPDATE rh_plano_ferias SET estado = 'aprovado', ausencia_id = ?, aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'"
+  ],
+  [
+    "98941fed97433ed070990101b9a275dc551a4593d6d7c941a9b103d98983e67a",
+    "UPDATE rh_plano_ferias SET mes_previsto = ?, data_inicio = ?, data_fim = ?, dias = ?, observacoes = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'"
   ],
   [
     "51a6f5049c5e4e83c7696c56f9323eeb17bfbfbf837ea5c6ef89b4b234c729fb",

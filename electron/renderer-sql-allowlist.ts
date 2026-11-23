@@ -1813,6 +1813,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO report_schedules (id, reportType, recipients, enabled, createdAt, createdBy) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET reportType = excluded.reportType, recipients = excluded.recipients, enabled = excluded.enabled"
   ],
   [
+    "64b086dc79db975d0068dabd078e253928b28c440f2c50532a55a0ca14f755b2",
+    "INSERT INTO rh_alerta (id, tipo, referencia_id, funcionario_id, mensagem, data_alerta, destinatario_perfil, prioridade, accao, estado, criado_em) VALUES (?, 'ferias_calendario', NULL, NULL, ?, ?, 'rh', 2, '/rh/ferias', 'novo', ?) ON CONFLICT(id) DO UPDATE SET mensagem = excluded.mensagem, estado = 'novo', actualizado_em = excluded.criado_em"
+  ],
+  [
     "b64745ff94c60dd5df27ccbcd12e324f3d6cd8f21211a346ae8269fc6c83bcf7",
     "INSERT INTO rh_ausencia (id, funcionario_id, tipo_id, data_inicio, data_fim, dias, horas, motivo, documento_id, estado, pedido_dispensa, aprovado_por, aprovado_por_nome, aprovado_em, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -1877,8 +1881,12 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_escala (id, funcionario_id, data, horario_id, criado_por, criado_por_nome, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(funcionario_id, data) DO UPDATE SET horario_id = excluded.horario_id, criado_por = excluded.criado_por, criado_por_nome = excluded.criado_por_nome, actualizado_em = excluded.criado_em"
   ],
   [
-    "7cd1f6c4a628fd86f2f2690f0bb6b5de78b0cd747b2d4902fad96ad5d8e8b3b1",
-    "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?)"
+    "63d10bf246d5f484ac2f28c78ea984d6bd598aeee7b5ec1b623c9cde1f081310",
+    "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, categoria, local, criado_em, criado_por) VALUES (?, ?, ?, 'nacional', 0, ?, ?, NULL, ?, ?) ON CONFLICT(id) DO UPDATE SET activo = excluded.activo, nome = excluded.nome"
+  ],
+  [
+    "e5193f2708bf5ff75225962eca060bad1b3f3562db84680b31db1ed0fbec916f",
+    "INSERT INTO rh_feriado (id, data, nome, tipo, recorrente, activo, categoria, local, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)"
   ],
   [
     "ca9be5dd425d8be5dfdef45431070b9b98395589e535bcf97f3f185d64af1050",
@@ -1925,12 +1933,12 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_pedido (id, funcionario_id, tipo, ano, assunto, descricao, estado, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, 'pendente', ?, ?, ?)"
   ],
   [
-    "0ddf99aa8e465ce334d3990eb596a8811afb9e9f9b2a996074cfa049e67c763a",
-    "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, estado, observacoes, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, 'planeado', ?, ?, ?, ?)"
+    "926f576b4419df4a8ac3baf10f044846c97b51ddaf3bb400d1a2392f893226e3",
+    "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, data_regresso, dias_calendario, estado, observacoes, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'planeado', ?, ?, ?, ?)"
   ],
   [
-    "29c81c76cf8fbff6544578a330802e1155e419d24dead5d0ad5f16d9d9fbbd15",
-    "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)"
+    "d22845fd09e70806acc9db77ff5017eae43eb286797cb2731952d7799c55804e",
+    "INSERT INTO rh_plano_ferias (id, funcionario_id, ano, mes_previsto, data_inicio, data_fim, dias, data_regresso, dias_calendario, observacoes, estado, pedido_funcionario, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'planeado', 1, ?, ?, ?)"
   ],
   [
     "7c5edb6a7dbe2b1f02cee726ead60fceb8ea63d727027812a0be4d5f74a3edd5",
@@ -4221,6 +4229,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_alerta SET mensagem = ?, actualizado_em = ? WHERE id = ? AND estado <> 'resolvido'"
   ],
   [
+    "b64c0d400e1dca5bdc8418d854d689a2d777b94b333e4b45f0f95d6307cb46f6",
+    "UPDATE rh_ausencia SET data_fim = ?, dias = ?, actualizado_em = ? WHERE id = ? AND estado = 'aprovada'"
+  ],
+  [
     "16ca4a31c7658f30b850d91b0de45a8b75e4c0e74694bd2392a38b4673118169",
     "UPDATE rh_ausencia SET documento_emitido_id = ? WHERE id = ? AND documento_emitido_id IS NULL"
   ],
@@ -4309,8 +4321,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_documento SET pasta_id = NULL, actualizado_em = ? WHERE pasta_id = ?"
   ],
   [
-    "ccfe9f9dafb2bd15a93d3fa2c30d35c1722bfd1d868d60f4658e8ff790e70e62",
-    "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ? WHERE id = ?"
+    "7802197773ae3d53caf083afde5cc0aa7bdf7d79656b0cebc777ae1179a5cdf6",
+    "UPDATE rh_feriado SET data = ?, nome = ?, tipo = ?, recorrente = ?, activo = ?, categoria = ?, local = ? WHERE id = ?"
   ],
   [
     "ca1996734edd02bc11ea8feacbabdedff0918eb81e149b0097fd86cea637ddd7",
@@ -4393,12 +4405,36 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_pedido SET estado = ?, resposta = ?, respondido_em = ?, respondido_por = ?, respondido_por_nome = ? WHERE id = ? AND estado = 'pendente'"
   ],
   [
+    "5daf243c602c7fd8495398d4768f5ef038bfa85c9187879185ef3c3368ceb57d",
+    "UPDATE rh_plano_ferias SET chefe_aprovado_por = ?, chefe_aprovado_por_nome = ?, chefe_aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado' AND pedido_funcionario = 1 AND chefe_aprovado_em IS NULL"
+  ],
+  [
+    "e678cfc5391e63c55bb7ac543f09c12965c933b77564ab1f8615bdc5723c4953",
+    "UPDATE rh_plano_ferias SET data_fim = ?, dias = ?, data_regresso = ?, interrompido_em = ?, observacoes = ?, actualizado_em = ? WHERE id = ? AND estado IN ('aprovado', 'em_gozo')"
+  ],
+  [
+    "803a3fbc32bc5ecf7edcd0a8b3e31a3d3587accc584ad2b5fdc3e2dafd4daea6",
+    "UPDATE rh_plano_ferias SET data_inicio = ?, data_fim = ?, data_regresso = ?, dias_calendario = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'"
+  ],
+  [
+    "ef88a1e6fb8a2a53cee02b463a926ea8e91e9059b687bdacb03615eb6fe73d1e",
+    "UPDATE rh_plano_ferias SET estado = 'anulado', observacoes = 'Cancelado pelo funcionário', actualizado_em = ? WHERE id = ? AND funcionario_id = ? AND estado = 'planeado' AND pedido_funcionario = 1"
+  ],
+  [
     "ac6053e6c1e8e477d46eeb08778813621104170df36db0377fef080989a529f9",
     "UPDATE rh_plano_ferias SET estado = 'anulado', observacoes = ?, actualizado_em = ? WHERE id = ? AND estado IN ('planeado', 'aprovado')"
   ],
   [
-    "4c66b909a5d8d94c93333f71c9d8482bc43a7a938a4ec3531c6ec292cf896221",
-    "UPDATE rh_plano_ferias SET estado = 'aprovado', ausencia_id = ?, aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'"
+    "7af74242074b21337c9a27c40fd5ba5d7a01cd26e41665b471519f94aa69406d",
+    "UPDATE rh_plano_ferias SET estado = 'anulado', recusado = 1, motivo_recusa = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'"
+  ],
+  [
+    "6dce1b93f90e285da716a49e7295d9bdfc86fe8c9e303e27aedae77d46fb150f",
+    "UPDATE rh_plano_ferias SET estado = 'anulado', recusado = 1, motivo_recusa = ?, chefe_aprovado_por = ?, chefe_aprovado_por_nome = ?, chefe_aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado' AND pedido_funcionario = 1"
+  ],
+  [
+    "20fd115e9952a594bd8c3d35c1a73178612fa305deaa1c4f087b3fd5b440eb8b",
+    "UPDATE rh_plano_ferias SET estado = 'aprovado', ausencia_id = ?, data_regresso = ?, aprovado_por = ?, aprovado_por_nome = ?, aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'"
   ],
   [
     "b560541691252c257c08cccff3dc6c2c83f19c45c21e0a35aa467bcff21f66e7",
@@ -4413,8 +4449,8 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_plano_ferias SET guia_id = NULL WHERE guia_id = ?"
   ],
   [
-    "98941fed97433ed070990101b9a275dc551a4593d6d7c941a9b103d98983e67a",
-    "UPDATE rh_plano_ferias SET mes_previsto = ?, data_inicio = ?, data_fim = ?, dias = ?, observacoes = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'"
+    "7215e529dd29345e349619b0613e24bc712c2d7b4d1da5d4e85c6e0f988f6041",
+    "UPDATE rh_plano_ferias SET mes_previsto = ?, data_inicio = ?, data_fim = ?, dias = ?, data_regresso = ?, dias_calendario = ?, observacoes = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado'"
   ],
   [
     "9cbd23d0d23518405482f0526340cd0ccff037322b02c0ed41a16e2cf8478927",
