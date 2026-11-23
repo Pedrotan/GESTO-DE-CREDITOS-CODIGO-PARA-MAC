@@ -1092,7 +1092,9 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                 <Table>
                     <TableHeader>
                         <TableRow className="bg-primary/10 hover:bg-primary/10 border-b-2 border-primary/20">
+                            <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">N.º Cliente</TableHead>
                             <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">Cliente</TableHead>
+                            <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">Província</TableHead>
                             <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">BI/NIF</TableHead>
                             <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">Validade do BI</TableHead>
                             <TableHead className="text-primary font-bold text-xs uppercase tracking-wider">Contacto</TableHead>
@@ -1108,18 +1110,27 @@ export default function Clients({ category = 'COMUM' }: ClientsProps) {
                     <TableBody>
                         {filteredClients.length === 0 ? (
                             <TableRow>
-                                <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                                <TableCell colSpan={companySettings.enableScoringModule !== false ? 13 : 12} className="text-center py-8 text-muted-foreground">
                                     Nenhum cliente encontrado.
                                 </TableCell>
                             </TableRow>
                         ) : paginatedClients.map((client, index) => (
                             <TableRow key={client.id} className="animate-fade-in" style={{ animationDelay: `${index * 50}ms` }}>
                                 <TableCell>
-                                    <div>
-                                        <p className="font-medium text-foreground">{client.name}</p>
-                                        {client.clientNumber && <p className="font-mono text-[11px] font-bold tracking-wide text-primary" title="N.º do cliente">N.º {client.clientNumber}</p>}
-                                        <p className="text-sm text-muted-foreground">{client.address}</p>
-                                    </div>
+                                    {client.clientNumber
+                                        ? <span className="inline-flex rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-bold tracking-wider text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/50 dark:text-indigo-300" title="N.º do cliente">{client.clientNumber}</span>
+                                        : <span className="text-xs text-muted-foreground">—</span>}
+                                </TableCell>
+                                <TableCell><p className="font-medium text-foreground">{client.name}</p></TableCell>
+                                <TableCell>
+                                    {client.province?.trim() ? (
+                                        <div className="flex flex-col">
+                                            <span className="text-sm text-foreground">{client.province}</span>
+                                            {client.municipality?.trim() && <span className="text-[11px] text-muted-foreground">{client.municipality}</span>}
+                                        </div>
+                                    ) : client.address?.trim()
+                                        ? <span className="block max-w-[220px] truncate text-sm text-muted-foreground" title={client.address}>{client.address}</span>
+                                        : <span className="text-xs text-muted-foreground">—</span>}
                                 </TableCell>
                                 <TableCell><span className="font-mono text-sm">{client.nif}</span></TableCell>
                                 <TableCell>
