@@ -1076,6 +1076,7 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   rh_funcionario: "hr_manage",
   rh_dependente: "hr_manage",
   rh_contrato: "hr_manage",
+  rh_contrato_modelo: "hr_manage",
   rh_historico_salarial: "hr_manage",
   rh_funcionario_rubrica: "hr_manage",
   rh_documento: "hr_manage",

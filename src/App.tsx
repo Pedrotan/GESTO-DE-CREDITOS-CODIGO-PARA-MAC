@@ -66,6 +66,7 @@ const ProcessamentoRH = lazyWithReload(() => import("./paginas/rh/ProcessamentoR
 const RecibosRH = lazyWithReload(() => import("./paginas/rh/RecibosRH"));
 const FeriasRH = lazyWithReload(() => import("./paginas/rh/FeriasRH"));
 const DeclaracoesRH = lazyWithReload(() => import("./paginas/rh/DeclaracoesRH"));
+const ContratosRH = lazyWithReload(() => import("./paginas/rh/ContratosRH"));
 const RelatoriosRH = lazyWithReload(() => import("./paginas/rh/RelatoriosRH"));
 const PortalFuncionario = lazyWithReload(() => import("./paginas/rh/PortalFuncionario"));
 const QuiosquePonto = lazyWithReload(() => import("./paginas/rh/QuiosquePonto"));
@@ -378,6 +379,7 @@ const AppContent = () => {
               { path: '/rh/recibos', page: <RecibosRH /> },
               { path: '/rh/ferias', page: <FeriasRH /> },
               { path: '/rh/declaracoes', page: <DeclaracoesRH /> },
+              { path: '/rh/contratos', page: <ContratosRH /> },
             ].map(({ path, page }) => (
               <Route key={path} path={path} element={<ProtectedRoute permission="hr_view"><GuardaModuloRH>{page}</GuardaModuloRH></ProtectedRoute>} />
             ))}

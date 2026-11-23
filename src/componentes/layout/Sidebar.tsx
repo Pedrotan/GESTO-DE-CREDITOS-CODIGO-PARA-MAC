@@ -169,6 +169,7 @@ const menuItems: MenuItem[] = [
       // As mesmas 9 entradas das abas do módulo (as páginas agrupadas abrem com a sub-navegação dentro da aba).
       { icon: LayoutDashboard, label: 'Painel de RH', path: '/rh/painel', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Users, label: 'Funcionários', path: '/rh/funcionarios', permission: 'hr_view', licensedModule: 'rh' },
+      { icon: FileText, label: 'Contratos', path: '/rh/contratos', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Clock, label: 'Livro de Ponto', path: '/rh/ponto', permission: 'hr_view', licensedModule: 'rh' },
       { icon: Plane, label: 'Férias e Ausências', path: '/rh/ferias', permission: 'hr_view', licensedModule: 'rh', alsoActive: ['/rh/ausencias'] },
       { icon: Banknote, label: 'Salários', path: '/rh/processamento', permission: 'hr_view_salaries', licensedModule: 'rh', alsoActive: ['/rh/recibos'] },

@@ -528,3 +528,21 @@ export const RH_PARAMETROS_CALENDARIO: Array<{ chave: string; valor: string; des
 export const rhSeedCalendarioStatements = (now: string) => RH_PARAMETROS_CALENDARIO.map(p => ({
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
 }));
+// Contratos: modelos de contrato editáveis e o texto escrito de cada contrato (o PDF emitido vai para a pasta pessoal).
+export const RH_CONTRATOS_SQL = [
+    `CREATE TABLE IF NOT EXISTS rh_contrato_modelo (
+        id TEXT PRIMARY KEY, nome TEXT NOT NULL, tipo_contrato TEXT NOT NULL DEFAULT 'todos', titulo TEXT, conteudo TEXT NOT NULL,
+        activo INTEGER NOT NULL DEFAULT 1, sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT
+    )`,
+];
+export const RH_CONTRATOS_COLUNAS: Array<[string, string, string]> = [
+    ['rh_contrato', 'texto', 'TEXT'], ['rh_contrato', 'titulo', 'TEXT'], ['rh_contrato', 'modelo_id', 'TEXT'], ['rh_contrato', 'texto_actualizado_em', 'TEXT'],
+];
+export const RH_SEED_CONTRATO_MODELO_SQL = `INSERT OR IGNORE INTO rh_contrato_modelo (id, nome, tipo_contrato, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome)
+    VALUES (?, ?, ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')`;
+export const RH_PARAMETROS_CONTRATOS: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'alerta_contrato_dias', valor: '60', descricao: 'Dias antes do fim do contrato a termo em que começa o alerta «a terminar»' },
+];
+export const rhSeedContratosStatements = (now: string) => RH_PARAMETROS_CONTRATOS.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));

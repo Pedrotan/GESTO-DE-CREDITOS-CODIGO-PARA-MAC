@@ -875,3 +875,97 @@ export function gerarMapaFeriasPdf(d: DadosMapaFerias, settings: unknown, userNa
     });
     return terminar(doc, `Mapa-de-ferias-${d.ano}.pdf`, saida);
 }
+
+export type DadosContratoPdf = {
+    titulo: string; referencia?: string | null;
+    /** Texto do contrato (parágrafos separados por linha em branco; a 1.ª linha de «CLÁUSULA …» sai a negrito). */
+    texto: string; local: string; dataExtenso: string;
+    empregador: { representante?: string | null; cargo?: string | null };
+    trabalhador: { nome: string; bi?: string | null };
+    /** Marca de água «MINUTA» na pré-visualização. */
+    minuta?: boolean;
+};
+
+/** Contrato de trabalho em A4: cabeçalho da empresa, título, cláusulas, local e data e as assinaturas das duas partes. */
+export function gerarContratoTrabalhoPdf(d: DadosContratoPdf, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+    const config = getCompanySettings(settings) as ReturnType<typeof getCompanySettings> & { phone?: string; email?: string };
+    const largura = doc.internal.pageSize.getWidth();
+    const altura = doc.internal.pageSize.getHeight();
+    const esq = 22; const dir = largura - 22; const util = dir - esq;
+    const empresa = (config.name || 'Empresa').toUpperCase();
+    const logo = logotipoEmpresa(config);
+    const rodape = () => {
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(6.5); doc.setTextColor(100, 116, 139);
+        doc.text(`${d.referencia ? `${d.referencia} · ` : ''}Emitido no Tango ERP por ${userName}`, esq, altura - 10);
+        doc.text(`Página ${doc.getNumberOfPages()}`, dir, altura - 10, { align: 'right' });
+        if (d.minuta) {
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(60); doc.setTextColor(226, 232, 240);
+            doc.text('MINUTA', largura / 2, altura / 2, { align: 'center', angle: 30 });
+        }
+        doc.setTextColor(15, 23, 42);
+    };
+    let y = 18;
+    if (logo) {
+        try {
+            const prop = doc.getImageProperties(logo);
+            const escala = Math.min(16 / prop.width, 16 / prop.height);
+            doc.addImage(logo, prop.fileType || 'PNG', largura / 2 - (prop.width * escala) / 2, y - 4, prop.width * escala, prop.height * escala, undefined, 'FAST');
+            y += 16;
+        } catch { /* logótipo ilegível: segue sem ele */ }
+    }
+    doc.setTextColor(15, 23, 42);
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12);
+    doc.text(empresa, largura / 2, y, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9);
+    if (config.nif) doc.text(`NIF ${config.nif}`, largura / 2, y + 5, { align: 'center' });
+    y += 10;
+    doc.setDrawColor(15, 23, 42); doc.setLineWidth(0.4); doc.line(esq, y, dir, y);
+    y += 11;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13.5);
+    for (const linha of doc.splitTextToSize(d.titulo.toUpperCase(), util) as string[]) { doc.text(linha, largura / 2, y, { align: 'center' }); y += 6; }
+    if (d.referencia) { doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5); doc.text(`N.º ${d.referencia}`, largura / 2, y, { align: 'center' }); y += 5; }
+    y += 5;
+    const quebra = (precisa: number) => { if (y + precisa > altura - 22) { rodape(); doc.addPage(); y = 22; } };
+    for (const paragrafo of d.texto.split(/\n{2,}/u).map(t => t.trim()).filter(Boolean)) {
+        const [primeira, ...resto] = paragrafo.split('\n');
+        const clausula = /^CL[ÁA]USULA\b/iu.test(primeira) && resto.length > 0;
+        if (clausula) {
+            quebra(14);
+            doc.setFont('helvetica', 'bold'); doc.setFontSize(10.5);
+            doc.text(primeira.trim(), esq, y); y += 5.5;
+        }
+        const corpo = (clausula ? resto.join(' ') : paragrafo.replace(/\n/gu, ' ')).trim();
+        if (!corpo) continue;
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5);
+        const linhas = doc.splitTextToSize(corpo, util) as string[];
+        for (let i = 0; i < linhas.length; i += 1) {
+            quebra(5.6);
+            doc.text(linhas[i], esq, y, i < linhas.length - 1 ? { align: 'justify', maxWidth: util } : undefined);
+            y += 5.6;
+        }
+        y += 3.5;
+    }
+    quebra(60);
+    y += 3;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(10.5);
+    doc.text(`${d.local}, ${d.dataExtenso}.`, esq, y);
+    y += 22;
+    const meio = largura / 2;
+    const colunas: Array<[number, string, string, string]> = [
+        [esq + util / 4, 'O EMPREGADOR', d.empregador.representante?.trim() || empresa, d.empregador.cargo?.trim() || ''],
+        [meio + util / 4, 'O TRABALHADOR', d.trabalhador.nome, d.trabalhador.bi ? `BI ${d.trabalhador.bi}` : ''],
+    ];
+    doc.setLineWidth(0.3);
+    for (const [x, papel, nome, extra] of colunas) {
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(10);
+        doc.text(papel, x, y - 14, { align: 'center' });
+        doc.line(x - 35, y, x + 35, y);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(9.5);
+        doc.text(doc.splitTextToSize(nome, 72) as string[], x, y + 5, { align: 'center' });
+        if (extra) { doc.setFontSize(8.5); doc.setTextColor(71, 85, 105); doc.text(extra, x, y + 10, { align: 'center' }); doc.setTextColor(15, 23, 42); }
+    }
+    rodape();
+    const nome = (d.referencia || d.trabalhador.nome).normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^\w]+/gu, '-').replace(/^-+|-+$/gu, '');
+    return terminar(doc, `Contrato-${nome}.pdf`, saida);
+}

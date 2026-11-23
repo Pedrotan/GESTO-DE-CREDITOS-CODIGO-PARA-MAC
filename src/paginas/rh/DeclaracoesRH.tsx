@@ -26,7 +26,7 @@ import { useBaseRH } from './FuncionariosRH';
 
 type Modelo = 'servico' | 'instituicao';
 const ROTULO_DOCUMENTO: Record<string, string> = {
-    declaracao_servico: 'Declaração de serviço e salário', declaracao_instituicao: 'Declaração para outras instituições', guia_ferias: 'Guia de férias',
+    declaracao_servico: 'Declaração de serviço e salário', declaracao_instituicao: 'Declaração para outras instituições', guia_ferias: 'Guia de férias', contrato_trabalho: 'Contrato de trabalho',
 };
 const MODELOS: Record<Modelo, { id: string; prefixo: string; titulo: string; subtitulo?: string }> = {
     servico: { id: 'declaracao_servico', prefixo: 'DS', titulo: 'Declaração de serviço e salário' },

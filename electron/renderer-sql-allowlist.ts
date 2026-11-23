@@ -697,6 +697,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS rh_contrato ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('indeterminado', 'determinado')), inicio TEXT NOT NULL, fim TEXT, periodo_experiencia_fim TEXT, salario_base_minor INTEGER NOT NULL CHECK(salario_base_minor >= 0), horas_semanais REAL NOT NULL DEFAULT 40, dias_ferias INTEGER NOT NULL DEFAULT 22, documento_id TEXT, estado TEXT NOT NULL DEFAULT 'activo' CHECK(estado IN ('activo', 'terminado')), motivo_fim TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT )"
   ],
   [
+    "f9a686aa82473861a2c0cc4c234bcf720aacf858c6a3794af3a1562014c0ecb4",
+    "CREATE TABLE IF NOT EXISTS rh_contrato_modelo ( id TEXT PRIMARY KEY, nome TEXT NOT NULL, tipo_contrato TEXT NOT NULL DEFAULT 'todos', titulo TEXT, conteudo TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 1, sistema INTEGER NOT NULL DEFAULT 0, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT )"
+  ],
+  [
     "bdc83e08d13fce887f893946011b88cdad1fd366e48b5f210d822107c832f771",
     "CREATE TABLE IF NOT EXISTS rh_correio ( id TEXT PRIMARY KEY, funcionario_id TEXT NOT NULL, sentido TEXT NOT NULL CHECK(sentido IN ('para_rh', 'para_funcionario')), assunto TEXT NOT NULL, corpo TEXT NOT NULL, de_id TEXT, de_nome TEXT, lida INTEGER NOT NULL DEFAULT 0, resposta_a TEXT, criado_em TEXT NOT NULL )"
   ],
@@ -1845,6 +1849,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO rh_contrato (id, funcionario_id, tipo, inicio, fim, periodo_experiencia_fim, salario_base_minor, horas_semanais, dias_ferias, estado, criado_em, criado_por) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'activo', ?, ?)"
   ],
   [
+    "94fad2b584102a2ce24fbdb2513a04c56e861e246499b6e3fc78a1ddc9690ecb",
+    "INSERT INTO rh_contrato_modelo (id, nome, tipo_contrato, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, 1, 0, ?, ?, ?)"
+  ],
+  [
     "6e3217528e4f8b871eb48f56e963014c7011cef4b2fe80c9acd1479717f591c4",
     "INSERT INTO rh_correio (id, funcionario_id, sentido, assunto, corpo, resposta_a, criado_em, de_id, de_nome) VALUES (?, ?, 'para_funcionario', ?, ?, ?, ?, ?, ?)"
   ],
@@ -2099,6 +2107,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "863d2a742a185461f38679b5ac811ae207f490b5f640aaae568d42042e2f6d8f",
     "INSERT OR IGNORE INTO rh_alerta (id, tipo, referencia_id, funcionario_id, mensagem, data_alerta, destinatario_perfil, prioridade, accao, estado, criado_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'novo', ?)"
+  ],
+  [
+    "c9c26e509319482d03441c9f99d677f8323034c45a79bbe45b2f6249a8f0c089",
+    "INSERT OR IGNORE INTO rh_contrato_modelo (id, nome, tipo_contrato, titulo, conteudo, activo, sistema, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, 1, 1, ?, 'sistema', 'Sistema')"
   ],
   [
     "9fa1aa35ecf12aed2bdceb8fbc1c8afdaf229eb96a6fcf648d6cf08a4092a4c9",
@@ -2585,6 +2597,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM rh_banco_horas WHERE id = ?"
   ],
   [
+    "2e35ae63c81d9dcafc05922d5a4f05379f2a1d6409f5b4d280cc40e1285411d3",
+    "SELECT * FROM rh_contrato ORDER BY estado, inicio DESC"
+  ],
+  [
     "a491d3b4987818c2d61f751a14de41a92dfb95dbbe4adf3ac0cfa13eca64a03e",
     "SELECT * FROM rh_contrato ORDER BY inicio DESC"
   ],
@@ -2595,6 +2611,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "88214a8b01b0e5141851d6c5237cc592b53bd924a4a01ed10bc7a503cc931b62",
     "SELECT * FROM rh_contrato WHERE funcionario_id = ? ORDER BY inicio DESC"
+  ],
+  [
+    "dc9d545d654f0b49568ba56a5d4163ecc770a70ec064d52c42237b4a2c897e30",
+    "SELECT * FROM rh_contrato_modelo ORDER BY sistema DESC, nome"
   ],
   [
     "25e4b569155bbe2ad4dead3aefa4007d10bbe5e9b99a370493badbb14d881adc",
@@ -4283,6 +4303,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d46edb562c2ec40c80468456de5e1793b32d000b67be18e0a8845516adbc5963",
     "UPDATE rh_contrato SET estado = 'terminado', motivo_fim = ?, fim = COALESCE(fim, ?), actualizado_em = ? WHERE funcionario_id = ? AND estado = 'activo'"
+  ],
+  [
+    "b87656739d658d787db69eb1a971cbe23fb1b99251052fb6c59017ee0e0126d3",
+    "UPDATE rh_contrato SET texto = ?, titulo = ?, modelo_id = ?, texto_actualizado_em = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "23a9d6eb0e8c34b490f15cf65cfa40d5c3e5d828179e92d252d678863d5f2ae8",
+    "UPDATE rh_contrato_modelo SET nome = ?, tipo_contrato = ?, titulo = ?, conteudo = ?, activo = ?, actualizado_em = ? WHERE id = ?"
   ],
   [
     "bb6edfac87d99ceff2660e6c6ad2fe8b429841d16989682e57b1c7af2106c9dc",

@@ -82,8 +82,12 @@ export function gerarAlertas(e: {
         if (c.estado !== 'activo' || !activos.some(f => f.id === c.funcionario_id)) continue;
         if (c.fim) {
             const falta = dias(hoje, c.fim);
-            if (falta >= 0 && falta <= 60) add({ id: `contrato-${falta <= 30 ? 30 : 60}:${c.id}`, tipo: 'contrato', referencia_id: c.id, funcionario_id: c.funcionario_id, prioridade: falta <= 30 ? 1 : 2, destinatario_perfil: 'rh', accao: `/rh/funcionarios?ficha=${c.funcionario_id}`,
-                mensagem: `O contrato de ${nome(c.funcionario_id)} termina a ${dataPt(c.fim)}.` });
+            // Contratos a termo: avisos 60, 30 e 7 dias antes do fim e quando o prazo passa sem renovar ou terminar.
+            const escalao = falta <= 7 ? 7 : falta <= 30 ? 30 : 60;
+            if (falta >= 0 && falta <= 60) add({ id: `contrato-${escalao}:${c.id}`, tipo: 'contrato', referencia_id: c.id, funcionario_id: c.funcionario_id, prioridade: falta <= 30 ? 1 : 2, destinatario_perfil: 'rh', accao: `/rh/contratos?contrato=${c.id}`,
+                mensagem: `O contrato de ${nome(c.funcionario_id)} termina a ${dataPt(c.fim)} (${falta === 0 ? 'hoje' : `daqui a ${falta} dia(s)`}).` });
+            if (falta < 0) add({ id: `contrato-expirado:${c.id}`, tipo: 'contrato', referencia_id: c.id, funcionario_id: c.funcionario_id, prioridade: 1, destinatario_perfil: 'rh', accao: `/rh/contratos?contrato=${c.id}`,
+                mensagem: `O contrato a termo de ${nome(c.funcionario_id)} terminou a ${dataPt(c.fim)} e continua activo: renove-o ou termine-o.` });
         }
         if (c.periodo_experiencia_fim) {
             const falta = dias(hoje, c.periodo_experiencia_fim);

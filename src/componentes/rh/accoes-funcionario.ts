@@ -9,7 +9,7 @@ import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { antiguidade, dataPt, kz } from './comum-rh';
 
 /** Guarda um PDF gerado pelo sistema na subpasta da pasta pessoal do funcionário (declarações, relatórios, férias e ausências). */
-export async function arquivarPdf(funcionarioId: string, chave: 'declaracoes' | 'relatorios' | 'recibos' | 'ausencias', nome: string, ficheiro: { fileName: string; dataUrl: string }, origem: string, actor: ActorRH) {
+export async function arquivarPdf(funcionarioId: string, chave: 'declaracoes' | 'relatorios' | 'recibos' | 'ausencias' | 'contratos', nome: string, ficheiro: { fileName: string; dataUrl: string }, origem: string, actor: ActorRH) {
     await ServicoRH.carregarDocumento({ funcionario_id: funcionarioId, categoria: 'outros', nome, ficheiro_nome: ficheiro.fileName, data_url: ficheiro.dataUrl,
         pasta_id: `sys:${chave}`, origem }, 20, actor);
 }

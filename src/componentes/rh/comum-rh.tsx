@@ -18,6 +18,7 @@ type Sub = { path: string; label: string };
 export const ABAS_RH: Array<{ path: string; label: string; subs?: Sub[] }> = [
     { path: '/rh/painel', label: 'Painel' },
     { path: '/rh/funcionarios', label: 'Funcionários' },
+    { path: '/rh/contratos', label: 'Contratos' },
     { path: '/rh/ponto', label: 'Livro de ponto' },
     { path: '/rh/ferias', label: 'Férias e ausências', subs: [{ path: '/rh/ferias', label: 'Férias' }, { path: '/rh/ausencias', label: 'Dispensas, licenças e faltas' }] },
     { path: '/rh/processamento', label: 'Salários', subs: [{ path: '/rh/processamento', label: 'Processamento' }, { path: '/rh/recibos', label: 'Recibos e declarações' }] },

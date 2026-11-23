@@ -36,6 +36,8 @@ export type Contrato = {
     id: string; funcionario_id: string; tipo: 'indeterminado' | 'determinado'; inicio: string; fim: string | null; periodo_experiencia_fim: string | null;
     salario_base_minor: number; horas_semanais: number; dias_ferias: number; documento_id: string | null; estado: 'activo' | 'terminado'; motivo_fim: string | null;
     criado_em: string;
+    /** Texto escrito do contrato (Contratos › escrever) e o modelo de onde veio. */
+    texto?: string | null; titulo?: string | null; modelo_id?: string | null; texto_actualizado_em?: string | null;
 };
 export type HistoricoSalarial = {
     id: string; funcionario_id: string; contrato_id: string | null; salario_anterior_minor: number | null; salario_novo_minor: number;
