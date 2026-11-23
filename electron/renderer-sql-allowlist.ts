@@ -4237,6 +4237,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE report_schedules SET lastRunMonth = ?, lastRunAt = ?, lastError = ? WHERE id = ?"
   ],
   [
+    "4ccaae4118f1bc84f8db9f2c3e260c50d75a72118f9b975d14524ded0f85d050",
+    "UPDATE rh_alerta SET adiado_ate = ?, estado = 'lido', lido_por = ?, lido_em = ? WHERE id = ? AND estado <> 'resolvido'"
+  ],
+  [
     "fa534ef10b84e9a4d6b66e54456d2ba89c705ab8b96deb7bfc913e50ed556158",
     "UPDATE rh_alerta SET estado = 'lido', lido_por = ?, lido_em = ? WHERE id = ? AND estado = 'novo'"
   ],

@@ -546,3 +546,11 @@ export const RH_PARAMETROS_CONTRATOS: Array<{ chave: string; valor: string; desc
 export const rhSeedContratosStatements = (now: string) => RH_PARAMETROS_CONTRATOS.map(p => ({
     sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
 }));
+// Painel de RH: alertas adiados (1 dia / 1 semana) e a meta da assiduidade diária no gráfico.
+export const RH_PAINEL_COLUNAS: Array<[string, string, string]> = [['rh_alerta', 'adiado_ate', 'TEXT']];
+export const RH_PARAMETROS_PAINEL: Array<{ chave: string; valor: string; descricao: string }> = [
+    { chave: 'painel_meta_assiduidade', valor: '95', descricao: 'Painel de RH: meta da assiduidade diária (%) mostrada no gráfico' },
+];
+export const rhSeedPainelStatements = (now: string) => RH_PARAMETROS_PAINEL.map(p => ({
+    sql: RH_SEED_PARAMETRO_SQL, params: [`param-${p.chave}-${RH_DATA_INICIAL}`, p.chave, p.valor, p.descricao, RH_DATA_INICIAL, now],
+}));

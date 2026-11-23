@@ -5,7 +5,7 @@ import initSqlJs, { Database } from 'sql.js';
 import wasmUrl from 'sql.js/dist/sql-wasm.wasm?url';
 import { LEDGER_PROTECTION_SQL } from '@/bibliotecas/esquema-ledger';
 import { buildInstallmentSchedule } from '@/bibliotecas/cronograma-prestacoes';
-import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_SQL, RH_PONTO_V3_COLUNAS, rhSeedPontoV3Statements, RH_FOLHA_COLUNAS, rhSeedFolhaStatements, rhSeedFaltaStatements, RH_CADASTRO_COLUNAS, rhSeedCadastroStatements, RH_CATALOGO_COLUNAS, RH_CATALOGO_MIGRACAO_SQL, RH_DOCS_SQL, RH_DOCS_COLUNAS, rhSeedDocsStatements, RH_MODELOS_SQL, RH_SEED_MODELO_SQL, RH_PORTAL_V2_SQL, RH_HIERARQUIA_SQL, RH_HIERARQUIA_COLUNAS, RH_CALENDARIO_COLUNAS, rhSeedCalendarioStatements, RH_CONTRATOS_SQL, RH_CONTRATOS_COLUNAS, RH_SEED_CONTRATO_MODELO_SQL, rhSeedContratosStatements, RH_PONTO_V2_COLUNAS, rhSeedPontoStatements, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
+import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_SQL, RH_PONTO_V3_COLUNAS, rhSeedPontoV3Statements, RH_FOLHA_COLUNAS, rhSeedFolhaStatements, rhSeedFaltaStatements, RH_CADASTRO_COLUNAS, rhSeedCadastroStatements, RH_CATALOGO_COLUNAS, RH_CATALOGO_MIGRACAO_SQL, RH_DOCS_SQL, RH_DOCS_COLUNAS, rhSeedDocsStatements, RH_MODELOS_SQL, RH_SEED_MODELO_SQL, RH_PORTAL_V2_SQL, RH_HIERARQUIA_SQL, RH_HIERARQUIA_COLUNAS, RH_CALENDARIO_COLUNAS, rhSeedCalendarioStatements, RH_CONTRATOS_SQL, RH_CONTRATOS_COLUNAS, RH_SEED_CONTRATO_MODELO_SQL, rhSeedContratosStatements, RH_PAINEL_COLUNAS, rhSeedPainelStatements, RH_PONTO_V2_COLUNAS, rhSeedPontoStatements, rhSeedFase2Statements, rhSeedFase4Statements, rhSeedStatements } from '@/bibliotecas/rh/esquema-rh';
 import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
 import { MODELO_DECLARACAO_SERVICO } from '@/bibliotecas/rh/modelos-rh';
 import { MODELOS_CONTRATO_INICIAIS } from '@/bibliotecas/rh/contratos-rh';
@@ -1284,6 +1284,11 @@ const createTables = async () => {
         for (const [tabela, coluna, definicao] of RH_CONTRATOS_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
         for (const m of MODELOS_CONTRATO_INICIAIS) await runSql(RH_SEED_CONTRATO_MODELO_SQL, [m.id, m.nome, m.tipo_contrato, m.titulo, m.conteudo, agora]);
         for (const seed of rhSeedContratosStatements(agora)) await runSql(seed.sql, seed.params);
+    });
+    // Painel de RH: alertas adiados e meta da assiduidade.
+    await applyMigration(2026112303, 'rh-painel-alertas-adiados', async () => {
+        for (const [tabela, coluna, definicao] of RH_PAINEL_COLUNAS) await safeAddColumn(tabela, coluna, definicao);
+        for (const seed of rhSeedPainelStatements(new Date().toISOString())) await runSql(seed.sql, seed.params);
     });
 
     // safeAddColumns for migrations

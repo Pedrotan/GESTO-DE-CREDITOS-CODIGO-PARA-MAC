@@ -13,13 +13,25 @@ import { ServicoPontoRH, agoraLuanda } from './ServicoPontoRH';
 import { alertasPonto } from '@/bibliotecas/rh/ponto-alertas';
 import type { ConfigPonto } from '@/bibliotecas/rh/ponto-calculo';
 import { ServicoRelogiosPonto, relogioOnline } from './ServicoRelogiosPonto';
+import { ServicoPortalComunicacao } from './ServicoPortalComunicacao';
+import { camposEmFalta } from '@/bibliotecas/rh/painel-rh';
+import { calendarioDoAno } from '@/bibliotecas/rh/calendario-laboral';
 
-export type AlertaRH = Alerta & { estado: 'novo' | 'lido' | 'resolvido'; lido_em: string | null; resolvido_em: string | null; criado_em: string };
+export type AlertaRH = Alerta & { estado: 'novo' | 'lido' | 'resolvido'; lido_em: string | null; resolvido_em: string | null; criado_em: string; adiado_ate?: string | null };
 const agora = () => new Date().toISOString();
 
 export class ServicoAlertasRH {
-    static abertos() {
-        return db.all<AlertaRH>(`SELECT * FROM rh_alerta WHERE estado <> 'resolvido' ORDER BY prioridade, data_alerta`).catch(() => [] as AlertaRH[]);
+    /** Alertas por resolver (os adiados só voltam no dia escolhido). */
+    static async abertos() {
+        const lista = await db.all<AlertaRH>(`SELECT * FROM rh_alerta WHERE estado <> 'resolvido' ORDER BY prioridade, data_alerta`).catch(() => [] as AlertaRH[]);
+        const hoje = luandaTodayKey();
+        return lista.filter(a => !a.adiado_ate || a.adiado_ate <= hoje);
+    }
+
+    /** Adia um alerta (1 dia ou 1 semana): sai do painel e do sino até essa data. */
+    static async adiar(id: string, dias: number, actor: ActorRH) {
+        const ate = new Date(Date.parse(`${luandaTodayKey()}T12:00:00Z`) + Math.max(1, dias) * 86_400_000).toISOString().slice(0, 10);
+        await db.run(`UPDATE rh_alerta SET adiado_ate = ?, estado = 'lido', lido_por = ?, lido_em = ? WHERE id = ? AND estado <> 'resolvido'`, [ate, actor.id, agora(), id]);
     }
 
     static async marcarLido(id: string, actor: ActorRH) {
@@ -83,6 +95,33 @@ export class ServicoAlertasRH {
         await ServicoRelogiosPonto.enviarEmails(mensagens);
     }
 
+    private static async alertasDoPainel(hoje: string, funcionarios: Awaited<ReturnType<typeof ServicoRH.funcionarios>>, processamentos: Awaited<ReturnType<typeof ServicoSalariosRH.processamentos>>,
+        planos: Awaited<ReturnType<typeof ServicoFeriasRH.planos>>, ausencias: Awaited<ReturnType<typeof ServicoTempoRH.ausencias>>): Promise<Alerta[]> {
+        const lista: Alerta[] = [];
+        const base = (id: string, tipo: string, mensagem: string, prioridade: 1 | 2 | 3, accao: string | null): Alerta =>
+            ({ id, tipo, referencia_id: null, funcionario_id: null, mensagem, data_alerta: hoje, destinatario_perfil: 'rh', prioridade, accao });
+        const incompletos = funcionarios.filter(f => f.estado === 'activo' && camposEmFalta(f).length);
+        if (incompletos.length) lista.push(base('fichas_incompletas', 'fichas', `${incompletos.length} ficha(s) com dados em falta (NIF, INSS, IBAN, BI ou data de nascimento).`, 2, '/rh/funcionarios?incompletas=1'));
+        const [ano, mes] = hoje.split('-').map(Number);
+        const MESES = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+        if (Number(hoje.slice(8, 10)) >= 25 && !processamentos.some(p => p.ano === ano && p.mes === mes && p.tipo === 'normal' && ['pago', 'fechado'].includes(p.estado)))
+            lista.push(base(`processamento_por_fechar:${hoje.slice(0, 7)}`, 'prazos', `O processamento de ${MESES[mes - 1]} ainda não está fechado.`, 2, '/rh/processamento'));
+        const limite = new Date(Date.now() - 48 * 3_600_000).toISOString();
+        const [pedidos, justificacoes] = await Promise.all([ServicoPortalComunicacao.todosPedidos().catch(() => []), ServicoPontoRH.justificacoes().catch(() => [])]);
+        const parados = planos.filter(p => p.estado === 'planeado' && p.pedido_funcionario && String((p as { criado_em?: string }).criado_em || '') < limite).length
+            + ausencias.filter(a => a.estado === 'pendente' && a.criado_em < limite).length
+            + justificacoes.filter(j => j.estado === 'pendente' && j.criado_em < limite).length
+            + pedidos.filter(p => p.estado === 'pendente' && p.criado_em < limite).length;
+        if (parados) lista.push(base('portal_pendentes', 'portal', `${parados} pedido(s) do portal à espera há mais de 48 horas.`, 2, '/rh/painel'));
+        const [registados, opcoes] = await Promise.all([ServicoTempoRH.feriadosRegistados(), ServicoTempoRH.opcoesCalendario()]);
+        const semana = new Date(Date.parse(`${hoje}T12:00:00Z`) + 7 * 86_400_000).toISOString().slice(0, 10);
+        for (const a of new Set([ano, Number(semana.slice(0, 4))])) for (const d of calendarioDoAno(a, registados, opcoes).values()) {
+            if (d.data > hoje && d.data <= semana && d.activo && d.folga)
+                lista.push(base(`feriado_proximo:${d.data}`, 'feriado', `${d.tipo === 'ponte' ? 'Ponte' : 'Feriado'} na próxima semana: ${d.nome} (${d.data.split('-').reverse().join('/')}).`, 3, null));
+        }
+        return lista;
+    }
+
     /** Corre a tarefa: devolve os alertas novos criados agora. */
     static async executar(actor: ActorRH, opcoes: { gerirRH: boolean; gerirClientes: boolean }) {
         const hoje = luandaTodayKey();
@@ -104,6 +143,8 @@ export class ServicoAlertasRH {
         // justificações por decidir e mês por fechar.
         const ponto = opcoes.gerirRH ? await this.alertasDoPonto(hoje, actor).catch(() => null) : null;
         if (ponto) alertas.push(...ponto.alertas);
+        // Painel de RH (secção 5): fichas incompletas, processamento por fechar, pedidos do portal parados e feriados próximos.
+        if (opcoes.gerirRH) alertas.push(...await this.alertasDoPainel(hoje, funcionarios, processamentos, planos, ausencias).catch(() => [] as Alerta[]));
         const porId = new Map(existentes.map(a => [a.id, a]));
         const actuais = new Set(alertas.map(a => a.id));
         const when = agora();
