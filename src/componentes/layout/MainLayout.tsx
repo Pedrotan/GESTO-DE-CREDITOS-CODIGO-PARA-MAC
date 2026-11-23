@@ -1,5 +1,6 @@
 import { LembretesCobranca } from './LembretesCobranca';
 import { TarefaDiariaRH } from '@/componentes/rh/TarefaDiariaRH';
+import { TarefaMonitorizacaoCompliance } from '@/componentes/compliance/TarefaMonitorizacaoCompliance';
 import { AvisosPontoSistema } from '@/componentes/rh/ponto/AvisosPontoSistema';
 import { ProcessamentoAlcadas } from './ProcessamentoAlcadas';
 import { VerificacaoContabilisticaDiaria } from './VerificacaoContabilisticaDiaria';
@@ -95,6 +96,7 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
           <VerificacaoContabilisticaDiaria />
           <LembretesCobranca />
           <TarefaDiariaRH />
+          <TarefaMonitorizacaoCompliance />
           <AvisosPontoSistema />
           <ProcessamentoAlcadas />
           <LembreteFechoMes />

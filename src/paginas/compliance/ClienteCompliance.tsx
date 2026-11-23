@@ -20,6 +20,7 @@ import {
 } from '@/servicos/compliance/ServicoCompliance';
 import { cn } from '@/bibliotecas/utils';
 import { ScreeningCliente } from '@/componentes/compliance/ScreeningCliente';
+import { AlertasCliente } from '@/componentes/compliance/AlertasCliente';
 
 function Seccao({ titulo, descricao, accao, children, icone: Icone }: { titulo: string; descricao?: string; accao?: ReactNode; children: ReactNode; icone?: typeof Gauge }) {
     return (
@@ -75,6 +76,7 @@ export default function ClienteCompliance() {
             cliente: ck, perfil, creditos: comp.creditos,
             duplicadosPorRever: linha.duplicados, modelo, tipo: avaliacoes.length ? 'reavaliacao' : 'inicial',
             screening: { estado: linha.screening.estado, pepConfirmado: linha.screening.pepConfirmado },
+            alertasFundamentados: linha.alertasFundamentados,
             motivo: avaliacoes.length ? 'Reavaliação pedida na ficha de Compliance' : 'Avaliação inicial',
         }, actor), 'Avaliação de risco registada');
         setAAvaliar(false);
@@ -148,6 +150,9 @@ export default function ClienteCompliance() {
 
                 <div className="space-y-5">
                     <ScreeningCliente linha={linha} scr={comp.dados.scr} actor={actor} registar={registar} decidir={decidir} aoMudar={() => void comp.recarregar()} />
+
+                    <AlertasCliente alertas={comp.dados.alr.alertas.filter(a => a.client_id === id)} historico={comp.dados.alr.historico} nomeCliente={String(cliente.name)}
+                        actor={actor} aoMudar={() => void comp.recarregar()} />
 
                     <Seccao titulo="Avaliação de risco" icone={Gauge}
                         descricao={avaliacao ? `Modelo v${avaliacao.modelo_versao} · ${dataHoraPt(avaliacao.criado_em)} · ${avaliacao.criado_por_nome || '—'}` : modelo ? `Modelo activo: v${modelo.versao}` : 'Sem modelo activo'}

@@ -137,6 +137,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_collection_messages_sentAt ON collection_messages(sentAt)"
   ],
   [
+    "810263e32631a7ac763dcc4c4b557746847e18972cb9db6c2df033bd681acafa",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_alerta_cliente ON compliance_alerta(client_id)"
+  ],
+  [
+    "fc0cd5d11f110d443f6d9b38701f0a00cdf0021dd05d3c559ce4c871e49260a6",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_alerta_estado ON compliance_alerta(estado, gravidade)"
+  ],
+  [
+    "ae5ba3ced492df43e80bbe8281202e91a772785168d44e2aef88633d622ed223",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_alerta_historico ON compliance_alerta_historico(alerta_id, em)"
+  ],
+  [
     "bd5f2899fdcb7d92a6fe14c54b7ee32c3fc82cbbe76f8380ae4fe05e4e52b14d",
     "CREATE INDEX IF NOT EXISTS idx_compliance_duplicado_chave ON compliance_duplicado_revisao(chave)"
   ],
@@ -527,6 +539,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "b35621ff31e608427d98fa7b7a7aae5c80e34aa3d5a81b7660cda6027ee2beaa",
     "CREATE TABLE IF NOT EXISTS company_settings ( id INTEGER PRIMARY KEY CHECK(id = 1), name TEXT NOT NULL, nif TEXT, address TEXT, logo TEXT, reportLogo TEXT, licenseKey TEXT, currency TEXT DEFAULT 'AOA', customClauses TEXT, rescueKey TEXT, phone TEXT, primaryColor TEXT, secondaryColor TEXT, watermarkLogo TEXT, sessionTimeout INTEGER DEFAULT 5, email TEXT, whatsapp TEXT, whatsappAutoNotify INTEGER DEFAULT 0, whatsappVerified INTEGER DEFAULT 0, syncEnabled INTEGER DEFAULT 0, syncUrl TEXT, syncApiKey TEXT, syncPasskey TEXT, lastSync TEXT, maintenanceMode INTEGER DEFAULT 0, allowedModulesDuringMaintenance TEXT DEFAULT '[]', enableGatewaysModule INTEGER DEFAULT 1, enableGatewaysModuleAdminOnly INTEGER DEFAULT 0, enableProfileActivity INTEGER DEFAULT 1, enableProfileActivityAdminOnly INTEGER DEFAULT 0, lastBackupDate TEXT, digitalSignatureEnabled INTEGER DEFAULT 1, authorizedSigners TEXT DEFAULT '[]', bankingInfo TEXT DEFAULT '[]', contractTemplates TEXT DEFAULT '[]', installDate TEXT, financialLock INTEGER DEFAULT 0, enableWarrantiesModule INTEGER DEFAULT 1, enableWarrantiesModuleAdminOnly INTEGER DEFAULT 0, enableLegalModule INTEGER DEFAULT 1, enableLegalModuleAdminOnly INTEGER DEFAULT 0, enableScoringModule INTEGER DEFAULT 1, enableScoringModuleAdminOnly INTEGER DEFAULT 0, defaultSimulationInterestRate REAL, defaultSimulationAdminFee REAL, defaultSimulationIof REAL, smtpHost TEXT, smtpPort TEXT, smtpUser TEXT, smtpPassword TEXT, smtpSecure INTEGER DEFAULT 0, smtpFromName TEXT, location TEXT, enableSuppliersModule INTEGER DEFAULT 0, enableSuppliersModuleAdminOnly INTEGER DEFAULT 0, enableMultiTenant INTEGER DEFAULT 1, website TEXT, segment TEXT, slogan TEXT )"
+  ],
+  [
+    "cbbf9358440624546074d547cae7739fb02b6b7d7f0fb84431308022c3dda8fe",
+    "CREATE TABLE IF NOT EXISTS compliance_alerta ( id TEXT PRIMARY KEY, regra TEXT NOT NULL, categoria TEXT NOT NULL CHECK(categoria IN ('operacao', 'fraude', 'controlo')), gravidade TEXT NOT NULL CHECK(gravidade IN ('baixa', 'media', 'alta')), client_id TEXT, operacao_tabela TEXT, operacao_id TEXT, titulo TEXT NOT NULL, descricao TEXT NOT NULL, evidencias TEXT NOT NULL, modelo_versao INTEGER, data_operacao TEXT, detectado_em TEXT NOT NULL, detectado_por TEXT, detectado_por_nome TEXT, estado TEXT NOT NULL DEFAULT 'NEW' CHECK(estado IN ('NEW', 'IN_REVIEW', 'INFORMATION_REQUESTED', 'SUBSTANTIATED', 'NOT_SUBSTANTIATED', 'CLOSED')), responsavel_id TEXT, responsavel_nome TEXT, actualizado_por TEXT, actualizado_em TEXT, resultado TEXT CHECK(resultado IN ('SUBSTANTIATED', 'NOT_SUBSTANTIATED') OR resultado IS NULL), conclusao TEXT, concluido_por TEXT, concluido_por_nome TEXT, concluido_em TEXT, medidas TEXT, encerrado_por TEXT, encerrado_por_nome TEXT, encerrado_em TEXT )"
+  ],
+  [
+    "658f54fbd3eacf49dbb72efba08eb49ba831411bbb018d487ee10a558c93774d",
+    "CREATE TABLE IF NOT EXISTS compliance_alerta_historico ( id TEXT PRIMARY KEY, alerta_id TEXT NOT NULL, estado_anterior TEXT, estado_novo TEXT NOT NULL, comentario TEXT, por TEXT, por_nome TEXT, em TEXT NOT NULL )"
   ],
   [
     "a32fe9500a99a4300d0c9d508d2d4f71b0194b3922af5c5f6071343ddbd845d6",
@@ -1071,6 +1091,26 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "676134166855a8983159bd9ca52f58bd40bf144cff6fad8d3d035eb54dd2f863",
     "CREATE TRIGGER IF NOT EXISTS trg_collection_update BEFORE UPDATE ON collection_events BEGIN SELECT RAISE(ABORT, 'O histórico de cobrança é imutável')"
+  ],
+  [
+    "8cf3689cb6344f9972e45311b40fd5f5d9a6f9419aaeab6990a41c3de8ddec83",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_conclusao BEFORE UPDATE ON compliance_alerta WHEN (OLD.conclusao IS NOT NULL AND COALESCE(NEW.conclusao, '') <> OLD.conclusao) OR (NEW.estado IN ('SUBSTANTIATED', 'NOT_SUBSTANTIATED') AND (NEW.conclusao IS NULL OR COALESCE(NEW.resultado, '') <> NEW.estado OR OLD.estado NOT IN ('IN_REVIEW', 'INFORMATION_REQUESTED', NEW.estado))) OR (NEW.conclusao IS NOT NULL AND OLD.conclusao IS NULL AND NEW.estado NOT IN ('SUBSTANTIATED', 'NOT_SUBSTANTIATED')) BEGIN SELECT RAISE(ABORT, 'A conclusão de um alerta regista-se uma só vez, depois da análise, e não se altera')"
+  ],
+  [
+    "5d0c30e356a761d5b7d914fb0fc69f536c8d2cc046f123dd09dc0937ec70ae48",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_delete BEFORE DELETE ON compliance_alerta BEGIN SELECT RAISE(ABORT, 'Os alertas não se apagam: concluem-se e encerram-se com justificação')"
+  ],
+  [
+    "5e873ef80ce746c6f3c2d997fb731c28ade54858167a8013a7e31e75912126f9",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_historico_delete BEFORE DELETE ON compliance_alerta_historico BEGIN SELECT RAISE(ABORT, 'O histórico dos alertas é imutável')"
+  ],
+  [
+    "c7af932ba4b7863702f0dadad66254944f5184df79d0b7a897dd76a4ee1e1797",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_historico_update BEFORE UPDATE ON compliance_alerta_historico BEGIN SELECT RAISE(ABORT, 'O histórico dos alertas é imutável')"
+  ],
+  [
+    "0a8fac85197ffa11ab5c188851fe826ff7f2998e9c7a4e5d4c2821f85eb9cf7d",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_imutavel BEFORE UPDATE ON compliance_alerta WHEN OLD.estado = 'CLOSED' OR NEW.regra <> OLD.regra OR NEW.evidencias <> OLD.evidencias OR NEW.descricao <> OLD.descricao OR COALESCE(NEW.client_id, '') <> COALESCE(OLD.client_id, '') OR COALESCE(NEW.operacao_id, '') <> COALESCE(OLD.operacao_id, '') OR NEW.detectado_em <> OLD.detectado_em OR NEW.gravidade <> OLD.gravidade OR (OLD.resultado IS NOT NULL AND COALESCE(NEW.resultado, '') <> OLD.resultado) BEGIN SELECT RAISE(ABORT, 'Um alerta encerrado não se altera e os dados detectados nunca mudam')"
   ],
   [
     "0f304e6952339c5c258732bd318bc3618748f1e111b0a4d74c7fd3e670cc14bf",
@@ -1761,6 +1801,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO collection_events (id, creditId, kind, agentId, agentName, monthKey, amountMinor, promisedDate, relatedId, notes, actorId, actorName, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)"
   ],
   [
+    "979367054fe29a7867773ec7656d14285fcf981cdeca198556a99f96810031f0",
+    "INSERT INTO compliance_alerta_historico (id, alerta_id, estado_anterior, estado_novo, comentario, por, por_nome, em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "02a75c528119f86ffc969a405cdf69515e9dd349068e368f13a75b3d9794ef9e",
     "INSERT INTO compliance_duplicado_revisao (id, chave, motivo, clientes, decisao, justificacao, decidido_por, decidido_por_nome, decidido_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
@@ -2237,6 +2281,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR IGNORE INTO company_settings (id, name, nif) VALUES (1, 'Tango Gestão de Créditos', '000000000')"
   ],
   [
+    "d660097fcb4ca593a1f6d3a2285aa24d3522a7226967e45180c3adad8beaa99a",
+    "INSERT OR IGNORE INTO compliance_alerta (id, regra, categoria, gravidade, client_id, operacao_tabela, operacao_id, titulo, descricao, evidencias, modelo_versao, data_operacao, detectado_em, detectado_por, detectado_por_nome, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW')"
+  ],
+  [
     "b382510eb034f2a37d4c806a4efd6c433f276219c3832e434ceb7bf4af493b84",
     "INSERT OR IGNORE INTO compliance_perfil (id, client_id, criado_em, criado_por) VALUES (?, ?, ?, ?)"
   ],
@@ -2535,6 +2583,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "43e7ca76ab7ddbe235b60673deffbcfbd54a4dd8caa77234a27a775d8870cf4f",
     "SELECT * FROM company_settings WHERE id = ?"
+  ],
+  [
+    "4873992b87dee4758693796bd10e766472287768ea3f0acf817a4862ad4855a3",
+    "SELECT * FROM compliance_alerta ORDER BY detectado_em DESC"
+  ],
+  [
+    "640b8fde170b079d123e01bf97aa25806b7851c6de4752d92e44257d6c52a44d",
+    "SELECT * FROM compliance_alerta_historico ORDER BY em"
   ],
   [
     "5b28185d62e13b24df8738310dfda8b7cd04a978204da54df0d3100a41d01d59",
@@ -3213,6 +3269,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT anexo_nome, anexo_data_url FROM rh_justificacao WHERE id = ?"
   ],
   [
+    "61b38875875b7489f27bb309fd251a751ff97a3617185d809a2bce374bda4866",
+    "SELECT appliedAt FROM schema_migrations WHERE version = 2026112401"
+  ],
+  [
     "e7063397d1756aca147a353a1d010dcdde988d06eb88cff546be75b1c0e8f9ef",
     "SELECT auditId, previousHash, integrityHash, seq FROM audit_log_chain ORDER BY seq"
   ],
@@ -3425,6 +3485,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id FROM closed_months"
   ],
   [
+    "aa8aebd7b47d0b698bc747be6786c26e59fdb15ffafbbde4254232950cb7edb2",
+    "SELECT id FROM compliance_alerta"
+  ],
+  [
     "f5f0ec7d5ecbffd1ee24ed583ae821bb963d52a397de48307c4d4f101e6dd594",
     "SELECT id FROM credit_writeoffs WHERE creditId = ?"
   ],
@@ -3557,6 +3621,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, clientId, clientName, principalAmount, currentBalance, interestRate, lateInterestRate, installments, status, deletedAt, deletedBy, createdAt FROM credits WHERE deletedAt IS NOT NULL AND COALESCE(deletedBy, '') NOT LIKE 'purged:%'"
   ],
   [
+    "9047635a219d9fa1e596c138c128b320c72a5e6b677e76aca748bea9f062d45b",
+    "SELECT id, clientId, clientName, principalAmount, status, createdAt, startDate, paidAt, requestedBy, approvedBy, interestRate, deletedAt FROM credits"
+  ],
+  [
     "68a37b8e9bab8c64d19dc673d86ee67997224e261d646b12e0a13b94806dacc1",
     "SELECT id, clientId, clientName, status, version FROM credits WHERE id = ? AND deletedAt IS NULL"
   ],
@@ -3591,6 +3659,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "463f0161a81c45d9b44e81bb00da9c1d600a8475d6e0916fba7a26d628571e1c",
     "SELECT id, createdAt, startDate FROM credits"
+  ],
+  [
+    "54d28e39993dd190df6dd73e398079ae68723dd56e363d9a332402709f288f82",
+    "SELECT id, creditId, amount, amountMinor, paymentDate, method, status, processedBy, registeredAt, validatedAt, cancelledAt, cancelledBy, cancelReason, deletedAt FROM payments WHERE paymentDate >= ? OR cancelledAt >= ? OR status = 'pending'"
+  ],
+  [
+    "a253e670a4ba0b9d7190a04fe1d0225f9d607084f50635c1d934bae8caa4742c",
+    "SELECT id, creditId, amountMinor, createdAt, createdBy FROM credit_reinforcements WHERE createdAt >= ?"
   ],
   [
     "9f9c08f3b26056685e6d039a882211569a2318a386a71025189f7e54346a6ff9",
@@ -3675,6 +3751,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d4e82fae11dd8685c4078a481dcfbad01e016e35bd74288ac66264fd270e4cdf",
     "SELECT id, name, email, username, role, avatar, status, permissions FROM users"
+  ],
+  [
+    "90ccef3c977a20c0ad72b12d2ee5ba5d4c17312cfafc480edc3fa6d671edd678",
+    "SELECT id, name, monthlyIncome FROM clients WHERE deletedAt IS NULL"
   ],
   [
     "ae82b24e38ac8e07be0a3ec52ecb1a34f063c179292e21bd4b7a75ea0dc8ac27",
@@ -3795,6 +3875,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "c6e443cd9c8c37b255d18b0b1ce45e6d91699f3fb334b82104daabea473fadee",
     "SELECT id, timestamp, userName, action, entity, details, metadata FROM audit_logs WHERE details LIKE ? OR metadata LIKE ? ORDER BY timestamp DESC LIMIT 500"
+  ],
+  [
+    "1d447d38d914a1332f1748513f3354396f0a416f4db536e625028101a7d84159",
+    "SELECT id, timestamp, userName, previousState, newState FROM audit_logs WHERE entity = 'credit' AND details LIKE 'Taxa do crédito % alterada manualmente%' AND timestamp >= ?"
   ],
   [
     "09195776dcb7e442622c3ad56d4752a7b975861a8219ea9f59830f1cd9cef108",
@@ -4111,6 +4195,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "cd2d870a39f3cc21c902caf66fb4044863c21d91a3c2c3456a16e4b612d34c18",
     "UPDATE company_settings SET rescueKey = NULL WHERE rescueKey = ?"
+  ],
+  [
+    "783e797dce25c949620e859e7d4977d653ae8acf1ce9cbd5890f9b101c6da07c",
+    "UPDATE compliance_alerta SET estado = 'CLOSED', medidas = ?, encerrado_por = ?, encerrado_por_nome = ?, encerrado_em = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('SUBSTANTIATED', 'NOT_SUBSTANTIATED')"
+  ],
+  [
+    "63cf20f60d625f39ecc6ae40d0481de1e5a3e48ee598ad3338018d1d567acc5d",
+    "UPDATE compliance_alerta SET estado = 'INFORMATION_REQUESTED', actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'IN_REVIEW'"
+  ],
+  [
+    "8798d4c0a6f82cab0b14bc2de13e735e3eb9df9d52cdb91348ef1cc2a9a303e1",
+    "UPDATE compliance_alerta SET estado = 'IN_REVIEW', responsavel_id = ?, responsavel_nome = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('NEW', 'INFORMATION_REQUESTED')"
+  ],
+  [
+    "13f2826003cbc9caf0bf6c1514d8eff23e5a7585e21f68310912d40fbe823314",
+    "UPDATE compliance_alerta SET estado = ?, resultado = ?, conclusao = ?, concluido_por = ?, concluido_por_nome = ?, concluido_em = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('IN_REVIEW', 'INFORMATION_REQUESTED')"
   ],
   [
     "3674864f9f003b96a1a08334321e482ae88bdec419a86285dcbe42a8863744c7",

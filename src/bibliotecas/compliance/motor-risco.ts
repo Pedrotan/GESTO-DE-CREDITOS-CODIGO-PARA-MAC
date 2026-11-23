@@ -7,6 +7,8 @@
 // NÃO se diluem na média: impõem um nível mínimo e/ou a revisão humana. Uma pontuação alta não prova nada — serve
 // para decidir o grau de diligência e quem tem de olhar para o caso.
 
+import { PARAMETROS_MONITORIZACAO_INICIAIS, lerParametrosMonitorizacao, validarParametrosMonitorizacao, type ParametrosMonitorizacao } from './monitorizacao.ts';
+
 export type NivelRisco = 'baixo' | 'medio' | 'elevado';
 export type DecisaoRisco = 'diligencia_normal' | 'verificacao_complementar' | 'diligencia_reforcada';
 export type FactorId = 'identificacao' | 'actividade' | 'financeiro' | 'pep_sancoes' | 'historico';
@@ -23,6 +25,8 @@ export type ConfiguracaoRisco = {
     actividadesRiscoElevado: string[];
     /** Exposição (saldo em dívida) a partir da qual o factor financeiro sobe, em meses de rendimento declarado. */
     exposicaoMesesRendimento: { atencao: number; elevada: number };
+    /** Parâmetros das regras de monitorização de operações (versionados com o modelo). */
+    monitorizacao: ParametrosMonitorizacao;
 };
 
 export const ROTULO_FACTOR: Record<FactorId, string> = {
@@ -49,6 +53,7 @@ export const CONFIGURACAO_RISCO_INICIAL: ConfiguracaoRisco = {
     paisesRiscoElevado: ['KP', 'IR', 'MM'],
     actividadesRiscoElevado: ['câmbio', 'cambista', 'casino', 'jogo', 'diamante', 'ouro', 'pedras preciosas', 'criptomoeda', 'remessas'],
     exposicaoMesesRendimento: { atencao: 6, elevada: 12 },
+    monitorizacao: PARAMETROS_MONITORIZACAO_INICIAIS,
 };
 
 /** Dados de um cliente no momento da avaliação (montados a partir do cadastro, do perfil KYC e dos créditos). */
@@ -82,6 +87,8 @@ export type EntradaRisco = {
     maiorAtrasoDias: number;
     creditoIncumprido: boolean;
     clienteBloqueado: boolean;
+    /** Alertas de operações concluídos como fundamentados (monitorização). */
+    alertasFundamentados?: number;
     /** Meses desde o cadastro (null = desconhecido). */
     antiguidadeMeses: number | null;
 };
@@ -121,6 +128,7 @@ export function validarConfiguracao(c: ConfiguracaoRisco): string[] {
     const { atencao, elevada } = c.exposicaoMesesRendimento;
     if (!(atencao > 0 && elevada > atencao)) erros.push('A exposição «elevada» tem de ser maior que a de «atenção» (em meses de rendimento).');
     if (c.paisesRiscoElevado.some(p => !/^[A-Z]{2}$/u.test(p))) erros.push('Os países de risco elevado indicam-se pelo código de duas letras (ex.: KP).');
+    erros.push(...validarParametrosMonitorizacao(c.monitorizacao));
     return erros;
 }
 
@@ -136,6 +144,7 @@ export function lerConfiguracao(texto: string | null | undefined): ConfiguracaoR
         paisesRiscoElevado: Array.isArray(lida.paisesRiscoElevado) ? lida.paisesRiscoElevado : base.paisesRiscoElevado,
         actividadesRiscoElevado: Array.isArray(lida.actividadesRiscoElevado) ? lida.actividadesRiscoElevado : base.actividadesRiscoElevado,
         exposicaoMesesRendimento: { ...base.exposicaoMesesRendimento, ...(lida.exposicaoMesesRendimento || {}) },
+        monitorizacao: lerParametrosMonitorizacao(lida.monitorizacao),
     };
 }
 
@@ -215,6 +224,7 @@ export function calcularRisco(e: EntradaRisco, c: ConfiguracaoRisco): ResultadoR
     else if (e.maiorAtrasoDias > 30) hist.push({ motivo: `Atraso de ${e.maiorAtrasoDias} dias`, pontos: 30 });
     else if (e.maiorAtrasoDias > 0) hist.push({ motivo: `Atraso de ${e.maiorAtrasoDias} dia(s)`, pontos: 15 });
     if (e.clienteBloqueado) hist.push({ motivo: 'Cliente bloqueado no cadastro', pontos: 40 });
+    if (e.alertasFundamentados) hist.push({ motivo: `${e.alertasFundamentados} alerta(s) de operações fundamentado(s)`, pontos: 50 });
     if (e.antiguidadeMeses !== null && e.antiguidadeMeses < 6) hist.push({ motivo: 'Cliente recente (menos de 6 meses de relação)', pontos: 20 });
 
     const factores = [
@@ -236,6 +246,7 @@ export function calcularRisco(e: EntradaRisco, c: ConfiguracaoRisco): ResultadoR
     if (e.kycEstado === 'recusado') regras.push({ id: 'kyc_recusado', descricao: 'Verificação de identidade recusada', nivelMinimo: 'elevado', revisao: true });
     if (e.documento === 'expirado') regras.push({ id: 'documento_expirado', descricao: 'Documento expirado: actualizar antes de novas operações', nivelMinimo: 'medio', revisao: true });
     if (e.duplicadosPorRever.length) regras.push({ id: 'duplicado', descricao: 'Possível duplicado por rever', nivelMinimo: 'medio', revisao: true });
+    if (e.alertasFundamentados) regras.push({ id: 'alertas_fundamentados', descricao: 'Operações atípicas ou fraude fundamentadas pela monitorização', nivelMinimo: 'medio', revisao: true });
     if (actividadeRisco) regras.push({ id: 'actividade_risco', descricao: `Actividade de risco acrescido («${actividadeRisco}»)`, nivelMinimo: 'medio' });
     for (const r of regras) if (r.nivelMinimo) nivel = maior(nivel, r.nivelMinimo);
 

@@ -54,6 +54,20 @@ export const SQL_SCREENING_REGISTAR = `INSERT INTO compliance_screening (id, cli
 /** Decisão humana sobre uma possível correspondência. Decisor: parâmetro 11. */
 export const SQL_SCREENING_DECIDIR = `INSERT INTO compliance_screening_decisao (id, screening_id, client_id, fonte, ref, nome_lista, nome_pesquisado, categoria, decisao, fundamento, decidido_em, decidido_por, decidido_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+// ── Alertas da monitorização (fase 3) ───────────────────────────────────────────
+/** Alerta detectado (ignorado se já existir). Autor: parâmetro 13 (detectado_por). */
+export const SQL_ALERTA_REGISTAR = `INSERT OR IGNORE INTO compliance_alerta (id, regra, categoria, gravidade, client_id, operacao_tabela, operacao_id, titulo, descricao, evidencias, modelo_versao, data_operacao, detectado_em, detectado_por, detectado_por_nome, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW')`;
+/** Iniciar ou retomar a análise (fica responsável quem a inicia). Autor: parâmetro 0. */
+export const SQL_ALERTA_ANALISAR = `UPDATE compliance_alerta SET estado = 'IN_REVIEW', responsavel_id = ?, responsavel_nome = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('NEW', 'INFORMATION_REQUESTED')`;
+/** Pedir informação adicional. Autor: parâmetro 0. */
+export const SQL_ALERTA_PEDIR_INFO = `UPDATE compliance_alerta SET estado = 'INFORMATION_REQUESTED', actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'IN_REVIEW'`;
+/** Concluir (fundamentado ou não confirmado; o resultado fica guardado mesmo depois de encerrado). Decisor: parâmetro 3. */
+export const SQL_ALERTA_CONCLUIR = `UPDATE compliance_alerta SET estado = ?, resultado = ?, conclusao = ?, concluido_por = ?, concluido_por_nome = ?, concluido_em = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('IN_REVIEW', 'INFORMATION_REQUESTED')`;
+/** Encerrar com as medidas tomadas. Decisor: parâmetro 1. */
+export const SQL_ALERTA_ENCERRAR = `UPDATE compliance_alerta SET estado = 'CLOSED', medidas = ?, encerrado_por = ?, encerrado_por_nome = ?, encerrado_em = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('SUBSTANTIATED', 'NOT_SUBSTANTIATED')`;
+/** Histórico de cada mudança (e comentários). Autor: parâmetro 5. */
+export const SQL_ALERTA_HISTORICO = `INSERT INTO compliance_alerta_historico (id, alerta_id, estado_anterior, estado_novo, comentario, por, por_nome, em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+
 type Regra = { permissao: PermissaoCompliance; autor: number | null };
 const REGRAS: Array<[string, Regra]> = [
     [SQL_PERFIL_CRIAR, { permissao: 'compliance_manage', autor: 3 }],
@@ -77,6 +91,12 @@ const REGRAS: Array<[string, Regra]> = [
     [SQL_INTERNA_ALTERAR, { permissao: 'compliance_manage', autor: 10 }],
     [SQL_SCREENING_REGISTAR, { permissao: 'compliance_manage', autor: 7 }],
     [SQL_SCREENING_DECIDIR, { permissao: 'compliance_approve', autor: 11 }],
+    [SQL_ALERTA_REGISTAR, { permissao: 'compliance_manage', autor: 13 }],
+    [SQL_ALERTA_ANALISAR, { permissao: 'compliance_manage', autor: 0 }],
+    [SQL_ALERTA_PEDIR_INFO, { permissao: 'compliance_manage', autor: 0 }],
+    [SQL_ALERTA_CONCLUIR, { permissao: 'compliance_approve', autor: 3 }],
+    [SQL_ALERTA_ENCERRAR, { permissao: 'compliance_approve', autor: 1 }],
+    [SQL_ALERTA_HISTORICO, { permissao: 'compliance_manage', autor: 5 }],
 ];
 const normalizar = (sql: string) => sql.replace(/\s+/gu, ' ').trim().replace(/;$/u, '');
 const MAPA = new Map(REGRAS.map(([sql, regra]) => [normalizar(sql), regra]));

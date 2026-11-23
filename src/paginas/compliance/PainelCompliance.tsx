@@ -43,7 +43,7 @@ export default function PainelCompliance() {
         const ordemNivel = { elevado: 0, medio: 1, baixo: 2 } as const;
         return linhas.filter(l => (estado === TODOS || l.kyc.estado === estado)
             && (nivel === TODOS || (nivel === 'sem' ? !l.nivel : l.nivel === nivel))
-            && (accao === TODOS || (accao === 'accao' ? l.kyc.precisaAccao || l.aRever || l.verificacaoPendente || l.duplicados.length > 0 || ALERTA_SCREENING.includes(l.screening.estado)
+            && (accao === TODOS || (accao === 'accao' ? l.kyc.precisaAccao || l.aRever || l.verificacaoPendente || l.duplicados.length > 0 || ALERTA_SCREENING.includes(l.screening.estado) || l.alertasAbertos.length > 0
                 : accao === 'decisao' ? l.aRever || l.verificacaoPendente || l.screening.pendentes.length > 0 : l.kyc.revisaoVencida))
             && (!termo || [l.cliente.name, l.cliente.clientNumber, l.cliente.nif].some(v => String(v || '').toLowerCase().includes(termo))))
             .sort((a, b) => Number(b.aRever || b.verificacaoPendente) - Number(a.aRever || a.verificacaoPendente)
@@ -155,6 +155,7 @@ export default function PainelCompliance() {
 
 function Linha({ l, hoje }: { l: LinhaCompliance; hoje: string }) {
     const avisos: Array<{ texto: string; icone: typeof AlertTriangle; tom: string }> = [];
+    if (l.alertasAbertos.length) avisos.push({ texto: `${l.alertasAbertos.length} alerta(s) de operações aberto(s)`, icone: AlertTriangle, tom: l.alertasAbertos.some(a => a.gravidade === 'alta') ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300' });
     if (l.screening.estado === 'confirmada') avisos.push({ texto: 'Sanção confirmada', icone: Radar, tom: 'text-red-700 dark:text-red-300' });
     else if (l.screening.pendentes.length) avisos.push({ texto: `${l.screening.pendentes.length} correspondência(s) por decidir`, icone: Radar, tom: 'text-amber-700 dark:text-amber-300' });
     else if (l.screening.estado === 'erro') avisos.push({ texto: 'Screening com erro', icone: Radar, tom: 'text-red-700 dark:text-red-300' });

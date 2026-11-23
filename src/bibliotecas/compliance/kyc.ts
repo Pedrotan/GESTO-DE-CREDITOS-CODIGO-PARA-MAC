@@ -161,6 +161,8 @@ export function entradaRisco(input: {
     cliente: ClienteKyc; perfil: PerfilKyc | null | undefined; creditos: CreditoRisco[]; duplicadosPorRever: string[]; hoje: string;
     /** Estado do screening de PEP e sanções (sem ele, conta como «por fazer»). */
     screening?: { estado: EntradaRisco['screening']; pepConfirmado: boolean };
+    /** Alertas da monitorização concluídos como fundamentados. */
+    alertasFundamentados?: number;
 }): EntradaRisco {
     const { cliente: c, perfil: p, hoje } = input;
     const kyc = avaliarKyc(c, p, hoje);
@@ -183,6 +185,7 @@ export function entradaRisco(input: {
         pep: p?.pep === 1 ? true : p?.pep === 0 ? false : null,
         screening: input.screening?.estado ?? 'nao_verificado',
         pepLista: input.screening?.pepConfirmado ?? false,
+        alertasFundamentados: input.alertasFundamentados ?? 0,
         exposicao: emCurso.reduce((s, x) => s + Math.max(0, Number(x.currentBalance) || 0), 0),
         creditosActivos: emCurso.length,
         maiorCredito: relevantes.reduce((m, x) => Math.max(m, Number(x.principalAmount) || 0), 0),

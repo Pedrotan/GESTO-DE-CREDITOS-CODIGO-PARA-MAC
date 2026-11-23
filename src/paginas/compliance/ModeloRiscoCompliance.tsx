@@ -31,6 +31,7 @@ export default function ModeloRiscoCompliance() {
     const alterado = JSON.stringify(proposta) !== JSON.stringify(base);
     const soma = FACTORES.reduce((s, f) => s + (Number(c.pesos[f]) || 0), 0);
     const num = (v: string) => (v === '' ? 0 : Number(v));
+    const setM = (parte: Partial<ConfiguracaoRisco['monitorizacao']>) => setC(x => ({ ...x, monitorizacao: { ...x.monitorizacao, ...parte } }));
 
     const guardar = async () => {
         if (!actor) return;
@@ -86,6 +87,26 @@ export default function ModeloRiscoCompliance() {
                                 onChange={v => setC(x => ({ ...x, exposicaoMesesRendimento: { ...x.exposicaoMesesRendimento, atencao: num(v) } }))} />
                             <Num rotulo="Dívida «elevada» a partir de" valor={c.exposicaoMesesRendimento.elevada} disabled={!configurar} sufixo="× rend."
                                 onChange={v => setC(x => ({ ...x, exposicaoMesesRendimento: { ...x.exposicaoMesesRendimento, elevada: num(v) } }))} />
+                        </div>
+
+                        <h3 className="mb-2 mt-5 text-xs font-bold uppercase tracking-wide text-slate-500">Monitorização de operações</h3>
+                        <p className="mb-2 text-xs text-slate-500">Limites das regras de alerta (valores indicativos, a validar). Cada alteração cria uma versão nova; os alertas guardam a versão que os gerou.</p>
+                        <div className="grid gap-3 sm:grid-cols-3">
+                            <Num rotulo="Analisar operações dos últimos" valor={c.monitorizacao.diasRetroactivos} disabled={!configurar} sufixo="dias" onChange={v => setM({ diasRetroactivos: num(v) })} />
+                            <Num rotulo="Numerário elevado a partir de" valor={c.monitorizacao.numerarioElevadoKz} disabled={!configurar} sufixo="Kz" onChange={v => setM({ numerarioElevadoKz: num(v) })} />
+                            <Num rotulo="Crédito acima de" valor={c.monitorizacao.desembolsoMultiploRendimento} disabled={!configurar} sufixo="× rend." onChange={v => setM({ desembolsoMultiploRendimento: num(v) })} />
+                            <Num rotulo="Sem rendimento: crédito a partir de" valor={c.monitorizacao.semRendimentoLimiteKz} disabled={!configurar} sufixo="Kz" onChange={v => setM({ semRendimentoLimiteKz: num(v) })} />
+                            <Num rotulo="Fraccionamento: pagamentos" valor={c.monitorizacao.fraccionamento.minPagamentos} disabled={!configurar} sufixo="ou mais" onChange={v => setM({ fraccionamento: { ...c.monitorizacao.fraccionamento, minPagamentos: num(v) } })} />
+                            <Num rotulo="… em" valor={c.monitorizacao.fraccionamento.dias} disabled={!configurar} sufixo="dias" onChange={v => setM({ fraccionamento: { ...c.monitorizacao.fraccionamento, dias: num(v) } })} />
+                            <Num rotulo="… somando pelo menos" valor={c.monitorizacao.fraccionamento.totalKz} disabled={!configurar} sufixo="Kz" onChange={v => setM({ fraccionamento: { ...c.monitorizacao.fraccionamento, totalKz: num(v) } })} />
+                            <Num rotulo="Pagamentos acima de" valor={c.monitorizacao.pagamentosRendimento.multiplo} disabled={!configurar} sufixo="× rend." onChange={v => setM({ pagamentosRendimento: { ...c.monitorizacao.pagamentosRendimento, multiplo: num(v) } })} />
+                            <Num rotulo="… em" valor={c.monitorizacao.pagamentosRendimento.dias} disabled={!configurar} sufixo="dias" onChange={v => setM({ pagamentosRendimento: { ...c.monitorizacao.pagamentosRendimento, dias: num(v) } })} />
+                            <Num rotulo="Liquidação rápida até" valor={c.monitorizacao.liquidacaoRapidaDias} disabled={!configurar} sufixo="dias" onChange={v => setM({ liquidacaoRapidaDias: num(v) })} />
+                            <Num rotulo="Reforços: pelo menos" valor={c.monitorizacao.reforcos.minimo} disabled={!configurar} sufixo={`em ${c.monitorizacao.reforcos.dias} dias`} onChange={v => setM({ reforcos: { ...c.monitorizacao.reforcos, minimo: num(v) } })} />
+                            <Num rotulo="Anulações por utilizador: pelo menos" valor={c.monitorizacao.anulacoes.minimo} disabled={!configurar} sufixo={`em ${c.monitorizacao.anulacoes.dias} dias`} onChange={v => setM({ anulacoes: { ...c.monitorizacao.anulacoes, minimo: num(v) } })} />
+                            <Num rotulo="Transferência por confirmar há" valor={c.monitorizacao.pendenteDias} disabled={!configurar} sufixo="dias" onChange={v => setM({ pendenteDias: num(v) })} />
+                            <Num rotulo="Redução manual da taxa a partir de" valor={c.monitorizacao.reducaoTaxaPct} disabled={!configurar} sufixo="%" onChange={v => setM({ reducaoTaxaPct: num(v) })} />
+                            <Num rotulo="Crédito duplicado: até" valor={c.monitorizacao.duplicadoDias} disabled={!configurar} sufixo="dias" onChange={v => setM({ duplicadoDias: num(v) })} />
                         </div>
 
                         <h3 className="mb-2 mt-5 text-xs font-bold uppercase tracking-wide text-slate-500">Listas</h3>

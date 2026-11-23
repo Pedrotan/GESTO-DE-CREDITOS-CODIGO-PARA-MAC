@@ -1130,7 +1130,9 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   compliance_lista_bloco: "compliance_manage",
   compliance_lista_interna: "compliance_manage",
   compliance_screening: "compliance_manage",
-  compliance_screening_decisao: "compliance_approve"
+  compliance_screening_decisao: "compliance_approve",
+  compliance_alerta: "compliance_manage",
+  compliance_alerta_historico: "compliance_manage"
 };
 // Compliance: cada comando exige a sua permissão (registar, decidir ou alterar o modelo) e o autor/decisor gravado tem
 // de ser o utilizador autenticado — sem isto, quem regista uma verificação podia decidi-la em nome de outra pessoa.

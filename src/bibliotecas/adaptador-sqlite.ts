@@ -9,7 +9,7 @@ import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_
 import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
 import { MODELO_DECLARACAO_SERVICO } from '@/bibliotecas/rh/modelos-rh';
 import { MODELOS_CONTRATO_INICIAIS } from '@/bibliotecas/rh/contratos-rh';
-import { COMPLIANCE_FASE1_SQL, COMPLIANCE_FASE2_SQL, COMPLIANCE_SEED_MODELO_SQL } from '@/bibliotecas/compliance/esquema-compliance';
+import { COMPLIANCE_FASE1_SQL, COMPLIANCE_FASE2_SQL, COMPLIANCE_FASE3_SQL, COMPLIANCE_SEED_MODELO_SQL } from '@/bibliotecas/compliance/esquema-compliance';
 import { CONFIGURACAO_RISCO_INICIAL } from '@/bibliotecas/compliance/motor-risco';
 
 let db: Database | null = null;
@@ -1301,6 +1301,10 @@ const createTables = async () => {
     // Compliance (fase 2): screening de PEP e sanções (listas ONU/OFAC, lista interna, resultados e decisões).
     await applyMigration(2026112402, 'compliance-fase2-screening', async () => {
         for (const statement of COMPLIANCE_FASE2_SQL) await executeSql(statement);
+    });
+    // Compliance (fase 3): alertas da monitorização de operações e da detecção de fraude, com histórico imutável.
+    await applyMigration(2026112403, 'compliance-fase3-monitorizacao', async () => {
+        for (const statement of COMPLIANCE_FASE3_SQL) await executeSql(statement);
     });
 
     // safeAddColumns for migrations

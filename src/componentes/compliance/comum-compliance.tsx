@@ -14,12 +14,15 @@ import {
     type ActorCompliance, type AvaliacaoRisco, type DadosCompliance, type PerfilCompliance,
 } from '@/servicos/compliance/ServicoCompliance';
 import type { Client } from '@/tipos/credito';
+import { DADOS_ALERTAS_VAZIOS, ServicoMonitorizacao, type AlertaRegisto, type DadosAlertas } from '@/servicos/compliance/ServicoMonitorizacao';
+import { ESTADOS_ABERTOS, ROTULO_ESTADO_ALERTA, ROTULO_GRAVIDADE, type EstadoAlerta, type Gravidade } from '@/bibliotecas/compliance/monitorizacao';
 import { DADOS_SCREENING_VAZIOS, ServicoScreening, estadosPorCliente, type DadosScreening, type ScreeningRegisto } from '@/servicos/compliance/ServicoScreening';
 import { ROTULO_ESTADO_SCREENING, type EstadoScreening, type PendenteScreening } from '@/bibliotecas/compliance/screening';
 
 export const ABAS_COMPLIANCE = [
     { path: '/compliance/painel', label: 'Painel e clientes' },
     { path: '/compliance/screening', label: 'Screening PEP e sanções' },
+    { path: '/compliance/alertas', label: 'Alertas de operações' },
     { path: '/compliance/duplicados', label: 'Possíveis duplicados' },
     { path: '/compliance/modelo-risco', label: 'Modelo de risco' },
 ];
@@ -81,6 +84,22 @@ export function SeloScreening({ estado, className }: { estado: EstadoScreening; 
     </span>;
 }
 
+const COR_ESTADO_ALERTA: Record<EstadoAlerta, string> = {
+    NEW: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-900',
+    IN_REVIEW: 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900',
+    INFORMATION_REQUESTED: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-900',
+    SUBSTANTIATED: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900',
+    NOT_SUBSTANTIATED: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900',
+    CLOSED: 'bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700',
+};
+export function SeloAlerta({ estado, className }: { estado: EstadoAlerta; className?: string }) {
+    return <span className={cn('inline-flex whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-bold', COR_ESTADO_ALERTA[estado], className)}>{ROTULO_ESTADO_ALERTA[estado]}</span>;
+}
+const COR_GRAVIDADE: Record<Gravidade, string> = { baixa: 'bg-slate-400', media: 'bg-amber-500', alta: 'bg-red-600' };
+export function SeloGravidade({ gravidade }: { gravidade: Gravidade }) {
+    return <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[11px] font-bold"><span className={cn('h-2 w-2 rounded-full', COR_GRAVIDADE[gravidade])} />{ROTULO_GRAVIDADE[gravidade]}</span>;
+}
+
 export function useActorCompliance() {
     const { user } = useAuth();
     return useMemo(() => {
@@ -100,16 +119,17 @@ export function useActorCompliance() {
 export type LinhaCompliance = {
     cliente: Client; perfil: PerfilCompliance | null; kyc: AvaliacaoKyc; avaliacao: AvaliacaoRisco | null;
     nivel: NivelRisco | null; duplicados: string[]; aRever: boolean; verificacaoPendente: boolean;
+    alertasAbertos: AlertaRegisto[]; alertasFundamentados: number;
     screening: { estado: EstadoScreening; pendentes: PendenteScreening[]; pepConfirmado: boolean; sancaoConfirmada: boolean; ultimo: ScreeningRegisto | null };
 };
 
 /** Dados do módulo e as linhas por cliente (perfil, estado KYC, última avaliação, duplicados). */
 export function useCompliance() {
     const { clients, credits } = useData();
-    const carga = useCarregar<DadosCompliance & { scr: DadosScreening }>(async () => {
-        const [base, scr] = await Promise.all([ServicoCompliance.carregar(), ServicoScreening.carregar()]);
-        return { ...base, scr };
-    }, { perfis: [], verificacoes: [], avaliacoes: [], modelos: [], revisoes: [], scr: DADOS_SCREENING_VAZIOS });
+    const carga = useCarregar<DadosCompliance & { scr: DadosScreening; alr: DadosAlertas }>(async () => {
+        const [base, scr, alr] = await Promise.all([ServicoCompliance.carregar(), ServicoScreening.carregar(), ServicoMonitorizacao.carregar()]);
+        return { ...base, scr, alr };
+    }, { perfis: [], verificacoes: [], avaliacoes: [], modelos: [], revisoes: [], scr: DADOS_SCREENING_VAZIOS, alr: DADOS_ALERTAS_VAZIOS });
     const hoje = luandaTodayKey();
     const derivado = useMemo(() => {
         const { perfis, avaliacoes, revisoes, verificacoes } = carga.dados;
@@ -122,6 +142,8 @@ export function useCompliance() {
         const gruposRisco = detectarDuplicados(clientes, revisoes.filter(r => DECISOES_ESCLARECIDAS.includes(r.decisao)));
         const pendentes = new Set(verificacoes.filter(v => v.estado === 'pendente').map(v => v.client_id));
         const screeningDe = estadosPorCliente(carga.dados.scr ?? DADOS_SCREENING_VAZIOS);
+        const alertasPor = new Map<string, AlertaRegisto[]>();
+        for (const a of (carga.dados.alr ?? DADOS_ALERTAS_VAZIOS).alertas) if (a.client_id) alertasPor.set(a.client_id, [...(alertasPor.get(a.client_id) || []), a]);
         const linhas: LinhaCompliance[] = clientes.map(c => {
             const perfil = perfilPor.get(c.id) || null;
             const avaliacao = avaliacaoPor.get(c.id) || null;
@@ -133,6 +155,8 @@ export function useCompliance() {
                 aRever: !!avaliacao && avaliacao.requer_revisao === 1 && !avaliacao.revisto_por,
                 verificacaoPendente: pendentes.has(c.id),
                 screening: screeningDe(c.id),
+                alertasAbertos: (alertasPor.get(c.id) || []).filter(a => ESTADOS_ABERTOS.includes(a.estado)),
+                alertasFundamentados: (alertasPor.get(c.id) || []).filter(a => a.resultado === 'SUBSTANTIATED').length,
             };
         });
         return { linhas, gruposPorRever, gruposRisco, clientes };

@@ -148,6 +148,47 @@ export const COMPLIANCE_FASE2_SQL = [
         BEGIN SELECT RAISE(ABORT, 'As decisões do screening não se apagam'); END`,
 ];
 
+// Fase 3: alertas da monitorização de operações e da detecção de fraude. O id é determinístico (regra + operação):
+// repetir a análise noutro momento ou noutro computador nunca duplica. Os alertas não se apagam; o histórico de
+// cada mudança de estado é imutável; a conclusão não se altera depois de registada e um alerta encerrado fica fechado.
+export const COMPLIANCE_FASE3_SQL = [
+    `CREATE TABLE IF NOT EXISTS compliance_alerta (
+        id TEXT PRIMARY KEY, regra TEXT NOT NULL, categoria TEXT NOT NULL CHECK(categoria IN ('operacao', 'fraude', 'controlo')),
+        gravidade TEXT NOT NULL CHECK(gravidade IN ('baixa', 'media', 'alta')), client_id TEXT, operacao_tabela TEXT, operacao_id TEXT,
+        titulo TEXT NOT NULL, descricao TEXT NOT NULL, evidencias TEXT NOT NULL, modelo_versao INTEGER, data_operacao TEXT,
+        detectado_em TEXT NOT NULL, detectado_por TEXT, detectado_por_nome TEXT,
+        estado TEXT NOT NULL DEFAULT 'NEW' CHECK(estado IN ('NEW', 'IN_REVIEW', 'INFORMATION_REQUESTED', 'SUBSTANTIATED', 'NOT_SUBSTANTIATED', 'CLOSED')),
+        responsavel_id TEXT, responsavel_nome TEXT, actualizado_por TEXT, actualizado_em TEXT,
+        resultado TEXT CHECK(resultado IN ('SUBSTANTIATED', 'NOT_SUBSTANTIATED') OR resultado IS NULL),
+        conclusao TEXT, concluido_por TEXT, concluido_por_nome TEXT, concluido_em TEXT,
+        medidas TEXT, encerrado_por TEXT, encerrado_por_nome TEXT, encerrado_em TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_alerta_estado ON compliance_alerta(estado, gravidade)`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_alerta_cliente ON compliance_alerta(client_id)`,
+    `CREATE TABLE IF NOT EXISTS compliance_alerta_historico (
+        id TEXT PRIMARY KEY, alerta_id TEXT NOT NULL, estado_anterior TEXT, estado_novo TEXT NOT NULL, comentario TEXT,
+        por TEXT, por_nome TEXT, em TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_alerta_historico ON compliance_alerta_historico(alerta_id, em)`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_delete BEFORE DELETE ON compliance_alerta
+        BEGIN SELECT RAISE(ABORT, 'Os alertas não se apagam: concluem-se e encerram-se com justificação'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_imutavel BEFORE UPDATE ON compliance_alerta
+        WHEN OLD.estado = 'CLOSED' OR NEW.regra <> OLD.regra OR NEW.evidencias <> OLD.evidencias OR NEW.descricao <> OLD.descricao
+            OR COALESCE(NEW.client_id, '') <> COALESCE(OLD.client_id, '') OR COALESCE(NEW.operacao_id, '') <> COALESCE(OLD.operacao_id, '')
+            OR NEW.detectado_em <> OLD.detectado_em OR NEW.gravidade <> OLD.gravidade
+            OR (OLD.resultado IS NOT NULL AND COALESCE(NEW.resultado, '') <> OLD.resultado)
+        BEGIN SELECT RAISE(ABORT, 'Um alerta encerrado não se altera e os dados detectados nunca mudam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_conclusao BEFORE UPDATE ON compliance_alerta
+        WHEN (OLD.conclusao IS NOT NULL AND COALESCE(NEW.conclusao, '') <> OLD.conclusao)
+            OR (NEW.estado IN ('SUBSTANTIATED', 'NOT_SUBSTANTIATED') AND (NEW.conclusao IS NULL OR COALESCE(NEW.resultado, '') <> NEW.estado OR OLD.estado NOT IN ('IN_REVIEW', 'INFORMATION_REQUESTED', NEW.estado)))
+            OR (NEW.conclusao IS NOT NULL AND OLD.conclusao IS NULL AND NEW.estado NOT IN ('SUBSTANTIATED', 'NOT_SUBSTANTIATED'))
+        BEGIN SELECT RAISE(ABORT, 'A conclusão de um alerta regista-se uma só vez, depois da análise, e não se altera'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_historico_update BEFORE UPDATE ON compliance_alerta_historico
+        BEGIN SELECT RAISE(ABORT, 'O histórico dos alertas é imutável'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_historico_delete BEFORE DELETE ON compliance_alerta_historico
+        BEGIN SELECT RAISE(ABORT, 'O histórico dos alertas é imutável'); END`,
+];
+
 /** Versão inicial do modelo de risco (pesos da especificação, a validar pela avaliação de risco da empresa). */
 export const COMPLIANCE_SEED_MODELO_SQL = `INSERT OR IGNORE INTO compliance_risco_modelo (id, versao, nome, configuracao, activo, notas, criado_em, criado_por, criado_por_nome)
     VALUES (?, 1, ?, ?, 1, ?, ?, 'sistema', 'Sistema')`;

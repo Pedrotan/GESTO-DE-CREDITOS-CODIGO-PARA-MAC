@@ -181,12 +181,13 @@ export class ServicoCompliance {
         cliente: ClienteKyc; perfil: PerfilCompliance | null; creditos: Parameters<typeof entradaRisco>[0]['creditos']; duplicadosPorRever: string[];
         modelo: ModeloRisco | null; tipo: AvaliacaoRisco['tipo']; motivo?: string;
         screening?: Parameters<typeof entradaRisco>[0]['screening'];
+        alertasFundamentados?: number;
     }, actor: ActorCompliance) {
         exigir(actor, 'compliance_manage', 'avaliar o risco de clientes');
         if (!input.modelo) throw new Error('Não há nenhuma versão activa do modelo de risco.');
         const config = lerConfiguracao(input.modelo.configuracao);
         const hoje = luandaTodayKey();
-        const entrada = entradaRisco({ cliente: input.cliente, perfil: input.perfil, creditos: input.creditos, duplicadosPorRever: input.duplicadosPorRever, hoje, screening: input.screening });
+        const entrada = entradaRisco({ cliente: input.cliente, perfil: input.perfil, creditos: input.creditos, duplicadosPorRever: input.duplicadosPorRever, hoje, screening: input.screening, alertasFundamentados: input.alertasFundamentados });
         const r = calcularRisco(entrada, config);
         const id = crypto.randomUUID();
         const when = new Date().toISOString();

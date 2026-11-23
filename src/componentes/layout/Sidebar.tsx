@@ -166,6 +166,7 @@ const menuItems: MenuItem[] = [
     children: [
       { icon: LayoutDashboard, label: 'Painel e Clientes', path: '/compliance/painel', permission: 'compliance_view', alsoActive: ['/compliance/clientes'] },
       { icon: Activity, label: 'Screening PEP e Sanções', path: '/compliance/screening', permission: 'compliance_view' },
+      { icon: AlertTriangle, label: 'Alertas de Operações', path: '/compliance/alertas', permission: 'compliance_view' },
       { icon: Users, label: 'Possíveis Duplicados', path: '/compliance/duplicados', permission: 'compliance_view' },
       { icon: SlidersHorizontal, label: 'Modelo de Risco', path: '/compliance/modelo-risco', permission: 'compliance_view' },
     ],
