@@ -114,3 +114,12 @@ test('portal: pedido de férias com regresso e decisões do chefe passam no proc
     assert.deepEqual(feriasPortalSql(`UPDATE rh_plano_ferias SET chefe_aprovado_por = ?, chefe_aprovado_por_nome = ?, chefe_aprovado_em = ?, actualizado_em = ? WHERE id = ? AND estado = 'planeado' AND pedido_funcionario = 1 AND chefe_aprovado_em IS NULL`), { tipo: 'chefe', actorParam: 0, planoParam: 4 });
     assert.equal(feriasPortalSql(`UPDATE rh_plano_ferias SET estado = 'aprovado' WHERE id = ?`), null);
 });
+
+test('transitados: o parâmetro limita os dias que passam do ano anterior (0 = sem limite)', async () => {
+    const { saldoFerias } = await import('../src/bibliotecas/rh/ferias.ts');
+    const planos: PlanoFerias[] = [{ id: 'a', funcionario_id: 'f1', ano: 2026, mes_previsto: 8, data_inicio: '2026-08-03', data_fim: '2026-08-07', dias: 5,
+        estado: 'gozado', subsidio_processado: 0, processamento_id: null, ausencia_id: null, guia_id: null }];
+    assert.equal(saldoFerias(planos, 'f1', 2027, 22, '2027-01-10', 22, '2020-01-01').transitados, 17);
+    assert.equal(saldoFerias(planos, 'f1', 2027, 22, '2027-01-10', 22, '2020-01-01', 10).transitados, 10);
+    assert.equal(saldoFerias(planos, 'f1', 2027, 22, '2027-01-10', 22, '2020-01-01', 10).saldo, 32);
+});

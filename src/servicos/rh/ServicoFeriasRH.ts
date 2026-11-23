@@ -5,7 +5,7 @@
 // gozados voltam ao saldo), guia de férias numerada e subsídio de férias (processamento do tipo «férias»).
 import { db } from '@/bibliotecas/bd';
 import { avisosFerias, conflitoDepartamento, diasDoPlano, estadoEfectivo, saldoFerias, simularFerias, type AvisoFerias, type PlanoFerias, type ResultadoFerias } from '@/bibliotecas/rh/ferias';
-import { diasUteis, HORARIO_OMISSAO, type Feriado, type Horario } from '@/bibliotecas/rh/ponto';
+import { diasUteis, HORARIO_OMISSAO, somarDias, type Feriado, type Horario } from '@/bibliotecas/rh/ponto';
 import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { auditoriaRH, ServicoRH, type ActorRH, type Funcionario } from './ServicoRH';
@@ -25,6 +25,11 @@ export type SimulacaoFerias = { resultado: ResultadoFerias; avisos: AvisoFerias[
 const TIPO_FERIAS = 'ausencia-FE';
 const agora = () => new Date().toISOString();
 const dataPt = (d: string) => d.split('-').reverse().join('/');
+/** Aviso ao funcionário com id fixo: a tarefa diária pode correr várias vezes sem o repetir. */
+const lembrete = (id: string, userId: string, titulo: string, mensagem: string, quando: string) => ({
+    sql: `INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, 'info', 0, ?) ON CONFLICT(id) DO NOTHING`,
+    params: [id, userId, titulo, mensagem, quando],
+});
 
 export function estadoVisivel(p: PlanoFeriasRH, hoje: string, temChefe = true): EstadoVisivelFerias {
     if (p.estado === 'anulado') return p.recusado ? 'recusado' : 'anulado';
@@ -55,7 +60,7 @@ export class ServicoFeriasRH {
         const hoje = luandaTodayKey();
         const [contratos, parametros, todos] = await Promise.all([ServicoRH.contratos(f.id), ServicoRH.parametros(), planos ? Promise.resolve(planos) : this.planos()]);
         const direito = contratos.find(c => c.estado === 'activo')?.dias_ferias ?? valorNumerico(parametros, 'dias_ferias_ano', hoje, 22);
-        return saldoFerias(todos, f.id, ano, direito, hoje, direito, f.data_admissao);
+        return saldoFerias(todos, f.id, ano, direito, hoje, direito, f.data_admissao, valorNumerico(parametros, 'ferias_transitados_max', hoje, 0));
     }
 
     /**
@@ -279,15 +284,26 @@ export class ServicoFeriasRH {
     }
 
     /**
-     * Acerta os estados pelas datas (aprovado → em gozo → gozado) e marca o subsídio como processado quando o
-     * processamento de férias ligado ao plano foi aprovado, pago ou fechado. Corre na tarefa diária (com hr_manage).
+     * Acerta os estados pelas datas (aprovado → em gozo → gozado), marca o subsídio como processado quando o
+     * processamento de férias ligado ao plano foi aprovado, pago ou fechado, e lembra o funcionário 7 dias antes do
+     * início e na véspera do regresso (um aviso de cada, com id fixo). Corre na tarefa diária (com hr_manage).
      */
     static async sincronizar(actor: ActorRH) {
         const hoje = luandaTodayKey();
-        const [planos, processamentos] = await Promise.all([this.planos(), ServicoSalariosRH.processamentos()]);
+        const [planos, processamentos, funcionarios] = await Promise.all([this.planos(), ServicoSalariosRH.processamentos(), ServicoRH.funcionarios()]);
         const when = agora();
-        const statements = [];
+        const statements: Array<{ sql: string; params: unknown[] }> = [];
+        const lembretes: Array<{ sql: string; params: unknown[] }> = [];
         for (const p of planos) {
+            const utilizador = funcionarios.find(x => x.id === p.funcionario_id)?.utilizador_id;
+            if (utilizador && p.data_inicio && p.data_fim && ['aprovado', 'em_gozo'].includes(estadoEfectivo(p, hoje))) {
+                const regresso = p.data_regresso || somarDias(p.data_fim, 1);
+                if (hoje >= somarDias(p.data_inicio, -7) && hoje < p.data_inicio)
+                    lembretes.push(lembrete(`ferias-inicio:${p.id}`, utilizador, 'As suas férias estão a chegar',
+                        `As suas férias começam a ${dataPt(p.data_inicio)} e vão até ${dataPt(p.data_fim)}. Regressa a ${dataPt(regresso)}.`, when));
+                if (hoje >= somarDias(regresso, -1) && hoje < regresso)
+                    lembretes.push(lembrete(`ferias-regresso:${p.id}`, utilizador, 'Regresso ao trabalho amanhã', `Lembrete: regressa ao trabalho a ${dataPt(regresso)}.`, when));
+            }
             const efectivo = estadoEfectivo(p, hoje);
             if (efectivo !== p.estado && ['em_gozo', 'gozado'].includes(efectivo))
                 statements.push({ sql: `UPDATE rh_plano_ferias SET estado = ?, actualizado_em = ? WHERE id = ? AND estado IN ('aprovado', 'em_gozo')`, params: [efectivo, when, p.id] });
@@ -295,6 +311,7 @@ export class ServicoFeriasRH {
                 statements.push({ sql: 'UPDATE rh_plano_ferias SET subsidio_processado = 1, actualizado_em = ? WHERE id = ? AND subsidio_processado = 0', params: [when, p.id] });
         }
         if (statements.length) await db.transaction([...statements, auditoriaRH(actor, 'update', `Tarefa diária: ${statements.length} actualização(ões) do plano de férias`, {}, undefined, undefined, when)]);
+        if (lembretes.length) await db.transaction(lembretes);
         return statements.length;
     }
 }

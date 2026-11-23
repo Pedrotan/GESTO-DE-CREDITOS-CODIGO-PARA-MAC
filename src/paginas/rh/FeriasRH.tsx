@@ -17,6 +17,7 @@ import { HORARIO_OMISSAO, ehDiaUtil, somarDias, type Feriado, type Horario } fro
 import { valorNumerico } from '@/bibliotecas/rh/parametros-rh';
 import { gerarMapaFeriasPdf } from '@/bibliotecas/rh/pdf-rh';
 import { emitirGuiaFerias } from '@/componentes/rh/guia-ferias';
+import { arquivarPdf } from '@/componentes/rh/accoes-funcionario';
 import { CalendarioAnual, LegendaCalendario, MESES_PT, type PeriodoCalendario } from '@/componentes/rh/CalendarioAnual';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { cn } from '@/bibliotecas/utils';
@@ -75,7 +76,8 @@ export default function FeriasRH() {
     const estrutura = { departamentos: base.dados.departamentos, seccoes: base.dados.seccoes };
     const temChefe = (fid: string) => { const f = funcionarios.find(x => x.id === fid); return Boolean(f && chefeDirecto(f, estrutura).id); };
     const visivel = (p: PlanoFeriasRH) => estadoVisivel(p, hoje, temChefe(p.funcionario_id));
-    const saldoDe = (f: Funcionario, a = ano) => saldoFerias(planos, f.id, a, direitoDe(f.id), hoje, direitoDe(f.id), f.data_admissao);
+    const transitadosMax = valorNumerico(parametros, 'ferias_transitados_max', hoje, 0);
+    const saldoDe = (f: Funcionario, a = ano) => saldoFerias(planos, f.id, a, direitoDe(f.id), hoje, direitoDe(f.id), f.data_admissao, transitadosMax);
     const calendario = useMemo(() => calendarioDoAno(ano, registados, opcoes), [ano, registados, opcoes]);
     const doAno = planos.filter(p => p.ano === ano && p.estado !== 'anulado');
 
@@ -114,15 +116,34 @@ export default function FeriasRH() {
         painel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
     const novo = () => { setEditar(null); setObs(''); setDias(22); painel.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+    /**
+     * Depois de aprovar: emite a guia de férias numerada (comunicação ao funcionário) e arquiva-a na pasta pessoal
+     * (Férias e ausências). Se falhar, a aprovação mantém-se e o RH pode emitir a guia na lista.
+     */
+    const arquivarGuia = async (id: string) => {
+        if (!actor) return;
+        try {
+            const todos = await ServicoFeriasRH.planos();
+            const plano = todos.find(x => x.id === id);
+            if (!plano?.data_inicio || !plano.data_fim) return;
+            const pdf = await emitirGuiaFerias(plano, { planos: todos, horarios, feriados, funcionarios: base.dados.funcionarios, contratos: base.dados.contratos, parametros,
+                cargos: base.dados.cargos, departamentos: base.dados.departamentos }, companySettings, actor, 'datauri');
+            await arquivarPdf(plano.funcionario_id, 'ausencias', `Guia de férias ${dataPt(plano.data_inicio)} a ${dataPt(plano.data_fim)}`, pdf, 'guia_ferias', actor);
+        } catch (error) {
+            toast({ variant: 'destructive', title: 'Férias aprovadas, mas a guia não foi arquivada', description: (error as Error).message });
+        }
+    };
     const guardar = async (aprovar: boolean) => {
         if (!actor || !f || !simulacao) return;
+        let id = '';
         const ok = await executar(async () => {
-            const id = await ServicoFeriasRH.guardar({ id: editar?.id, funcionario_id: f.id, ano: Number(simulacao.inicio.slice(0, 4)), mes_previsto: null, data_inicio: inicio, dias, observacoes: obs }, actor);
+            id = await ServicoFeriasRH.guardar({ id: editar?.id, funcionario_id: f.id, ano: Number(simulacao.inicio.slice(0, 4)), mes_previsto: null, data_inicio: inicio, dias, observacoes: obs }, actor);
             if (aprovar) {
                 const plano = (await ServicoFeriasRH.planos()).find(x => x.id === id);
                 if (plano) await ServicoFeriasRH.aprovar(plano, actor);
             }
         }, aprovar ? 'Férias aprovadas e marcadas no livro de ponto' : 'Férias guardadas como previstas');
+        if (ok && aprovar && id) await arquivarGuia(id);
         if (ok) { setEditar(null); recarregar(); }
     };
 
@@ -195,7 +216,8 @@ export default function FeriasRH() {
         });
         gerarMapaFeriasPdf({ ano, calendario: diasAno, ferias, linhas }, companySettings, actor?.name || '');
     };
-    const aprovarAccao = (p: PlanoFeriasRH) => actor && void executar(() => ServicoFeriasRH.aprovar(p, actor), 'Férias aprovadas e marcadas no livro de ponto').then(ok => ok && recarregar());
+    const aprovarAccao = (p: PlanoFeriasRH) => actor && void executar(() => ServicoFeriasRH.aprovar(p, actor), 'Férias aprovadas e marcadas no livro de ponto')
+        .then(async ok => { if (ok) { await arquivarGuia(p.id); recarregar(); } });
 
     const listaFeriados = diasAno.filter(d => d.activo || d.tipo === 'ponte');
     const equipaFiltrada = funcionarios.filter(x => departamento === TODOS || x.departamento_id === departamento);

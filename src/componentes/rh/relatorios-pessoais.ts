@@ -106,7 +106,7 @@ async function seccoes(f: Funcionario, ctx: ContextoRH, lista: SeccaoPersonaliza
             const primeiro = Math.max(Number(f.data_admissao.slice(0, 4)), ano - 4);
             const linhas: string[][] = [];
             for (let a = primeiro; a <= ano; a++) {
-                const sld = saldoFerias(planos, f.id, a, direito, hoje, direito, f.data_admissao);
+                const sld = saldoFerias(planos, f.id, a, direito, hoje, direito, f.data_admissao, valorNumerico(parametros, 'ferias_transitados_max', hoje, 0));
                 linhas.push([String(a), String(sld.direito), String(sld.transitados), String(sld.marcados), String(sld.gozados), String(sld.saldo)]);
             }
             saida.push({ titulo: 'Férias por ano (dias úteis)', tabela: { colunas: ['Ano', 'Direito', 'Transitados', 'Marcados', 'Gozados', 'Por gozar'], linhas } });

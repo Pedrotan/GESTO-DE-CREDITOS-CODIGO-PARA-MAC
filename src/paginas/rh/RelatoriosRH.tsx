@@ -51,7 +51,7 @@ export default function RelatoriosRH() {
         if (!extra.dados || !definicao || de > ate) return null;
         const dados: Base = { ...(extra.dados as Omit<Base, 'funcionarios' | 'departamentos' | 'cargos' | 'contratos' | 'diasFeriasPadrao'>),
             funcionarios: base.dados.funcionarios, departamentos: base.dados.departamentos, cargos: base.dados.cargos, contratos: base.dados.contratos,
-            diasFeriasPadrao: valorNumerico(base.dados.parametros, 'dias_ferias_ano', hoje, 22) } as Base;
+            diasFeriasPadrao: valorNumerico(base.dados.parametros, 'dias_ferias_ano', hoje, 22), transitadosMax: valorNumerico(base.dados.parametros, 'ferias_transitados_max', hoje, 0) } as Base;
         return definicao.gerar(dados, filtro);
     }, [extra.dados, definicao, base.dados, de, ate, departamento, estado, hoje]); // eslint-disable-line react-hooks/exhaustive-deps
     const descricaoFiltros = [departamento !== TODOS ? base.dados.departamentos.find(d => d.id === departamento)?.nome : '', estado !== 'todos' ? `estado: ${estado}` : ''].filter(Boolean).join(' · ');

@@ -102,7 +102,7 @@ export default function PortalFuncionario() {
     const f = d.f;
     const ano = Number(hoje.slice(0, 4));
     const direito = d.contratos.find((c: any) => c.estado === 'activo')?.dias_ferias ?? valorNumerico(d.parametros, 'dias_ferias_ano', hoje, 22);
-    const saldo = saldoFerias(d.planos, f.id, ano, direito, hoje, direito, f.data_admissao);
+    const saldo = saldoFerias(d.planos, f.id, ano, direito, hoje, direito, f.data_admissao, valorNumerico(d.parametros, 'ferias_transitados_max', hoje, 0));
     const recarregar = () => void dados.recarregar();
     const recebidos = [...ultimaPorRecibo(d.recebimentos).values()].filter((r: any) => r.estado === 'recebido').length;
     const pendentes = d.planos.filter((p: any) => p.estado === 'planeado').length + d.ausencias.filter((a: any) => a.estado === 'pendente').length + d.pedidos.filter((p: any) => p.estado === 'pendente').length;

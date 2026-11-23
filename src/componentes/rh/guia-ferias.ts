@@ -20,8 +20,9 @@ export async function emitirGuiaFerias(p: PlanoFeriasRH, ctx: ContextoGuia, sett
     const contrato = ctx.contratos.find(c => c.funcionario_id === p.funcionario_id && c.estado === 'activo');
     const direito = contrato?.dias_ferias ?? valorNumerico(ctx.parametros, 'dias_ferias_ano', hoje, 22);
     const horario = ctx.horarios.find(h => h.id === f?.horario_id) || ctx.horarios.find(h => h.id === 'horario-normal') || HORARIO_OMISSAO;
-    const saldo = saldoFerias(ctx.planos, p.funcionario_id, p.ano, direito, hoje, direito, f?.data_admissao).saldo;
-    const regresso = dataRegresso(p.data_fim, horario, ctx.feriados);
+    const saldo = saldoFerias(ctx.planos, p.funcionario_id, p.ano, direito, hoje, direito, f?.data_admissao, valorNumerico(ctx.parametros, 'ferias_transitados_max', hoje, 0)).saldo;
+    // O regresso guardado no plano (calculado pelo calendário laboral); os planos antigos calculam-no aqui.
+    const regresso = p.data_regresso || dataRegresso(p.data_fim, horario, ctx.feriados);
     const emitido = await ServicoFeriasRH.emitirGuia(p, { inicio: p.data_inicio, fim: p.data_fim, dias: p.dias, regresso, saldo }, actor);
     return gerarGuiaFeriasPdf({
         numero: emitido.numero, emitidoEm: emitido.emitido_em, ano: p.ano, inicio: p.data_inicio, fim: p.data_fim, dias: p.dias, regresso, saldoRestante: saldo,

@@ -522,6 +522,7 @@ export const RH_CALENDARIO_COLUNAS: Array<[string, string, string]> = [
 ];
 export const RH_PARAMETROS_CALENDARIO: Array<{ chave: string; valor: string; descricao: string }> = [
     { chave: 'pontes_desde_ano', valor: '2027', descricao: 'Ano a partir do qual o calendário gera as pontes (feriado à terça → segunda; à quinta → sexta)' },
+    { chave: 'ferias_transitados_max', valor: '0', descricao: 'Máximo de dias de férias que passam para o ano seguinte (0 = sem limite; confirmar com a LGT)' },
     { chave: 'ferias_periodo_minimo', valor: '15', descricao: 'Férias divididas: um dos períodos deve ter pelo menos estes dias úteis (0 = sem regra; confirmar com a LGT)' },
 ];
 export const rhSeedCalendarioStatements = (now: string) => RH_PARAMETROS_CALENDARIO.map(p => ({

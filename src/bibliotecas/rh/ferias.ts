@@ -26,15 +26,17 @@ export type SaldoFerias = { direito: number; transitados: number; marcados: numb
 
 /**
  * Saldo do ano: direito (dias úteis do contrato) + dias transitados do ano anterior (o que ficou por gozar)
- * − dias aprovados/em gozo/gozados. Os planos só previstos («planeado») não descontam.
+ * − dias aprovados/em gozo/gozados. Os planos só previstos («planeado») não descontam. `limiteTransitados` (> 0)
+ * limita os dias que passam do ano anterior (parâmetro «ferias_transitados_max»; 0 = sem limite).
  */
-export function saldoFerias(planos: PlanoFerias[], funcionarioId: string, ano: number, direito: number, hoje: string, direitoAnterior = direito, admissao?: string): SaldoFerias {
+export function saldoFerias(planos: PlanoFerias[], funcionarioId: string, ano: number, direito: number, hoje: string, direitoAnterior = direito, admissao?: string, limiteTransitados = 0): SaldoFerias {
     const conta = (a: number, estados: EstadoFerias[]) => planos
         .filter(p => p.funcionario_id === funcionarioId && p.ano === a && estados.includes(estadoEfectivo(p, hoje)))
         .reduce((s, p) => s + (Number(p.dias) || 0), 0);
     const usadosAnterior = conta(ano - 1, ['aprovado', 'em_gozo', 'gozado']);
     // Só transita quem já estava na empresa no ano anterior.
-    const transitados = !admissao || admissao <= `${ano - 1}-12-31` ? Math.max(0, direitoAnterior - usadosAnterior) : 0;
+    const porGozar = !admissao || admissao <= `${ano - 1}-12-31` ? Math.max(0, direitoAnterior - usadosAnterior) : 0;
+    const transitados = limiteTransitados > 0 ? Math.min(porGozar, limiteTransitados) : porGozar;
     const marcados = conta(ano, ['aprovado', 'em_gozo']);
     const gozados = conta(ano, ['gozado']);
     return { direito, transitados, marcados, gozados, saldo: direito + transitados - marcados - gozados };

@@ -1765,6 +1765,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, 'Pagamento Recebido', ?, 'success', 0, ?)"
   ],
   [
+    "6b1195b0367d7c431145933eb46b84fbe9b9e4a86562965d358f472cb62d2fa4",
+    "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, 'info', 0, ?) ON CONFLICT(id) DO NOTHING"
+  ],
+  [
     "40175cbf254825df73b4cadb5c4e3d1b8323b7cc05da9fe3ff4dbb3ffe6dc91b",
     "INSERT INTO notifications (id, userId, title, message, type, read, timestamp) VALUES (?, ?, ?, ?, ?, 0, ?)"
   ],

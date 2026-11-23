@@ -20,7 +20,7 @@ export type LinhaRel = { recibo_id: string; codigo: string; quantidade: number; 
 export type Base = {
     funcionarios: Func[]; departamentos: Nome[]; cargos: Nome[]; recibos: ReciboRel[]; linhas: LinhaRel[]; ausencias: Ausencia[]; tipos: TipoAusencia[];
     pontos: RegistoPonto[]; horarios: Horario[]; feriados: Feriado[]; planos: PlanoFerias[]; contratos: Array<{ id: string; funcionario_id: string; estado: string; tipo: string; fim: string | null; dias_ferias: number }>;
-    documentos: Array<{ id: string; funcionario_id: string; nome: string; categoria: string; estado: string; data_validade: string | null }>; diasFeriasPadrao: number;
+    documentos: Array<{ id: string; funcionario_id: string; nome: string; categoria: string; estado: string; data_validade: string | null }>; diasFeriasPadrao: number; transitadosMax?: number;
 };
 
 const OFICIAIS = new Set(['aprovado', 'pago', 'fechado']);
@@ -139,7 +139,7 @@ export function mapaFerias(b: Base, f: FiltroRH): TabelaRH {
     const ano = Number(f.ate.slice(0, 4));
     const linhas = filtrarFuncionarios(b, f).map(x => {
         const direito = b.contratos.find(c => c.funcionario_id === x.id && c.estado === 'activo')?.dias_ferias ?? b.diasFeriasPadrao;
-        const s = saldoFerias(b.planos, x.id, ano, direito, f.hoje, direito, x.data_admissao);
+        const s = saldoFerias(b.planos, x.id, ano, direito, f.hoje, direito, x.data_admissao, b.transitadosMax ?? 0);
         const periodos = b.planos.filter(p => p.funcionario_id === x.id && p.ano === ano && p.estado !== 'anulado')
             .map(p => p.data_inicio ? `${p.data_inicio.slice(8, 10)}/${p.data_inicio.slice(5, 7)}–${p.data_fim!.slice(8, 10)}/${p.data_fim!.slice(5, 7)} (${estadoEfectivo(p, f.hoje).replace('_', ' ')})` : `${MESES[(p.mes_previsto || 1) - 1]} (previsto)`).join('; ');
         return [x.nome, nomeDe(b.departamentos, x.departamento_id), s.direito, s.transitados, s.marcados, s.gozados, s.saldo, periodos || '—'] as Celula[];
