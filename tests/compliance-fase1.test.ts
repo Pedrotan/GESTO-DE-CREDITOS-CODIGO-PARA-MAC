@@ -18,7 +18,8 @@ const perfilCompleto: PerfilKyc = { profissao: 'Professora', origem_fundos: 'Sal
 const entradaBase = (extra: Partial<EntradaRisco> = {}): EntradaRisco => ({
     particular: true, documento: 'valido', kycEmFalta: [], kycEstado: 'verificado', duplicadosPorRever: [], estrangeiro: false, pais: 'AO',
     rendimentoMensal: 300_000, origemFundos: 'Salário', profissao: 'Professora', sector: null, pep: false, exposicao: 0, creditosActivos: 0,
-    maiorCredito: 0, maiorAtrasoDias: 0, creditoIncumprido: false, clienteBloqueado: false, antiguidadeMeses: 34, ...extra,
+    maiorCredito: 0, maiorAtrasoDias: 0, creditoIncumprido: false, clienteBloqueado: false, antiguidadeMeses: 34,
+    screening: 'sem_correspondencia', pepLista: false, ...extra,
 });
 
 test('KYC: cliente completo e verificado; requisitos em falta tornam-no incompleto', () => {
@@ -58,7 +59,8 @@ test('risco: cliente sem factores fica baixo; pesos da especificação somam 100
     const r = calcularRisco(entradaBase(), C);
     assert.deepEqual([r.pontuacao, r.nivel, r.decisao, r.requerRevisao, r.regras.length], [0, 'baixo', 'diligencia_normal', false, 0]);
     assert.equal(r.factores.length, 5);
-    assert.ok(r.factores.find(f => f.id === 'pep_sancoes')!.notas[0].includes('não verificado'), 'sanções por verificar ficam registadas, nunca como «sem correspondência»');
+    const semScreening = calcularRisco(entradaBase({ screening: 'nao_verificado' }), C).factores.find(f => f.id === 'pep_sancoes')!;
+    assert.ok(semScreening.notas[0].includes('não verificadas'), 'sanções por verificar ficam registadas, nunca como «sem correspondência»');
 });
 
 test('risco: média ponderada e escalões 0–29 / 30–59 / 60–100', () => {

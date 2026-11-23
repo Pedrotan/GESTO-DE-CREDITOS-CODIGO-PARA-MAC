@@ -70,6 +70,7 @@ const ContratosRH = lazyWithReload(() => import("./paginas/rh/ContratosRH"));
 const PainelCompliance = lazyWithReload(() => import("./paginas/compliance/PainelCompliance"));
 const ClienteCompliance = lazyWithReload(() => import("./paginas/compliance/ClienteCompliance"));
 const DuplicadosCompliance = lazyWithReload(() => import("./paginas/compliance/DuplicadosCompliance"));
+const ScreeningCompliance = lazyWithReload(() => import("./paginas/compliance/ScreeningCompliance"));
 const ModeloRiscoCompliance = lazyWithReload(() => import("./paginas/compliance/ModeloRiscoCompliance"));
 const RelatoriosRH = lazyWithReload(() => import("./paginas/rh/RelatoriosRH"));
 const PortalFuncionario = lazyWithReload(() => import("./paginas/rh/PortalFuncionario"));
@@ -391,6 +392,7 @@ const AppContent = () => {
               { path: '/compliance', page: <PainelCompliance /> },
               { path: '/compliance/painel', page: <PainelCompliance /> },
               { path: '/compliance/clientes/:id', page: <ClienteCompliance /> },
+              { path: '/compliance/screening', page: <ScreeningCompliance /> },
               { path: '/compliance/duplicados', page: <DuplicadosCompliance /> },
               { path: '/compliance/modelo-risco', page: <ModeloRiscoCompliance /> },
             ].map(({ path, page }) => (

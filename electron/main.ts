@@ -1125,7 +1125,12 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   compliance_kyc_verificacao: "compliance_manage",
   compliance_risco_avaliacao: "compliance_manage",
   compliance_risco_modelo: "compliance_settings",
-  compliance_duplicado_revisao: "compliance_approve"
+  compliance_duplicado_revisao: "compliance_approve",
+  compliance_lista_versao: "compliance_settings",
+  compliance_lista_bloco: "compliance_manage",
+  compliance_lista_interna: "compliance_manage",
+  compliance_screening: "compliance_manage",
+  compliance_screening_decisao: "compliance_approve"
 };
 // Compliance: cada comando exige a sua permissão (registar, decidir ou alterar o modelo) e o autor/decisor gravado tem
 // de ser o utilizador autenticado — sem isto, quem regista uma verificação podia decidi-la em nome de outra pessoa.

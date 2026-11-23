@@ -19,6 +19,7 @@ import {
     type AvaliacaoRisco, type FonteVerificacao, type PerfilCompliance, type TipoVerificacao, type VerificacaoKyc,
 } from '@/servicos/compliance/ServicoCompliance';
 import { cn } from '@/bibliotecas/utils';
+import { ScreeningCliente } from '@/componentes/compliance/ScreeningCliente';
 
 function Seccao({ titulo, descricao, accao, children, icone: Icone }: { titulo: string; descricao?: string; accao?: ReactNode; children: ReactNode; icone?: typeof Gauge }) {
     return (
@@ -73,6 +74,7 @@ export default function ClienteCompliance() {
         await executar(() => ServicoCompliance.avaliarRisco({
             cliente: ck, perfil, creditos: comp.creditos,
             duplicadosPorRever: linha.duplicados, modelo, tipo: avaliacoes.length ? 'reavaliacao' : 'inicial',
+            screening: { estado: linha.screening.estado, pepConfirmado: linha.screening.pepConfirmado },
             motivo: avaliacoes.length ? 'Reavaliação pedida na ficha de Compliance' : 'Avaliação inicial',
         }, actor), 'Avaliação de risco registada');
         setAAvaliar(false);
@@ -145,6 +147,8 @@ export default function ClienteCompliance() {
                 </div>
 
                 <div className="space-y-5">
+                    <ScreeningCliente linha={linha} scr={comp.dados.scr} actor={actor} registar={registar} decidir={decidir} aoMudar={() => void comp.recarregar()} />
+
                     <Seccao titulo="Avaliação de risco" icone={Gauge}
                         descricao={avaliacao ? `Modelo v${avaliacao.modelo_versao} · ${dataHoraPt(avaliacao.criado_em)} · ${avaliacao.criado_por_nome || '—'}` : modelo ? `Modelo activo: v${modelo.versao}` : 'Sem modelo activo'}
                         accao={registar && <Button size="sm" onClick={avaliar} disabled={aAvaliar || !modelo}>{aAvaliar ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : null}{avaliacao ? 'Reavaliar' : 'Avaliar risco'}</Button>}>

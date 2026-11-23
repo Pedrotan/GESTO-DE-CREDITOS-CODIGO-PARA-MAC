@@ -3,9 +3,9 @@ import { Link } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Input } from '@/componentes/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
-import { AlertTriangle, ChevronRight, Loader2, Search, ShieldCheck, UserCheck, Users } from 'lucide-react';
+import { AlertTriangle, ChevronRight, Loader2, Radar, Search, ShieldCheck, UserCheck, Users } from 'lucide-react';
 import { Indicador, SeloBI, Vazio, dataPt } from '@/componentes/rh/comum-rh';
-import { NavegacaoCompliance, SeloKyc, SeloRisco, useCompliance, type LinhaCompliance } from '@/componentes/compliance/comum-compliance';
+import { NavegacaoCompliance, SeloKyc, SeloRisco, SeloScreening, useCompliance, type LinhaCompliance } from '@/componentes/compliance/comum-compliance';
 import { mascararDocumento, ROTULO_ESTADO_KYC, type EstadoKyc } from '@/bibliotecas/compliance/kyc';
 import { ROTULO_NIVEL, type NivelRisco } from '@/bibliotecas/compliance/motor-risco';
 import { cn } from '@/bibliotecas/utils';
@@ -13,6 +13,7 @@ import { cn } from '@/bibliotecas/utils';
 const TODOS = '__todos__';
 type FiltroAccao = typeof TODOS | 'accao' | 'decisao' | 'revisao_vencida';
 
+const ALERTA_SCREENING = ['possivel', 'confirmada', 'erro'];
 const pct = (n: number, total: number) => (total ? Math.round((n / total) * 100) : 0);
 
 export default function PainelCompliance() {
@@ -29,7 +30,7 @@ export default function PainelCompliance() {
         for (const l of linhas) porNivel[l.nivel || 'sem'] += 1;
         return {
             total, verificados,
-            decisoes: linhas.filter(l => l.verificacaoPendente).length + linhas.filter(l => l.aRever).length,
+            decisoes: linhas.filter(l => l.verificacaoPendente).length + linhas.filter(l => l.aRever).length + linhas.filter(l => l.screening.pendentes.length > 0).length,
             expirados: linhas.filter(l => l.kyc.documento.estado === 'expirado').length,
             aExpirar: linhas.filter(l => l.kyc.documento.estado === 'a_expirar').length,
             vencidas: linhas.filter(l => l.kyc.revisaoVencida).length,
@@ -42,8 +43,8 @@ export default function PainelCompliance() {
         const ordemNivel = { elevado: 0, medio: 1, baixo: 2 } as const;
         return linhas.filter(l => (estado === TODOS || l.kyc.estado === estado)
             && (nivel === TODOS || (nivel === 'sem' ? !l.nivel : l.nivel === nivel))
-            && (accao === TODOS || (accao === 'accao' ? l.kyc.precisaAccao || l.aRever || l.verificacaoPendente || l.duplicados.length > 0
-                : accao === 'decisao' ? l.aRever || l.verificacaoPendente : l.kyc.revisaoVencida))
+            && (accao === TODOS || (accao === 'accao' ? l.kyc.precisaAccao || l.aRever || l.verificacaoPendente || l.duplicados.length > 0 || ALERTA_SCREENING.includes(l.screening.estado)
+                : accao === 'decisao' ? l.aRever || l.verificacaoPendente || l.screening.pendentes.length > 0 : l.kyc.revisaoVencida))
             && (!termo || [l.cliente.name, l.cliente.clientNumber, l.cliente.nif].some(v => String(v || '').toLowerCase().includes(termo))))
             .sort((a, b) => Number(b.aRever || b.verificacaoPendente) - Number(a.aRever || a.verificacaoPendente)
                 || (a.nivel ? ordemNivel[a.nivel] : 3) - (b.nivel ? ordemNivel[b.nivel] : 3)
@@ -63,7 +64,7 @@ export default function PainelCompliance() {
 
             <div className="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <Indicador titulo="KYC verificado" valor={`${pct(ind.verificados, ind.total)}%`} nota={`${ind.verificados} de ${ind.total} clientes`} tom={pct(ind.verificados, ind.total) >= 80 ? 'emerald' : 'orange'} />
-                <Indicador titulo="Decisões por tomar" valor={ind.decisoes} nota="Verificações e avaliações a rever" tom={ind.decisoes ? 'orange' : 'slate'} />
+                <Indicador titulo="Decisões por tomar" valor={ind.decisoes} nota="Verificações, avaliações e screening" tom={ind.decisoes ? 'orange' : 'slate'} />
                 <Indicador titulo="Documentos" valor={ind.expirados} nota={`expirados · ${ind.aExpirar} a expirar em 60 dias`} tom={ind.expirados ? 'red' : 'slate'} />
                 <Indicador titulo="Possíveis duplicados" valor={gruposPorRever.length} nota={`por rever · ${ind.vencidas} revisões periódicas vencidas`} tom={gruposPorRever.length ? 'orange' : 'slate'} />
             </div>
@@ -128,12 +129,13 @@ export default function PainelCompliance() {
                 <Vazio>{accao === 'accao' && !pesquisa ? 'Nenhum cliente precisa de atenção neste momento.' : 'Nenhum cliente corresponde aos filtros.'}</Vazio>
             ) : (
                 <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-                    <table className="w-full min-w-[860px] text-sm">
+                    <table className="w-full min-w-[980px] text-sm">
                         <thead className="border-b border-slate-100 text-left text-[11px] uppercase tracking-wide text-slate-500 dark:border-slate-800">
                             <tr>
                                 <th className="px-4 py-3 font-bold">Cliente</th>
                                 <th className="px-3 py-3 font-bold">KYC</th>
                                 <th className="px-3 py-3 font-bold">Documento</th>
+                                <th className="px-3 py-3 font-bold">Screening</th>
                                 <th className="px-3 py-3 font-bold">Risco</th>
                                 <th className="px-3 py-3 font-bold">Próxima revisão</th>
                                 <th className="px-3 py-3 font-bold">Atenção</th>
@@ -153,6 +155,9 @@ export default function PainelCompliance() {
 
 function Linha({ l, hoje }: { l: LinhaCompliance; hoje: string }) {
     const avisos: Array<{ texto: string; icone: typeof AlertTriangle; tom: string }> = [];
+    if (l.screening.estado === 'confirmada') avisos.push({ texto: 'Sanção confirmada', icone: Radar, tom: 'text-red-700 dark:text-red-300' });
+    else if (l.screening.pendentes.length) avisos.push({ texto: `${l.screening.pendentes.length} correspondência(s) por decidir`, icone: Radar, tom: 'text-amber-700 dark:text-amber-300' });
+    else if (l.screening.estado === 'erro') avisos.push({ texto: 'Screening com erro', icone: Radar, tom: 'text-red-700 dark:text-red-300' });
     if (l.verificacaoPendente) avisos.push({ texto: 'Verificação por decidir', icone: UserCheck, tom: 'text-sky-700 dark:text-sky-300' });
     if (l.aRever) avisos.push({ texto: 'Avaliação a rever', icone: ShieldCheck, tom: 'text-amber-700 dark:text-amber-300' });
     if (l.duplicados.length) avisos.push({ texto: l.duplicados.join(', '), icone: Users, tom: 'text-red-700 dark:text-red-300' });
@@ -172,6 +177,7 @@ function Linha({ l, hoje }: { l: LinhaCompliance; hoje: string }) {
                 </div>
             </td>
             <td className="px-3 py-3"><SeloBI situacao={l.kyc.documento} /></td>
+            <td className="px-3 py-3"><SeloScreening estado={l.screening.estado} /></td>
             <td className="px-3 py-3"><SeloRisco nivel={l.nivel} pontuacao={l.perfil?.pontuacao_risco} /></td>
             <td className={cn('px-3 py-3 text-xs', vencida ? 'font-bold text-red-600' : 'text-slate-600 dark:text-slate-400')}>{l.perfil?.proxima_revisao ? `${dataPt(l.perfil.proxima_revisao)}${vencida ? ' (vencida)' : ''}` : '—'}</td>
             <td className="px-3 py-3">

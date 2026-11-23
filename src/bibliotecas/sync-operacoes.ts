@@ -57,6 +57,9 @@ export const SYNC_EXCLUDED_TABLES = new Set([
     // Fiscal: o registo das chamadas à AGT e as cópias dos ficheiros SAF-T ficam no computador que os fez
     // (os documentos, as séries e a configuração fiscal sincronizam normalmente).
     'fiscal_agt_requests', 'fiscal_saft_exports',
+    // Compliance: as entradas das listas de sanções (milhares) são importadas em cada computador a partir do ficheiro
+    // oficial; a versão activa, os resultados do screening e as decisões sincronizam normalmente.
+    'compliance_lista_bloco',
 ]);
 
 export const normalizeSqlText = (sql: string) =>

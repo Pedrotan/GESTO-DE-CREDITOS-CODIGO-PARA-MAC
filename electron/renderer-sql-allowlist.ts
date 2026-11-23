@@ -145,8 +145,20 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_compliance_kyc_cliente ON compliance_kyc_verificacao(client_id, registado_em)"
   ],
   [
+    "a3b349c20e99a94810aaaae9aba4f180ae41a6443773af8d43ccbd5a859c53b6",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_lista_bloco_versao ON compliance_lista_bloco(versao_id, ordem)"
+  ],
+  [
     "51d549229ea5ff441f24381e0990d377b3b806974ed0f5bf351242a8f00943e9",
     "CREATE INDEX IF NOT EXISTS idx_compliance_risco_cliente ON compliance_risco_avaliacao(client_id, criado_em)"
+  ],
+  [
+    "9278ce3a2a5ee6181cf2ffd9d1ce12bd39950bae9bbcb819ac6ebae6f5651fbc",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_screening_cliente ON compliance_screening(client_id, criado_em)"
+  ],
+  [
+    "bfe05c020b0d0de4286eaf9cbb0084578923a85583328b3b54fbe80f8d580cb8",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_screening_decisao_cliente ON compliance_screening_decisao(client_id)"
   ],
   [
     "8197e43059a8893fc18da3faccd0fbd599d9d42c147577320f23f74f56042c1e",
@@ -525,6 +537,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS compliance_kyc_verificacao ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('inicial', 'actualizacao', 'periodica', 'reforcada')), documento_tipo TEXT NOT NULL, documento_ref TEXT, documento_emissor TEXT, documento_validade TEXT, fonte TEXT NOT NULL CHECK(fonte IN ('presencial', 'documento_original', 'copia_certificada', 'consulta_online', 'declaracao')), controlos TEXT, notas TEXT, estado TEXT NOT NULL DEFAULT 'pendente' CHECK(estado IN ('pendente', 'verificado', 'recusado')), registado_por TEXT, registado_por_nome TEXT, registado_em TEXT NOT NULL, decidido_por TEXT, decidido_por_nome TEXT, decidido_em TEXT, motivo_decisao TEXT )"
   ],
   [
+    "c656585fe353f9929e9e16fba88599744d1f32791288651e05a058a392a16b1a",
+    "CREATE TABLE IF NOT EXISTS compliance_lista_bloco ( id TEXT PRIMARY KEY, versao_id TEXT NOT NULL, fonte TEXT NOT NULL, ordem INTEGER NOT NULL, total INTEGER NOT NULL, conteudo TEXT NOT NULL )"
+  ],
+  [
+    "ad9cf017f8225693e4abc1af9a2d37ba3557fc2b808f0a56c602b50372891807",
+    "CREATE TABLE IF NOT EXISTS compliance_lista_interna ( id TEXT PRIMARY KEY, categoria TEXT NOT NULL CHECK(categoria IN ('pep', 'sancao', 'outro')), tipo TEXT NOT NULL CHECK(tipo IN ('pessoa', 'entidade')), nome TEXT NOT NULL, aliases TEXT, nascimento TEXT, nacionalidade TEXT, funcao TEXT, fonte_referencia TEXT, notas TEXT, activa INTEGER NOT NULL DEFAULT 1 CHECK(activa IN (0, 1)), criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT, actualizado_em TEXT, actualizado_por TEXT, actualizado_por_nome TEXT )"
+  ],
+  [
+    "aeb647ba1c84dc5d6de2598e42a6f7af8238f785991f0bfc4f51175827aef545",
+    "CREATE TABLE IF NOT EXISTS compliance_lista_versao ( id TEXT PRIMARY KEY, fonte TEXT NOT NULL CHECK(fonte IN ('ONU', 'OFAC')), data_lista TEXT, hash TEXT NOT NULL, total_entradas INTEGER NOT NULL, ignoradas INTEGER NOT NULL DEFAULT 0, nome_ficheiro TEXT, activa INTEGER NOT NULL DEFAULT 1 CHECK(activa IN (0, 1)), importada_em TEXT NOT NULL, importada_por TEXT, importada_por_nome TEXT )"
+  ],
+  [
     "761a0d185c5f6dfd903a513cf2aecbbecd473a0b58eb2bb174c6067bad511a5a",
     "CREATE TABLE IF NOT EXISTS compliance_perfil ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL UNIQUE, profissao TEXT, entidade_empregadora TEXT, origem_fundos TEXT, finalidade_credito TEXT, pep INTEGER CHECK(pep IN (0, 1) OR pep IS NULL), pep_funcao TEXT, pep_relacao TEXT CHECK(pep_relacao IN ('proprio', 'familiar', 'associado') OR pep_relacao IS NULL), beneficiario_efectivo TEXT, documentos_entregues TEXT, observacoes TEXT, estado_kyc TEXT NOT NULL DEFAULT 'pendente' CHECK(estado_kyc IN ('pendente', 'em_verificacao', 'verificado', 'recusado')), kyc_verificado_em TEXT, kyc_verificado_por TEXT, kyc_verificado_por_nome TEXT, nivel_risco TEXT CHECK(nivel_risco IN ('baixo', 'medio', 'elevado') OR nivel_risco IS NULL), pontuacao_risco INTEGER, diligencia TEXT CHECK(diligencia IN ('simplificada', 'normal', 'reforcada') OR diligencia IS NULL), avaliacao_id TEXT, proxima_revisao TEXT, criado_em TEXT NOT NULL, criado_por TEXT, actualizado_em TEXT, actualizado_por TEXT, actualizado_por_nome TEXT )"
   ],
@@ -535,6 +559,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "f586960c9c28684a9939e3daa6df3ee38f8ba3447f750b13f341c5f7b21ed8c0",
     "CREATE TABLE IF NOT EXISTS compliance_risco_modelo ( id TEXT PRIMARY KEY, versao INTEGER NOT NULL, nome TEXT NOT NULL, configuracao TEXT NOT NULL, activo INTEGER NOT NULL DEFAULT 0 CHECK(activo IN (0, 1)), notas TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )"
+  ],
+  [
+    "d8f626213fe1e3b7c2b1d6fbd8b369598566e6943c510e22b35221c17222d482",
+    "CREATE TABLE IF NOT EXISTS compliance_screening ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, motivo TEXT NOT NULL CHECK(motivo IN ('manual', 'novo_cliente', 'pedido_credito', 'periodico', 'lista_actualizada')), resultado TEXT NOT NULL CHECK(resultado IN ('NO_MATCH', 'POTENTIAL_MATCH', 'NOT_CHECKED', 'ERROR')), resultados TEXT NOT NULL, criterios TEXT NOT NULL, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )"
+  ],
+  [
+    "de7914b2452401db938c66b39f37db2573b249451bd45e13170b5af404ae74b9",
+    "CREATE TABLE IF NOT EXISTS compliance_screening_decisao ( id TEXT PRIMARY KEY, screening_id TEXT NOT NULL, client_id TEXT NOT NULL, fonte TEXT NOT NULL, ref TEXT NOT NULL, nome_lista TEXT NOT NULL, nome_pesquisado TEXT NOT NULL, categoria TEXT, decisao TEXT NOT NULL CHECK(decisao IN ('falso_positivo', 'confirmada')), fundamento TEXT NOT NULL, decidido_em TEXT NOT NULL, decidido_por TEXT, decidido_por_nome TEXT )"
   ],
   [
     "6313b99e162ac8fe97464973b99516416612b83e533d00ace673f8843b886323",
@@ -1073,12 +1105,40 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_kyc_quatro_olhos BEFORE UPDATE ON compliance_kyc_verificacao WHEN NEW.decidido_por IS NOT NULL AND NEW.decidido_por = OLD.registado_por AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.decidido_por AND role = 'super_admin') BEGIN SELECT RAISE(ABORT, 'Quem registou a verificação KYC não a pode decidir')"
   ],
   [
+    "aabc7f957c593fc91b5e0ee788564c589fb7465882fc8908f5afcc25690a743f",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_lista_interna_delete BEFORE DELETE ON compliance_lista_interna BEGIN SELECT RAISE(ABORT, 'As entradas da lista interna não se apagam: desactivam-se')"
+  ],
+  [
+    "ee6438af6684ad9d8ddb87964afbfcee7b842d7b2d277474e62a4707143005e7",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_lista_versao_delete BEFORE DELETE ON compliance_lista_versao BEGIN SELECT RAISE(ABORT, 'As versões das listas não se apagam')"
+  ],
+  [
+    "f90d432eb15fda96b78e91f4c9717ff71bb7ca05415e56b5c7e8e4f8ac1396e7",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_lista_versao_imutavel BEFORE UPDATE ON compliance_lista_versao WHEN NEW.hash <> OLD.hash OR NEW.fonte <> OLD.fonte OR NEW.total_entradas <> OLD.total_entradas OR NEW.importada_em <> OLD.importada_em OR COALESCE(NEW.data_lista, '') <> COALESCE(OLD.data_lista, '') BEGIN SELECT RAISE(ABORT, 'Uma versão de lista não se altera: importa-se outra')"
+  ],
+  [
     "9f89b624d67c8bf5d81787f94cb501cb7b19565221946b825a42118b9045a8fb",
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_modelo_delete BEFORE DELETE ON compliance_risco_modelo BEGIN SELECT RAISE(ABORT, 'As versões do modelo de risco não se apagam')"
   ],
   [
     "6f86de24009d46f1d8e039f9d9581f41e6f8d4d4524bd776304d73e364304862",
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_modelo_imutavel BEFORE UPDATE ON compliance_risco_modelo WHEN NEW.configuracao <> OLD.configuracao OR NEW.versao <> OLD.versao OR NEW.nome <> OLD.nome OR NEW.criado_em <> OLD.criado_em BEGIN SELECT RAISE(ABORT, 'Uma versão do modelo de risco não se altera: cria-se uma versão nova')"
+  ],
+  [
+    "8c6d780140a5947616657f3731f85e82ed01703b0fb177bdfeaa942093bdbdf7",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_screening_decisao_delete BEFORE DELETE ON compliance_screening_decisao BEGIN SELECT RAISE(ABORT, 'As decisões do screening não se apagam')"
+  ],
+  [
+    "a6ba51a57c31343f2e9d774c77ec54ebf26692311655dc95390657d58037a4e3",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_screening_decisao_update BEFORE UPDATE ON compliance_screening_decisao BEGIN SELECT RAISE(ABORT, 'As decisões do screening não se alteram')"
+  ],
+  [
+    "81faa5f9de1bc10c08d3444752d1abcf25f4b795ba5dcbca526e4c98a870ed09",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_screening_delete BEFORE DELETE ON compliance_screening BEGIN SELECT RAISE(ABORT, 'Os resultados do screening não se apagam')"
+  ],
+  [
+    "9770f50f047072f2726c381df06216b587a9737f3de00b265fe4be9f01b431b0",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_screening_update BEFORE UPDATE ON compliance_screening BEGIN SELECT RAISE(ABORT, 'Os resultados do screening não se alteram')"
   ],
   [
     "5b3f2214e4d93976a1fd63e628b80d3c1230f1fa681459808e5bddf35995c372",
@@ -1367,6 +1427,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "d565fa38635b4abb2dbeb235cb054d7184fa7c11bc5b7abaa33bdc4a42145678",
     "DELETE FROM closed_months WHERE id = ?"
+  ],
+  [
+    "5c60e40dc74d43bbba354f5fb34a5207c35beea609f78f1177b46a18b8e8d10d",
+    "DELETE FROM compliance_lista_bloco WHERE fonte = ? AND versao_id <> ?"
   ],
   [
     "ce87b9db92b382e5eb835c5cfbeacb1bf35fde7b1e7829242146adfe4a66c487",
@@ -1705,12 +1769,28 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO compliance_kyc_verificacao (id, client_id, tipo, documento_tipo, documento_ref, documento_emissor, documento_validade, fonte, controlos, notas, registado_por, registado_por_nome, registado_em, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente')"
   ],
   [
+    "2a5d01d952778dadbf5bf9c7d87b98b02dfade4e7184e2c198cf27408c06379c",
+    "INSERT INTO compliance_lista_interna (id, categoria, tipo, nome, aliases, nascimento, nacionalidade, funcao, fonte_referencia, notas, activa, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?)"
+  ],
+  [
+    "c4871a8e320b29c31169c4c4fd42a4d4d5c104cad33560b25381e2cf4de58ff6",
+    "INSERT INTO compliance_lista_versao (id, fonte, data_lista, hash, total_entradas, ignoradas, nome_ficheiro, importada_em, importada_por, importada_por_nome, activa) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)"
+  ],
+  [
     "68c8a0508c3e7b4fc49b815514d4a0b140b3446a2b3d6339f8b2354d48cf2126",
     "INSERT INTO compliance_risco_avaliacao (id, client_id, modelo_id, modelo_versao, tipo, motivo, pontuacao, pontuacao_ponderada, nivel, decisao, requer_revisao, factores, regras, dados, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "33d89bae3d74f7db135c25f1146d716d14939d23b51e36edd2ec337a786902ad",
     "INSERT INTO compliance_risco_modelo (id, versao, nome, configuracao, activo, notas, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?)"
+  ],
+  [
+    "8126c8aaba8dad04fcb10b377e072b3bff0fc391478b4c5980af5bc74b7aaafd",
+    "INSERT INTO compliance_screening (id, client_id, motivo, resultado, resultados, criterios, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "e2cce77d21fd349c8c5ffb0445cab127e753c3f80701e2daa77c68c5ee008538",
+    "INSERT INTO compliance_screening_decisao (id, screening_id, client_id, fonte, ref, nome_lista, nome_pesquisado, categoria, decisao, fundamento, decidido_em, decidido_por, decidido_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "1fef7aba424e6c56360fff4678f06b33ce251c3ad8a123884d6878a94c06edff",
@@ -2281,6 +2361,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR REPLACE INTO company_settings ( id, name, nif, currency, sessionTimeout, installDate ) VALUES (1, ?, ?, ?, ?, ?)"
   ],
   [
+    "9fc25f58505acbeaf3747cb5db6d0c6eae7a4e7ec63075f9f513e09bfccff90b",
+    "INSERT OR REPLACE INTO compliance_lista_bloco (id, versao_id, fonte, ordem, total, conteudo) VALUES (?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "9ff8cf04f515e992614730dd0e25f5e4c79c18c1f73a607ef44b4b11e06a4591",
     "INSERT OR REPLACE INTO payment_proofs (paymentId, fileName, mimeType, dataUrl, uploadedAt, uploadedBy) VALUES (?, ?, ?, ?, ?, ?)"
   ],
@@ -2461,6 +2545,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM compliance_kyc_verificacao ORDER BY registado_em DESC"
   ],
   [
+    "4f25dd139f0ac20781c5f104c6f6ce14b8b2daeeb3868677ccf655ecec292625",
+    "SELECT * FROM compliance_lista_interna ORDER BY activa DESC, nome"
+  ],
+  [
+    "99a80a5d2d42f4800f717bb27953dabadd3871085c2ca2d83cd9fc3b392933c7",
+    "SELECT * FROM compliance_lista_versao ORDER BY importada_em DESC"
+  ],
+  [
     "68944080f6ff0a7928f2671af4f5639488261575a09021b16fb6f57d657fffc6",
     "SELECT * FROM compliance_perfil"
   ],
@@ -2471,6 +2563,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "7b023d6512b006521e54e327b69ec392c6d6a0ce1daa3518c653fe26c9cb2e95",
     "SELECT * FROM compliance_risco_modelo ORDER BY versao DESC, criado_em DESC"
+  ],
+  [
+    "d42f35516c099059c6ef59cf0959d52f35f7865ddcbe0eca94b3337d2d0911b6",
+    "SELECT * FROM compliance_screening ORDER BY criado_em DESC"
+  ],
+  [
+    "361ac45668512163eea6fcfeca04c0b572759c2e8fbb3d5590642a0a3508e4a0",
+    "SELECT * FROM compliance_screening_decisao ORDER BY decidido_em DESC"
   ],
   [
     "5aaac999f318a556c1c4e5426ab282bce919926c8979290c69b1fb14816706c8",
@@ -3147,6 +3247,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "3f674c6ed3824d44a09c03195095af83503c0c689f4c61646f6e457dbba09bbf",
     "SELECT clientNumber FROM clients WHERE clientNumber IS NOT NULL"
+  ],
+  [
+    "41e1eee83ddd967308801d8b56a2b7b2e0b3ea2a97880bf21ff14a1a7d3b3388",
+    "SELECT conteudo FROM compliance_lista_bloco WHERE versao_id = ? ORDER BY ordem"
   ],
   [
     "00f13408432a1eda6723a565bfc26cfab8b493452a0e3fc7fd1d5b39fd561da4",
@@ -3913,6 +4017,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT value FROM shared_settings WHERE key = ?"
   ],
   [
+    "e9ec791b839e8053cbc353b6e415c118a713708a41381bec18c1c49fbcb9ce17",
+    "SELECT versao_id, COUNT(*) AS n, MAX(total) AS total FROM compliance_lista_bloco GROUP BY versao_id"
+  ],
+  [
     "ab9e6a70582e6f9918807e03b1d05a18fa6e0f978db576813b166079c5b32cdd",
     "UPDATE accounting_cash_sessions SET expectedMinor = openingMinor + (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amountMinor ELSE -l.amountMinor END),0) FROM ledger_lines l JOIN ledger_transactions t ON t.id = l.transactionId WHERE l.account = 'cash' AND t.usuario_id = accounting_cash_sessions.operatorId AND t.timestamp >= accounting_cash_sessions.openedAt AND t.timestamp <= ?), countedMinor = ?, reason = ?, closedAt = ?, status = 'closed' WHERE id = ? AND operatorId = ? AND status = 'open'"
   ],
@@ -4007,6 +4115,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "3674864f9f003b96a1a08334321e482ae88bdec419a86285dcbe42a8863744c7",
     "UPDATE compliance_kyc_verificacao SET estado = ?, decidido_por = ?, decidido_por_nome = ?, decidido_em = ?, motivo_decisao = ? WHERE id = ? AND estado = 'pendente'"
+  ],
+  [
+    "cb12fcb5c033206623651aa94c2380704d07d900c02436e7561b2438bb100224",
+    "UPDATE compliance_lista_interna SET categoria = ?, tipo = ?, nome = ?, aliases = ?, nascimento = ?, nacionalidade = ?, funcao = ?, fonte_referencia = ?, notas = ?, activa = ?, actualizado_por = ?, actualizado_por_nome = ?, actualizado_em = ? WHERE id = ?"
+  ],
+  [
+    "5a66242285bf562b28c1557e7a36b759169f7f4e91cb637991630208fd396c3b",
+    "UPDATE compliance_lista_versao SET activa = 0 WHERE fonte = ? AND id <> ? AND activa = 1"
   ],
   [
     "48ef410cd0773ae008b387318e2f1ab53fba18779c60f60960de259cb73ebe5a",

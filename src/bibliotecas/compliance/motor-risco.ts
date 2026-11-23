@@ -70,6 +70,10 @@ export type EntradaRisco = {
     sector: string | null;
     /** null = pergunta PEP ainda sem resposta. */
     pep: boolean | null;
+    /** Estado do screening de PEP e sanções (listas ONU, OFAC e interna). */
+    screening: 'sem_correspondencia' | 'possivel' | 'confirmada' | 'erro' | 'nao_verificado' | 'desactualizado';
+    /** PEP confirmado por um responsável a partir da lista interna (mesmo que o cliente não o tenha declarado). */
+    pepLista: boolean;
     /** Saldo em dívida dos créditos activos/em atraso (Kz). */
     exposicao: number;
     creditosActivos: number;
@@ -191,9 +195,15 @@ export function calcularRisco(e: EntradaRisco, c: ConfiguracaoRisco): ResultadoR
 
     // 4. PEP e exposição a sanções
     const pep: Contributo[] = [];
-    const notasPep = ['Consulta a listas de sanções (ONU/OFAC) ainda não disponível neste módulo: não verificado.'];
+    const notasPep: string[] = [];
     if (e.pep === true) pep.push({ motivo: 'Pessoa politicamente exposta (declarada)', pontos: 100 });
+    else if (e.pepLista) pep.push({ motivo: 'Pessoa politicamente exposta (confirmada na lista interna)', pontos: 100 });
     else if (e.pep === null) pep.push({ motivo: 'Declaração PEP por preencher', pontos: 30 });
+    if (e.screening === 'confirmada') pep.push({ motivo: 'Correspondência confirmada com lista de sanções', pontos: 100 });
+    else if (e.screening === 'possivel') pep.push({ motivo: 'Possível correspondência em lista de sanções/PEP por decidir', pontos: 60 });
+    else if (e.screening === 'erro') { pep.push({ motivo: 'Screening com erro (lista indisponível)', pontos: 20 }); notasPep.push('Uma falha do screening nunca conta como «sem correspondência».'); }
+    else if (e.screening === 'nao_verificado') { pep.push({ motivo: 'Screening de PEP e sanções por fazer', pontos: 20 }); notasPep.push('Listas de sanções não verificadas para este cliente.'); }
+    else if (e.screening === 'desactualizado') pep.push({ motivo: 'Screening desactualizado (as listas mudaram depois)', pontos: 10 });
     const pais = String(e.pais || '').toUpperCase();
     if (pais && c.paisesRiscoElevado.includes(pais)) pep.push({ motivo: `País de risco elevado (${pais})`, pontos: 80 });
     else if (e.estrangeiro) pep.push({ motivo: 'Cliente estrangeiro', pontos: 15 });
@@ -218,7 +228,10 @@ export function calcularRisco(e: EntradaRisco, c: ConfiguracaoRisco): ResultadoR
     let nivel = nivelDaPontuacao(pontuacaoPonderada, c);
 
     // Regras próprias: não se diluem na média.
-    if (e.pep === true) regras.push({ id: 'pep', descricao: 'PEP: diligência reforçada e decisão de um responsável autorizado', nivelMinimo: 'elevado', revisao: true });
+    if (e.screening === 'confirmada') regras.push({ id: 'sancao_confirmada', descricao: 'Correspondência confirmada com lista de sanções: bloquear novas operações e aplicar as medidas restritivas (decisão separada da comunicação à UIF)', nivelMinimo: 'elevado', revisao: true });
+    if (e.screening === 'possivel') regras.push({ id: 'screening_possivel', descricao: 'Possível correspondência em lista: decidir antes de novas operações', nivelMinimo: 'medio', revisao: true });
+    if (e.screening === 'erro') regras.push({ id: 'screening_erro', descricao: 'Screening com erro: repetir quando a lista estiver disponível', revisao: true });
+    if (e.pep === true || e.pepLista) regras.push({ id: 'pep', descricao: 'PEP: diligência reforçada e decisão de um responsável autorizado', nivelMinimo: 'elevado', revisao: true });
     if (pais && c.paisesRiscoElevado.includes(pais)) regras.push({ id: 'pais_risco', descricao: `Ligação a país de risco elevado (${pais})`, nivelMinimo: 'elevado', revisao: true });
     if (e.kycEstado === 'recusado') regras.push({ id: 'kyc_recusado', descricao: 'Verificação de identidade recusada', nivelMinimo: 'elevado', revisao: true });
     if (e.documento === 'expirado') regras.push({ id: 'documento_expirado', descricao: 'Documento expirado: actualizar antes de novas operações', nivelMinimo: 'medio', revisao: true });

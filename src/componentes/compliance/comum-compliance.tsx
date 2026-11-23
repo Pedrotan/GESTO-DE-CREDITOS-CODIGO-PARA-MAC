@@ -14,9 +14,12 @@ import {
     type ActorCompliance, type AvaliacaoRisco, type DadosCompliance, type PerfilCompliance,
 } from '@/servicos/compliance/ServicoCompliance';
 import type { Client } from '@/tipos/credito';
+import { DADOS_SCREENING_VAZIOS, ServicoScreening, estadosPorCliente, type DadosScreening, type ScreeningRegisto } from '@/servicos/compliance/ServicoScreening';
+import { ROTULO_ESTADO_SCREENING, type EstadoScreening, type PendenteScreening } from '@/bibliotecas/compliance/screening';
 
 export const ABAS_COMPLIANCE = [
     { path: '/compliance/painel', label: 'Painel e clientes' },
+    { path: '/compliance/screening', label: 'Screening PEP e sanções' },
     { path: '/compliance/duplicados', label: 'Possíveis duplicados' },
     { path: '/compliance/modelo-risco', label: 'Modelo de risco' },
 ];
@@ -64,6 +67,20 @@ export function SeloRisco({ nivel, pontuacao, className }: { nivel: NivelRisco |
     </span>;
 }
 
+const COR_SCREENING: Record<EstadoScreening, string> = {
+    sem_correspondencia: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-900',
+    possivel: 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900',
+    confirmada: 'bg-red-600 text-white border-red-700',
+    erro: 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-900',
+    nao_verificado: 'bg-slate-50 text-slate-600 border-dashed border-slate-300 dark:bg-slate-900 dark:text-slate-300 dark:border-slate-700',
+    desactualizado: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-900',
+};
+export function SeloScreening({ estado, className }: { estado: EstadoScreening; className?: string }) {
+    return <span className={cn('inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-0.5 text-[11px] font-bold', COR_SCREENING[estado], className)}>
+        <span className="h-1.5 w-1.5 rounded-full bg-current" />{ROTULO_ESTADO_SCREENING[estado]}
+    </span>;
+}
+
 export function useActorCompliance() {
     const { user } = useAuth();
     return useMemo(() => {
@@ -83,12 +100,16 @@ export function useActorCompliance() {
 export type LinhaCompliance = {
     cliente: Client; perfil: PerfilCompliance | null; kyc: AvaliacaoKyc; avaliacao: AvaliacaoRisco | null;
     nivel: NivelRisco | null; duplicados: string[]; aRever: boolean; verificacaoPendente: boolean;
+    screening: { estado: EstadoScreening; pendentes: PendenteScreening[]; pepConfirmado: boolean; sancaoConfirmada: boolean; ultimo: ScreeningRegisto | null };
 };
 
 /** Dados do módulo e as linhas por cliente (perfil, estado KYC, última avaliação, duplicados). */
 export function useCompliance() {
     const { clients, credits } = useData();
-    const carga = useCarregar<DadosCompliance>(() => ServicoCompliance.carregar(), { perfis: [], verificacoes: [], avaliacoes: [], modelos: [], revisoes: [] });
+    const carga = useCarregar<DadosCompliance & { scr: DadosScreening }>(async () => {
+        const [base, scr] = await Promise.all([ServicoCompliance.carregar(), ServicoScreening.carregar()]);
+        return { ...base, scr };
+    }, { perfis: [], verificacoes: [], avaliacoes: [], modelos: [], revisoes: [], scr: DADOS_SCREENING_VAZIOS });
     const hoje = luandaTodayKey();
     const derivado = useMemo(() => {
         const { perfis, avaliacoes, revisoes, verificacoes } = carga.dados;
@@ -100,6 +121,7 @@ export function useCompliance() {
         // Sinal de risco: só as conclusões «pessoas diferentes» deixam de contar.
         const gruposRisco = detectarDuplicados(clientes, revisoes.filter(r => DECISOES_ESCLARECIDAS.includes(r.decisao)));
         const pendentes = new Set(verificacoes.filter(v => v.estado === 'pendente').map(v => v.client_id));
+        const screeningDe = estadosPorCliente(carga.dados.scr ?? DADOS_SCREENING_VAZIOS);
         const linhas: LinhaCompliance[] = clientes.map(c => {
             const perfil = perfilPor.get(c.id) || null;
             const avaliacao = avaliacaoPor.get(c.id) || null;
@@ -110,6 +132,7 @@ export function useCompliance() {
                 duplicados: motivosDoCliente(c.id, gruposRisco),
                 aRever: !!avaliacao && avaliacao.requer_revisao === 1 && !avaliacao.revisto_por,
                 verificacaoPendente: pendentes.has(c.id),
+                screening: screeningDe(c.id),
             };
         });
         return { linhas, gruposPorRever, gruposRisco, clientes };

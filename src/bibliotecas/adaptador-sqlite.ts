@@ -9,7 +9,7 @@ import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_
 import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
 import { MODELO_DECLARACAO_SERVICO } from '@/bibliotecas/rh/modelos-rh';
 import { MODELOS_CONTRATO_INICIAIS } from '@/bibliotecas/rh/contratos-rh';
-import { COMPLIANCE_FASE1_SQL, COMPLIANCE_SEED_MODELO_SQL } from '@/bibliotecas/compliance/esquema-compliance';
+import { COMPLIANCE_FASE1_SQL, COMPLIANCE_FASE2_SQL, COMPLIANCE_SEED_MODELO_SQL } from '@/bibliotecas/compliance/esquema-compliance';
 import { CONFIGURACAO_RISCO_INICIAL } from '@/bibliotecas/compliance/motor-risco';
 
 let db: Database | null = null;
@@ -1297,6 +1297,10 @@ const createTables = async () => {
         for (const statement of COMPLIANCE_FASE1_SQL) await executeSql(statement);
         await runSql(COMPLIANCE_SEED_MODELO_SQL, ['risco-modelo-v1', 'Modelo inicial (especificação BRAVALDO v1.0)', JSON.stringify(CONFIGURACAO_RISCO_INICIAL),
             'Pesos e escalões propostos na especificação, para testes. A validar pela avaliação de risco da empresa.', new Date().toISOString()]);
+    });
+    // Compliance (fase 2): screening de PEP e sanções (listas ONU/OFAC, lista interna, resultados e decisões).
+    await applyMigration(2026112402, 'compliance-fase2-screening', async () => {
+        for (const statement of COMPLIANCE_FASE2_SQL) await executeSql(statement);
     });
 
     // safeAddColumns for migrations

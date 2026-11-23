@@ -159,6 +159,8 @@ function mesesEntre(de: string | Date | null | undefined, ate: string) {
 /** Monta os dados de entrada do motor de risco a partir do cadastro, do perfil KYC e dos créditos do cliente. */
 export function entradaRisco(input: {
     cliente: ClienteKyc; perfil: PerfilKyc | null | undefined; creditos: CreditoRisco[]; duplicadosPorRever: string[]; hoje: string;
+    /** Estado do screening de PEP e sanções (sem ele, conta como «por fazer»). */
+    screening?: { estado: EntradaRisco['screening']; pepConfirmado: boolean };
 }): EntradaRisco {
     const { cliente: c, perfil: p, hoje } = input;
     const kyc = avaliarKyc(c, p, hoje);
@@ -179,6 +181,8 @@ export function entradaRisco(input: {
         profissao: p?.profissao || c.workPosition || null,
         sector: c.employmentSector || c.businessSector || null,
         pep: p?.pep === 1 ? true : p?.pep === 0 ? false : null,
+        screening: input.screening?.estado ?? 'nao_verificado',
+        pepLista: input.screening?.pepConfirmado ?? false,
         exposicao: emCurso.reduce((s, x) => s + Math.max(0, Number(x.currentBalance) || 0), 0),
         creditosActivos: emCurso.length,
         maiorCredito: relevantes.reduce((m, x) => Math.max(m, Number(x.principalAmount) || 0), 0),

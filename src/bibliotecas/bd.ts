@@ -88,6 +88,17 @@ export const db = {
         if (adapter === sqlite) await enqueueSyncTransaction(statements);
         return results;
     },
+    /**
+     * Transacção só neste dispositivo (não vai para a nuvem): para dados de referência volumosos que cada
+     * dispositivo carrega por si, como as entradas das listas de sanções importadas.
+     */
+    transactionLocal: async (statements: SqlTransactionStatement[]): Promise<any[]> => {
+        const adapter = state.adapter as any;
+        if (adapter.transaction) return await adapter.transaction(statements);
+        const results: any[] = [];
+        for (const statement of statements) results.push(await adapter.run(statement.sql, statement.params || []));
+        return results;
+    },
     all: async <T>(query: string, params?: any[]): Promise<T[]> => {
         return await (state.adapter as any).all(query, params) as T[];
     },
