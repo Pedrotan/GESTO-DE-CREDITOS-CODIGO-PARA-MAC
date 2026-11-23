@@ -98,6 +98,17 @@ export default function LivroPontoRH() {
     const [pedido, setPedido] = useState<Pedido>(null);
     const [imprimir, setImprimir] = useState(false);
     const [vista, setVista] = useState('grelha');
+    // Ligações do Painel de RH: ?importar=1 abre a importação do relógio; ?dia=…&funcionario=… abre esse dia.
+    useEffect(() => {
+        const p = new URLSearchParams(window.location.search || window.location.hash.split('?')[1] || '');
+        const dia = p.get('dia');
+        if (dia && /^\d{4}-\d{2}-\d{2}$/u.test(dia)) {
+            setAno(Number(dia.slice(0, 4))); setMes(Number(dia.slice(5, 7)));
+            const funcionario = p.get('funcionario');
+            if (funcionario) setPedido({ tipo: 'painel', funcionarioId: funcionario, data: dia });
+        }
+        if (p.get('importar') === '1') setPedido({ tipo: 'importar' });
+    }, []);
 
     useEffect(() => { const t = window.setTimeout(() => setPesquisa(pesquisaBruta.trim().toLowerCase()), 300); return () => window.clearTimeout(t); }, [pesquisaBruta]);
     useEffect(() => { try { localStorage.setItem(CHAVE_HORAS, mostrarHoras ? '1' : '0'); } catch { /* sem armazenamento */ } }, [mostrarHoras]);

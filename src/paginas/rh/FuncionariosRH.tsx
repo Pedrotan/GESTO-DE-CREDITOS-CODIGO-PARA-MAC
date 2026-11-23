@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { camposEmFalta } from '@/bibliotecas/rh/painel-rh';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Button } from '@/componentes/ui/button';
@@ -68,11 +69,14 @@ export default function FuncionariosRH() {
     const [pesquisaBruta, setPesquisaBruta] = useState(url.get('q') || '');
     useEffect(() => { const t = setTimeout(() => mudar('q', pesquisaBruta.trim(), ''), 300); return () => clearTimeout(t); }, [pesquisaBruta]); // eslint-disable-line react-hooks/exhaustive-deps
     const pesquisa = (url.get('q') || '').toLowerCase();
+    const soIncompletas = url.get('incompletas') === '1';
 
     const [formulario, setFormulario] = useState<{ aberto: boolean; funcionario: Funcionario | null; seccao?: AlvoEdicao }>({ aberto: false, funcionario: null });
     const fichaId = url.get('ficha');
     const abrirFicha = (id: string | null) => mudar('ficha', id || '', '');
     const [dialogo, setDialogo] = useState<Dialogo | null>(null);
+    // «Novo funcionário» do Painel de RH abre já o formulário.
+    useEffect(() => { if (url.get('novo') === '1' && gerir) { setFormulario({ aberto: true, funcionario: null }); mudar('novo', '', ''); } }, [gerir]); // eslint-disable-line react-hooks/exhaustive-deps
     const [seleccao, setSeleccao] = useState<Set<string>>(new Set());
     const hoje = luandaTodayKey();
     const anosBI = valorNumerico(parametros, 'bi_anos_validade', hoje, 10);
@@ -82,8 +86,9 @@ export default function FuncionariosRH() {
     const salarioActual = useMemo(() => new Map(contratos.filter(c => c.estado === 'activo').map(c => [c.funcionario_id, c.salario_base_minor])), [contratos]);
     const lista = useMemo(() => funcionarios.filter(f => (estado === TODOS || f.estado === estado) && (departamento === TODOS || f.departamento_id === departamento)
         && (cargo === TODOS || f.cargo_id === cargo) && (vinculo === TODOS || f.vinculo === vinculo)
-        && (!pesquisa || [f.nome, f.numero_mecanografico, f.nif, f.bi_numero, f.telefone, f.email].some(v => v?.toLowerCase().includes(pesquisa)))),
-    [funcionarios, pesquisa, estado, departamento, cargo, vinculo]);
+        && (!pesquisa || [f.nome, f.numero_mecanografico, f.nif, f.bi_numero, f.telefone, f.email].some(v => v?.toLowerCase().includes(pesquisa)))
+        && (!soIncompletas || camposEmFalta(f).length > 0)),
+    [funcionarios, pesquisa, estado, departamento, cargo, vinculo, soIncompletas]);
     useEffect(() => { setSeleccao(s => new Set([...s].filter(id => lista.some(f => f.id === id)))); }, [lista]);
     const ficha = funcionarios.find(f => f.id === fichaId) || null;
 
@@ -97,7 +102,7 @@ export default function FuncionariosRH() {
     const seleccionados = lista.filter(f => seleccao.has(f.id));
     const todosMarcados = lista.length > 0 && seleccionados.length === lista.length;
     const descricaoFiltros = [estado !== TODOS ? `Estado: ${estado === 'cessado' ? 'terminados' : estado}` : '', departamento !== TODOS ? `Departamento: ${departamentos.find(d => d.id === departamento)?.nome}` : '',
-        cargo !== TODOS ? `Cargo: ${cargos.find(c => c.id === cargo)?.nome}` : '', vinculo !== TODOS ? `Vínculo: ${vinculo}` : '', pesquisa ? `Pesquisa: «${pesquisa}»` : ''].filter(Boolean).join(' · ');
+        cargo !== TODOS ? `Cargo: ${cargos.find(c => c.id === cargo)?.nome}` : '', vinculo !== TODOS ? `Vínculo: ${vinculo}` : '', pesquisa ? `Pesquisa: «${pesquisa}»` : '', soIncompletas ? 'Só fichas incompletas' : ''].filter(Boolean).join(' · ');
     const exportar = (formato: 'excel' | 'pdf', alvo = lista) => actor && void executar(async () => exportarFuncionarios(alvo, ctx, formato, companySettings, actor, salarios, descricaoFiltros), 'Lista exportada');
     const declaracoes = (alvo: Funcionario[]) => actor && void executar(async () => { for (const f of alvo) await emitirDeclaracaoServico(f, ctx, companySettings, actor); }, alvo.length > 1 ? `${alvo.length} declarações geradas` : 'Declaração gerada');
     const recarregar = () => void base.recarregar();
