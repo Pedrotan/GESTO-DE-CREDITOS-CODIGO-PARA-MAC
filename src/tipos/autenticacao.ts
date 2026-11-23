@@ -170,6 +170,7 @@ export const AVAILABLE_PERMISSIONS = [
     { id: 'compliance_view', label: 'Compliance: Consultar', description: 'Ver o painel de Compliance, o perfil KYC, as avaliações de risco e os possíveis duplicados' },
     { id: 'compliance_manage', label: 'Compliance: Registar', description: 'Preencher o perfil KYC, registar verificações de identidade e pedir avaliações de risco' },
     { id: 'compliance_approve', label: 'Compliance: Decidir', description: 'Confirmar ou recusar verificações KYC, rever avaliações de risco e concluir revisões de duplicados (nunca as que o próprio registou)' },
+    { id: 'compliance_reports', label: 'Compliance: Relatórios e exportação', description: 'Exportar relatórios de Compliance (CSV e PDF); cada exportação fica registada na auditoria' },
     { id: 'compliance_settings', label: 'Compliance: Modelo de risco', description: 'Criar e activar novas versões do modelo de risco (pesos, escalões, prazos de revisão e listas)' },
 ];
 

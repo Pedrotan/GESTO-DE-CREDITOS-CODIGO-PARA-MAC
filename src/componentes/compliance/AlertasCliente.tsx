@@ -7,8 +7,9 @@ import type { AlertaRegisto, HistoricoAlerta } from '@/servicos/compliance/Servi
 import type { ActorCompliance } from '@/servicos/compliance/ServicoCompliance';
 
 /** Secção da ficha: alertas de operações do cliente (abertos primeiro), com o detalhe e a triagem. */
-export function AlertasCliente({ alertas, historico, nomeCliente, actor, aoMudar }: {
+export function AlertasCliente({ alertas, historico, nomeCliente, actor, aoMudar, casosDoAlerta }: {
     alertas: AlertaRegisto[]; historico: HistoricoAlerta[]; nomeCliente: string; actor: ActorCompliance | null; aoMudar: () => void;
+    casosDoAlerta?: (alertaId: string) => Array<{ id: string; numero: string }>;
 }) {
     const [aberto, setAberto] = useState<string | null>(null);
     const ordenados = [...alertas].sort((a, b) => Number(a.estado === 'CLOSED') - Number(b.estado === 'CLOSED') || b.detectado_em.localeCompare(a.detectado_em));
@@ -40,7 +41,7 @@ export function AlertasCliente({ alertas, historico, nomeCliente, actor, aoMudar
                     </ul>
                 )}
             </div>
-            {actual && <DetalheAlerta alerta={actual} historico={historico.filter(h => h.alerta_id === actual.id)} nomeCliente={nomeCliente} actor={actor}
+            {actual && <DetalheAlerta alerta={actual} historico={historico.filter(h => h.alerta_id === actual.id)} nomeCliente={nomeCliente} actor={actor} casos={casosDoAlerta?.(actual.id)}
                 onClose={() => setAberto(null)} aoMudar={aoMudar} />}
         </section>
     );

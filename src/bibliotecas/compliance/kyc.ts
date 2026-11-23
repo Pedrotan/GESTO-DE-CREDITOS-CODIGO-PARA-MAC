@@ -163,6 +163,7 @@ export function entradaRisco(input: {
     screening?: { estado: EntradaRisco['screening']; pepConfirmado: boolean };
     /** Alertas da monitorização concluídos como fundamentados. */
     alertasFundamentados?: number;
+    suspeitaFundamentada?: boolean;
 }): EntradaRisco {
     const { cliente: c, perfil: p, hoje } = input;
     const kyc = avaliarKyc(c, p, hoje);
@@ -186,6 +187,7 @@ export function entradaRisco(input: {
         screening: input.screening?.estado ?? 'nao_verificado',
         pepLista: input.screening?.pepConfirmado ?? false,
         alertasFundamentados: input.alertasFundamentados ?? 0,
+        suspeitaFundamentada: input.suspeitaFundamentada ?? false,
         exposicao: emCurso.reduce((s, x) => s + Math.max(0, Number(x.currentBalance) || 0), 0),
         creditosActivos: emCurso.length,
         maiorCredito: relevantes.reduce((m, x) => Math.max(m, Number(x.principalAmount) || 0), 0),

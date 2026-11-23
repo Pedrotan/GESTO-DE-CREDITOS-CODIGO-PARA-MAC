@@ -89,6 +89,8 @@ export type EntradaRisco = {
     clienteBloqueado: boolean;
     /** Alertas de operações concluídos como fundamentados (monitorização). */
     alertasFundamentados?: number;
+    /** Investigação concluída com «suspeita fundamentada». */
+    suspeitaFundamentada?: boolean;
     /** Meses desde o cadastro (null = desconhecido). */
     antiguidadeMeses: number | null;
 };
@@ -224,6 +226,7 @@ export function calcularRisco(e: EntradaRisco, c: ConfiguracaoRisco): ResultadoR
     else if (e.maiorAtrasoDias > 30) hist.push({ motivo: `Atraso de ${e.maiorAtrasoDias} dias`, pontos: 30 });
     else if (e.maiorAtrasoDias > 0) hist.push({ motivo: `Atraso de ${e.maiorAtrasoDias} dia(s)`, pontos: 15 });
     if (e.clienteBloqueado) hist.push({ motivo: 'Cliente bloqueado no cadastro', pontos: 40 });
+    if (e.suspeitaFundamentada) hist.push({ motivo: 'Investigação concluída com suspeita fundamentada', pontos: 60 });
     if (e.alertasFundamentados) hist.push({ motivo: `${e.alertasFundamentados} alerta(s) de operações fundamentado(s)`, pontos: 50 });
     if (e.antiguidadeMeses !== null && e.antiguidadeMeses < 6) hist.push({ motivo: 'Cliente recente (menos de 6 meses de relação)', pontos: 20 });
 
@@ -246,6 +249,7 @@ export function calcularRisco(e: EntradaRisco, c: ConfiguracaoRisco): ResultadoR
     if (e.kycEstado === 'recusado') regras.push({ id: 'kyc_recusado', descricao: 'Verificação de identidade recusada', nivelMinimo: 'elevado', revisao: true });
     if (e.documento === 'expirado') regras.push({ id: 'documento_expirado', descricao: 'Documento expirado: actualizar antes de novas operações', nivelMinimo: 'medio', revisao: true });
     if (e.duplicadosPorRever.length) regras.push({ id: 'duplicado', descricao: 'Possível duplicado por rever', nivelMinimo: 'medio', revisao: true });
+    if (e.suspeitaFundamentada) regras.push({ id: 'suspeita_fundamentada', descricao: 'Investigação concluída com suspeita fundamentada: diligência reforçada e medidas decididas no caso', nivelMinimo: 'elevado', revisao: true });
     if (e.alertasFundamentados) regras.push({ id: 'alertas_fundamentados', descricao: 'Operações atípicas ou fraude fundamentadas pela monitorização', nivelMinimo: 'medio', revisao: true });
     if (actividadeRisco) regras.push({ id: 'actividade_risco', descricao: `Actividade de risco acrescido («${actividadeRisco}»)`, nivelMinimo: 'medio' });
     for (const r of regras) if (r.nivelMinimo) nivel = maior(nivel, r.nivelMinimo);

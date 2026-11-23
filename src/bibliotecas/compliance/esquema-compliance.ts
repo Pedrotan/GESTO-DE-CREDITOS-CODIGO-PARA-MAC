@@ -189,6 +189,95 @@ export const COMPLIANCE_FASE3_SQL = [
         BEGIN SELECT RAISE(ABORT, 'O histórico dos alertas é imutável'); END`,
 ];
 
+// Fase 4: investigações (casos), ligações a alertas/screenings/avaliações, notas, evidências e decisões.
+// A conclusão interna e a decisão sobre a comunicação à UIF são registos SEPARADOS (uma de cada por caso).
+// Na base de dados: nada se apaga; decisões e evidências são imutáveis; quem abriu o caso não regista a conclusão
+// (salvo o Super Administrador); um caso só se encerra com conclusão e, se a suspeita for fundamentada, com a
+// decisão sobre a UIF e pelo menos uma medida; um caso encerrado não se altera.
+export const COMPLIANCE_FASE4_SQL = [
+    `CREATE TABLE IF NOT EXISTS compliance_caso (
+        id TEXT PRIMARY KEY, numero TEXT NOT NULL, client_id TEXT NOT NULL,
+        tipo TEXT NOT NULL CHECK(tipo IN ('actividade_suspeita', 'fraude', 'kyc', 'sancoes', 'outro')),
+        prioridade TEXT NOT NULL CHECK(prioridade IN ('baixa', 'media', 'alta', 'critica')), titulo TEXT NOT NULL, descricao TEXT NOT NULL,
+        estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'em_investigacao', 'aguarda_decisao', 'encerrado')),
+        responsavel_id TEXT, responsavel_nome TEXT, prazo TEXT,
+        aberto_em TEXT NOT NULL, aberto_por TEXT, aberto_por_nome TEXT, actualizado_em TEXT, actualizado_por TEXT,
+        encerrado_em TEXT, encerrado_por TEXT, encerrado_por_nome TEXT, resumo_final TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_caso_cliente ON compliance_caso(client_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_caso_estado ON compliance_caso(estado, prazo)`,
+    `CREATE TABLE IF NOT EXISTS compliance_caso_ligacao (
+        id TEXT PRIMARY KEY, caso_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('alerta', 'screening', 'avaliacao', 'verificacao', 'outro')),
+        ref_id TEXT NOT NULL, descricao TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_caso_ligacao ON compliance_caso_ligacao(caso_id)`,
+    `CREATE TABLE IF NOT EXISTS compliance_caso_nota (
+        id TEXT PRIMARY KEY, caso_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('nota', 'estado', 'atribuicao', 'evidencia', 'decisao', 'ligacao')),
+        texto TEXT, estado_anterior TEXT, estado_novo TEXT, por TEXT, por_nome TEXT, em TEXT NOT NULL
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_caso_nota ON compliance_caso_nota(caso_id, em)`,
+    `CREATE TABLE IF NOT EXISTS compliance_evidencia (
+        id TEXT PRIMARY KEY, caso_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('documento', 'extracto', 'declaracao', 'captura', 'nota', 'outro')),
+        titulo TEXT NOT NULL, descricao TEXT, ficheiro_nome TEXT, ficheiro_mime TEXT, ficheiro_tamanho INTEGER, ficheiro_hash TEXT,
+        criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_evidencia_caso ON compliance_evidencia(caso_id)`,
+    `CREATE TABLE IF NOT EXISTS compliance_evidencia_ficheiro (id TEXT PRIMARY KEY, conteudo TEXT NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS compliance_decisao (
+        id TEXT PRIMARY KEY, caso_id TEXT NOT NULL, client_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('conclusao', 'medida', 'uif')),
+        decisao TEXT NOT NULL, fundamento TEXT NOT NULL, referencia TEXT, data_referencia TEXT,
+        decidido_em TEXT NOT NULL, decidido_por TEXT, decidido_por_nome TEXT,
+        CHECK((tipo = 'conclusao' AND decisao IN ('suspeita_fundamentada', 'sem_fundamento', 'inconclusivo'))
+            OR (tipo = 'medida' AND decisao IN ('diligencia_reforcada', 'monitorizacao_reforcada', 'actualizacao_kyc', 'recusa_operacao', 'bloqueio_operacoes', 'encerramento_relacao', 'nenhuma'))
+            OR (tipo = 'uif' AND decisao IN ('comunicar', 'nao_comunicar')))
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_decisao_caso ON compliance_decisao(caso_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_decisao_cliente ON compliance_decisao(client_id)`,
+    // ── Imutabilidade e regras ──────────────────────────────────────────────────────
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_delete BEFORE DELETE ON compliance_caso
+        BEGIN SELECT RAISE(ABORT, 'As investigações não se apagam: encerram-se com decisão'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_imutavel BEFORE UPDATE ON compliance_caso
+        WHEN OLD.estado = 'encerrado' OR NEW.numero <> OLD.numero OR NEW.client_id <> OLD.client_id OR NEW.tipo <> OLD.tipo
+            OR NEW.descricao <> OLD.descricao OR NEW.aberto_em <> OLD.aberto_em OR COALESCE(NEW.aberto_por, '') <> COALESCE(OLD.aberto_por, '')
+        BEGIN SELECT RAISE(ABORT, 'Uma investigação encerrada não se altera e os dados de abertura nunca mudam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_encerrar BEFORE UPDATE ON compliance_caso
+        WHEN NEW.estado = 'encerrado' AND OLD.estado <> 'encerrado' AND (
+            NOT EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.id AND tipo = 'conclusao')
+            OR (EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.id AND tipo = 'conclusao' AND decisao = 'suspeita_fundamentada')
+                AND (NOT EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.id AND tipo = 'uif')
+                    OR NOT EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.id AND tipo = 'medida'))))
+        BEGIN SELECT RAISE(ABORT, 'Para encerrar: conclusão interna e, se a suspeita for fundamentada, decisão sobre a UIF e pelo menos uma medida'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_decisao_regras BEFORE INSERT ON compliance_decisao
+        WHEN EXISTS (SELECT 1 FROM compliance_caso WHERE id = NEW.caso_id AND estado = 'encerrado')
+            OR (NEW.tipo IN ('conclusao', 'uif') AND EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.caso_id AND tipo = NEW.tipo))
+        BEGIN SELECT RAISE(ABORT, 'A conclusão e a decisão sobre a UIF registam-se uma só vez e não depois de encerrado o caso'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_decisao_quatro_olhos BEFORE INSERT ON compliance_decisao
+        WHEN NEW.tipo = 'conclusao' AND NEW.decidido_por IS NOT NULL
+            AND NEW.decidido_por = (SELECT aberto_por FROM compliance_caso WHERE id = NEW.caso_id)
+            AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.decidido_por AND role = 'super_admin')
+        BEGIN SELECT RAISE(ABORT, 'Quem abriu a investigação não regista a conclusão: tem de ser outro responsável'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_decisao_update BEFORE UPDATE ON compliance_decisao
+        BEGIN SELECT RAISE(ABORT, 'As decisões não se alteram'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_decisao_delete BEFORE DELETE ON compliance_decisao
+        BEGIN SELECT RAISE(ABORT, 'As decisões não se apagam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_ligacao_update BEFORE UPDATE ON compliance_caso_ligacao
+        BEGIN SELECT RAISE(ABORT, 'As ligações da investigação não se alteram'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_ligacao_delete BEFORE DELETE ON compliance_caso_ligacao
+        BEGIN SELECT RAISE(ABORT, 'As ligações da investigação não se apagam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_nota_update BEFORE UPDATE ON compliance_caso_nota
+        BEGIN SELECT RAISE(ABORT, 'O histórico da investigação é imutável'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_nota_delete BEFORE DELETE ON compliance_caso_nota
+        BEGIN SELECT RAISE(ABORT, 'O histórico da investigação é imutável'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_evidencia_update BEFORE UPDATE ON compliance_evidencia
+        BEGIN SELECT RAISE(ABORT, 'As evidências não se alteram'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_evidencia_delete BEFORE DELETE ON compliance_evidencia
+        BEGIN SELECT RAISE(ABORT, 'As evidências não se apagam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_evidencia_ficheiro_update BEFORE UPDATE ON compliance_evidencia_ficheiro
+        BEGIN SELECT RAISE(ABORT, 'As evidências não se alteram'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_evidencia_ficheiro_delete BEFORE DELETE ON compliance_evidencia_ficheiro
+        BEGIN SELECT RAISE(ABORT, 'As evidências não se apagam'); END`,
+];
+
 /** Versão inicial do modelo de risco (pesos da especificação, a validar pela avaliação de risco da empresa). */
 export const COMPLIANCE_SEED_MODELO_SQL = `INSERT OR IGNORE INTO compliance_risco_modelo (id, versao, nome, configuracao, activo, notas, criado_em, criado_por, criado_por_nome)
     VALUES (?, 1, ?, ?, 1, ?, ?, 'sistema', 'Sistema')`;

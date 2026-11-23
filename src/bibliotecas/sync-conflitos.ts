@@ -38,6 +38,8 @@ const ENTITY_LABELS: Record<string, string> = {
     compliance_lista_versao: 'Compliance · Versões das listas de sanções', compliance_lista_interna: 'Compliance · Lista interna (PEP e designações)',
     compliance_screening: 'Compliance · Screening', compliance_screening_decisao: 'Compliance · Decisões do screening',
     compliance_alerta: 'Compliance · Alertas de operações', compliance_alerta_historico: 'Compliance · Histórico dos alertas',
+    compliance_caso: 'Compliance · Investigações', compliance_caso_ligacao: 'Compliance · Ligações das investigações', compliance_caso_nota: 'Compliance · Histórico das investigações',
+    compliance_evidencia: 'Compliance · Evidências', compliance_evidencia_ficheiro: 'Compliance · Ficheiros das evidências', compliance_decisao: 'Compliance · Decisões',
     rh_alerta: 'RH · Alertas', rh_ausencia: 'RH · Ausências', rh_cargo: 'RH · Cargos', rh_contrato: 'RH · Contratos de trabalho', rh_contrato_modelo: 'RH · Modelos de contrato', rh_departamento: 'RH · Departamentos', rh_seccao: 'RH · Secções',
     rh_dependente: 'RH · Dependentes', rh_documento: 'RH · Documentos', rh_documento_emitido: 'RH · Documentos emitidos', rh_documento_ficheiro: 'RH · Ficheiros',
     rh_feriado: 'RH · Feriados', rh_funcionario: 'RH · Funcionários', rh_funcionario_rubrica: 'RH · Rubricas do funcionário', rh_historico_salarial: 'RH · Histórico salarial',

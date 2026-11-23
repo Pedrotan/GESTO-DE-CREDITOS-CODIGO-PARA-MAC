@@ -149,8 +149,36 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_compliance_alerta_historico ON compliance_alerta_historico(alerta_id, em)"
   ],
   [
+    "8025fa6874c015c4bf8e8c301bde0085036920767a47bd24fc7ee9480cce8259",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_caso_cliente ON compliance_caso(client_id)"
+  ],
+  [
+    "4422dfd6b5c74ce46306f8064a4ba79b66fe2e343aa7bf6347e6802213cf4836",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_caso_estado ON compliance_caso(estado, prazo)"
+  ],
+  [
+    "fc7b6c020bb2355b70b032813041751ddb28d888927a09872854e89fdd7d9b39",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_caso_ligacao ON compliance_caso_ligacao(caso_id)"
+  ],
+  [
+    "ce6665f49d961209abc5d703cac771159696d71df9bea85f7742d11d7df83fa0",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_caso_nota ON compliance_caso_nota(caso_id, em)"
+  ],
+  [
+    "4eb8bd26ceb9a11e43d936c1b74b0a78efda2637034b417dbe171a3cce1cbfc0",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_decisao_caso ON compliance_decisao(caso_id)"
+  ],
+  [
+    "68562a8151b23ba7e802d4454937895ecc4743d6543b4f9f60ae6ebdbb886904",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_decisao_cliente ON compliance_decisao(client_id)"
+  ],
+  [
     "bd5f2899fdcb7d92a6fe14c54b7ee32c3fc82cbbe76f8380ae4fe05e4e52b14d",
     "CREATE INDEX IF NOT EXISTS idx_compliance_duplicado_chave ON compliance_duplicado_revisao(chave)"
+  ],
+  [
+    "1ca6359d5f389ff67c50830a32580d0d27a79fc7950a4cc8b5880ac46c7eae8f",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_evidencia_caso ON compliance_evidencia(caso_id)"
   ],
   [
     "121134e06e7d17c9cf35203babcb80282e549d93a021017340d367aec894977c",
@@ -549,8 +577,32 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TABLE IF NOT EXISTS compliance_alerta_historico ( id TEXT PRIMARY KEY, alerta_id TEXT NOT NULL, estado_anterior TEXT, estado_novo TEXT NOT NULL, comentario TEXT, por TEXT, por_nome TEXT, em TEXT NOT NULL )"
   ],
   [
+    "bfa88d6699139a64940394576584010faa744a7bf08b5059aa1c5d2708aea2c1",
+    "CREATE TABLE IF NOT EXISTS compliance_caso ( id TEXT PRIMARY KEY, numero TEXT NOT NULL, client_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('actividade_suspeita', 'fraude', 'kyc', 'sancoes', 'outro')), prioridade TEXT NOT NULL CHECK(prioridade IN ('baixa', 'media', 'alta', 'critica')), titulo TEXT NOT NULL, descricao TEXT NOT NULL, estado TEXT NOT NULL DEFAULT 'aberto' CHECK(estado IN ('aberto', 'em_investigacao', 'aguarda_decisao', 'encerrado')), responsavel_id TEXT, responsavel_nome TEXT, prazo TEXT, aberto_em TEXT NOT NULL, aberto_por TEXT, aberto_por_nome TEXT, actualizado_em TEXT, actualizado_por TEXT, encerrado_em TEXT, encerrado_por TEXT, encerrado_por_nome TEXT, resumo_final TEXT )"
+  ],
+  [
+    "88801b9a8538924503ad2b7a70a2283e90c6364c0ad12e0a9c3675df77fc9e83",
+    "CREATE TABLE IF NOT EXISTS compliance_caso_ligacao ( id TEXT PRIMARY KEY, caso_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('alerta', 'screening', 'avaliacao', 'verificacao', 'outro')), ref_id TEXT NOT NULL, descricao TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )"
+  ],
+  [
+    "6f9b1630775837f9bbde72b253d6b7fb4a993b6418ee2c84232c27cbf0a20ad8",
+    "CREATE TABLE IF NOT EXISTS compliance_caso_nota ( id TEXT PRIMARY KEY, caso_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('nota', 'estado', 'atribuicao', 'evidencia', 'decisao', 'ligacao')), texto TEXT, estado_anterior TEXT, estado_novo TEXT, por TEXT, por_nome TEXT, em TEXT NOT NULL )"
+  ],
+  [
+    "e47dccb1f49dbaebab7b4cbda34d814b03921ed6d6dc68788f1efe2712584fce",
+    "CREATE TABLE IF NOT EXISTS compliance_decisao ( id TEXT PRIMARY KEY, caso_id TEXT NOT NULL, client_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('conclusao', 'medida', 'uif')), decisao TEXT NOT NULL, fundamento TEXT NOT NULL, referencia TEXT, data_referencia TEXT, decidido_em TEXT NOT NULL, decidido_por TEXT, decidido_por_nome TEXT, CHECK((tipo = 'conclusao' AND decisao IN ('suspeita_fundamentada', 'sem_fundamento', 'inconclusivo')) OR (tipo = 'medida' AND decisao IN ('diligencia_reforcada', 'monitorizacao_reforcada', 'actualizacao_kyc', 'recusa_operacao', 'bloqueio_operacoes', 'encerramento_relacao', 'nenhuma')) OR (tipo = 'uif' AND decisao IN ('comunicar', 'nao_comunicar'))) )"
+  ],
+  [
     "a32fe9500a99a4300d0c9d508d2d4f71b0194b3922af5c5f6071343ddbd845d6",
     "CREATE TABLE IF NOT EXISTS compliance_duplicado_revisao ( id TEXT PRIMARY KEY, chave TEXT NOT NULL, motivo TEXT NOT NULL, clientes TEXT NOT NULL, decisao TEXT NOT NULL CHECK(decisao IN ('homonimo', 'familia_partilha', 'mesma_pessoa', 'erro_cadastro', 'suspeita_fraude')), justificacao TEXT NOT NULL, decidido_por TEXT, decidido_por_nome TEXT, decidido_em TEXT NOT NULL )"
+  ],
+  [
+    "ed4526c783623b62692c24765c4dd5727deaf82d12fb4d2508d5b5efb3ec380e",
+    "CREATE TABLE IF NOT EXISTS compliance_evidencia ( id TEXT PRIMARY KEY, caso_id TEXT NOT NULL, tipo TEXT NOT NULL CHECK(tipo IN ('documento', 'extracto', 'declaracao', 'captura', 'nota', 'outro')), titulo TEXT NOT NULL, descricao TEXT, ficheiro_nome TEXT, ficheiro_mime TEXT, ficheiro_tamanho INTEGER, ficheiro_hash TEXT, criado_em TEXT NOT NULL, criado_por TEXT, criado_por_nome TEXT )"
+  ],
+  [
+    "8236107c226cb2e4f464fb95b27a0d34e2905be01fb47a4110eaf82fbcc88365",
+    "CREATE TABLE IF NOT EXISTS compliance_evidencia_ficheiro (id TEXT PRIMARY KEY, conteudo TEXT NOT NULL)"
   ],
   [
     "f7c8457c7d43f2901742acfc70c8abea82d0849fac2f4cadf5f6dd5b6e3d88bb",
@@ -1125,12 +1177,72 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_avaliacao_quatro_olhos BEFORE UPDATE ON compliance_risco_avaliacao WHEN NEW.revisto_por IS NOT NULL AND NEW.revisto_por = OLD.criado_por AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.revisto_por AND role = 'super_admin') BEGIN SELECT RAISE(ABORT, 'Quem pediu a avaliação de risco não a pode rever')"
   ],
   [
+    "9c107f1fdd5062566f8a59882581bf3de66ee79b5f5a67e51cf012850ff49628",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_delete BEFORE DELETE ON compliance_caso BEGIN SELECT RAISE(ABORT, 'As investigações não se apagam: encerram-se com decisão')"
+  ],
+  [
+    "7b13d870ecf91a83d31d77717db52f4938b6393fe01cade6fc185a1b2fbb7882",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_encerrar BEFORE UPDATE ON compliance_caso WHEN NEW.estado = 'encerrado' AND OLD.estado <> 'encerrado' AND ( NOT EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.id AND tipo = 'conclusao') OR (EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.id AND tipo = 'conclusao' AND decisao = 'suspeita_fundamentada') AND (NOT EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.id AND tipo = 'uif') OR NOT EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.id AND tipo = 'medida')))) BEGIN SELECT RAISE(ABORT, 'Para encerrar: conclusão interna e, se a suspeita for fundamentada, decisão sobre a UIF e pelo menos uma medida')"
+  ],
+  [
+    "f7403db6035ddcb5c4ad889299bbb8de7e0baef8a2c233ede5fe7d78b10addbe",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_imutavel BEFORE UPDATE ON compliance_caso WHEN OLD.estado = 'encerrado' OR NEW.numero <> OLD.numero OR NEW.client_id <> OLD.client_id OR NEW.tipo <> OLD.tipo OR NEW.descricao <> OLD.descricao OR NEW.aberto_em <> OLD.aberto_em OR COALESCE(NEW.aberto_por, '') <> COALESCE(OLD.aberto_por, '') BEGIN SELECT RAISE(ABORT, 'Uma investigação encerrada não se altera e os dados de abertura nunca mudam')"
+  ],
+  [
+    "9b26912f2b371e726384423b3d614ad6d54ed2e01b9234b1b9be63230a53dd41",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_ligacao_delete BEFORE DELETE ON compliance_caso_ligacao BEGIN SELECT RAISE(ABORT, 'As ligações da investigação não se apagam')"
+  ],
+  [
+    "73f4720605da81962e3ff6072187744d88ae5acc86d61d0c711a3a7925eb8b4c",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_ligacao_update BEFORE UPDATE ON compliance_caso_ligacao BEGIN SELECT RAISE(ABORT, 'As ligações da investigação não se alteram')"
+  ],
+  [
+    "ca84b80eb9df8cd7554a98fe69820b636d6f6feeca85ade7915fc7cdd49b95ba",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_nota_delete BEFORE DELETE ON compliance_caso_nota BEGIN SELECT RAISE(ABORT, 'O histórico da investigação é imutável')"
+  ],
+  [
+    "e677ca3a6ca9d802b6e6f574ca8fef2e5499c79879f0385f277461fbd15f4efe",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_caso_nota_update BEFORE UPDATE ON compliance_caso_nota BEGIN SELECT RAISE(ABORT, 'O histórico da investigação é imutável')"
+  ],
+  [
+    "c7ccfdee4a1b31d69c2c12f0cfa3d7095a9cba4fee0aa0ef186d94f69d427695",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_decisao_delete BEFORE DELETE ON compliance_decisao BEGIN SELECT RAISE(ABORT, 'As decisões não se apagam')"
+  ],
+  [
+    "a89ae7e3eeab7ae0201e4df168ac5b8fba69a766d0b9817b4b94b9a11a129370",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_decisao_quatro_olhos BEFORE INSERT ON compliance_decisao WHEN NEW.tipo = 'conclusao' AND NEW.decidido_por IS NOT NULL AND NEW.decidido_por = (SELECT aberto_por FROM compliance_caso WHERE id = NEW.caso_id) AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.decidido_por AND role = 'super_admin') BEGIN SELECT RAISE(ABORT, 'Quem abriu a investigação não regista a conclusão: tem de ser outro responsável')"
+  ],
+  [
+    "d8f74bf1dca2cf16d7136fa16fd5651072444c6f20b117906c03924ae26e5e52",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_decisao_regras BEFORE INSERT ON compliance_decisao WHEN EXISTS (SELECT 1 FROM compliance_caso WHERE id = NEW.caso_id AND estado = 'encerrado') OR (NEW.tipo IN ('conclusao', 'uif') AND EXISTS (SELECT 1 FROM compliance_decisao WHERE caso_id = NEW.caso_id AND tipo = NEW.tipo)) BEGIN SELECT RAISE(ABORT, 'A conclusão e a decisão sobre a UIF registam-se uma só vez e não depois de encerrado o caso')"
+  ],
+  [
+    "4b8af6397c8c07c8be697925e87b6865b2d0197cd32643b1f5498cd292cf123d",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_decisao_update BEFORE UPDATE ON compliance_decisao BEGIN SELECT RAISE(ABORT, 'As decisões não se alteram')"
+  ],
+  [
     "92a1e7823fa6d2427b91560c068aa2aa4dfff41fd18d2acd102b489f58088b02",
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_duplicado_delete BEFORE DELETE ON compliance_duplicado_revisao BEGIN SELECT RAISE(ABORT, 'As revisões de duplicados não se apagam')"
   ],
   [
     "37eaa2c4a306d82c17153953273455c5aeafc3ceeefdd980745353cd55ec9875",
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_duplicado_update BEFORE UPDATE ON compliance_duplicado_revisao BEGIN SELECT RAISE(ABORT, 'As revisões de duplicados não se alteram')"
+  ],
+  [
+    "fa18123f1c20d31b739c0e739d0fa356474d8a8a3c27b5f2d3f525547c62ba4e",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_evidencia_delete BEFORE DELETE ON compliance_evidencia BEGIN SELECT RAISE(ABORT, 'As evidências não se apagam')"
+  ],
+  [
+    "4dcc62c69470485db42aa941b3d94423552022aad3eb8ab4824f774b64323b59",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_evidencia_ficheiro_delete BEFORE DELETE ON compliance_evidencia_ficheiro BEGIN SELECT RAISE(ABORT, 'As evidências não se apagam')"
+  ],
+  [
+    "01785384f3af865d8a1e7b28227399f1a69e29c5cd03f5d9b67e57530f88a566",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_evidencia_ficheiro_update BEFORE UPDATE ON compliance_evidencia_ficheiro BEGIN SELECT RAISE(ABORT, 'As evidências não se alteram')"
+  ],
+  [
+    "6dfe4bd848adcea9203a79d005467e47c74a4551646677341fbe7c4d9f8b5924",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_evidencia_update BEFORE UPDATE ON compliance_evidencia BEGIN SELECT RAISE(ABORT, 'As evidências não se alteram')"
   ],
   [
     "7a214ceb3479cc4fccc867371a8342a2dd4b527a5ee2548a3b444d38ab4606a4",
@@ -1805,8 +1917,28 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT INTO compliance_alerta_historico (id, alerta_id, estado_anterior, estado_novo, comentario, por, por_nome, em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
   ],
   [
+    "d6a361c7a9b4fd937205b709165406f645ecdfdb15d402b8c8eaad8ec5d741a8",
+    "INSERT INTO compliance_caso (id, numero, client_id, tipo, prioridade, titulo, descricao, prazo, responsavel_id, responsavel_nome, aberto_em, aberto_por, aberto_por_nome, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aberto')"
+  ],
+  [
+    "a562a9bbe8f2ebb8c80ae7bffce8b9a5c3160e9fbe5a5c262c02020365a3317d",
+    "INSERT INTO compliance_caso_nota (id, caso_id, tipo, texto, estado_anterior, estado_novo, por, por_nome, em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "e8dad9aeb7a7980ccb768811e2f6d2361b3ab1e83b02c0eb980b25d42e7b7e37",
+    "INSERT INTO compliance_decisao (id, caso_id, client_id, tipo, decisao, fundamento, referencia, data_referencia, decidido_em, decidido_por, decidido_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "02a75c528119f86ffc969a405cdf69515e9dd349068e368f13a75b3d9794ef9e",
     "INSERT INTO compliance_duplicado_revisao (id, chave, motivo, clientes, decisao, justificacao, decidido_por, decidido_por_nome, decidido_em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "0e74d2de88ba667e6ace90016336b5caa6f7dcabbef1b132886f5a9d88c23fc9",
+    "INSERT INTO compliance_evidencia (id, caso_id, tipo, titulo, descricao, ficheiro_nome, ficheiro_mime, ficheiro_tamanho, ficheiro_hash, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "d2baaed0f9813c38ff7951b7d8b90db58c119f4922bf692cea4aee619ec802b7",
+    "INSERT INTO compliance_evidencia_ficheiro (id, conteudo) VALUES (?, ?)"
   ],
   [
     "7a5bb1f1ea11270fecf598b0c22e4ba1220e06baa07b9b1da0b3a9c772f6cb6b",
@@ -2285,6 +2417,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "INSERT OR IGNORE INTO compliance_alerta (id, regra, categoria, gravidade, client_id, operacao_tabela, operacao_id, titulo, descricao, evidencias, modelo_versao, data_operacao, detectado_em, detectado_por, detectado_por_nome, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'NEW')"
   ],
   [
+    "f20ccd84a9650734cc9c7ed3bf748b00d1df30ac0631f6f2ce0f5f64d592c0c6",
+    "INSERT OR IGNORE INTO compliance_caso_ligacao (id, caso_id, tipo, ref_id, descricao, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
     "b382510eb034f2a37d4c806a4efd6c433f276219c3832e434ceb7bf4af493b84",
     "INSERT OR IGNORE INTO compliance_perfil (id, client_id, criado_em, criado_por) VALUES (?, ?, ?, ?)"
   ],
@@ -2593,8 +2729,28 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM compliance_alerta_historico ORDER BY em"
   ],
   [
+    "eb64a1948ef4ee838880cc2d1ee6e6465d36ad567e409d0bc1e7508038321392",
+    "SELECT * FROM compliance_caso ORDER BY aberto_em DESC"
+  ],
+  [
+    "b6ab496a090e62f85369dd8896f381378e39f1e6dc5e5ff9780fea884b5a9f3f",
+    "SELECT * FROM compliance_caso_ligacao ORDER BY criado_em"
+  ],
+  [
+    "f14a8aa17e90400439bc41b01a24e44a2d55171d96854552a7273207b54f5999",
+    "SELECT * FROM compliance_caso_nota ORDER BY em"
+  ],
+  [
+    "0afadcda977e300d9b4e7391982e4fd651a6d87096d5271d46c8f20e01d97597",
+    "SELECT * FROM compliance_decisao ORDER BY decidido_em"
+  ],
+  [
     "5b28185d62e13b24df8738310dfda8b7cd04a978204da54df0d3100a41d01d59",
     "SELECT * FROM compliance_duplicado_revisao ORDER BY decidido_em DESC"
+  ],
+  [
+    "8aa7470255c41c5370db6b5d326f048eb7baf5132aedba63145117c958ceeb5d",
+    "SELECT * FROM compliance_evidencia ORDER BY criado_em"
   ],
   [
     "e38137ce450b0b20bf9e4d39e70f06473ac6d4b7bb9e6e443c2e890b5bacf832",
@@ -3307,6 +3463,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "3f674c6ed3824d44a09c03195095af83503c0c689f4c61646f6e457dbba09bbf",
     "SELECT clientNumber FROM clients WHERE clientNumber IS NOT NULL"
+  ],
+  [
+    "20b699f85dca1bf97e03bba998cd7bc3fa258804789184e26e15ca07126258ca",
+    "SELECT conteudo FROM compliance_evidencia_ficheiro WHERE id = ?"
   ],
   [
     "41e1eee83ddd967308801d8b56a2b7b2e0b3ea2a97880bf21ff14a1a7d3b3388",
@@ -4089,6 +4249,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT syncEnabled, syncUrl, syncPasskey FROM company_settings WHERE id = 1"
   ],
   [
+    "d926f16eafe98cb26fbb41ca71ed3fdeb0449a0654229bd2e727faaa5b7557d9",
+    "SELECT timestamp, userName, action, details FROM audit_logs WHERE entity = 'compliance' AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp DESC LIMIT 5000"
+  ],
+  [
     "5c7c18b3dd13cdd5f9d05b533db3d14340dd71427416675a1a796b58a77249f4",
     "SELECT twoFactorSecret FROM users WHERE id = ?"
   ],
@@ -4211,6 +4375,22 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "13f2826003cbc9caf0bf6c1514d8eff23e5a7585e21f68310912d40fbe823314",
     "UPDATE compliance_alerta SET estado = ?, resultado = ?, conclusao = ?, concluido_por = ?, concluido_por_nome = ?, concluido_em = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('IN_REVIEW', 'INFORMATION_REQUESTED')"
+  ],
+  [
+    "975734459a2801889df923d2a229ae0a734c7030c034800211dd9742d5e84630",
+    "UPDATE compliance_caso SET estado = 'aguarda_decisao', actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'em_investigacao'"
+  ],
+  [
+    "53f66a2d47d1c3559f5ac14fef2013e9f3fc3c663196b630318b1aee30114b4c",
+    "UPDATE compliance_caso SET estado = 'em_investigacao', actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('aberto', 'aguarda_decisao')"
+  ],
+  [
+    "d342849b2c8b471c1b9b8047ebfedf739bea2b5cd7e04aa81521ee20cc7140af",
+    "UPDATE compliance_caso SET estado = 'encerrado', resumo_final = ?, encerrado_por = ?, encerrado_por_nome = ?, encerrado_em = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'aguarda_decisao'"
+  ],
+  [
+    "3a91882141b20ef89f382a3994c278ce4c308be38c1f6f20069d294e04dc0d31",
+    "UPDATE compliance_caso SET responsavel_id = ?, responsavel_nome = ?, prioridade = ?, prazo = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado <> 'encerrado'"
   ],
   [
     "3674864f9f003b96a1a08334321e482ae88bdec419a86285dcbe42a8863744c7",

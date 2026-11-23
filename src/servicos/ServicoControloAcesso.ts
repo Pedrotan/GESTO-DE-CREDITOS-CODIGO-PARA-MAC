@@ -231,7 +231,8 @@ export class ServicoControloAcesso {
       compliance_view: ['compliance_kyc.ver', 'compliance_risco.ver'],
       compliance_manage: ['compliance_kyc.criar', 'compliance_kyc.editar', 'compliance_risco.criar'],
       compliance_approve: ['compliance_kyc.aprovar', 'compliance_risco.aprovar'],
-      compliance_settings: ['compliance_risco.editar']
+      compliance_settings: ['compliance_risco.editar'],
+      compliance_reports: ['compliance_kyc.exportar', 'compliance_risco.exportar']
     };
     return mapa[legado] || [legado];
   }

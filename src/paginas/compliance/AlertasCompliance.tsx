@@ -129,6 +129,7 @@ export default function AlertasCompliance() {
             )}
 
             {actual && <DetalheAlerta alerta={actual} historico={historico.filter(h => h.alerta_id === actual.id)} nomeCliente={nome(actual.client_id)} actor={actor}
+                casos={comp.dados.cas.ligacoes.filter(l => l.tipo === 'alerta' && l.ref_id === actual.id).map(l => comp.dados.cas.casos.find(c => c.id === l.caso_id)).filter((c): c is NonNullable<typeof c> => !!c)}
                 onClose={() => setAberto(null)} aoMudar={() => void comp.recarregar()} />}
         </MainLayout>
     );

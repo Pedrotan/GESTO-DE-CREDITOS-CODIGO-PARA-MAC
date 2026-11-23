@@ -14,6 +14,7 @@ import {
     type ActorCompliance, type AvaliacaoRisco, type DadosCompliance, type PerfilCompliance,
 } from '@/servicos/compliance/ServicoCompliance';
 import type { Client } from '@/tipos/credito';
+import { DADOS_CASOS_VAZIOS, ServicoCasos, type Caso, type DadosCasos } from '@/servicos/compliance/ServicoCasos';
 import { DADOS_ALERTAS_VAZIOS, ServicoMonitorizacao, type AlertaRegisto, type DadosAlertas } from '@/servicos/compliance/ServicoMonitorizacao';
 import { ESTADOS_ABERTOS, ROTULO_ESTADO_ALERTA, ROTULO_GRAVIDADE, type EstadoAlerta, type Gravidade } from '@/bibliotecas/compliance/monitorizacao';
 import { DADOS_SCREENING_VAZIOS, ServicoScreening, estadosPorCliente, type DadosScreening, type ScreeningRegisto } from '@/servicos/compliance/ServicoScreening';
@@ -23,13 +24,15 @@ export const ABAS_COMPLIANCE = [
     { path: '/compliance/painel', label: 'Painel e clientes' },
     { path: '/compliance/screening', label: 'Screening PEP e sanções' },
     { path: '/compliance/alertas', label: 'Alertas de operações' },
+    { path: '/compliance/casos', label: 'Investigações' },
     { path: '/compliance/duplicados', label: 'Possíveis duplicados' },
     { path: '/compliance/modelo-risco', label: 'Modelo de risco' },
+    { path: '/compliance/relatorios', label: 'Indicadores e relatórios' },
 ];
 
 export function NavegacaoCompliance() {
     const { pathname } = useLocation();
-    const actual = pathname === '/compliance' || pathname.startsWith('/compliance/clientes') ? '/compliance/painel' : pathname;
+    const actual = pathname === '/compliance' || pathname.startsWith('/compliance/clientes') ? '/compliance/painel' : pathname.startsWith('/compliance/casos') ? '/compliance/casos' : pathname;
     return (
         <nav aria-label="Módulo de Compliance" className="mb-5 flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1.5 dark:border-slate-800 dark:bg-slate-900">
             {ABAS_COMPLIANCE.map(a => (
@@ -119,17 +122,17 @@ export function useActorCompliance() {
 export type LinhaCompliance = {
     cliente: Client; perfil: PerfilCompliance | null; kyc: AvaliacaoKyc; avaliacao: AvaliacaoRisco | null;
     nivel: NivelRisco | null; duplicados: string[]; aRever: boolean; verificacaoPendente: boolean;
-    alertasAbertos: AlertaRegisto[]; alertasFundamentados: number;
+    alertasAbertos: AlertaRegisto[]; alertasFundamentados: number; casosAbertos: Caso[]; suspeitaFundamentada: boolean;
     screening: { estado: EstadoScreening; pendentes: PendenteScreening[]; pepConfirmado: boolean; sancaoConfirmada: boolean; ultimo: ScreeningRegisto | null };
 };
 
 /** Dados do módulo e as linhas por cliente (perfil, estado KYC, última avaliação, duplicados). */
 export function useCompliance() {
     const { clients, credits } = useData();
-    const carga = useCarregar<DadosCompliance & { scr: DadosScreening; alr: DadosAlertas }>(async () => {
-        const [base, scr, alr] = await Promise.all([ServicoCompliance.carregar(), ServicoScreening.carregar(), ServicoMonitorizacao.carregar()]);
-        return { ...base, scr, alr };
-    }, { perfis: [], verificacoes: [], avaliacoes: [], modelos: [], revisoes: [], scr: DADOS_SCREENING_VAZIOS, alr: DADOS_ALERTAS_VAZIOS });
+    const carga = useCarregar<DadosCompliance & { scr: DadosScreening; alr: DadosAlertas; cas: DadosCasos }>(async () => {
+        const [base, scr, alr, cas] = await Promise.all([ServicoCompliance.carregar(), ServicoScreening.carregar(), ServicoMonitorizacao.carregar(), ServicoCasos.carregar()]);
+        return { ...base, scr, alr, cas };
+    }, { perfis: [], verificacoes: [], avaliacoes: [], modelos: [], revisoes: [], scr: DADOS_SCREENING_VAZIOS, alr: DADOS_ALERTAS_VAZIOS, cas: DADOS_CASOS_VAZIOS });
     const hoje = luandaTodayKey();
     const derivado = useMemo(() => {
         const { perfis, avaliacoes, revisoes, verificacoes } = carga.dados;
@@ -144,6 +147,8 @@ export function useCompliance() {
         const screeningDe = estadosPorCliente(carga.dados.scr ?? DADOS_SCREENING_VAZIOS);
         const alertasPor = new Map<string, AlertaRegisto[]>();
         for (const a of (carga.dados.alr ?? DADOS_ALERTAS_VAZIOS).alertas) if (a.client_id) alertasPor.set(a.client_id, [...(alertasPor.get(a.client_id) || []), a]);
+        const cas = carga.dados.cas ?? DADOS_CASOS_VAZIOS;
+        const suspeitas = new Set(cas.decisoes.filter(d => d.tipo === 'conclusao' && d.decisao === 'suspeita_fundamentada').map(d => d.client_id));
         const linhas: LinhaCompliance[] = clientes.map(c => {
             const perfil = perfilPor.get(c.id) || null;
             const avaliacao = avaliacaoPor.get(c.id) || null;
@@ -157,6 +162,8 @@ export function useCompliance() {
                 screening: screeningDe(c.id),
                 alertasAbertos: (alertasPor.get(c.id) || []).filter(a => ESTADOS_ABERTOS.includes(a.estado)),
                 alertasFundamentados: (alertasPor.get(c.id) || []).filter(a => a.resultado === 'SUBSTANTIATED').length,
+                casosAbertos: cas.casos.filter(x => x.client_id === c.id && x.estado !== 'encerrado'),
+                suspeitaFundamentada: suspeitas.has(c.id),
             };
         });
         return { linhas, gruposPorRever, gruposRisco, clientes };

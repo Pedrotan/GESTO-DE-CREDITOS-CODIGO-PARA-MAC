@@ -21,6 +21,7 @@ import {
 import { cn } from '@/bibliotecas/utils';
 import { ScreeningCliente } from '@/componentes/compliance/ScreeningCliente';
 import { AlertasCliente } from '@/componentes/compliance/AlertasCliente';
+import { InvestigacoesCliente } from '@/componentes/compliance/casos-comum';
 
 function Seccao({ titulo, descricao, accao, children, icone: Icone }: { titulo: string; descricao?: string; accao?: ReactNode; children: ReactNode; icone?: typeof Gauge }) {
     return (
@@ -77,6 +78,7 @@ export default function ClienteCompliance() {
             duplicadosPorRever: linha.duplicados, modelo, tipo: avaliacoes.length ? 'reavaliacao' : 'inicial',
             screening: { estado: linha.screening.estado, pepConfirmado: linha.screening.pepConfirmado },
             alertasFundamentados: linha.alertasFundamentados,
+            suspeitaFundamentada: linha.suspeitaFundamentada,
             motivo: avaliacoes.length ? 'Reavaliação pedida na ficha de Compliance' : 'Avaliação inicial',
         }, actor), 'Avaliação de risco registada');
         setAAvaliar(false);
@@ -152,7 +154,10 @@ export default function ClienteCompliance() {
                     <ScreeningCliente linha={linha} scr={comp.dados.scr} actor={actor} registar={registar} decidir={decidir} aoMudar={() => void comp.recarregar()} />
 
                     <AlertasCliente alertas={comp.dados.alr.alertas.filter(a => a.client_id === id)} historico={comp.dados.alr.historico} nomeCliente={String(cliente.name)}
-                        actor={actor} aoMudar={() => void comp.recarregar()} />
+                        actor={actor} aoMudar={() => void comp.recarregar()}
+                        casosDoAlerta={alertaId => comp.dados.cas.ligacoes.filter(l => l.tipo === 'alerta' && l.ref_id === alertaId).map(l => comp.dados.cas.casos.find(x => x.id === l.caso_id)).filter((x): x is NonNullable<typeof x> => !!x)} />
+
+                    <InvestigacoesCliente cliente={{ id, nome: String(cliente.name) }} casos={comp.dados.cas.casos.filter(x => x.client_id === id)} actor={actor} podeAbrir={registar} />
 
                     <Seccao titulo="Avaliação de risco" icone={Gauge}
                         descricao={avaliacao ? `Modelo v${avaliacao.modelo_versao} · ${dataHoraPt(avaliacao.criado_em)} · ${avaliacao.criado_por_nome || '—'}` : modelo ? `Modelo activo: v${modelo.versao}` : 'Sem modelo activo'}

@@ -3,7 +3,7 @@
 // registado como autor/decisor é o utilizador autenticado (sem isto, quem regista poderia «assinar» como outro e
 // contornar a regra dos quatro olhos). Comandos de Compliance que não estejam aqui são recusados.
 
-export const PERMISSOES_COMPLIANCE = ['compliance_view', 'compliance_manage', 'compliance_approve', 'compliance_settings'] as const;
+export const PERMISSOES_COMPLIANCE = ['compliance_view', 'compliance_manage', 'compliance_approve', 'compliance_settings', 'compliance_reports'] as const;
 export type PermissaoCompliance = typeof PERMISSOES_COMPLIANCE[number];
 
 // ── Perfil KYC ──────────────────────────────────────────────────────────────────
@@ -68,6 +68,27 @@ export const SQL_ALERTA_ENCERRAR = `UPDATE compliance_alerta SET estado = 'CLOSE
 /** Histórico de cada mudança (e comentários). Autor: parâmetro 5. */
 export const SQL_ALERTA_HISTORICO = `INSERT INTO compliance_alerta_historico (id, alerta_id, estado_anterior, estado_novo, comentario, por, por_nome, em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
 
+// ── Investigações (fase 4) ──────────────────────────────────────────────────────
+/** Abrir uma investigação. Autor: parâmetro 11 (aberto_por). */
+export const SQL_CASO_ABRIR = `INSERT INTO compliance_caso (id, numero, client_id, tipo, prioridade, titulo, descricao, prazo, responsavel_id, responsavel_nome, aberto_em, aberto_por, aberto_por_nome, estado) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aberto')`;
+/** Iniciar ou retomar a investigação. Autor: parâmetro 0. */
+export const SQL_CASO_INVESTIGAR = `UPDATE compliance_caso SET estado = 'em_investigacao', actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado IN ('aberto', 'aguarda_decisao')`;
+/** Passar à decisão. Autor: parâmetro 0. */
+export const SQL_CASO_PARA_DECISAO = `UPDATE compliance_caso SET estado = 'aguarda_decisao', actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'em_investigacao'`;
+/** Responsável, prioridade e prazo. Autor: parâmetro 4. */
+export const SQL_CASO_ATRIBUIR = `UPDATE compliance_caso SET responsavel_id = ?, responsavel_nome = ?, prioridade = ?, prazo = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado <> 'encerrado'`;
+/** Encerrar (só com as decisões exigidas, verificadas também na base de dados). Decisor: parâmetro 1. */
+export const SQL_CASO_ENCERRAR = `UPDATE compliance_caso SET estado = 'encerrado', resumo_final = ?, encerrado_por = ?, encerrado_por_nome = ?, encerrado_em = ?, actualizado_por = ?, actualizado_em = ? WHERE id = ? AND estado = 'aguarda_decisao'`;
+/** Ligar um alerta, screening, avaliação ou verificação ao caso. Autor: parâmetro 6. */
+export const SQL_CASO_LIGAR = `INSERT OR IGNORE INTO compliance_caso_ligacao (id, caso_id, tipo, ref_id, descricao, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`;
+/** Nota ou movimento no histórico do caso. Autor: parâmetro 6. */
+export const SQL_CASO_NOTA = `INSERT INTO compliance_caso_nota (id, caso_id, tipo, texto, estado_anterior, estado_novo, por, por_nome, em) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+/** Evidência (metadados). Autor: parâmetro 10. */
+export const SQL_EVIDENCIA_REGISTAR = `INSERT INTO compliance_evidencia (id, caso_id, tipo, titulo, descricao, ficheiro_nome, ficheiro_mime, ficheiro_tamanho, ficheiro_hash, criado_em, criado_por, criado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+export const SQL_EVIDENCIA_FICHEIRO = `INSERT INTO compliance_evidencia_ficheiro (id, conteudo) VALUES (?, ?)`;
+/** Decisão (conclusão, medida ou UIF). Decisor: parâmetro 9. */
+export const SQL_DECISAO_REGISTAR = `INSERT INTO compliance_decisao (id, caso_id, client_id, tipo, decisao, fundamento, referencia, data_referencia, decidido_em, decidido_por, decidido_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
 type Regra = { permissao: PermissaoCompliance; autor: number | null };
 const REGRAS: Array<[string, Regra]> = [
     [SQL_PERFIL_CRIAR, { permissao: 'compliance_manage', autor: 3 }],
@@ -97,6 +118,16 @@ const REGRAS: Array<[string, Regra]> = [
     [SQL_ALERTA_CONCLUIR, { permissao: 'compliance_approve', autor: 3 }],
     [SQL_ALERTA_ENCERRAR, { permissao: 'compliance_approve', autor: 1 }],
     [SQL_ALERTA_HISTORICO, { permissao: 'compliance_manage', autor: 5 }],
+    [SQL_CASO_ABRIR, { permissao: 'compliance_manage', autor: 11 }],
+    [SQL_CASO_INVESTIGAR, { permissao: 'compliance_manage', autor: 0 }],
+    [SQL_CASO_PARA_DECISAO, { permissao: 'compliance_manage', autor: 0 }],
+    [SQL_CASO_ATRIBUIR, { permissao: 'compliance_manage', autor: 4 }],
+    [SQL_CASO_ENCERRAR, { permissao: 'compliance_approve', autor: 1 }],
+    [SQL_CASO_LIGAR, { permissao: 'compliance_manage', autor: 6 }],
+    [SQL_CASO_NOTA, { permissao: 'compliance_manage', autor: 6 }],
+    [SQL_EVIDENCIA_REGISTAR, { permissao: 'compliance_manage', autor: 10 }],
+    [SQL_EVIDENCIA_FICHEIRO, { permissao: 'compliance_manage', autor: null }],
+    [SQL_DECISAO_REGISTAR, { permissao: 'compliance_approve', autor: 9 }],
 ];
 const normalizar = (sql: string) => sql.replace(/\s+/gu, ' ').trim().replace(/;$/u, '');
 const MAPA = new Map(REGRAS.map(([sql, regra]) => [normalizar(sql), regra]));

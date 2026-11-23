@@ -9,6 +9,8 @@ import { SeloAlerta, SeloGravidade, dataHoraPt } from './comum-compliance';
 import { REGRAS_MONITORIZACAO, ROTULO_CATEGORIA_ALERTA, ROTULO_ESTADO_ALERTA, TRANSICOES, type EstadoAlerta } from '@/bibliotecas/compliance/monitorizacao';
 import { ServicoMonitorizacao, type AlertaRegisto, type HistoricoAlerta } from '@/servicos/compliance/ServicoMonitorizacao';
 import { podeCompliance, type ActorCompliance } from '@/servicos/compliance/ServicoCompliance';
+import { DialogoNovoCaso } from './casos-comum';
+import { prioridadeSugerida, type TipoCaso } from '@/bibliotecas/compliance/casos';
 
 const ACCAO: Record<EstadoAlerta, string> = {
     NEW: '', IN_REVIEW: 'Iniciar / retomar análise', INFORMATION_REQUESTED: 'Pedir informação', SUBSTANTIATED: 'Concluir: fundamentado',
@@ -24,9 +26,12 @@ function valor(v: unknown): string {
     return String(v);
 }
 
-export function DetalheAlerta({ alerta: a, historico, nomeCliente, actor, onClose, aoMudar }: {
+export function DetalheAlerta({ alerta: a, historico, nomeCliente, actor, onClose, aoMudar, casos = [] }: {
     alerta: AlertaRegisto; historico: HistoricoAlerta[]; nomeCliente: string | null; actor: ActorCompliance | null; onClose: () => void; aoMudar: () => void;
+    /** Investigações a que o alerta já está ligado. */
+    casos?: Array<{ id: string; numero: string }>;
 }) {
+    const [novoCaso, setNovoCaso] = useState(false);
     const [texto, setTexto] = useState('');
     const [aGuardar, setAGuardar] = useState(false);
     const evidencias = (() => { try { return JSON.parse(a.evidencias) as Record<string, unknown>; } catch { return {}; } })();
@@ -65,7 +70,17 @@ export function DetalheAlerta({ alerta: a, historico, nomeCliente, actor, onClos
                 <div className="flex flex-wrap gap-3 text-xs">
                     {a.client_id && <Link to={`/compliance/clientes/${a.client_id}`} className="font-semibold text-emerald-700 underline dark:text-emerald-400" onClick={onClose}>Ficha de Compliance{nomeCliente ? ` de ${nomeCliente}` : ''}</Link>}
                     {a.operacao_id && <span className="text-slate-500">Registo original: {a.operacao_tabela} <span className="font-mono">{a.operacao_id}</span></span>}
+                    {casos.map(c => <Link key={c.id} to={`/compliance/casos/${c.id}`} onClick={onClose} className="font-semibold text-violet-700 underline dark:text-violet-300">Investigação {c.numero}</Link>)}
+                    {a.client_id && actor && podeCompliance(actor, 'compliance_manage') && a.estado !== 'CLOSED' && !casos.length && (
+                        <button type="button" onClick={() => setNovoCaso(true)} className="font-semibold text-violet-700 underline dark:text-violet-300">Abrir investigação</button>
+                    )}
                 </div>
+                {novoCaso && actor && a.client_id && (
+                    <DialogoNovoCaso cliente={{ id: a.client_id, nome: nomeCliente || 'Cliente' }} actor={actor} onClose={() => setNovoCaso(false)}
+                        tipoInicial={(a.categoria === 'fraude' ? 'fraude' : a.regra === 'desembolso_sem_controlos' ? 'kyc' : 'actividade_suspeita') as TipoCaso}
+                        prioridadeInicial={prioridadeSugerida([a.gravidade])} tituloInicial={a.titulo}
+                        ligacoes={[{ tipo: 'alerta', refId: a.id, descricao: a.titulo }]} />
+                )}
                 <div className="rounded-xl bg-slate-50 p-3 dark:bg-slate-800/60">
                     <p className="mb-1 text-[11px] font-bold uppercase tracking-wide text-slate-500">Evidências</p>
                     <dl className="grid gap-x-4 gap-y-1 text-xs sm:grid-cols-[160px_1fr]">

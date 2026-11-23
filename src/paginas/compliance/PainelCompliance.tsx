@@ -155,6 +155,7 @@ export default function PainelCompliance() {
 
 function Linha({ l, hoje }: { l: LinhaCompliance; hoje: string }) {
     const avisos: Array<{ texto: string; icone: typeof AlertTriangle; tom: string }> = [];
+    if (l.casosAbertos.length) avisos.push({ texto: `${l.casosAbertos.length} investigação(ões) em curso`, icone: ShieldCheck, tom: 'text-violet-700 dark:text-violet-300' });
     if (l.alertasAbertos.length) avisos.push({ texto: `${l.alertasAbertos.length} alerta(s) de operações aberto(s)`, icone: AlertTriangle, tom: l.alertasAbertos.some(a => a.gravidade === 'alta') ? 'text-red-700 dark:text-red-300' : 'text-amber-700 dark:text-amber-300' });
     if (l.screening.estado === 'confirmada') avisos.push({ texto: 'Sanção confirmada', icone: Radar, tom: 'text-red-700 dark:text-red-300' });
     else if (l.screening.pendentes.length) avisos.push({ texto: `${l.screening.pendentes.length} correspondência(s) por decidir`, icone: Radar, tom: 'text-amber-700 dark:text-amber-300' });
