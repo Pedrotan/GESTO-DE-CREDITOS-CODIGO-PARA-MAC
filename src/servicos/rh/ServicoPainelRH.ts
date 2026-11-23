@@ -107,13 +107,13 @@ export class ServicoPainelRH {
                 id: j.id, tipo: 'justificacao' as const, rotulo: 'Justificação de falta', funcionarioId: j.funcionario_id, nome: nome(j.funcionario_id),
                 detalhe: `${dataPt(j.data_inicio)}${j.data_fim !== j.data_inicio ? ` a ${dataPt(j.data_fim)}` : ''} · ${j.motivo}`, criadoEm: j.criado_em, origem: { id: j.id } })),
             ...pedidos.filter(p => p.estado === 'pendente' && ids.has(p.funcionario_id)).map(p => ({
-                id: p.id, tipo: 'pedido' as const, rotulo: p.tipo === 'declaracao' ? 'Declaração' : p.tipo === 'subsidio_ferias' ? 'Subsídio de férias' : 'Outro pedido',
+                id: p.id, tipo: 'pedido' as const, rotulo: p.tipo === 'declaracao' ? 'Declaração' : p.tipo === 'subsidio_ferias' ? 'Subsídio de férias' : /^altera[çc][ãa]o de dados/iu.test(p.assunto || '') ? 'Alteração de dados' : 'Outro pedido',
                 funcionarioId: p.funcionario_id, nome: nome(p.funcionario_id), detalhe: p.assunto + (p.descricao ? ` · ${p.descricao}` : ''), criadoEm: p.criado_em, origem: p })),
         ].sort((a, b) => b.criadoEm.localeCompare(a.criadoEm));
         const portal = {
             ferias: recentes.filter(r => r.tipo === 'ferias').length, justificacoes: recentes.filter(r => r.tipo === 'justificacao').length,
             declaracoes: recentes.filter(r => r.tipo === 'pedido' && (r.origem as PedidoRH).tipo === 'declaracao').length,
-            outros: recentes.filter(r => r.tipo === 'dispensa' || (r.tipo === 'pedido' && (r.origem as PedidoRH).tipo !== 'declaracao')).length,
+            alteracoes: recentes.filter(r => r.tipo === 'pedido' && /^altera[çc][ãa]o de dados/iu.test((r.origem as PedidoRH).assunto || '')).length,
             pendentes: recentes.length, recentes: recentes.slice(0, 5),
             comAcesso: activos.filter(x => x.utilizador_id).length, total: activos.length,
             antigos: recentes.filter(r => r.criadoEm && Date.parse(r.criadoEm) < Date.now() - 48 * 3_600_000).length,
@@ -194,6 +194,8 @@ export class ServicoPainelRH {
             etapa, processamentoId: procMes?.id || null, estado: procMes?.estado || null, base: massa,
             bruto: procMes && procMes.estado !== 'aberto' ? Number(procMes.total_bruto_minor) || 0 : null,
             descontos: procMes && procMes.estado !== 'aberto' ? (Number(procMes.total_inss_trab_minor) || 0) + (Number(procMes.total_irt_minor) || 0) : null,
+            // Subsídios e abonos: o bruto processado menos o salário base dos contratos activos.
+            subsidios: procMes && procMes.estado !== 'aberto' ? Math.max(0, (Number(procMes.total_bruto_minor) || 0) - massa) : null,
             liquido: procMes && procMes.estado !== 'aberto' ? Number(procMes.total_liquido_minor) || 0 : null,
         } : null;
 
@@ -228,7 +230,13 @@ export class ServicoPainelRH {
         // ── Alertas (os da tarefa diária, filtrados pelo departamento) ──
         const alertas = alertasAbertos.filter((a: AlertaRH) => a.destinatario_perfil !== 'clientes' && (!f.departamentoId || !a.funcionario_id || ids.has(a.funcionario_id)));
 
+        // Lembretes que o desenho mostra mesmo sem alerta (BI a expirar e contratos a terminar: «nenhum»).
+        const semBi = !alertas.some(a => a.tipo === 'documento' && a.id.startsWith('bi-funcionario'));
+        const semContratos = !alertas.some(a => a.tipo === 'contrato');
         return {
+            lembretesVazios: [...(semBi ? ['BI a expirar nos próximos 90 dias: nenhum'] : []), ...(semContratos ? ['Contratos a terminar em 60 dias: nenhum'] : [])],
+            anoAnterior: anoFerias - 1,
+            funcionariosSemAcesso: activos.filter(x => !x.utilizador_id).map(x => ({ id: x.id, nome: x.nome, email: x.email, numero: x.numero_mecanografico, cargo_id: x.cargo_id, departamento_id: x.departamento_id, seccao_id: x.seccao_id ?? null })),
             actualizadoEm: new Date().toISOString(), hoje: hojeBloco, intervalo, semMarcacoes, portal, kpis, alertas, eventos: eventos.slice(0, 8), salariosMes,
             graficos: {
                 assiduidadeDiaria: diaria, meta, massaMensal, porDepartamento, ordemDepartamentos: ordemDeps,

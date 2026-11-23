@@ -212,7 +212,9 @@ export default function PortalFuncionario() {
                     <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                         <h2 className="mb-3 font-black">Outro pedido ao RH</h2>
                         <div className="grid gap-3 sm:grid-cols-[260px_1fr_auto] sm:items-end">
-                            <div><Label className="text-xs font-bold">Assunto</Label><Input className="mt-1" value={outro.assunto} onChange={e => setOutro(x => ({ ...x, assunto: e.target.value }))} placeholder="Ex.: declaração para o banco" /></div>
+                            <div><Label className="text-xs font-bold">Assunto</Label><Input className="mt-1" value={outro.assunto} onChange={e => setOutro(x => ({ ...x, assunto: e.target.value }))} placeholder="Ex.: declaração para o banco ou alteração de dados (nova morada)" />
+                                <div className="mt-1 flex flex-wrap gap-1">{['Declaração', 'Alteração de dados'].map(t => <button key={t} type="button" onClick={() => setOutro(x => ({ ...x, assunto: x.assunto.toLowerCase().startsWith(t.toLowerCase()) ? x.assunto : `${t}: ${x.assunto.replace(/^(declaração|alteração de dados):\s*/iu, '')}` }))}
+                                    className="rounded-full border border-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300">{t}</button>)}</div></div>
                             <div><Label className="text-xs font-bold">Explique o pedido</Label><Input className="mt-1" value={outro.descricao} onChange={e => setOutro(x => ({ ...x, descricao: e.target.value }))} /></div>
                             <Button disabled={!outro.assunto.trim()} onClick={() => void executar(() => ServicoPortalComunicacao.pedir(f, { tipo: /declara/i.test(outro.assunto) ? 'declaracao' : 'outro', assunto: outro.assunto, descricao: outro.descricao }, actor, avisarPedidos), 'Pedido enviado ao RH').then(ok => { if (ok) { setOutro({ assunto: '', descricao: '' }); recarregar(); } })}>
                                 <Send className="mr-1.5 h-4 w-4" /> Enviar

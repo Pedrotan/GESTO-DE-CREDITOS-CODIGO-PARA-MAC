@@ -14,8 +14,8 @@ const dataCurta = (d: string) => `${d.slice(8, 10)}/${d.slice(5, 7)}`;
 const milhoes = (minor: number) => `${(minor / 100 / 1_000_000).toLocaleString('pt-PT', { maximumFractionDigits: 2 })} M`;
 
 /** Moldura comum: título, subtítulo, «Ver tabela» e o estado vazio. */
-export function CartaoGrafico({ titulo, subtitulo, children, tabela, vazio, rodape, accaoTitulo }: {
-    titulo: string; subtitulo: string; children: ReactNode; tabela: { colunas: string[]; linhas: Array<Array<string | number>> }; vazio?: string | null; rodape?: ReactNode; accaoTitulo?: ReactNode;
+export function CartaoGrafico({ titulo, subtitulo, children, tabela, vazio, rodape, accaoTitulo, semTabela = false, encher = true }: {
+    titulo: string; subtitulo: string; children: ReactNode; tabela: { colunas: string[]; linhas: Array<Array<string | number>> }; vazio?: string | null; rodape?: ReactNode; accaoTitulo?: ReactNode; semTabela?: boolean; encher?: boolean;
 }) {
     const [verTabela, setVerTabela] = useState(false);
     return (
@@ -24,7 +24,7 @@ export function CartaoGrafico({ titulo, subtitulo, children, tabela, vazio, roda
                 <div><h2 className="text-base font-extrabold">{titulo}</h2><p className="mt-0.5 text-xs text-[#5B6474] dark:text-slate-400">{subtitulo}</p></div>
                 {accaoTitulo}
             </div>
-            <div className="mt-3.5 min-h-[190px] flex-1">
+            <div className={cn("mt-3.5", encher && "min-h-[190px] flex-1")}>
                 {vazio ? <div className="flex h-[190px] items-center justify-center rounded-xl border border-dashed border-[#D0D5DD] px-6 text-center text-sm text-[#5B6474] dark:border-slate-700">{vazio}</div>
                     : verTabela ? (
                         <div className="max-h-[230px] overflow-auto rounded-lg border border-[#EAECF0] dark:border-slate-800">
@@ -37,7 +37,7 @@ export function CartaoGrafico({ titulo, subtitulo, children, tabela, vazio, roda
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-x-[18px] gap-y-1 text-[13px]">
                 {rodape}
-                {!vazio && <button type="button" className="ml-auto text-[13px] font-semibold text-[#1D4ED8] hover:underline dark:text-sky-400" onClick={() => setVerTabela(v => !v)}>{verTabela ? 'Ver gráfico' : 'Ver tabela'}</button>}
+                {!vazio && !semTabela && <button type="button" className="ml-auto text-[13px] font-semibold text-[#1D4ED8] hover:underline dark:text-sky-400" onClick={() => setVerTabela(v => !v)}>{verTabela ? 'Ver gráfico' : 'Ver tabela'}</button>}
             </div>
         </section>
     );
@@ -72,22 +72,22 @@ export function GraficoAssiduidade({ dados, meta, onDia }: { dados: Array<{ data
 }
 
 /** G2: massa salarial mensal (12 meses, o actual destacado); clicar abre o processamento desse mês. */
+const MESES_EXTENSO: Record<string, string> = { Jan: 'Janeiro', Fev: 'Fevereiro', Mar: 'Março', Abr: 'Abril', Mai: 'Maio', Jun: 'Junho', Jul: 'Julho', Ago: 'Agosto', Set: 'Setembro', Out: 'Outubro', Nov: 'Novembro', Dez: 'Dezembro' };
 export function GraficoMassa({ dados, onMes }: { dados: Array<{ mes: string; rotulo: string; total: number; real: boolean; estimado: boolean }>; onMes: (mes: string) => void }) {
     const comValor = dados.filter(d => d.total > 0);
     const actual = dados[dados.length - 1];
     const anoAntes = dados[0];
     const variacaoAnual = actual && anoAntes && anoAntes.total > 0 && actual.total > 0 ? Math.round(((actual.total - anoAntes.total) / anoAntes.total) * 1000) / 10 : null;
     return (
-        <CartaoGrafico titulo="Massa salarial mensal" subtitulo="Salário base + subsídios processados, últimos 12 meses"
+        <CartaoGrafico semTabela titulo="Massa salarial mensal" subtitulo="Salário base + subsídios, últimos 12 meses"
             vazio={comValor.length < 2 ? 'São precisos pelo menos 2 meses de salários processados para mostrar a evolução. Até lá, veja a massa salarial base nos indicadores.' : null}
             tabela={{ colunas: ['Mês', 'Total'], linhas: dados.map(d => [`${d.rotulo} ${d.mes.slice(0, 4)}`, d.total ? `${kz(d.total)}${d.estimado ? ' (base, estimado)' : ''}` : '—']) }}
-            rodape={actual && <><span>{actual.rotulo}: <strong>{actual.total ? kz(actual.total) : '—'}</strong>{actual.estimado ? ' (base, ainda por processar)' : ''}</span>
+            rodape={actual && <><span>{MESES_EXTENSO[actual.rotulo] || actual.rotulo}: <strong>{actual.total ? kz(actual.total) : '—'}</strong>{actual.estimado ? ' (base real)' : ''}</span>
                 {variacaoAnual !== null && <span>Variação anual: <strong className={variacaoAnual >= 0 ? 'text-[#067647]' : 'text-[#B42318]'}>{variacaoAnual >= 0 ? '▲' : '▼'} {Math.abs(variacaoAnual).toLocaleString('pt-PT')}%</strong></span>}</>}>
             <ResponsiveContainer width="100%" height={190}>
-                <BarChart data={dados} margin={{ top: 8, right: 4, bottom: 0, left: -6 }} barCategoryGap={3}>
-                    <CartesianGrid vertical={false} stroke={GRELHA} />
+                <BarChart data={dados} margin={{ top: 8, right: 2, bottom: 0, left: 2 }} barCategoryGap={3}>
                     <XAxis dataKey="rotulo" tick={EIXO} axisLine={{ stroke: '#D0D5DD' }} tickLine={false} />
-                    <YAxis tickFormatter={milhoes} tick={EIXO} axisLine={false} tickLine={false} width={52} />
+                    <YAxis hide domain={[0, 'dataMax']} />
                     <Tooltip cursor={{ fill: '#F2F4F7' }} content={<Dica formatar={(v, p) => `${p.rotulo} ${String(p.mes).slice(0, 4)}: ${v ? kz(v) : 'sem processamento'}${p.estimado ? ' (base, estimado)' : ''}`} />} />
                     <Bar dataKey="total" radius={[4, 4, 0, 0]} cursor="pointer" onClick={(d: { mes?: string }) => d.mes && onMes(d.mes)}>
                         {dados.map((d, i) => <Cell key={d.mes} fill={i === dados.length - 1 ? '#2a78d6' : '#9EC3EE'} fillOpacity={d.estimado ? 0.55 : 1} />)}
@@ -109,15 +109,18 @@ export function GraficoDepartamentos({ dados, ordem, salarios, onDepartamento }:
     const totalFuncionarios = dados.reduce((s, d) => s + d.funcionarios, 0);
     const formatar = (d: Departamento) => (vista === 'massa' ? kz(valor(d)) : vista === 'presenca' ? `${d.presentesHoje} de ${d.funcionarios}` : String(d.funcionarios));
     return (
-        <CartaoGrafico titulo="Funcionários por departamento" subtitulo={`${totalFuncionarios} funcionário(s) activo(s)`}
+        <CartaoGrafico titulo={vista === 'massa' ? 'Massa salarial por departamento' : vista === 'presenca' ? 'Presença hoje por departamento' : 'Funcionários por departamento'} subtitulo={`${totalFuncionarios} funcionários activos`} semTabela encher={false}
             vazio={dados.length === 0 ? 'Ainda não há funcionários activos atribuídos a departamentos.' : null}
             tabela={{ colunas: ['Departamento', 'Funcionários', ...(salarios ? ['Massa salarial'] : []), 'Presentes hoje'], linhas: lista.map(d => [d.nome, d.funcionarios, ...(salarios ? [d.massa !== null ? kz(d.massa) : '—'] : []), d.presentesHoje]) }}
-            rodape={<div className="flex flex-wrap gap-1.5" role="group" aria-label="Medida">
-                {([['funcionarios', 'Funcionários'], ...(salarios ? [['massa', 'Massa salarial']] : []), ['presenca', 'Presença hoje']] as Array<[typeof vista, string]>).map(([id, r]) => (
-                    <button key={id} type="button" aria-pressed={vista === id} onClick={() => setVista(id)} className={cn('rounded-full border px-2.5 py-0.5 text-xs font-semibold', vista === id ? 'border-[#0F1B3D] bg-[#0F1B3D] text-white' : 'border-[#D0D5DD] text-[#344054] dark:border-slate-700 dark:text-slate-300')}>{r}</button>
+            rodape={<div className="mt-1.5 grid w-full grid-cols-2 gap-2.5 border-t border-[#F2F4F7] pt-3.5 text-[13px] dark:border-slate-800">
+                {(vista === 'massa' || !salarios ? [['funcionarios', 'Funcionários por departamento']] : [['massa', 'Massa salarial por departamento']]).map(([id, r]) => (
+                    <div key={id}>{r} <button type="button" className="font-semibold text-[#1D4ED8] hover:underline dark:text-sky-400" onClick={() => setVista(id as typeof vista)}>ver</button></div>
+                ))}
+                {[vista === 'presenca' ? ['funcionarios', 'Funcionários por departamento'] : ['presenca', 'Presença hoje por departamento']].map(([id, r]) => (
+                    <div key={id} className="text-right">{r} <button type="button" className="font-semibold text-[#1D4ED8] hover:underline dark:text-sky-400" onClick={() => setVista(id as typeof vista)}>ver</button></div>
                 ))}
             </div>}>
-            <div className="mt-1 flex flex-col gap-3.5">
+            <div className="mt-1 flex flex-col gap-3.5 pt-1">
                 {lista.map(d => {
                     const v = valor(d);
                     const pct = total ? Math.round((v / total) * 100) : 0;
@@ -126,7 +129,7 @@ export function GraficoDepartamentos({ dados, ordem, salarios, onDepartamento }:
                             className="grid grid-cols-[130px_1fr_auto] items-center gap-3 rounded-md text-left enabled:hover:bg-[#F9FAFB] dark:enabled:hover:bg-slate-800">
                             <span className="truncate text-[13px] font-semibold">{d.nome}</span>
                             <span className="h-3.5 rounded bg-[#F2F4F7] dark:bg-slate-800"><span className="block h-3.5 rounded" style={{ width: `${(v / maximo) * 100}%`, background: corDepartamento(ordem, d.id || null) }} /></span>
-                            <span className="min-w-[80px] text-right text-[13px] tabular-nums text-[#344054] dark:text-slate-300"><strong>{vista === 'massa' ? milhoes(v) : v}</strong> · {pct}%</span>
+                            <span className="min-w-[70px] text-right text-[13px] tabular-nums text-[#344054] dark:text-slate-300"><strong>{vista === 'massa' ? milhoes(v) : v}</strong> · {pct}%</span>
                         </button>
                     );
                 })}
@@ -144,7 +147,7 @@ export function GraficoAusencias({ tipos, semana, periodo, onTipo }: { tipos: Ti
     const total = TIPOS.reduce((s, t) => s + tipos[t.chave], 0);
     const maxSemana = Math.max(1, ...semana);
     return (
-        <CartaoGrafico titulo="Ausências por tipo" subtitulo={`Dias de ausência · ${periodo}`}
+        <CartaoGrafico titulo="Ausências do mês por tipo" subtitulo={`Dias de ausência em ${periodo}`} semTabela
             vazio={total === 0 ? 'Sem férias, faltas, licenças ou dispensas no período escolhido.' : null}
             tabela={{ colunas: ['Tipo', 'Dias'], linhas: [...TIPOS.map(t => [t.nome, tipos[t.chave]]), ...SEMANA.map((d, i) => [`${d} (sem férias)`, semana[i]])] }}>
             <div className="mt-1 flex h-[26px] gap-0.5 overflow-hidden rounded-md">
@@ -154,9 +157,9 @@ export function GraficoAusencias({ tipos, semana, periodo, onTipo }: { tipos: Ti
                 ))}
             </div>
             <ul className="mt-3 flex flex-wrap gap-x-3.5 gap-y-1.5">
-                {TIPOS.map(t => <li key={t.chave} className="inline-flex items-center gap-1.5 text-xs text-[#344054] dark:text-slate-300"><span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: t.cor }} aria-hidden="true" />{t.nome} · <strong>{tipos[t.chave]}</strong></li>)}
+                {TIPOS.filter(t => tipos[t.chave] > 0).map(t => <li key={t.chave} className="inline-flex items-center gap-1.5 text-xs text-[#344054] dark:text-slate-300"><span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: t.cor }} aria-hidden="true" />{t.nome} · <strong>{tipos[t.chave]}</strong></li>)}
             </ul>
-            <p className="mb-2 mt-[18px] text-xs font-semibold text-[#475467] dark:text-slate-400">Ausências por dia da semana (faltas, licenças e dispensas)</p>
+            <p className="mb-2 mt-[18px] text-xs font-semibold text-[#475467] dark:text-slate-400">Ausências por dia da semana</p>
             <div className="grid h-[90px] grid-cols-5 items-end gap-2">
                 {semana.map((v, i) => (
                     <div key={SEMANA[i]} className="flex h-full flex-col justify-end" title={`${SEMANA[i]}: ${v} ausência(s)`}>
@@ -164,7 +167,7 @@ export function GraficoAusencias({ tipos, semana, periodo, onTipo }: { tipos: Ti
                     </div>
                 ))}
             </div>
-            <div className="mt-1.5 grid grid-cols-5 gap-2">{SEMANA.map((d, i) => <span key={d} className="text-center text-[11px] tabular-nums text-[#5B6474]">{d} · {semana[i]}</span>)}</div>
+            <div className="mt-1.5 grid grid-cols-5 gap-2">{SEMANA.map(d => <span key={d} className="text-center text-[11px] tabular-nums text-[#5B6474]">{d}</span>)}</div>
         </CartaoGrafico>
     );
 }
@@ -181,7 +184,6 @@ export function MapaPresenca({ mapa, dias, titulo, onDia }: {
                 <div><h2 className="text-base font-extrabold">Mapa de presença · {titulo}</h2><p className="mt-0.5 text-xs text-[#5B6474] dark:text-slate-400">Cada quadrado é um dia útil. Clique para abrir o dia no livro de ponto.</p></div>
                 <div className="flex flex-wrap items-center gap-3">
                     {legenda.map(e => <span key={e} className="inline-flex items-center gap-1.5 text-xs text-[#344054] dark:text-slate-300"><span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: COR_ESTADO[e] }} aria-hidden="true" />{ROTULO_ESTADO[e]}</span>)}
-                    <button type="button" className="text-[13px] font-semibold text-[#1D4ED8] hover:underline dark:text-sky-400" onClick={() => setVerTabela(v => !v)}>{verTabela ? 'Ver mapa' : 'Ver tabela'}</button>
                 </div>
             </div>
             {mapa.length === 0 || dias.length === 0 ? <p className="mt-4 rounded-xl border border-dashed border-[#D0D5DD] p-6 text-center text-sm text-[#5B6474]">Sem funcionários ou dias úteis neste mês.</p> : verTabela ? (
@@ -195,11 +197,6 @@ export function MapaPresenca({ mapa, dias, titulo, onDia }: {
             ) : (
                 <div className="mt-3.5 overflow-x-auto">
                     <div className="flex min-w-[900px] flex-col gap-1.5">
-                        <div className="grid items-end gap-3" style={{ gridTemplateColumns: '260px 1fr 70px' }}>
-                            <span />
-                            <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${dias.length}, minmax(0, 1fr))` }}>{dias.map(d => <span key={d} className="text-center text-[10px] tabular-nums text-[#5B6474]">{d.slice(8, 10)}</span>)}</div>
-                            <span className="text-right text-[11px] text-[#5B6474]">Taxa</span>
-                        </div>
                         {mapa.map(r => (
                             <div key={r.funcionarioId} className="grid items-center gap-3" style={{ gridTemplateColumns: '260px 1fr 70px' }}>
                                 <span className="truncate text-[13px] font-semibold">{r.nome}</span>

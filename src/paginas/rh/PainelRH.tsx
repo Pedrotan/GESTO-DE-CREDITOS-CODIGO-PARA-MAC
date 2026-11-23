@@ -7,7 +7,7 @@ import { Label } from '@/componentes/ui/label';
 import { Textarea } from '@/componentes/ui/textarea';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/componentes/ui/dropdown-menu';
-import { AlertTriangle, CalendarDays, Clock, Download, FileText, Inbox, Loader2, Phone, RefreshCw, Users, Wallet, XCircle } from 'lucide-react';
+import { AlertTriangle, CalendarDays, Clock, CreditCard, Download, FileText, Inbox, Loader2, Phone, RefreshCw, UserPlus, XCircle } from 'lucide-react';
 import { ServicoPainelRH, type DadosPainel, type PedidoPainel } from '@/servicos/rh/ServicoPainelRH';
 import { ServicoAlertasRH, type AlertaRH } from '@/servicos/rh/ServicoAlertasRH';
 import { ServicoPontoRH } from '@/servicos/rh/ServicoPontoRH';
@@ -26,6 +26,10 @@ import { CaixaPortalRH } from '@/componentes/rh/CaixaPortalRH';
 import { EVENTO_ALERTAS_RH } from '@/componentes/rh/TarefaDiariaRH';
 import { GraficoAssiduidade, GraficoAusencias, GraficoDepartamentos, GraficoMassa, MapaPresenca } from '@/componentes/rh/painel/GraficosPainel';
 import { useBaseRH } from './FuncionariosRH';
+import { useAuth } from '@/contextos/ContextoAutenticacao';
+import { ServicoContaPortal } from '@/servicos/rh/ServicoContaPortal';
+import { enderecoPortal } from '@/bibliotecas/rh/conta-portal';
+import { gerarFichaAcessoPortalPdf } from '@/bibliotecas/rh/pdf-rh';
 
 /** Próximo aniversário (aaaa-mm-dd) a partir de hoje; 29/02 conta a 28/02 nos anos não bissextos. */
 export function proximoAniversario(nascimento: string, hoje: string) {
@@ -70,6 +74,37 @@ export default function PainelRH() {
     const [erro, setErro] = useState<string | null>(null);
     const [recusar, setRecusar] = useState<PedidoPainel | null>(null);
     const [correio, setCorreio] = useState(false);
+    const [convidados, setConvidados] = useState<Array<{ funcionario: DadosPainel['funcionariosSemAcesso'][number]; username: string; senha: string }> | null>(null);
+    const { users, reloadUsers } = useAuth();
+
+    /**
+     * «Convidar todos»: cria o acesso ao portal de cada funcionário activo que ainda não o tem (utilizador pelo nome e
+     * senha temporária com troca obrigatória). As senhas só aparecem nas fichas de acesso que se descarregam a seguir.
+     */
+    const convidarTodos = async () => {
+        if (!actor || !dados) return;
+        const lista = dados.funcionariosSemAcesso;
+        if (!lista.length) return;
+        if (!await confirmar(`Criar o acesso ao portal de ${lista.length} funcionário(s) que ainda não o têm? Cada um recebe um utilizador e uma senha temporária, que troca no primeiro acesso.`,
+            { titulo: 'Convidar todos para o portal', confirmar: 'Sim, criar acessos' })) return;
+        const criados: Array<{ funcionario: DadosPainel['funcionariosSemAcesso'][number]; username: string; senha: string }> = [];
+        const existentes = [...((users || []) as Array<{ email?: string; username?: string }>)];
+        const ok = await executar(async () => {
+            for (const f of lista) {
+                const c = await ServicoContaPortal.criar({ id: f.id, nome: f.nome, email: f.email, utilizador_id: null }, actor, existentes as never);
+                existentes.push({ email: c.email, username: c.username });
+                criados.push({ funcionario: f, username: c.username, senha: c.senha });
+            }
+        }, `${lista.length} acesso(s) criado(s)`);
+        if (criados.length) { setConvidados(criados); void reloadUsers?.(); void carregar(); }
+        if (!ok && !criados.length) return;
+    };
+    const fichaAcesso = (c: { funcionario: DadosPainel['funcionariosSemAcesso'][number]; username: string; senha: string }) => actor && gerarFichaAcessoPortalPdf({
+        motivo: 'criacao', utilizador: c.username, senha: c.senha, endereco: enderecoPortal(), emitidoPor: actor.name,
+        funcionario: { nome: c.funcionario.nome, numero: c.funcionario.numero, email: c.funcionario.email,
+            cargo: base.dados.cargos.find(x => x.id === c.funcionario.cargo_id)?.nome, departamento: base.dados.departamentos.find(x => x.id === c.funcionario.departamento_id)?.nome,
+            seccao: base.dados.seccoes.find(x => x.id === c.funcionario.seccao_id)?.nome },
+    }, companySettings, actor.name);
 
     // Chefe de departamento sem «gerir RH»: vê só o seu departamento (validado também nas leituras do processo principal).
     const chefeDe = useMemo(() => base.dados.departamentos.filter(d => base.dados.funcionarios.find(f => f.id === d.responsavel_id)?.utilizador_id === actor?.id), [base.dados, actor?.id]);
@@ -155,12 +190,12 @@ export default function PainelRH() {
     }, 'Relatório gerado');
 
     const accoesRapidas: Array<{ rotulo: string; icone: ReactNode; fundo: string; cor: string; ir: () => void; mostrar: boolean }> = [
-        { rotulo: 'Novo funcionário', icone: <Users className="h-[18px] w-[18px]" />, fundo: '#EEF2FF', cor: '#3538CD', ir: () => navigate('/rh/funcionarios?novo=1'), mostrar: gerir },
+        { rotulo: 'Novo funcionário', icone: <UserPlus className="h-[18px] w-[18px]" />, fundo: '#EEF2FF', cor: '#3538CD', ir: () => navigate('/rh/funcionarios?novo=1'), mostrar: gerir },
         { rotulo: 'Importar ponto (CSV)', icone: <Clock className="h-[18px] w-[18px]" />, fundo: '#ECFDF3', cor: '#067647', ir: () => navigate('/rh/ponto?importar=1'), mostrar: gerir },
         { rotulo: 'Planear férias', icone: <CalendarDays className="h-[18px] w-[18px]" />, fundo: '#F0F9FF', cor: '#026AA2', ir: () => navigate('/rh/ferias'), mostrar: gerir },
         { rotulo: 'Lançar falta', icone: <XCircle className="h-[18px] w-[18px]" />, fundo: '#FEF3F2', cor: '#B42318', ir: () => navigate('/rh/ausencias'), mostrar: gerir },
         { rotulo: 'Gerar declaração', icone: <FileText className="h-[18px] w-[18px]" />, fundo: '#FFFAEB', cor: '#B54708', ir: () => navigate('/rh/declaracoes'), mostrar: gerir },
-        { rotulo: 'Processar salários', icone: <Wallet className="h-[18px] w-[18px]" />, fundo: '#F4F3FF', cor: '#5925DC', ir: () => navigate('/rh/processamento'), mostrar: calcular },
+        { rotulo: 'Processar salários', icone: <CreditCard className="h-[18px] w-[18px]" />, fundo: '#F4F3FF', cor: '#5925DC', ir: () => navigate('/rh/processamento'), mostrar: calcular },
     ];
 
     return (
@@ -248,8 +283,9 @@ export default function PainelRH() {
                                 {d.hoje.ausentesLista.map(a => (
                                     <div key={a.id} className="flex flex-wrap items-center gap-2.5 border-b border-[#F2F4F7] py-2.5 text-sm last:border-0 dark:border-slate-800">
                                         <span className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full bg-[#EEF2FF] text-[11px] font-bold text-[#1E3A8A]" aria-hidden="true">{iniciais(a.nome)}</span>
-                                        <span className="min-w-0 flex-1"><strong className="font-semibold">{a.nome}</strong> <span className="text-[#5B6474]">· {a.departamento} · sem marcação</span></span>
-                                        {a.telefone && <a className={cn(botao, 'h-[30px] text-xs')} href={`tel:${a.telefone.replace(/\s+/gu, '')}`}><Phone className="h-3.5 w-3.5" /> Ligar</a>}
+                                        <span className="min-w-0 flex-1" title={a.departamento}><strong className="font-semibold">{a.nome}</strong> <span className="text-[#5B6474]">· sem marcação</span></span>
+                                        {a.telefone ? <a className={cn(botao, 'h-[30px] text-xs')} href={`tel:${a.telefone.replace(/\s+/gu, '')}`}><Phone className="h-3.5 w-3.5" /> Ligar</a>
+                                            : <button type="button" className={cn(botao, 'h-[30px] text-xs')} disabled title="Sem telefone na ficha">Ligar</button>}
                                         {gerir && <button type="button" className={cn(botao, 'h-[30px] text-xs')} onClick={() => navigate(`/rh/ponto?dia=${d.hoje.data}&funcionario=${a.id}`)}>Registar entrada</button>}
                                         {gerir && <button type="button" className={cn(botao, 'h-[30px] text-xs text-[#B42318]')} onClick={() => void lancarFalta([a])}>Falta</button>}
                                     </div>
@@ -257,15 +293,15 @@ export default function PainelRH() {
                             </>}
                         </section>
 
-                        <PortalCompacto portal={d.portal} gerir={gerir} onAprovar={p => void aprovar(p)} onRecusar={setRecusar} onCorreio={() => setCorreio(true)} onCriarAcessos={() => navigate('/rh/funcionarios')} />
+                        <PortalCompacto portal={d.portal} gerir={gerir} onAprovar={p => void aprovar(p)} onRecusar={setRecusar} onCorreio={() => setCorreio(true)} onCriarAcessos={() => void convidarTodos()} />
                     </div>
 
                     {/* 8 indicadores */}
                     <section aria-label="Indicadores" className="grid gap-3.5 [grid-template-columns:repeat(auto-fill,minmax(230px,1fr))]">
-                        <Kpi rotulo="Funcionários activos" valor={String(d.kpis.activos)} detalhe={`${d.kpis.suspensos} suspensos · ${d.kpis.admitidos} admitidos no período`} onClick={() => navigate('/rh/funcionarios')} />
+                        <Kpi rotulo="Funcionários activos" valor={String(d.kpis.activos)} detalhe={`${d.kpis.suspensos} suspensos · ${d.kpis.admitidos} admitidos ${periodo === 'este_mes' ? 'este mês' : 'no período'}`} onClick={() => navigate('/rh/funcionarios')} />
                         {salarios && <Kpi rotulo="Massa salarial base" valor={kz(d.kpis.massaSalarial || 0)} detalhe="soma dos salários base activos" onClick={() => navigate('/rh/contratos')} />}
                         {salarios && <Kpi rotulo="Salário base médio" valor={d.kpis.salarioMedio !== null ? kz(d.kpis.salarioMedio) : '—'} detalhe={`massa salarial ÷ ${d.kpis.activos} funcionários`} onClick={() => navigate('/rh/contratos')} />}
-                        <Kpi rotulo="Saldo de férias da equipa" valor={`${d.kpis.saldoFerias} dias`} detalhe={`${d.kpis.transitados} transitados · ${d.kpis.planeados} planeados`} onClick={() => navigate('/rh/ferias')} />
+                        <Kpi rotulo="Saldo de férias da equipa" valor={`${d.kpis.saldoFerias} dias`} detalhe={`${d.kpis.transitados} transitados de ${d.anoAnterior} · ${d.kpis.planeados} planeados`} onClick={() => navigate('/rh/ferias')} />
                         <Kpi rotulo={`Taxa de assiduidade (${periodo === 'este_mes' ? 'mês' : 'período'})`} valor={d.kpis.assiduidade !== null ? `${d.kpis.assiduidade.toLocaleString('pt-PT')}%` : '—'}
                             detalhe="dias presentes ÷ dias úteis" variacao={d.kpis.assiduidadeVariacao} unidade=" p.p." melhorSobe onClick={() => navigate('/rh/ponto')} />
                         <Kpi rotulo={`Faltas injustificadas (${periodo === 'este_mes' ? 'mês' : 'período'})`} valor={String(d.kpis.faltas)} detalhe={d.kpis.descontoFaltas !== null ? `desconto estimado: ${kz(d.kpis.descontoFaltas)}` : 'dias de falta injustificada'}
@@ -273,7 +309,7 @@ export default function PainelRH() {
                         <Kpi rotulo={`Horas extra (${periodo === 'este_mes' ? 'mês' : 'período'})`} valor={horasMin(d.kpis.minutosExtra)} detalhe={d.kpis.custoExtra !== null ? `custo estimado: ${kz(d.kpis.custoExtra)}` : 'minutos acima do horário'}
                             variacao={d.kpis.extraVariacao} unidade="%" onClick={() => navigate('/rh/ponto')} />
                         <Kpi rotulo="Fichas incompletas" valor={String(d.kpis.fichasIncompletas)} cor={d.kpis.fichasIncompletas ? '#B54708' : undefined}
-                            detalhe={d.kpis.fichasIncompletas ? `sem ${[...new Set(d.kpis.incompletos.flatMap(x => x.faltam))].slice(0, 3).join(', ')} · ver` : 'todas as fichas completas'} onClick={() => navigate('/rh/funcionarios?incompletas=1')} />
+                            detalhe={d.kpis.fichasIncompletas ? <>sem {[...new Set(d.kpis.incompletos.flatMap(x => x.faltam))].slice(0, 3).join(', ').replace(/, ([^,]*)$/u, ' ou $1')} · <span className="font-semibold text-[#1D4ED8] dark:text-sky-400">ver</span></> : 'todas as fichas completas'} onClick={() => navigate('/rh/funcionarios?incompletas=1')} />
                     </section>
 
                     {/* Gráficos 2×2 */}
@@ -294,7 +330,7 @@ export default function PainelRH() {
                         <section className={cn(cartao, 'p-[18px]')}>
                             <div className="flex items-center justify-between"><h2 className="text-base font-extrabold">Alertas e lembretes</h2>
                                 <span className="rounded-full bg-[#FEF0C7] px-2 py-0.5 text-xs font-bold text-[#93370D]">{d.alertas.length} aberto{d.alertas.length === 1 ? '' : 's'}</span></div>
-                            {d.alertas.length === 0 ? <p className="py-6 text-center text-sm text-[#5B6474]">Sem alertas abertos.</p> : (
+                            {d.alertas.length === 0 && d.lembretesVazios.length === 0 ? <p className="py-6 text-center text-sm text-[#5B6474]">Sem alertas abertos.</p> : (
                                 <ul className="max-h-[360px] overflow-y-auto">
                                     {d.alertas.map(a => (
                                         <li key={a.id} className="flex items-center gap-2.5 border-b border-[#F2F4F7] py-2.5 text-sm last:border-0 dark:border-slate-800">
@@ -313,6 +349,11 @@ export default function PainelRH() {
                                             )}
                                         </li>
                                     ))}
+                                    {d.lembretesVazios.map(t => (
+                                        <li key={t} className="flex items-center gap-2.5 border-b border-[#F2F4F7] py-2.5 text-sm text-[#5B6474] last:border-0 dark:border-slate-800">
+                                            <span className="h-2 w-2 shrink-0 rounded-full bg-[#98A2B3]" aria-hidden="true" /><span className="flex-1">{t}</span>
+                                        </li>
+                                    ))}
                                 </ul>
                             )}
                         </section>
@@ -320,10 +361,10 @@ export default function PainelRH() {
                         <section className={cn(cartao, 'p-[18px]')}>
                             <h2 className="text-base font-extrabold">Próximos eventos</h2>
                             {d.eventos.map(e => (
-                                <div key={`${e.tipo}-${e.data}-${e.titulo}`} className="flex items-center gap-2.5 border-b border-[#F2F4F7] py-2.5 text-sm last:border-0 dark:border-slate-800">
+                                <div key={`${e.tipo}-${e.data}-${e.titulo}`} role={e.rota ? 'link' : undefined} tabIndex={e.rota ? 0 : undefined} onClick={() => e.rota && navigate(e.rota)} onKeyDown={k => { if (e.rota && k.key === 'Enter') navigate(e.rota); }}
+                                    className={cn('flex items-center gap-2.5 border-b border-[#F2F4F7] py-2.5 text-sm last:border-0 dark:border-slate-800', e.rota && 'cursor-pointer hover:bg-[#F9FAFB] dark:hover:bg-slate-800/40')}>
                                     <span className="w-11 shrink-0 text-center"><strong className="block text-lg leading-tight">{e.data.slice(8, 10)}</strong><span className="text-[11px] tabular-nums text-[#5B6474]">{MESES_CURTOS[Number(e.data.slice(5, 7)) - 1]}</span></span>
                                     <span className="min-w-0 flex-1"><strong className="font-semibold">{e.titulo}</strong><br /><span className="text-xs text-[#5B6474]">{e.detalhe}</span></span>
-                                    {e.rota && <button type="button" className={ligacao} onClick={() => navigate(e.rota!)}>Abrir</button>}
                                 </div>
                             ))}
                             {!d.eventos.some(e => e.tipo === 'ferias') && (
@@ -335,12 +376,29 @@ export default function PainelRH() {
                             )}
                         </section>
 
-                        <SalariosMes s={d.salariosMes} mes={MESES[Number(hoje.slice(5, 7)) - 1]} ano={hoje.slice(0, 4)} calcular={calcular} onAbrir={() => navigate(d.salariosMes?.processamentoId ? `/rh/processamento?id=${d.salariosMes.processamentoId}` : '/rh/processamento')} onPonto={() => navigate('/rh/ponto')} />
+                        <SalariosMes s={d.salariosMes} mes={MESES[Number(hoje.slice(5, 7)) - 1]} ano={hoje.slice(0, 4)} calcular={calcular} onAbrir={() => navigate(d.salariosMes?.processamentoId ? `/rh/processamento?id=${d.salariosMes.processamentoId}` : '/rh/processamento')} />
                     </div>
                 </>}
             </div>
 
             {recusar && <DialogoRecusar pedido={recusar} onClose={() => setRecusar(null)} onConfirmar={m => recusarPedido(recusar, m)} />}
+            {convidados && (
+                <Dialog open onOpenChange={v => !v && setConvidados(null)}>
+                    <DialogContent className="max-w-lg">
+                        <DialogHeader><DialogTitle>Acessos ao portal criados</DialogTitle>
+                            <DialogDescription>Descarregue a ficha de acesso de cada funcionário e entregue-a impressa. A senha temporária só existe nessas fichas: ao fechar esta janela deixa de aparecer.</DialogDescription></DialogHeader>
+                        <ul className="divide-y divide-[#F2F4F7] text-sm dark:divide-slate-800">
+                            {convidados.map(c => (
+                                <li key={c.funcionario.id} className="flex items-center justify-between gap-2 py-2">
+                                    <span className="min-w-0"><strong className="font-semibold">{c.funcionario.nome}</strong><br /><span className="text-xs text-[#5B6474]">utilizador: {c.username}</span></span>
+                                    <Button size="sm" variant="outline" onClick={() => fichaAcesso(c)}><Download className="mr-1.5 h-4 w-4" /> Ficha de acesso</Button>
+                                </li>
+                            ))}
+                        </ul>
+                        <DialogFooter><Button variant="outline" onClick={() => convidados.forEach(c => fichaAcesso(c))}>Descarregar todas</Button><Button onClick={() => setConvidados(null)}>Concluído</Button></DialogFooter>
+                    </DialogContent>
+                </Dialog>
+            )}
             {correio && actor && (
                 <Dialog open onOpenChange={v => !v && setCorreio(false)}>
                     <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
@@ -367,7 +425,7 @@ function AnelPresenca({ valor }: { valor: number }) {
 }
 
 function Kpi({ rotulo, valor, detalhe, onClick, variacao, unidade = '%', melhorSobe = false, cor }: {
-    rotulo: string; valor: string; detalhe: string; onClick: () => void; variacao?: number | null; unidade?: string; melhorSobe?: boolean; cor?: string;
+    rotulo: string; valor: string; detalhe: ReactNode; onClick: () => void; variacao?: number | null; unidade?: string; melhorSobe?: boolean; cor?: string;
 }) {
     const sobe = (variacao ?? 0) > 0;
     const bom = variacao === null || variacao === undefined || variacao === 0 ? null : melhorSobe ? sobe : !sobe;
@@ -382,7 +440,7 @@ function Kpi({ rotulo, valor, detalhe, onClick, variacao, unidade = '%', melhorS
                     </span>
                 )}
             </div>
-            <div className="mt-1 text-xs text-[#5B6474] dark:text-slate-400">{detalhe}{variacao !== null && variacao !== undefined ? ' · vs. período anterior' : ''}</div>
+            <div className="mt-1 text-xs text-[#5B6474] dark:text-slate-400">{detalhe}</div>
         </button>
     );
 }
@@ -392,14 +450,14 @@ function PortalCompacto({ portal, gerir, onAprovar, onRecusar, onCorreio, onCria
 }) {
     return (
         <section className={cn(cartao, 'flex min-w-0 flex-[1_1_360px] flex-col p-[18px] lg:max-w-[480px]')}>
-            <div className="flex items-center justify-between gap-2"><h2 className="text-base font-extrabold">Portal dos funcionários</h2>
+            <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="whitespace-nowrap text-base font-extrabold">Portal dos funcionários</h2>
                 <div className="flex gap-1">
                     <span className="inline-flex h-[30px] items-center gap-1.5 rounded-lg bg-[#0F1B3D] px-3 text-xs font-semibold text-white">Pedidos <span className="rounded-full bg-white/20 px-1.5">{portal.pendentes}</span></span>
                     <button type="button" className={cn(botao, 'h-[30px] text-xs')} onClick={onCorreio}>Correio</button>
                 </div>
             </div>
             <div className="mt-3.5 grid grid-cols-2 gap-2">
-                {([['Férias por aprovar', portal.ferias], ['Justificações', portal.justificacoes], ['Declarações pedidas', portal.declaracoes], ['Dispensas e outros', portal.outros]] as const).map(([r, v]) => (
+                {([['Férias por aprovar', portal.ferias], ['Justificações', portal.justificacoes], ['Declarações pedidas', portal.declaracoes], ['Alteração de dados', portal.alteracoes]] as const).map(([r, v]) => (
                     <div key={r} className="rounded-[10px] bg-[#F9FAFB] p-2.5 dark:bg-slate-800"><div className="text-xs font-semibold text-[#475467] dark:text-slate-400">{r}</div><div className="text-xl font-extrabold tabular-nums">{v}</div></div>
                 ))}
             </div>
@@ -425,32 +483,31 @@ function PortalCompacto({ portal, gerir, onAprovar, onRecusar, onCorreio, onCria
                 </ul>
             )}
             <div className="mt-3 text-[13px] text-[#5B6474] dark:text-slate-400">Funcionários com acesso ao portal: <strong className="text-[#101828] dark:text-white">{portal.comAcesso} de {portal.total}</strong>
-                {gerir && portal.comAcesso < portal.total && <> · <button type="button" className={ligacao} onClick={onCriarAcessos}>Criar acessos</button></>}</div>
+                {gerir && portal.comAcesso < portal.total && <> · <button type="button" className={ligacao} onClick={onCriarAcessos}>Convidar todos</button></>}</div>
         </section>
     );
 }
 
-function SalariosMes({ s, mes, ano, calcular, onAbrir, onPonto }: { s: DadosPainel['salariosMes']; mes: string; ano: string; calcular: boolean; onAbrir: () => void; onPonto: () => void }) {
+function SalariosMes({ s, mes, ano, calcular, onAbrir }: { s: DadosPainel['salariosMes']; mes: string; ano: string; calcular: boolean; onAbrir: () => void }) {
     if (!s) return <section className={cn(cartao, 'flex items-center justify-center p-6 text-center text-sm text-[#5B6474]')}>Os salários do mês só aparecem a quem tem a permissão «RH: Ver salários».</section>;
     const indice = ETAPAS_SALARIOS.findIndex(e => e.id === s.etapa);
-    const proxima = { ponto: 'Validar o ponto', processar: `Processar ${mes}`, aprovar: 'Aprovar o processamento', pagar: 'Registar o pagamento', recibos: 'Ver os recibos' }[s.etapa];
+    const proxima = { ponto: `Processar ${mes}`, processar: `Processar ${mes}`, aprovar: 'Aprovar o processamento', pagar: 'Registar o pagamento', recibos: 'Ver os recibos' }[s.etapa];
     return (
         <section className={cn(cartao, 'p-[18px]')}>
             <h2 className="text-base font-extrabold">Salários · {mes} {ano}</h2>
             <ol className="mb-4 mt-3.5 flex gap-1.5" aria-label="Etapas do processamento">
                 {ETAPAS_SALARIOS.map((e, i) => (
                     <li key={e.id} className="flex-1" aria-current={i === indice ? 'step' : undefined}>
-                        <div className={cn('h-1.5 rounded-[3px]', i < indice ? 'bg-[#12B76A]' : i === indice ? 'bg-[#2a78d6]' : 'bg-[#D0D5DD]')} />
+                        <div className={cn('h-1.5 rounded-[3px]', i <= indice ? 'bg-[#12B76A]' : 'bg-[#D0D5DD]')} />
                         <div className={cn('mt-1.5 text-[11px] tabular-nums', i === indice ? 'font-bold text-[#101828] dark:text-white' : 'text-[#5B6474]')}>{e.rotulo}</div>
                     </li>
                 ))}
             </ol>
-            {([['Salário base', kz(s.base)], ['Bruto (base + subsídios)', s.bruto !== null ? kz(s.bruto) : '—'], ['INSS (3%) + IRT', s.descontos !== null ? kz(s.descontos) : '—']] as const).map(([r, v]) => (
+            {([['Salário base', kz(s.base)], ['Subsídios e abonos', s.subsidios !== null ? kz(s.subsidios) : '—'], ['INSS (3%) + IRT', s.descontos !== null ? kz(s.descontos) : '—']] as const).map(([r, v]) => (
                 <div key={r} className="flex items-center border-b border-[#F2F4F7] py-2.5 text-sm dark:border-slate-800"><span className="flex-1 text-[#5B6474]">{r}</span><strong className="tabular-nums">{v}</strong></div>
             ))}
             <div className="flex items-center py-2.5 text-sm"><span className="flex-1 font-semibold">Líquido a pagar</span><strong className="tabular-nums">{s.liquido !== null ? kz(s.liquido) : '—'}</strong></div>
-            {s.bruto === null && <p className="text-xs text-[#5B6474]">Os valores do bruto, descontos e líquido aparecem depois de calcular o processamento.</p>}
-            {(calcular || s.etapa === 'ponto') && <Button className="mt-2 w-full bg-[#0F1B3D] text-white hover:bg-[#0F1B3D]/90" onClick={s.etapa === 'ponto' ? onPonto : onAbrir}>{proxima}</Button>}
+            {calcular && <Button className="mt-2 w-full bg-[#0F1B3D] text-white hover:bg-[#0F1B3D]/90" onClick={onAbrir}>{proxima}</Button>}
         </section>
     );
 }
