@@ -229,7 +229,7 @@ function FeriadosDoAno({ registados, opcoes, configurar, actor, onEditar, onNovo
                 {dias.map(d => (
                     <div key={d.data} className={`flex items-center gap-3 border-b border-slate-100 px-4 py-2 text-sm last:border-0 dark:border-slate-800 ${d.activo ? '' : 'opacity-50'}`}>
                         <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${COR_CATEGORIA[d.tipo]}`} aria-hidden="true" />
-                        <span className="w-28 shrink-0 font-bold tabular-nums">{dataPt(d.data)} · {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][new Date(`${d.data}T12:00:00Z`).getUTCDay()]}</span>
+                        <span className="w-36 shrink-0 font-bold tabular-nums">{dataPt(d.data)} · {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][new Date(`${d.data}T12:00:00Z`).getUTCDay()]}</span>
                         <span className="min-w-0 flex-1">{d.nome}{d.internacional ? ' (internacional)' : ''}{d.local ? ` · ${d.local}` : ''}
                             <span className="ml-2 text-xs text-slate-500">{ROTULO_CATEGORIA[d.tipo]}{d.origem === 'gerado' ? ' · gerado' : ''}</span></span>
                         {configurar && actor && d.origem === 'gerado' && (d.tipo === 'ponte' || d.tipo === 'nacional') && (
