@@ -6,7 +6,7 @@ import { Input } from '@/componentes/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/componentes/ui/dropdown-menu';
 import {
-    Ban, Banknote, CalendarClock, Download, Eye, FileSignature, FileText, Folder, FolderOpen, MoreHorizontal, Pencil, Plus, Printer, RotateCcw, Search, UserX, Users, X,
+    Ban, Banknote, CalendarClock, ClipboardList, Download, Eye, FileSignature, FileText, Folder, FolderOpen, Pencil, Plus, Printer, RotateCcw, Search, UserX, Users, X,
 } from 'lucide-react';
 import { ServicoRH, type Contrato, type Funcionario, type Seccao } from '@/servicos/rh/ServicoRH';
 import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
@@ -133,6 +133,25 @@ export default function FuncionariosRH() {
         </DropdownMenuContent>
     );
 
+    /** Todas as acções de um funcionário, visíveis na linha da tabela (as mesmas do menu da ficha). */
+    const accoesLinha = (f: Funcionario) => {
+        const activo = f.estado !== 'cessado';
+        return [
+            { chave: 'ficha', rotulo: 'Ver ficha completa', icone: Eye, accao: () => abrirFicha(f.id), mostrar: true },
+            { chave: 'editar', rotulo: 'Editar dados', icone: Pencil, accao: () => setFormulario({ aberto: true, funcionario: f }), mostrar: gerir },
+            { chave: 'documentos', rotulo: 'Abrir pasta de documentos', icone: Folder, accao: () => navigate(`/rh/documentos?funcionario=${f.id}`), mostrar: true },
+            { chave: 'contrato', rotulo: 'Novo contrato / renovar', icone: FileSignature, accao: () => setDialogo({ tipo: 'contrato', funcionario: f }), mostrar: gerir && activo },
+            { chave: 'subsidio', rotulo: 'Atribuir subsídio', icone: Plus, accao: () => setDialogo({ tipo: 'subsidio', ids: [f.id] }), mostrar: gerir && salarios && activo },
+            { chave: 'salario', rotulo: 'Registar alteração salarial', icone: Banknote, accao: () => setDialogo({ tipo: 'salario', funcionario: f }), mostrar: gerir && salarios && activo },
+            { chave: 'declaracao', rotulo: 'Gerar declaração de serviço', icone: FileText, accao: () => declaracoes([f]), mostrar: gerir },
+            { chave: 'imprimir', rotulo: 'Imprimir ficha (PDF)', icone: Printer, accao: () => actor && void executar(() => imprimirFicha(f, ctx, companySettings, actor, salarios), 'Ficha gerada'), mostrar: true },
+            { chave: 'relatorios', rotulo: 'Relatórios pessoais', icone: ClipboardList, accao: () => setDialogo({ tipo: 'relatorios', ids: [f.id] }), mostrar: true },
+            { chave: 'ponto', rotulo: 'Ver livro de ponto', icone: CalendarClock, accao: () => navigate(`/rh/ponto?pesquisa=${encodeURIComponent(f.numero_mecanografico)}`), mostrar: true },
+            { chave: 'suspender', rotulo: f.estado === 'suspenso' ? 'Reactivar' : 'Suspender', icone: f.estado === 'suspenso' ? RotateCcw : Ban, accao: () => setDialogo({ tipo: 'suspender', funcionario: f }), mostrar: gerir && activo },
+            { chave: 'terminar', rotulo: 'Terminar contrato', icone: UserX, accao: () => setDialogo({ tipo: 'terminar', funcionario: f }), mostrar: gerir && activo, perigo: true },
+        ].filter(a => a.mostrar);
+    };
+
     const botaoIcone = 'inline-flex h-9 w-9 items-center justify-center rounded-lg border border-rh-border bg-white text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rh-link dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800';
 
     return (
@@ -206,11 +225,11 @@ export default function FuncionariosRH() {
                         <div className="p-6"><Vazio>{funcionarios.length === 0 ? 'Ainda não há funcionários registados.' : 'Nenhum funcionário corresponde aos filtros.'}</Vazio></div>
                     ) : (
                         <div className="overflow-x-auto">
-                            <table className="w-full min-w-[1100px] border-collapse text-sm">
+                            <table className="w-full min-w-[1400px] border-collapse text-sm">
                                 <thead>
                                     <tr className="border-b border-rh-border bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
                                         <th className="w-11 px-4 py-3"><input type="checkbox" aria-label="Seleccionar todos" checked={todosMarcados} onChange={() => setSeleccao(todosMarcados ? new Set() : new Set(lista.map(f => f.id)))} className="h-4 w-4 accent-rh-navy" /></th>
-                                        <th className="px-4 py-3">N.º</th><th className="px-4 py-3">Funcionário</th><th className="px-4 py-3">Cargo / Departamento</th><th className="px-4 py-3">Admissão</th>
+                                        <th className="w-px whitespace-nowrap py-3 pl-2 pr-3">N.º</th><th className="px-3 py-3">Funcionário</th><th className="px-4 py-3">Cargo / Departamento</th><th className="px-4 py-3">Admissão</th>
                                         {salarios && <th className="px-4 py-3 text-right">Salário base</th>}<th className="px-4 py-3">BI</th><th className="px-4 py-3">Estado</th><th className="px-4 py-3 text-right">Acções</th>
                                     </tr>
                                 </thead>
@@ -219,8 +238,10 @@ export default function FuncionariosRH() {
                                         <tr key={f.id} className={cn('border-b border-slate-100 align-middle dark:border-slate-800', seleccao.has(f.id) ? 'bg-indigo-50/60 dark:bg-indigo-950/20' : 'hover:bg-slate-50 dark:hover:bg-slate-800/40')}>
                                             <td className="px-4 py-3.5"><input type="checkbox" aria-label={`Seleccionar ${f.nome}`} checked={seleccao.has(f.id)} className="h-4 w-4 accent-rh-navy"
                                                 onChange={() => setSeleccao(s => { const n = new Set(s); if (n.has(f.id)) n.delete(f.id); else n.add(f.id); return n; })} /></td>
-                                            <td className="px-4 py-3.5 font-mono text-xs text-slate-600 dark:text-slate-400">{f.numero_mecanografico}</td>
-                                            <td className="px-4 py-3.5">
+                                            <td className="w-px whitespace-nowrap py-3.5 pl-2 pr-3">
+                                                <span className="inline-block rounded-md border border-indigo-200 bg-indigo-50 px-2 py-0.5 font-mono text-xs font-bold tracking-wider text-indigo-700 dark:border-indigo-800 dark:bg-indigo-950 dark:text-indigo-200">{f.numero_mecanografico}</span>
+                                            </td>
+                                            <td className="px-3 py-3.5">
                                                 <button type="button" onClick={() => abrirFicha(f.id)} className="flex items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rh-link">
                                                     <AvatarFuncionario f={f} />
                                                     <span className="min-w-0">
@@ -235,16 +256,16 @@ export default function FuncionariosRH() {
                                             <td className="px-4 py-3.5"><SeloBI situacao={estadoBI(f.bi_validade, hoje, 90)} /></td>
                                             <td className="px-4 py-3.5"><SeloEstadoFuncionario estado={f.estado} /></td>
                                             <td className="px-4 py-3.5">
-                                                <div className="flex justify-end gap-1.5">
-                                                    <button type="button" className={botaoIcone} aria-label={`Ver ficha de ${f.nome}`} title="Ver ficha" onClick={() => abrirFicha(f.id)}><Eye className="h-4 w-4" /></button>
-                                                    {gerir && <button type="button" className={botaoIcone} aria-label={`Editar ${f.nome}`} title="Editar" onClick={() => setFormulario({ aberto: true, funcionario: f })}><Pencil className="h-4 w-4" /></button>}
-                                                    <button type="button" className={botaoIcone} aria-label={`Documentos de ${f.nome}`} title="Documentos" onClick={() => navigate(`/rh/documentos?funcionario=${f.id}`)}><Folder className="h-4 w-4" /></button>
-                                                    <DropdownMenu>
-                                                        <DropdownMenuTrigger asChild>
-                                                            <button type="button" className={cn(botaoIcone, 'bg-slate-100 dark:bg-slate-800')} aria-label={`Mais acções para ${f.nome}`} title="Mais acções"><MoreHorizontal className="h-4 w-4" /></button>
-                                                        </DropdownMenuTrigger>
-                                                        {menuAccoes(f)}
-                                                    </DropdownMenu>
+                                                <div className="flex justify-end gap-1">
+                                                    {accoesLinha(f).map(a => {
+                                                        const Icone = a.icone;
+                                                        return (
+                                                            <button key={a.chave} type="button" title={a.rotulo} aria-label={`${a.rotulo}: ${f.nome}`} onClick={a.accao}
+                                                                className={cn(botaoIcone, 'h-8 w-8', a.perigo && 'border-red-200 text-rh-danger hover:bg-red-50 dark:border-red-900 dark:text-red-400 dark:hover:bg-red-950')}>
+                                                                <Icone className="h-4 w-4" />
+                                                            </button>
+                                                        );
+                                                    })}
                                                 </div>
                                             </td>
                                         </tr>
