@@ -6,6 +6,7 @@
 export type AreaModulo = 
   | 'comercial'
   | 'credito'
+  | 'conformidade'
   | 'cobranca'
   | 'financeiro'
   | 'fiscal'
@@ -197,6 +198,26 @@ export const MODULOS_SISTEMA: DefinicaoModulo[] = [
     acoesDisponiveis: ['ver', 'criar', 'editar', 'exportar'],
     caminho: '/scoring',
     legadoId: 'view_reports'
+  },
+
+  // 2b. Conformidade (Compliance): KYC, risco do cliente e possíveis duplicados.
+  {
+    id: 'compliance_kyc',
+    nome: 'Compliance: Perfil KYC e verificações',
+    area: 'conformidade',
+    acoesDisponiveis: ['ver', 'criar', 'editar', 'aprovar', 'exportar', 'ver_sensiveis'],
+    acoesCriticas: ['aprovar'],
+    caminho: '/compliance',
+    legadoId: 'compliance_view'
+  },
+  {
+    id: 'compliance_risco',
+    nome: 'Compliance: Avaliação de risco e duplicados',
+    area: 'conformidade',
+    acoesDisponiveis: ['ver', 'criar', 'editar', 'aprovar', 'exportar'],
+    acoesCriticas: ['aprovar', 'editar'],
+    caminho: '/compliance/modelo-risco',
+    legadoId: 'compliance_view'
   },
 
   // 3. Cobrança
@@ -455,6 +476,7 @@ export const DESCRICOES_ACOES: Record<AcaoModulo, { nome: string; descricao: str
 export const ROTULOS_AREAS: Record<AreaModulo, { nome: string; descricao: string; cor: string }> = {
   comercial: { nome: 'Comercial', descricao: 'Clientes, simulações, contactos e garantias', cor: 'sky' },
   credito: { nome: 'Crédito', descricao: 'Propostas, aprovações, contratos e análise de risco', cor: 'amber' },
+  conformidade: { nome: 'Compliance', descricao: 'KYC, avaliação de risco do cliente, duplicados e modelo de risco', cor: 'green' },
   cobranca: { nome: 'Cobrança', descricao: 'Recebimentos, negociações e contencioso', cor: 'emerald' },
   financeiro: { nome: 'Financeiro e Contabilidade', descricao: 'Plano contabilístico, tesouraria e despesas', cor: 'purple' },
   fiscal: { nome: 'Fiscal', descricao: 'Relatórios AGT, SAF-T (AO) e facturação', cor: 'indigo' },
@@ -501,6 +523,18 @@ export const CONFLITOS_SEGREGAO_FUNCOES: ConflitoSegregacao[] = [
     nome: 'Cálculo e Aprovação de Salários',
     descricao: 'Quem calcula o processamento salarial não deve aprovar o pagamento sem uma segunda validação.',
     permissoesConflitantes: ['rh_salarios.criar', 'rh_salarios.aprovar']
+  },
+  {
+    id: 'compliance_cadastro_validacao',
+    nome: 'Cadastro de Clientes e Validação KYC',
+    descricao: 'Quem cadastra o cliente não deve validar sozinho a sua identificação (KYC).',
+    permissoesConflitantes: ['clientes.criar', 'compliance_kyc.aprovar']
+  },
+  {
+    id: 'compliance_kyc_credito',
+    nome: 'Validação KYC e Aprovação de Crédito',
+    descricao: 'Quem valida os controlos de Compliance não deve também aprovar o crédito.',
+    permissoesConflitantes: ['compliance_kyc.aprovar', 'creditos.aprovar']
   },
   {
     id: 'risco_analise_aprovacao',
@@ -847,6 +881,32 @@ export const PERFIS_PREDEFINIDOS: PerfilAcesso[] = [
       abateCreditoKz: 0
     },
     exigeDoisFatores: false,
+    editavel: true,
+    predefinido: true
+  },
+  {
+    id: 'compliance_officer',
+    codigo: 'RESP_COMPLIANCE',
+    nome: 'Responsável de Compliance',
+    descricao: 'Verificações KYC, avaliações de risco, revisão de duplicados e modelo de risco. Consulta clientes e créditos, mas não cadastra, não aprova créditos nem movimenta valores.',
+    areaPrincipal: 'conformidade',
+    corBadge: 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-200 dark:border-green-900',
+    permissoesBase: [
+      'clientes.ver', 'clientes.ver_sensiveis',
+      'creditos.ver', 'contratos.ver', 'plano_mensal.ver', 'pagamentos.ver',
+      'compliance_kyc.ver', 'compliance_kyc.criar', 'compliance_kyc.editar', 'compliance_kyc.aprovar', 'compliance_kyc.exportar', 'compliance_kyc.ver_sensiveis',
+      'compliance_risco.ver', 'compliance_risco.criar', 'compliance_risco.editar', 'compliance_risco.aprovar', 'compliance_risco.exportar',
+      'auditoria.ver'
+    ],
+    alcadasPadrao: {
+      aprovacaoCreditoKz: 0,
+      desembolsoKz: 0,
+      perdaoJurosPct: 0,
+      perdaoJurosKz: 0,
+      anulacaoPagamentoKz: 0,
+      abateCreditoKz: 0
+    },
+    exigeDoisFatores: true,
     editavel: true,
     predefinido: true
   },

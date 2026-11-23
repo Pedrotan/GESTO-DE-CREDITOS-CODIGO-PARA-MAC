@@ -227,7 +227,11 @@ export class ServicoControloAcesso {
       hr_payroll: ['rh_salarios.criar'],
       hr_payroll_approve: ['rh_salarios.aprovar', 'rh_salarios.fechar_periodo'],
       hr_settings: ['rh_configuracoes.editar'],
-      hr_self: ['rh_portal.ver', 'rh_portal.criar']
+      hr_self: ['rh_portal.ver', 'rh_portal.criar'],
+      compliance_view: ['compliance_kyc.ver', 'compliance_risco.ver'],
+      compliance_manage: ['compliance_kyc.criar', 'compliance_kyc.editar', 'compliance_risco.criar'],
+      compliance_approve: ['compliance_kyc.aprovar', 'compliance_risco.aprovar'],
+      compliance_settings: ['compliance_risco.editar']
     };
     return mapa[legado] || [legado];
   }

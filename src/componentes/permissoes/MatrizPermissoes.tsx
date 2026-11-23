@@ -3,7 +3,7 @@ import { AlertTriangle, Check, ChevronDown, Minus } from 'lucide-react';
 import { cn } from '@/bibliotecas/utils';
 import { DESCRICOES_ACOES, MODULOS_SISTEMA, ROTULOS_AREAS, comporPermissao, type AcaoModulo } from '@/tipos/controlo-acesso';
 
-const AREAS = ['comercial', 'credito', 'cobranca', 'financeiro', 'fiscal', 'relatorios', 'administracao'] as const;
+const AREAS = ['comercial', 'credito', 'conformidade', 'cobranca', 'financeiro', 'fiscal', 'relatorios', 'administracao'] as const;
 const STANDARD: AcaoModulo[] = ['ver', 'criar', 'editar', 'eliminar', 'aprovar', 'exportar'];
 const STANDARD_LABELS: Record<string, string> = { ver: 'Ver', criar: 'Criar', editar: 'Editar', eliminar: 'Eliminar', aprovar: 'Aprovar', exportar: 'Exportar' };
 

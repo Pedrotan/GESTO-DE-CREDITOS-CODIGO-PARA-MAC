@@ -33,6 +33,8 @@ const ENTITY_LABELS: Record<string, string> = {
     payments: 'Pagamentos', report_history: 'Histórico de relatórios', report_schedules: 'Relatórios agendados', schema_migrations: 'Actualizações da base de dados',
     shared_settings: 'Definições partilhadas', simulations: 'Simulações', suppliers: 'Fornecedores', sync_conflicts: 'Conflitos de sincronização',
     user_limits: 'Limites dos utilizadores', users: 'Utilizadores', warranties: 'Garantias',
+    compliance_perfil: 'Compliance · Perfis KYC', compliance_kyc_verificacao: 'Compliance · Verificações KYC', compliance_risco_modelo: 'Compliance · Modelo de risco',
+    compliance_risco_avaliacao: 'Compliance · Avaliações de risco', compliance_duplicado_revisao: 'Compliance · Revisões de duplicados',
     rh_alerta: 'RH · Alertas', rh_ausencia: 'RH · Ausências', rh_cargo: 'RH · Cargos', rh_contrato: 'RH · Contratos de trabalho', rh_contrato_modelo: 'RH · Modelos de contrato', rh_departamento: 'RH · Departamentos', rh_seccao: 'RH · Secções',
     rh_dependente: 'RH · Dependentes', rh_documento: 'RH · Documentos', rh_documento_emitido: 'RH · Documentos emitidos', rh_documento_ficheiro: 'RH · Ficheiros',
     rh_feriado: 'RH · Feriados', rh_funcionario: 'RH · Funcionários', rh_funcionario_rubrica: 'RH · Rubricas do funcionário', rh_historico_salarial: 'RH · Histórico salarial',

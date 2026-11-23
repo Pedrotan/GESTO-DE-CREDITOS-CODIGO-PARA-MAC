@@ -67,6 +67,10 @@ const RecibosRH = lazyWithReload(() => import("./paginas/rh/RecibosRH"));
 const FeriasRH = lazyWithReload(() => import("./paginas/rh/FeriasRH"));
 const DeclaracoesRH = lazyWithReload(() => import("./paginas/rh/DeclaracoesRH"));
 const ContratosRH = lazyWithReload(() => import("./paginas/rh/ContratosRH"));
+const PainelCompliance = lazyWithReload(() => import("./paginas/compliance/PainelCompliance"));
+const ClienteCompliance = lazyWithReload(() => import("./paginas/compliance/ClienteCompliance"));
+const DuplicadosCompliance = lazyWithReload(() => import("./paginas/compliance/DuplicadosCompliance"));
+const ModeloRiscoCompliance = lazyWithReload(() => import("./paginas/compliance/ModeloRiscoCompliance"));
 const RelatoriosRH = lazyWithReload(() => import("./paginas/rh/RelatoriosRH"));
 const PortalFuncionario = lazyWithReload(() => import("./paginas/rh/PortalFuncionario"));
 const QuiosquePonto = lazyWithReload(() => import("./paginas/rh/QuiosquePonto"));
@@ -382,6 +386,15 @@ const AppContent = () => {
               { path: '/rh/contratos', page: <ContratosRH /> },
             ].map(({ path, page }) => (
               <Route key={path} path={path} element={<ProtectedRoute permission="hr_view"><GuardaModuloRH>{page}</GuardaModuloRH></ProtectedRoute>} />
+            ))}
+            {[
+              { path: '/compliance', page: <PainelCompliance /> },
+              { path: '/compliance/painel', page: <PainelCompliance /> },
+              { path: '/compliance/clientes/:id', page: <ClienteCompliance /> },
+              { path: '/compliance/duplicados', page: <DuplicadosCompliance /> },
+              { path: '/compliance/modelo-risco', page: <ModeloRiscoCompliance /> },
+            ].map(({ path, page }) => (
+              <Route key={path} path={path} element={<ProtectedRoute permission="compliance_view">{page}</ProtectedRoute>} />
             ))}
             <Route path="/rh/relatorios" element={<ProtectedRoute permission="hr_view"><GuardaModuloRH><RelatoriosRH /></GuardaModuloRH></ProtectedRoute>} />
             <Route path="/rh/portal" element={<ProtectedRoute permission="hr_self"><GuardaModuloRH><PortalFuncionario /></GuardaModuloRH></ProtectedRoute>} />

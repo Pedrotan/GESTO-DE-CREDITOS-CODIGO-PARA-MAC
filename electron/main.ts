@@ -23,6 +23,7 @@ import { installStructuredConsole } from '../src/bibliotecas/logger-estruturado'
 import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
 import { feriasPortalSql, isMarcarCorreioLidoSql, isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
 import { carregamentoPortalPermitido, regraLeituraRH } from '../src/bibliotecas/rh/permissoes-rh';
+import { regraEscritaCompliance } from '../src/bibliotecas/compliance/permissoes-compliance';
 import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
@@ -1118,7 +1119,21 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   fiscal_series: "manage_fiscal",
   fiscal_documents: "manage_fiscal",
   fiscal_agt_requests: "manage_fiscal",
-  fiscal_saft_exports: "manage_fiscal"
+  fiscal_saft_exports: "manage_fiscal",
+  // Compliance: a permissão e o autor de cada comando verificam-se em assertComplianceAutorizado.
+  compliance_perfil: "compliance_manage",
+  compliance_kyc_verificacao: "compliance_manage",
+  compliance_risco_avaliacao: "compliance_manage",
+  compliance_risco_modelo: "compliance_settings",
+  compliance_duplicado_revisao: "compliance_approve"
+};
+// Compliance: cada comando exige a sua permissão (registar, decidir ou alterar o modelo) e o autor/decisor gravado tem
+// de ser o utilizador autenticado — sem isto, quem regista uma verificação podia decidi-la em nome de outra pessoa.
+const assertComplianceAutorizado = (event: Electron.IpcMainInvokeEvent, statement: { sql: string; params?: unknown[] }) => {
+  const regra = regraEscritaCompliance(statement.sql);
+  if (!regra) throw new Error("Comando de Compliance não reconhecido.");
+  const actor = assertUserPermission(event, regra.permissao);
+  if (regra.autor !== null && statement.params?.[regra.autor] !== actor.id) throw new Error("O registo de Compliance tem de identificar o utilizador autenticado.");
 };
 // Processamento salarial: calcular exige hr_payroll; aprovar, pagar e fechar exigem hr_payroll_approve e o
 // utilizador autenticado como responsável (1.º parâmetro); aprovar o que o próprio calculou e reabrir um
@@ -1271,6 +1286,7 @@ const assertGenericSqlAuthorized = (event: Electron.IpcMainInvokeEvent, statemen
       if (operator !== actor.id) throw new Error('Só pode abrir ou fechar o seu próprio caixa.');
     }
     if (table === 'rh_processamento') assertPayrollSqlAuthorized(event, statement);
+    if (table.startsWith('compliance_')) { assertComplianceAutorizado(event, statement); continue; }
     // Férias pelo portal sem «gerir RH»: o funcionário cancela o seu pedido; o chefe directo dá o parecer (a ficha e
     // a chefia confirmam-se em assertApprovalBatch).
     const feriasPortal = feriasPortalSql(statement.sql);

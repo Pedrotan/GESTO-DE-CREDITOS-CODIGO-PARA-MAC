@@ -9,6 +9,7 @@ export type Role =
     | 'credit_director'
     | 'commercial_manager'
     | 'risk_analyst'
+    | 'compliance_officer'
     | 'cashier'
     | 'collection_officer'
     | 'accountant'
@@ -82,6 +83,11 @@ export const ROLES: Record<string, { label: string; description: string; badgeCo
         label: 'Analista de Risco',
         description: 'Avaliação de solvabilidade, scoring e parecer técnico',
         badgeColor: 'bg-teal-500/10 text-teal-700 dark:text-teal-400 border-teal-200'
+    },
+    compliance_officer: {
+        label: 'Responsável de Compliance',
+        description: 'KYC, avaliação de risco do cliente, duplicados e modelo de risco',
+        badgeColor: 'bg-green-500/10 text-green-700 dark:text-green-400 border-green-200'
     },
     cashier: {
         label: 'Operador de Caixa',
@@ -160,6 +166,11 @@ export const AVAILABLE_PERMISSIONS = [
     { id: 'hr_payroll_approve', label: 'RH: Aprovar e fechar salários', description: 'Aprovar, pagar e fechar o processamento salarial (gera os lançamentos)' },
     { id: 'hr_self', label: 'RH: Portal do funcionário', description: 'Ver os próprios recibos, o saldo de férias e pedir férias ou dispensas (a ficha tem de estar ligada à conta)' },
     { id: 'hr_settings', label: 'RH: Configurações legais', description: 'Alterar parâmetros legais, tabela do IRT, rubricas, horários e tipos de ausência' },
+    // Compliance (KYC, risco do cliente e duplicados).
+    { id: 'compliance_view', label: 'Compliance: Consultar', description: 'Ver o painel de Compliance, o perfil KYC, as avaliações de risco e os possíveis duplicados' },
+    { id: 'compliance_manage', label: 'Compliance: Registar', description: 'Preencher o perfil KYC, registar verificações de identidade e pedir avaliações de risco' },
+    { id: 'compliance_approve', label: 'Compliance: Decidir', description: 'Confirmar ou recusar verificações KYC, rever avaliações de risco e concluir revisões de duplicados (nunca as que o próprio registou)' },
+    { id: 'compliance_settings', label: 'Compliance: Modelo de risco', description: 'Criar e activar novas versões do modelo de risco (pesos, escalões, prazos de revisão e listas)' },
 ];
 
 

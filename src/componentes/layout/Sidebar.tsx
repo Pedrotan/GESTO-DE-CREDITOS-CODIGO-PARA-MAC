@@ -158,6 +158,17 @@ const menuItems: MenuItem[] = [
   },
   { icon: Wallet, label: 'Gateways de Pagamento', path: '/portais-pagamento', permission: 'manage_gateways', moduleKey: 'enableGatewaysModule' },
   { icon: ShieldCheck, label: 'Garantias', path: '/garantias', permission: 'manage_warranties', moduleKey: 'enableWarrantiesModule' },
+  {
+    icon: ShieldCheck,
+    label: 'Compliance',
+    path: '/compliance',
+    permission: 'compliance_view',
+    children: [
+      { icon: LayoutDashboard, label: 'Painel e Clientes', path: '/compliance/painel', permission: 'compliance_view', alsoActive: ['/compliance/clientes'] },
+      { icon: Users, label: 'Possíveis Duplicados', path: '/compliance/duplicados', permission: 'compliance_view' },
+      { icon: SlidersHorizontal, label: 'Modelo de Risco', path: '/compliance/modelo-risco', permission: 'compliance_view' },
+    ],
+  },
   { icon: Activity, label: 'Análise de Risco', path: '/scoring', permission: 'view_reports', moduleKey: 'enableScoringModule' },
   { icon: Scale, label: 'Contencioso', path: '/contencioso', permission: 'manage_legal', moduleKey: 'enableLegalModule' },
   {
