@@ -342,6 +342,20 @@ export class ServicoTempoRH {
         return { id, numero, emitido_em: when };
     }
 
+    /**
+     * Elimina um documento emitido (declaração, guia ou dispensa). Desliga-o do plano de férias ou da ausência de onde saiu,
+     * para que se possa voltar a emitir, e fica o registo completo na auditoria.
+     */
+    static async eliminarDocumentoEmitido(d: DocumentoEmitido, actor: ActorRH) {
+        const when = agora();
+        await db.transaction([
+            ...(d.modelo === 'guia_ferias' ? [{ sql: 'UPDATE rh_plano_ferias SET guia_id = NULL WHERE guia_id = ?', params: [d.id] }] : []),
+            ...(d.modelo === 'dispensa' ? [{ sql: 'UPDATE rh_ausencia SET documento_emitido_id = NULL WHERE documento_emitido_id = ?', params: [d.id] }] : []),
+            { sql: 'DELETE FROM rh_documento_emitido WHERE id = ?', params: [d.id], expectChanges: 1 },
+            auditoriaRH(actor, 'delete', `Eliminou o documento ${d.numero} (${d.modelo})`, { funcionarioId: d.funcionario_id, documentoEmitidoId: d.id }, d, undefined, when),
+        ]);
+    }
+
     /** Emite a dispensa (PDF numerado) de uma ausência aprovada e liga-a à ausência. */
     static async emitirDispensa(a: AusenciaRH, dados: Record<string, unknown>, actor: ActorRH) {
         if (a.estado !== 'aprovada') throw new Error('A dispensa só é emitida depois de aprovada.');

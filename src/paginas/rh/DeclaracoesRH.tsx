@@ -1,26 +1,33 @@
 import { useEffect, useMemo, useState } from 'react';
-import { FileDown, FileText, Landmark, Plane, RefreshCw, Stamp } from 'lucide-react';
+import { Download, Eye, FileDown, FileText, Landmark, Loader2, Plane, RefreshCw, Stamp, Trash2 } from 'lucide-react';
 import { MainLayout } from '@/componentes/layout/MainLayout';
 import { Button } from '@/componentes/ui/button';
 import { Input } from '@/componentes/ui/input';
 import { Label } from '@/componentes/ui/label';
 import { Textarea } from '@/componentes/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/componentes/ui/tabs';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
+import { PdfCanvasViewer } from '@/componentes/ui/PdfCanvasViewer';
+import { confirmar } from '@/bibliotecas/alerta';
+import { descarregarPdf } from '@/componentes/rh/accoes-funcionario';
 import { SearchableSelect } from '@/componentes/ui/SearchableSelect';
 import { NavegacaoRH, dataPt, executar, useCarregar, Vazio } from '@/componentes/rh/comum-rh';
 import { useActorRH } from '@/ganchos/usar-modulo-rh';
 import { useData } from '@/contextos/ContextoDados';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { dataPorExtenso, factosDoFuncionario, textoDeclaracaoInstituicao, textoDeclaracaoServico, type DadosServico } from '@/bibliotecas/rh/declaracoes';
-import { gerarDeclaracaoEmpresaPdf, type DadosDeclaracaoEmpresa } from '@/bibliotecas/rh/pdf-rh';
+import { gerarDeclaracaoEmpresaPdf, type DadosDeclaracaoEmpresa, type FicheiroPdf } from '@/bibliotecas/rh/pdf-rh';
 import { ServicoTempoRH, type DocumentoEmitido } from '@/servicos/rh/ServicoTempoRH';
 import { ServicoFeriasRH, type PlanoFeriasRH } from '@/servicos/rh/ServicoFeriasRH';
 import { EMPRESA } from '@/servicos/rh/ServicoDocumentosRH';
-import type { Funcionario } from '@/servicos/rh/ServicoRH';
+import { ServicoRH, type Funcionario } from '@/servicos/rh/ServicoRH';
 import { emitirGuiaFerias } from '@/componentes/rh/guia-ferias';
 import { useBaseRH } from './FuncionariosRH';
 
 type Modelo = 'servico' | 'instituicao';
+const ROTULO_DOCUMENTO: Record<string, string> = {
+    declaracao_servico: 'Declaração de serviço e salário', declaracao_instituicao: 'Declaração para outras instituições', guia_ferias: 'Guia de férias',
+};
 const MODELOS: Record<Modelo, { id: string; prefixo: string; titulo: string; subtitulo?: string }> = {
     servico: { id: 'declaracao_servico', prefixo: 'DS', titulo: 'Declaração de serviço e salário' },
     instituicao: { id: 'declaracao_instituicao', prefixo: 'DI', titulo: 'Modelo de declaração', subtitulo: 'Para apresentação a outras instituições' },
@@ -73,29 +80,73 @@ export default function DeclaracoesRH() {
     }, [modelo, funcionarioId]); // eslint-disable-line react-hooks/exhaustive-deps
 
     const set = (k: keyof typeof campos, v: string) => setCampos(c => ({ ...c, [k]: v }));
-    const pdfDe = (dados: DadosDeclaracaoEmpresa) => gerarDeclaracaoEmpresaPdf(dados, companySettings, actor?.name || 'Sistema');
+    const pdfDe = (dados: DadosDeclaracaoEmpresa, saida: 'save' | 'datauri' = 'save') => gerarDeclaracaoEmpresaPdf(dados, companySettings, actor?.name || 'Sistema', saida);
+    const dadosActuais = (referencia: string | null): DadosDeclaracaoEmpresa => ({
+        titulo: MODELOS[modelo].titulo, subtitulo: MODELOS[modelo].subtitulo, referencia, texto, local, dataExtenso: dataPorExtenso(luandaTodayKey()),
+        representante: campos.representante || null, cargoRepresentante: campos.cargo ? `Cargo: ${campos.cargo}` : null,
+        destinatario: modelo === 'instituicao' ? { instituicao: campos.instituicao || '[NOME DA INSTITUIÇÃO / ENTIDADE]', ac: campos.ac, assunto: campos.assunto } : null,
+    });
+
+    // Pré-visualização: janela com o texto editável ao lado do PDF, que se refaz enquanto se escreve (sem descarregar).
+    const [preVer, setPreVer] = useState(false);
+    const [pdfVivo, setPdfVivo] = useState<string | null>(null);
+    useEffect(() => {
+        if (!preVer) { setPdfVivo(null); return; }
+        const t = window.setTimeout(() => {
+            try { setPdfVivo(pdfDe(dadosActuais('Pré-visualização'), 'datauri').dataUrl); } catch { /* o texto a meio da edição não impede a janela */ }
+        }, pdfVivo ? 350 : 0);
+        return () => window.clearTimeout(t);
+    }, [preVer, texto, modelo, campos, companySettings]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    // Documento emitido aberto para ver (com opção de descarregar).
+    const [aVer, setAVer] = useState<{ titulo: string; pdf: FicheiroPdf | null; erro?: string } | null>(null);
 
     const emitir = () => executar(async () => {
         if (!actor) return;
         if (modelo === 'servico' && !f) throw new Error('Escolha o funcionário.');
         if (texto.trim().length < 40) throw new Error('O texto da declaração está vazio.');
         const m = MODELOS[modelo];
-        const dados: DadosDeclaracaoEmpresa = {
-            titulo: m.titulo, subtitulo: m.subtitulo, referencia: null, texto, local, dataExtenso: dataPorExtenso(luandaTodayKey()),
-            representante: campos.representante || null, cargoRepresentante: campos.cargo ? `Cargo: ${campos.cargo}` : null,
-            destinatario: modelo === 'instituicao' ? { instituicao: campos.instituicao || '[NOME DA INSTITUIÇÃO / ENTIDADE]', ac: campos.ac, assunto: campos.assunto } : null,
-        };
+        const dados = dadosActuais(null);
         const emitido = await ServicoTempoRH.emitirDocumento(f?.id || EMPRESA, m.id, m.prefixo, { pdf: dados }, actor);
-        const final = { ...dados, referencia: emitido.numero };
-        pdfDe(final);
+        pdfDe({ ...dados, referencia: emitido.numero });
+        setPreVer(false);
         void emitidos.recarregar();
     }, 'Declaração emitida');
 
-    const reemitir = (d: DocumentoEmitido) => executar(async () => {
-        const guardado = JSON.parse(d.dados_json || '{}') as { pdf?: DadosDeclaracaoEmpresa };
-        if (!guardado.pdf) throw new Error('Este documento foi emitido noutra página (Férias ou Recibos).');
-        pdfDe({ ...guardado.pdf, referencia: d.numero });
-    }, 'Declaração descarregada');
+    const titulo = (d: DocumentoEmitido) => `${ROTULO_DOCUMENTO[d.modelo] || d.modelo} ${d.numero}`;
+    /**
+     * PDF de um documento emitido. As declarações desta página guardam o conteúdo e saem iguais; as emitidas na página
+     * Recibos ou na ficha do funcionário vêm do PDF arquivado na pasta dele (ou, sem arquivo, refazem-se com os dados
+     * guardados na emissão); as guias saem do plano de férias, com o mesmo número.
+     */
+    const pdfEmitido = async (d: DocumentoEmitido): Promise<FicheiroPdf> => {
+        const guardado = JSON.parse(d.dados_json || '{}') as { pdf?: DadosDeclaracaoEmpresa; planoId?: string; salarioBaseMinor?: number | null };
+        if (guardado.pdf) return pdfDe({ ...guardado.pdf, referencia: d.numero }, 'datauri');
+        if (d.modelo === 'guia_ferias') {
+            const p = ferias.dados.planos.find(x => x.id === guardado.planoId || x.guia_id === d.id);
+            if (!p || !actor) throw new Error('O plano de férias desta guia já não existe.');
+            return emitirGuiaFerias(p, { ...ferias.dados, funcionarios: base.dados.funcionarios, contratos: base.dados.contratos, parametros: base.dados.parametros,
+                cargos: base.dados.cargos, departamentos: base.dados.departamentos }, companySettings, actor, 'datauri');
+        }
+        const arquivo = (await ServicoRH.documentos(d.funcionario_id)).find(x => x.nome.includes(d.numero) && x.mime === 'application/pdf');
+        const dataUrl = arquivo ? await ServicoRH.ficheiroDocumento(arquivo.id) : null;
+        if (arquivo && dataUrl) return { fileName: arquivo.ficheiro_nome || `${d.numero.replace(/\W+/gu, '-')}.pdf`, dataUrl };
+        const fx = base.dados.funcionarios.find(x => x.id === d.funcionario_id);
+        if (d.modelo !== 'declaracao_servico' || !fx) throw new Error('Não se encontrou o PDF deste documento.');
+        const contrato = base.dados.contratos.find(c => c.funcionario_id === fx.id && c.estado === 'activo');
+        const texto = textoDeclaracaoServico({ empresa, sexo: fx.sexo, nome: fx.nome, bi: fx.bi_numero, nif: fx.nif, admissao: fx.data_admissao, numero: fx.numero_mecanografico,
+            cargo: base.dados.cargos.find(c => c.id === fx.cargo_id)?.nome, departamento: base.dados.departamentos.find(x => x.id === fx.departamento_id)?.nome,
+            tipoContrato: contrato?.tipo, salarioBaseMinor: guardado.salarioBaseMinor ?? contrato?.salario_base_minor ?? null });
+        return pdfDe({ titulo: MODELOS.servico.titulo, referencia: d.numero, texto, local, dataExtenso: dataPorExtenso(d.emitido_em.slice(0, 10)) }, 'datauri');
+    };
+    const ver = async (d: DocumentoEmitido) => {
+        setAVer({ titulo: titulo(d), pdf: null });
+        try { setAVer({ titulo: titulo(d), pdf: await pdfEmitido(d) }); } catch (e) { setAVer({ titulo: titulo(d), pdf: null, erro: e instanceof Error ? e.message : String(e) }); }
+    };
+    const eliminar = async (d: DocumentoEmitido) => {
+        if (!actor || !await confirmar(`Eliminar «${titulo(d)}» de ${nomeDe(d.funcionario_id)}? O documento sai da lista e fica o registo na auditoria.`, { titulo: 'Eliminar documento', confirmar: 'Sim, eliminar', perigo: true })) return;
+        if (await executar(() => ServicoTempoRH.eliminarDocumentoEmitido(d, actor), 'Documento eliminado')) { void emitidos.recarregar(); void ferias.recarregar(); }
+    };
 
     const planosAprovados = ferias.dados.planos.filter(p => ['aprovado', 'em_gozo', 'gozado'].includes(p.estado) && (!funcionarioId || p.funcionario_id === funcionarioId))
         .sort((a, b) => (b.data_inicio || '').localeCompare(a.data_inicio || ''));
@@ -171,10 +222,8 @@ export default function DeclaracoesRH() {
                                 <Textarea aria-label="Texto da declaração" rows={16} className="font-serif text-[15px] leading-relaxed" value={texto} onChange={e => { setTexto(e.target.value); setEditado(true); }} />
                             )}
                             <div className="flex flex-wrap justify-end gap-2">
-                                <Button variant="outline" disabled={texto.trim().length < 40} onClick={() => pdfDe({ titulo: MODELOS[modelo].titulo, subtitulo: MODELOS[modelo].subtitulo, referencia: 'Pré-visualização', texto, local,
-                                    dataExtenso: dataPorExtenso(luandaTodayKey()), representante: campos.representante, cargoRepresentante: campos.cargo ? `Cargo: ${campos.cargo}` : null,
-                                    destinatario: modelo === 'instituicao' ? { instituicao: campos.instituicao, ac: campos.ac, assunto: campos.assunto } : null })}>
-                                    <FileDown className="mr-1.5 h-4 w-4" /> Pré-visualizar
+                                <Button variant="outline" disabled={texto.trim().length < 40} onClick={() => setPreVer(true)}>
+                                    <Eye className="mr-1.5 h-4 w-4" /> Pré-visualizar
                                 </Button>
                                 {gerir && <Button className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={texto.trim().length < 40 || (modelo === 'servico' && !f)} onClick={() => void emitir()}>
                                     <Stamp className="mr-1.5 h-4 w-4" /> Emitir declaração numerada
@@ -212,10 +261,16 @@ export default function DeclaracoesRH() {
                                 <tbody>{historico.map(d => (
                                     <tr key={d.id} className="border-t border-slate-100 dark:border-slate-800">
                                         <td className="px-3 py-2 font-mono text-xs font-bold">{d.numero}</td>
-                                        <td className="px-3 py-2">{d.modelo === 'guia_ferias' ? 'Guia de férias' : d.modelo === 'declaracao_servico' ? 'Declaração de serviço e salário' : 'Declaração para outras instituições'}</td>
+                                        <td className="px-3 py-2">{ROTULO_DOCUMENTO[d.modelo] || d.modelo}</td>
                                         <td className="px-3 py-2">{nomeDe(d.funcionario_id)}</td>
                                         <td className="px-3 py-2 text-xs text-slate-500">{dataPt(d.emitido_em)} · {d.emitido_por_nome || '—'}</td>
-                                        <td className="px-3 py-2 text-right">{d.modelo !== 'guia_ferias' && <Button size="sm" variant="outline" onClick={() => void reemitir(d)}><FileDown className="mr-1.5 h-4 w-4" /> PDF</Button>}</td>
+                                        <td className="px-3 py-2">
+                                            <div className="flex justify-end gap-1.5">
+                                                <Button size="sm" variant="outline" onClick={() => void ver(d)}><Eye className="mr-1.5 h-4 w-4" /> Ver</Button>
+                                                {gerir && <Button size="sm" variant="outline" aria-label={`Eliminar ${d.numero}`} title="Eliminar" className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700 dark:border-red-900 dark:hover:bg-red-950/40"
+                                                    onClick={() => void eliminar(d)}><Trash2 className="h-4 w-4" /></Button>}
+                                            </div>
+                                        </td>
                                     </tr>
                                 ))}</tbody>
                             </table>
@@ -223,6 +278,54 @@ export default function DeclaracoesRH() {
                     )}
                 </TabsContent>
             </Tabs>
+
+            <Dialog open={preVer} onOpenChange={setPreVer}>
+                <DialogContent className="flex h-[94vh] max-w-7xl flex-col gap-3 p-4 sm:p-6">
+                    <DialogHeader>
+                        <DialogTitle>Pré-visualização · {MODELOS[modelo].titulo}</DialogTitle>
+                        <DialogDescription>Edite o texto à esquerda: o documento à direita actualiza-se enquanto escreve.</DialogDescription>
+                    </DialogHeader>
+                    <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
+                        <div className="flex min-h-0 flex-col gap-2">
+                            <div className="grid gap-2 sm:grid-cols-2">
+                                <div><Label className="text-xs font-bold">Representante que assina</Label><Input className="mt-1" value={campos.representante} onChange={e => set('representante', e.target.value)} /></div>
+                                <div><Label className="text-xs font-bold">Cargo do representante</Label><Input className="mt-1" value={campos.cargo} onChange={e => set('cargo', e.target.value)} /></div>
+                            </div>
+                            <Textarea aria-label="Texto da declaração (pré-visualização)" className="min-h-[220px] flex-1 resize-none font-serif text-[15px] leading-relaxed" value={texto}
+                                onChange={e => { setTexto(e.target.value); setEditado(true); }} />
+                            {editado && <Button size="sm" variant="ghost" className="self-start" onClick={() => setEditado(false)}><RefreshCw className="mr-1.5 h-4 w-4" /> Repor texto do modelo</Button>}
+                        </div>
+                        <div className="min-h-[320px] overflow-hidden rounded-xl border bg-slate-100 dark:bg-slate-950" onContextMenu={e => e.preventDefault()}>
+                            {pdfVivo ? <PdfCanvasViewer source={pdfVivo} className="h-full" />
+                                : <p className="flex items-center gap-2 p-6 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> A preparar a pré-visualização…</p>}
+                        </div>
+                    </div>
+                    <div className="flex flex-wrap justify-end gap-2">
+                        <Button variant="outline" onClick={() => setPreVer(false)}>Fechar</Button>
+                        {gerir && <Button className="bg-emerald-600 text-white hover:bg-emerald-700" disabled={texto.trim().length < 40 || (modelo === 'servico' && !f)} onClick={() => void emitir()}>
+                            <Stamp className="mr-1.5 h-4 w-4" /> Emitir declaração numerada
+                        </Button>}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
+            <Dialog open={Boolean(aVer)} onOpenChange={v => { if (!v) setAVer(null); }}>
+                <DialogContent className="flex h-[94vh] max-w-5xl flex-col gap-3 p-4 sm:p-6">
+                    <DialogHeader>
+                        <DialogTitle>{aVer?.titulo}</DialogTitle>
+                        <DialogDescription>Documento emitido, tal como foi entregue.</DialogDescription>
+                    </DialogHeader>
+                    <div className="min-h-0 flex-1 overflow-hidden rounded-xl border bg-slate-100 dark:bg-slate-950">
+                        {aVer?.erro ? <p className="p-6 text-sm text-red-700">{aVer.erro}</p>
+                            : aVer?.pdf ? <PdfCanvasViewer source={aVer.pdf.dataUrl} className="h-full" />
+                                : <p className="flex items-center gap-2 p-6 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> A abrir o documento…</p>}
+                    </div>
+                    <div className="flex justify-end gap-2">
+                        <Button variant="outline" onClick={() => setAVer(null)}>Fechar</Button>
+                        <Button disabled={!aVer?.pdf} onClick={() => { if (aVer?.pdf) descarregarPdf(aVer.pdf); }}><Download className="mr-1.5 h-4 w-4" /> Descarregar PDF</Button>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </MainLayout>
     );
 }

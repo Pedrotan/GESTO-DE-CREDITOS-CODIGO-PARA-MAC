@@ -1369,6 +1369,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "DELETE FROM rh_documento WHERE id = ? AND estado = 'arquivado'"
   ],
   [
+    "34a704e49aff3a17f90bf8966b2f967d6b522df6040c078bfa8ec850ec3fcbaa",
+    "DELETE FROM rh_documento_emitido WHERE id = ?"
+  ],
+  [
     "1ff3d0ee89647e811246e4957573708c40e8b82aa02b893b6688ccff4af42f1b",
     "DELETE FROM rh_documento_ficheiro WHERE documento_id = ?"
   ],
@@ -4221,6 +4225,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "UPDATE rh_ausencia SET documento_emitido_id = ? WHERE id = ? AND documento_emitido_id IS NULL"
   ],
   [
+    "936548f0b9440d8690ba176966a734b073a5beac726de0da4095f575c5e79dba",
+    "UPDATE rh_ausencia SET documento_emitido_id = NULL WHERE documento_emitido_id = ?"
+  ],
+  [
     "d0587b6957d3473263eeceec67e9f14008849f46f098f8c11ea0532f45b0e8dd",
     "UPDATE rh_ausencia SET estado = 'anulada', anulado_por = ?, anulado_por_nome = ?, anulado_em = ?, motivo_anulacao = ?, actualizado_em = ? WHERE id = ? AND estado <> 'anulada'"
   ],
@@ -4399,6 +4407,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "efbce3c879f0d95bced8d680f46e0bb49ff0219cb649cdfd6399144749d9533f",
     "UPDATE rh_plano_ferias SET guia_id = ? WHERE id = ? AND guia_id IS NULL"
+  ],
+  [
+    "6d09d458c765335594376e50e1a3161b977873b6c113f572945defe355954348",
+    "UPDATE rh_plano_ferias SET guia_id = NULL WHERE guia_id = ?"
   ],
   [
     "98941fed97433ed070990101b9a275dc551a4593d6d7c941a9b103d98983e67a",
