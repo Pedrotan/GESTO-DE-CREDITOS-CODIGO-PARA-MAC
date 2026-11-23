@@ -827,7 +827,10 @@ export function gerarMapaFeriasPdf(d: DadosMapaFerias, settings: unknown, userNa
     });
     y += 13;
     const dias = new Map(d.calendario.map(x => [x.data, x]));
-    const colunas = 4, gap = 4, largMes = (largura - 28 - gap * (colunas - 1)) / colunas, altMes = 50;
+    // Os 12 meses cabem entre o cabeçalho e o rodapé da marca (que ocupa os últimos ~22 mm da página).
+    const limite = doc.internal.pageSize.getHeight() - 24;
+    const colunas = 4, gap = 3, largMes = (largura - 28 - gap * (colunas - 1)) / colunas, altMes = Math.min(50, (limite - 5 - y - gap * 2) / 3);
+    const passoLinha = Math.min(6.3, (altMes - 12) / 6);
     for (let m = 0; m < 12; m++) {
         const x0 = 14 + (m % colunas) * (largMes + gap), y0 = y + Math.floor(m / colunas) * (altMes + gap);
         const [r, g, b] = CORES_MAPA[m];
@@ -840,7 +843,7 @@ export function gerarMapaFeriasPdf(d: DadosMapaFerias, settings: unknown, userNa
         const desloc = new Date(Date.UTC(d.ano, m, 1)).getUTCDay();
         const total = new Date(Date.UTC(d.ano, m + 1, 0)).getUTCDate();
         for (let dia = 1; dia <= total; dia++) {
-            const pos = desloc + dia - 1, cx = x0 + 3 + passo * (pos % 7), cy = y0 + 11 + Math.floor(pos / 7) * 6.3;
+            const pos = desloc + dia - 1, cx = x0 + 3 + passo * (pos % 7), cy = y0 + 11 + Math.floor(pos / 7) * passoLinha;
             const data = `${d.ano}-${String(m + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
             const info = dias.get(data);
             const n = d.ferias.get(data) || 0;
@@ -849,15 +852,15 @@ export function gerarMapaFeriasPdf(d: DadosMapaFerias, settings: unknown, userNa
             else if (info?.activo && info.tipo === 'ponte') { fundo = [254, 240, 199]; texto = [147, 55, 13]; }
             else if (info?.activo && info.folga) { fundo = [253, 227, 224]; texto = [180, 35, 24]; }
             if (n > 0 && !(info?.activo && info.folga) && pos % 7 !== 0 && pos % 7 !== 6) { fundo = [18, 183, 106]; texto = [255, 255, 255]; }
-            if (fundo) { doc.setFillColor(...fundo); doc.roundedRect(cx + 0.4, cy - 0.2, passo - 0.8, 5.6, 1, 1, 'F'); }
+            if (fundo) { doc.setFillColor(...fundo); doc.roundedRect(cx + 0.4, cy - 0.2, passo - 0.8, passoLinha - 0.6, 1, 1, 'F'); }
             doc.setFont('helvetica', fundo ? 'bold' : 'normal'); doc.setFontSize(6.5); doc.setTextColor(...texto);
-            doc.text(String(dia), cx + passo / 2, cy + 3.8, { align: 'center' });
+            doc.text(String(dia), cx + passo / 2, cy + passoLinha * 0.6, { align: 'center' });
             if (n > 1) { doc.setFontSize(4.2); doc.text(String(n), cx + passo - 1, cy + 1.6, { align: 'right' }); }
         }
     }
     y += 3 * (altMes + gap) + 1;
     doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(71, 85, 105);
-    doc.text('Verde: funcionários de férias (o número indica quantos) · Vermelho: feriado · Amarelo: ponte · Azul: data internacional (não é folga)', largura / 2, Math.min(y, doc.internal.pageSize.getHeight() - 12), { align: 'center' });
+    doc.text('Verde: funcionários de férias (o número indica quantos) · Vermelho: feriado · Amarelo: ponte · Azul: data internacional (não é folga)', largura / 2, Math.min(y + 1, limite + 1), { align: 'center' });
     doc.addPage('a4', 'landscape');
     applyBranding(doc, config, userName, true);
     const y2 = brandingHeaderBottom(doc) + 8;
