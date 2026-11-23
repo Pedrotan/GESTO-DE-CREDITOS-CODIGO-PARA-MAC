@@ -797,3 +797,78 @@ export function gerarFichaAcessoPortalPdf(d: DadosAcessoPortal, settings: unknow
     const nome = f.nome.normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^\w]+/gu, '_');
     return terminar(doc, `Acesso_Portal_${nome}.pdf`, saida);
 }
+
+export type DadosMapaFerias = {
+    ano: number;
+    /** Dias do calendário laboral do ano (feriados, pontes, datas internacionais). */
+    calendario: Array<{ data: string; nome: string; tipo: string; folga: boolean; activo: boolean }>;
+    /** Funcionários de férias em cada dia (só aprovadas e em gozo). */
+    ferias: Map<string, number>;
+    linhas: Array<{ nome: string; departamento: string; periodos: string; dias: number; regresso: string; saldo: number; estado: string }>;
+};
+const MESES_MAPA = ['JANEIRO', 'FEVEREIRO', 'MARÇO', 'ABRIL', 'MAIO', 'JUNHO', 'JULHO', 'AGOSTO', 'SETEMBRO', 'OUTUBRO', 'NOVEMBRO', 'DEZEMBRO'];
+const CORES_MAPA: Array<[number, number, number]> = [[232, 163, 23], [217, 65, 43], [68, 102, 170], [14, 159, 110], [14, 159, 110], [68, 102, 170], [232, 163, 23], [217, 65, 43], [217, 65, 43], [232, 163, 23], [14, 159, 110], [68, 102, 170]];
+
+/** Mapa de férias em A4 horizontal: o calendário anual (como o de parede) e a lista das férias da equipa. */
+export function gerarMapaFeriasPdf(d: DadosMapaFerias, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF({ orientation: 'landscape', format: 'a4' });
+    const config = getCompanySettings(settings);
+    const cor = resolveBrandPrimary(config.primaryColor);
+    applyBranding(doc, config, userName);
+    const largura = doc.internal.pageSize.getWidth();
+    let y = brandingHeaderBottom(doc) + 6;
+    // Ano grande ao centro com quatro linhas coloridas de cada lado.
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(26); doc.setTextColor(27, 38, 69);
+    doc.text(String(d.ano), largura / 2, y + 7, { align: 'center' });
+    [[232, 163, 23], [217, 65, 43], [68, 102, 170], [14, 159, 110]].forEach(([r, g, b], i) => {
+        doc.setDrawColor(r, g, b); doc.setLineWidth(0.8);
+        doc.line(14, y + 1 + i * 2, largura / 2 - 22, y + 1 + i * 2);
+        doc.line(largura / 2 + 22, y + 1 + i * 2, largura - 14, y + 1 + i * 2);
+    });
+    y += 13;
+    const dias = new Map(d.calendario.map(x => [x.data, x]));
+    const colunas = 4, gap = 4, largMes = (largura - 28 - gap * (colunas - 1)) / colunas, altMes = 50;
+    for (let m = 0; m < 12; m++) {
+        const x0 = 14 + (m % colunas) * (largMes + gap), y0 = y + Math.floor(m / colunas) * (altMes + gap);
+        const [r, g, b] = CORES_MAPA[m];
+        doc.setDrawColor(r, g, b); doc.setLineWidth(0.7); doc.roundedRect(x0, y0, largMes, altMes, 3, 3);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(8.5); doc.setTextColor(r, g, b);
+        doc.text(MESES_MAPA[m], x0 + largMes / 2, y0 + 5, { align: 'center' });
+        const passo = (largMes - 6) / 7;
+        doc.setFontSize(5.5);
+        ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].forEach((s, i) => { doc.setTextColor(i === 0 ? 217 : 100, i === 0 ? 45 : 116, i === 0 ? 32 : 139); doc.text(s, x0 + 3 + passo * i + passo / 2, y0 + 9.5, { align: 'center' }); });
+        const desloc = new Date(Date.UTC(d.ano, m, 1)).getUTCDay();
+        const total = new Date(Date.UTC(d.ano, m + 1, 0)).getUTCDate();
+        for (let dia = 1; dia <= total; dia++) {
+            const pos = desloc + dia - 1, cx = x0 + 3 + passo * (pos % 7), cy = y0 + 11 + Math.floor(pos / 7) * 6.3;
+            const data = `${d.ano}-${String(m + 1).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
+            const info = dias.get(data);
+            const n = d.ferias.get(data) || 0;
+            let fundo: [number, number, number] | null = null, texto: [number, number, number] = pos % 7 === 0 ? [217, 45, 32] : [16, 24, 40];
+            if (info?.tipo === 'data_internacional') { fundo = [224, 234, 255]; texto = [45, 71, 168]; }
+            else if (info?.activo && info.tipo === 'ponte') { fundo = [254, 240, 199]; texto = [147, 55, 13]; }
+            else if (info?.activo && info.folga) { fundo = [253, 227, 224]; texto = [180, 35, 24]; }
+            if (n > 0 && !(info?.activo && info.folga) && pos % 7 !== 0 && pos % 7 !== 6) { fundo = [18, 183, 106]; texto = [255, 255, 255]; }
+            if (fundo) { doc.setFillColor(...fundo); doc.roundedRect(cx + 0.4, cy - 0.2, passo - 0.8, 5.6, 1, 1, 'F'); }
+            doc.setFont('helvetica', fundo ? 'bold' : 'normal'); doc.setFontSize(6.5); doc.setTextColor(...texto);
+            doc.text(String(dia), cx + passo / 2, cy + 3.8, { align: 'center' });
+            if (n > 1) { doc.setFontSize(4.2); doc.text(String(n), cx + passo - 1, cy + 1.6, { align: 'right' }); }
+        }
+    }
+    y += 3 * (altMes + gap) + 1;
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(7); doc.setTextColor(71, 85, 105);
+    doc.text('Verde: funcionários de férias (o número indica quantos) · Vermelho: feriado · Amarelo: ponte · Azul: data internacional (não é folga)', largura / 2, Math.min(y, doc.internal.pageSize.getHeight() - 12), { align: 'center' });
+    doc.addPage('a4', 'landscape');
+    applyBranding(doc, config, userName, true);
+    const y2 = brandingHeaderBottom(doc) + 8;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(12); doc.setTextColor(15, 23, 42);
+    doc.text(`MAPA DE FÉRIAS ${d.ano}`, largura / 2, y2, { align: 'center' });
+    autoTable(doc, {
+        startY: y2 + 5, theme: 'striped', styles: { fontSize: 7.5, cellPadding: 1.4 }, headStyles: { fillColor: cor },
+        head: [['Funcionário', 'Departamento', 'Períodos', 'Dias úteis', 'Regresso', 'Estado', 'Saldo']],
+        body: d.linhas.length ? d.linhas.map(l => [l.nome, l.departamento, l.periodos, String(l.dias), l.regresso, l.estado, String(l.saldo)]) : [[{ content: `Ainda não há férias planeadas em ${d.ano}.`, colSpan: 7 }]],
+        columnStyles: { 3: { halign: 'right' }, 6: { halign: 'right' } },
+        didDrawPage: () => applyBranding(doc, config, userName, true),
+    });
+    return terminar(doc, `Mapa-de-ferias-${d.ano}.pdf`, saida);
+}
