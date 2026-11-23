@@ -969,3 +969,72 @@ export function gerarContratoTrabalhoPdf(d: DadosContratoPdf, settings: unknown,
     const nome = (d.referencia || d.trabalhador.nome).normalize('NFD').replace(/[̀-ͯ]/gu, '').replace(/[^\w]+/gu, '-').replace(/^-+|-+$/gu, '');
     return terminar(doc, `Contrato-${nome}.pdf`, saida);
 }
+
+export type DadosRelatorioPainel = {
+    titulo: string; periodo: string; departamento: string;
+    kpis: Array<{ rotulo: string; valor: string; detalhe: string }>;
+    assiduidade: Array<{ rotulo: string; valor: number }>; meta: number;
+    massa: Array<{ rotulo: string; valor: number; destaque?: boolean }>;
+    departamentos: Array<{ rotulo: string; valor: number; cor: string }>;
+    ausencias: Array<{ rotulo: string; valor: number; cor: string }>;
+};
+
+const corRgb = (hex: string): [number, number, number] => [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16)];
+
+/** Relatório mensal do Painel de RH (A4 horizontal): os indicadores e os gráficos do período, com a marca da empresa. */
+export function gerarRelatorioPainelPdf(d: DadosRelatorioPainel, settings: unknown, userName: string, saida: SaidaPdf = 'save'): FicheiroPdf {
+    const doc = new jsPDF({ orientation: 'landscape', format: 'a4' });
+    const config = getCompanySettings(settings);
+    applyBranding(doc, config, userName);
+    const largura = doc.internal.pageSize.getWidth();
+    let y = brandingHeaderBottom(doc) + 8;
+    doc.setFont('helvetica', 'bold'); doc.setFontSize(13); doc.setTextColor(15, 23, 42);
+    doc.text(d.titulo.toUpperCase(), largura / 2, y, { align: 'center' });
+    doc.setFont('helvetica', 'normal'); doc.setFontSize(9); doc.setTextColor(100, 116, 139);
+    doc.text(`${d.periodo} · ${d.departamento}`, largura / 2, y + 5, { align: 'center' });
+    y += 11;
+    // Indicadores: 4 por linha.
+    const colunas = 4, gap = 4, largK = (largura - 28 - gap * (colunas - 1)) / colunas, altK = 19;
+    d.kpis.forEach((k, i) => {
+        const x = 14 + (i % colunas) * (largK + gap), yy = y + Math.floor(i / colunas) * (altK + gap);
+        doc.setDrawColor(228, 231, 236); doc.setLineWidth(0.3); doc.roundedRect(x, yy, largK, altK, 2, 2);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(7.5); doc.setTextColor(71, 84, 103); doc.text(k.rotulo, x + 3, yy + 5);
+        doc.setFontSize(12.5); doc.setTextColor(16, 24, 40); doc.text(k.valor, x + 3, yy + 11.5);
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(6.8); doc.setTextColor(91, 100, 116);
+        doc.text((doc.splitTextToSize(k.detalhe, largK - 6) as string[])[0] || '', x + 3, yy + 16);
+    });
+    y += Math.ceil(d.kpis.length / colunas) * (altK + gap) + 3;
+    // Gráficos de barras simples (uma escala por gráfico).
+    const grafico = (x: number, yy: number, w: number, h: number, titulo: string, barras: Array<{ rotulo: string; valor: number; cor?: string; destaque?: boolean }>, formatar: (v: number) => string, linhaMeta?: number, maximoFixo?: number, zeroEDado = false) => {
+        doc.setDrawColor(228, 231, 236); doc.roundedRect(x, yy, w, h, 2, 2);
+        doc.setFont('helvetica', 'bold'); doc.setFontSize(9); doc.setTextColor(16, 24, 40); doc.text(titulo, x + 3, yy + 6);
+        if (!barras.length || (!zeroEDado && barras.every(b => !b.valor))) {
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(100, 116, 139); doc.text('Sem dados no período.', x + w / 2, yy + h / 2, { align: 'center' });
+            return;
+        }
+        const base = yy + h - 9, topo = yy + 12, area = base - topo;
+        const maximo = maximoFixo || Math.max(...barras.map(b => b.valor)) || 1;
+        doc.setDrawColor(208, 213, 221); doc.line(x + 4, base, x + w - 4, base);
+        const passo = (w - 8) / barras.length;
+        barras.forEach((b, i) => {
+            const alt = (b.valor / maximo) * area;
+            doc.setFillColor(...corRgb(b.cor || (b.destaque ? '#2a78d6' : '#9EC3EE')));
+            if (alt > 0) doc.roundedRect(x + 4 + i * passo + passo * 0.15, base - alt, passo * 0.7, alt, 0.8, 0.8, 'F');
+            doc.setFont('helvetica', 'normal'); doc.setFontSize(5.8); doc.setTextColor(91, 100, 116);
+            doc.text(b.rotulo, x + 4 + i * passo + passo / 2, base + 3.5, { align: 'center', maxWidth: passo });
+            if (barras.length <= 12) doc.text(formatar(b.valor), x + 4 + i * passo + passo / 2, base - alt - 1.2, { align: 'center' });
+        });
+        if (linhaMeta !== undefined) {
+            const ym = base - (linhaMeta / maximo) * area;
+            doc.setDrawColor(71, 84, 103); doc.setLineDashPattern([1, 1], 0); doc.line(x + 4, ym, x + w - 4, ym); doc.setLineDashPattern([], 0);
+            doc.setFontSize(6); doc.text(`meta ${linhaMeta}%`, x + w - 5, ym - 1, { align: 'right' });
+        }
+    };
+    const altG = Math.min(60, (doc.internal.pageSize.getHeight() - 26 - y - gap) / 2);
+    const largG = (largura - 28 - gap) / 2;
+    grafico(14, y, largG, altG, 'Assiduidade diária (%)', d.assiduidade, v => `${Math.round(v)}`, d.meta, 100, true);
+    grafico(14 + largG + gap, y, largG, altG, 'Massa salarial mensal (milhões de Kz)', d.massa.map(m => ({ ...m, valor: m.valor / 100 / 1_000_000 })), v => v.toFixed(2).replace('.', ','));
+    grafico(14, y + altG + gap, largG, altG, 'Funcionários por departamento', d.departamentos, v => String(v));
+    grafico(14 + largG + gap, y + altG + gap, largG, altG, 'Ausências por tipo (dias)', d.ausencias, v => String(v));
+    return terminar(doc, `Relatorio-RH-${d.periodo.normalize('NFD').replace(/[\u0300-\u036f]/gu, '').replace(/[^\w]+/gu, '-')}.pdf`, saida);
+}
