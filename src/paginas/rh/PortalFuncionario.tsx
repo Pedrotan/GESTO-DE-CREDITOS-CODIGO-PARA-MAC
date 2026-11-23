@@ -7,10 +7,12 @@ import { Label } from '@/componentes/ui/label';
 import { Switch } from '@/componentes/ui/switch';
 import { Textarea } from '@/componentes/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/componentes/ui/select';
-import { Banknote, Briefcase, CalendarCheck, Clock, FileText, Inbox, LayoutDashboard, Mail, Network, Plane, Send, Users, Wallet } from 'lucide-react';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/componentes/ui/dialog';
+import { Banknote, Briefcase, CalendarCheck, CalendarDays, CheckCircle2, Clock, FileText, Inbox, LayoutDashboard, Mail, Network, Plane, Send, Users, Wallet, XCircle } from 'lucide-react';
 import { cadeiaChefia, chefeDirecto, nomeNivel, subordinados } from '@/bibliotecas/rh/hierarquia-rh';
 import { ServicoPortalRH } from '@/servicos/rh/ServicoPortalRH';
-import { ServicoFeriasRH } from '@/servicos/rh/ServicoFeriasRH';
+import { ServicoFeriasRH, type PlanoFeriasRH } from '@/servicos/rh/ServicoFeriasRH';
+import { FeriasPortal } from '@/componentes/rh/FeriasPortal';
 import { ServicoTempoRH } from '@/servicos/rh/ServicoTempoRH';
 import { ServicoRH } from '@/servicos/rh/ServicoRH';
 import { ServicoRecebimentoRH, ultimaPorRecibo } from '@/servicos/rh/ServicoRecebimentoRH';
@@ -35,6 +37,7 @@ import { CorreioInterno } from '@/componentes/rh/CorreioFuncionario';
 /** Abas do portal do funcionário (o menu lateral do funcionário aponta para elas). */
 export const ABAS_PORTAL = [
     { id: 'painel', rotulo: 'Painel', icone: LayoutDashboard },
+    { id: 'ferias', rotulo: 'Férias', icone: CalendarDays },
     { id: 'pedidos', rotulo: 'Pedidos', icone: Plane },
     { id: 'salarios', rotulo: 'Salários', icone: Wallet },
     { id: 'documentos', rotulo: 'Documentos e contratos', icone: FileText },
@@ -47,7 +50,7 @@ type Aba = (typeof ABAS_PORTAL)[number]['id'];
 const ROTULO_ESTADO_PEDIDO = { pendente: 'aguarda resposta', aprovado: 'aprovado', recusado: 'recusado' } as const;
 const ROTULO_CONTRATO: Record<string, string> = { indeterminado: 'Sem termo', determinado: 'A termo certo', estagio: 'Estágio', prestacao: 'Prestação de serviços' };
 
-/** Portal do funcionário: painel, pedidos (férias, subsídio, dispensas), salários, documentos e contratos, correio e ponto. */
+/** Portal do funcionário: painel, férias (calendário e pedido), pedidos (subsídio, dispensas), salários, documentos e contratos, correio e ponto. */
 export default function PortalFuncionario() {
     const { actor } = useActorRH();
     const { users } = useAuth();
@@ -75,7 +78,7 @@ export default function PortalFuncionario() {
             tipos, contratos, parametros, recebimentos, reclamacoes, pedidos, correio, correccao, chefe, cadeia: cadeiaChefia(f.id, estrutura), equipa, cargos,
             departamentos, seccoes,
             equipaPedidos: [
-                ...planos.filter(p => idsEquipa.has(p.funcionario_id) && p.estado === 'planeado' && p.pedido_funcionario).map(p => ({ id: p.id, funcionario_id: p.funcionario_id, o: `Férias de ${dataPt(p.data_inicio)} a ${dataPt(p.data_fim)}` })),
+                ...planos.filter(p => idsEquipa.has(p.funcionario_id) && p.estado === 'planeado' && p.pedido_funcionario).map(p => ({ id: p.id, funcionario_id: p.funcionario_id, o: `Férias de ${dataPt(p.data_inicio)} a ${dataPt(p.data_fim)} (${p.dias} dias úteis${p.data_regresso ? `, regressa ${dataPt(p.data_regresso)}` : ''})${p.chefe_aprovado_em ? ' · já aprovado por si, aguarda o RH' : ''}`, plano: p as PlanoFeriasRH })),
                 ...ausencias.filter(a => idsEquipa.has(a.funcionario_id) && a.estado === 'pendente').map(a => ({ id: a.id, funcionario_id: a.funcionario_id, o: `Dispensa ${dataPt(a.data_inicio)}${a.motivo ? ` · ${a.motivo}` : ''}` })),
                 ...pedidosTodos.filter(p => idsEquipa.has(p.funcionario_id) && p.estado === 'pendente').map(p => ({ id: p.id, funcionario_id: p.funcionario_id, o: `${ROTULO_PEDIDO[p.tipo]}: ${p.assunto}` })),
             ] };
@@ -86,7 +89,8 @@ export default function PortalFuncionario() {
     // Os pedidos também avisam o chefe directo (se tiver conta no sistema).
     const chefeUtilizador: string | null = dados.dados?.chefe?.utilizador_id || null;
     const avisarPedidos = chefeUtilizador && chefeUtilizador !== actor?.id ? [...new Set([...destinatarios, chefeUtilizador])] : destinatarios;
-    const [ferias, setFerias] = useState({ inicio: '', dias: 22, obs: '' });
+    const [recusarFerias, setRecusarFerias] = useState<PlanoFeriasRH | null>(null);
+    const [motivoRecusa, setMotivoRecusa] = useState('');
     const [subsidio, setSubsidio] = useState({ ano: Number(hoje.slice(0, 4)), obs: '' });
     const [outro, setOutro] = useState({ assunto: '', descricao: '' });
     const [dispensa, setDispensa] = useState({ tipo_id: 'ausencia-D', inicio: hoje, fim: hoje, porHoras: false, horas: 2, motivo: '' });
@@ -158,20 +162,18 @@ export default function PortalFuncionario() {
                 </>
             )}
 
+            {aba === 'ferias' && (
+                <FeriasPortal f={f} actor={actor} planos={d.planos} saldo={saldo} temChefe={Boolean(d.chefe)} destinatarios={avisarPedidos} hoje={hoje} onMudou={recarregar} />
+            )}
+
             {aba === 'pedidos' && (
                 <>
                     <div className="grid gap-4 lg:grid-cols-3">
                         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                             <h2 className="mb-3 flex items-center gap-2 font-black"><Plane className="h-4 w-4" /> Pedir férias</h2>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                <div><Label className="text-xs font-bold">Início</Label><Input className="mt-1" type="date" min={hoje} value={ferias.inicio} onChange={e => setFerias(x => ({ ...x, inicio: e.target.value }))} /></div>
-                                <div><Label className="text-xs font-bold">Dias úteis</Label><Input className="mt-1" type="number" min={1} value={ferias.dias} onChange={e => setFerias(x => ({ ...x, dias: Number(e.target.value) }))} /></div>
-                                <div className="sm:col-span-2"><Label className="text-xs font-bold">Observações</Label><Input className="mt-1" value={ferias.obs} onChange={e => setFerias(x => ({ ...x, obs: e.target.value }))} /></div>
-                            </div>
+                            <p className="text-sm text-slate-600 dark:text-slate-300">Escolha o início no calendário anual: os dias úteis, o último dia e a data de regresso são calculados automaticamente.</p>
                             <p className="mt-2 text-xs text-slate-500">Saldo disponível: {saldo.saldo} dias.</p>
-                            <Button className="mt-3" onClick={() => void executar(() => ServicoPortalRH.pedirFerias(f, ferias.inicio, ferias.dias, ferias.obs, actor, avisarPedidos), 'Pedido de férias enviado ao RH').then(ok => { if (ok) { setFerias({ inicio: '', dias: 22, obs: '' }); recarregar(); } })}>
-                                <Send className="mr-1.5 h-4 w-4" /> Enviar pedido
-                            </Button>
+                            <Button className="mt-3" onClick={() => irPara('ferias')}><CalendarDays className="mr-1.5 h-4 w-4" /> Abrir o calendário de férias</Button>
                         </div>
                         <div className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                             <h2 className="mb-3 flex items-center gap-2 font-black"><Banknote className="h-4 w-4" /> Pedir subsídio de férias</h2>
@@ -295,11 +297,19 @@ export default function PortalFuncionario() {
                     </section>
                     <section className="rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
                         <h2 className="mb-1 flex items-center gap-2 font-black"><Inbox className="h-4 w-4" /> Pedidos da equipa por decidir</h2>
-                        <p className="mb-3 text-xs text-slate-500">Recebe um aviso de cada pedido da sua equipa. A decisão fica registada pelo RH.</p>
+                        <p className="mb-3 text-xs text-slate-500">Recebe um aviso de cada pedido da sua equipa. Nas férias dá o seu parecer (aprovar ou recusar) e o RH aprova no fim.</p>
                         {d.equipaPedidos.length === 0 ? <Vazio>Sem pedidos pendentes.</Vazio> : (
                             <ul className="space-y-1.5 text-sm">
                                 {d.equipaPedidos.map((p: any) => <li key={p.id} className="rounded-lg border border-amber-200 bg-amber-50/60 px-3 py-1.5 dark:border-amber-900 dark:bg-amber-950/20">
                                     <b>{d.equipa.find((x: any) => x.id === p.funcionario_id)?.nome}</b> · {p.o}
+                                    {p.plano && !p.plano.chefe_aprovado_em && (
+                                        <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                            <Button size="sm" className="h-7 bg-[#067647] px-2 text-xs text-white hover:bg-[#05603A]" onClick={() => void executar(() => ServicoFeriasRH.aprovarComoChefe(p.plano, actor, destinatarios), 'Pedido aprovado: segue para o RH').then(ok => ok && recarregar())}>
+                                                <CheckCircle2 className="mr-1 h-3.5 w-3.5" /> Aprovar
+                                            </Button>
+                                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-red-700" onClick={() => setRecusarFerias(p.plano)}><XCircle className="mr-1 h-3.5 w-3.5" /> Recusar</Button>
+                                        </div>
+                                    )}
                                 </li>)}
                             </ul>
                         )}
@@ -312,6 +322,17 @@ export default function PortalFuncionario() {
                     <MarcarPonto f={f} actor={actor} />
                     <MeuPonto f={f} actor={actor} />
                 </div>
+            )}
+            {recusarFerias && (
+                <Dialog open onOpenChange={v => { if (!v) { setRecusarFerias(null); setMotivoRecusa(''); } }}>
+                    <DialogContent className="max-w-md">
+                        <DialogHeader><DialogTitle>Recusar pedido de férias</DialogTitle><DialogDescription>O funcionário recebe um aviso com o motivo.</DialogDescription></DialogHeader>
+                        <Label htmlFor="motivo-recusa" className="text-xs font-bold">Motivo</Label>
+                        <Textarea id="motivo-recusa" rows={3} value={motivoRecusa} onChange={e => setMotivoRecusa(e.target.value)} />
+                        <DialogFooter><Button variant="outline" onClick={() => { setRecusarFerias(null); setMotivoRecusa(''); }}>Cancelar</Button>
+                            <Button variant="destructive" onClick={() => void executar(() => ServicoFeriasRH.recusar(recusarFerias, motivoRecusa, actor, true), 'Pedido recusado').then(ok => { if (ok) { setRecusarFerias(null); setMotivoRecusa(''); recarregar(); } })}>Recusar</Button></DialogFooter>
+                    </DialogContent>
+                </Dialog>
             )}
         </MainLayout>
     );

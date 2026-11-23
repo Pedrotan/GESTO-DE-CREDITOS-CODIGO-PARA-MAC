@@ -37,7 +37,7 @@ export class ServicoPortalRH {
      * calendário laboral. Fica «planeado» e marcado como pedido do funcionário (chefe directo → RH).
      */
     static async pedirFerias(f: Funcionario, inicio: string, dias: number, observacoes: string, actor: ActorRH, destinatarios: string[] = []) {
-        if (!/^d{4}-d{2}-d{2}$/u.test(inicio)) throw new Error('Indique o início das férias.');
+        if (!/^\d{4}-\d{2}-\d{2}$/u.test(inicio)) throw new Error('Indique o início das férias.');
         if (inicio < luandaTodayKey()) throw new Error('O início das férias tem de ser hoje ou depois.');
         const sim = await ServicoFeriasRH.simular({ funcionario_id: f.id, data_inicio: inicio, dias });
         const erro = sim.avisos.find(a => a.nivel === 'erro');
