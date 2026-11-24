@@ -149,6 +149,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE INDEX IF NOT EXISTS idx_compliance_alerta_historico ON compliance_alerta_historico(alerta_id, em)"
   ],
   [
+    "ad3fd373fe8904581e35d9b68e764ba92a2b3c6dcf8dd6182d10ad40c4a6b2d8",
+    "CREATE INDEX IF NOT EXISTS idx_compliance_autorizacao_cliente ON compliance_autorizacao(client_id, valido_ate)"
+  ],
+  [
     "8025fa6874c015c4bf8e8c301bde0085036920767a47bd24fc7ee9480cce8259",
     "CREATE INDEX IF NOT EXISTS idx_compliance_caso_cliente ON compliance_caso(client_id)"
   ],
@@ -575,6 +579,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "658f54fbd3eacf49dbb72efba08eb49ba831411bbb018d487ee10a558c93774d",
     "CREATE TABLE IF NOT EXISTS compliance_alerta_historico ( id TEXT PRIMARY KEY, alerta_id TEXT NOT NULL, estado_anterior TEXT, estado_novo TEXT NOT NULL, comentario TEXT, por TEXT, por_nome TEXT, em TEXT NOT NULL )"
+  ],
+  [
+    "23d8ab9098b547bd50f508b7858532d876618deffce72be33672559fc5ebd51b",
+    "CREATE TABLE IF NOT EXISTS compliance_autorizacao ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, decisao TEXT NOT NULL CHECK(decisao IN ('autorizado', 'recusado')), montante_maximo_minor INTEGER NOT NULL CHECK(montante_maximo_minor >= 0), valido_ate TEXT NOT NULL, motivos TEXT NOT NULL, fundamento TEXT NOT NULL, autorizado_em TEXT NOT NULL, autorizado_por TEXT, autorizado_por_nome TEXT )"
+  ],
+  [
+    "c74421346760f3c57897d24a63d9857b04e85bee07efe2619c887fdb75104952",
+    "CREATE TABLE IF NOT EXISTS compliance_bloqueio_levantamento ( id TEXT PRIMARY KEY, decisao_id TEXT NOT NULL UNIQUE, client_id TEXT NOT NULL, fundamento TEXT NOT NULL, levantado_em TEXT NOT NULL, levantado_por TEXT, levantado_por_nome TEXT )"
   ],
   [
     "bfa88d6699139a64940394576584010faa744a7bf08b5059aa1c5d2708aea2c1",
@@ -1165,6 +1177,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_alerta_imutavel BEFORE UPDATE ON compliance_alerta WHEN OLD.estado = 'CLOSED' OR NEW.regra <> OLD.regra OR NEW.evidencias <> OLD.evidencias OR NEW.descricao <> OLD.descricao OR COALESCE(NEW.client_id, '') <> COALESCE(OLD.client_id, '') OR COALESCE(NEW.operacao_id, '') <> COALESCE(OLD.operacao_id, '') OR NEW.detectado_em <> OLD.detectado_em OR NEW.gravidade <> OLD.gravidade OR (OLD.resultado IS NOT NULL AND COALESCE(NEW.resultado, '') <> OLD.resultado) BEGIN SELECT RAISE(ABORT, 'Um alerta encerrado não se altera e os dados detectados nunca mudam')"
   ],
   [
+    "c339b52365ff03ae2f3b533ed48cab10c43f07d668c3f7ded922c74d9ba85587",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_autorizacao_delete BEFORE DELETE ON compliance_autorizacao BEGIN SELECT RAISE(ABORT, 'As autorizações de Compliance não se apagam')"
+  ],
+  [
+    "8ca356cfc6e01ce667d5b8a7154e514d050f800f8f4a40f8b544dac415726965",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_autorizacao_update BEFORE UPDATE ON compliance_autorizacao BEGIN SELECT RAISE(ABORT, 'As autorizações de Compliance não se alteram: regista-se outra')"
+  ],
+  [
     "0f304e6952339c5c258732bd318bc3618748f1e111b0a4d74c7fd3e670cc14bf",
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_avaliacao_delete BEFORE DELETE ON compliance_risco_avaliacao BEGIN SELECT RAISE(ABORT, 'As avaliações de risco não se apagam: reavalia-se')"
   ],
@@ -1257,6 +1277,18 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_kyc_quatro_olhos BEFORE UPDATE ON compliance_kyc_verificacao WHEN NEW.decidido_por IS NOT NULL AND NEW.decidido_por = OLD.registado_por AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.decidido_por AND role = 'super_admin') BEGIN SELECT RAISE(ABORT, 'Quem registou a verificação KYC não a pode decidir')"
   ],
   [
+    "03904cfea1d8628f4903f76c8282788510406f77eda42cd1a90887855bb092ce",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_levantamento_delete BEFORE DELETE ON compliance_bloqueio_levantamento BEGIN SELECT RAISE(ABORT, 'Os levantamentos de bloqueio não se apagam')"
+  ],
+  [
+    "54e52b65e2aaff43a0316d901f25778582bdd9601698170cc1855b06413d8282",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_levantamento_quatro_olhos BEFORE INSERT ON compliance_bloqueio_levantamento WHEN NOT EXISTS (SELECT 1 FROM compliance_decisao WHERE id = NEW.decisao_id AND tipo = 'medida' AND decisao IN ('bloqueio_operacoes', 'encerramento_relacao')) OR (NEW.levantado_por = (SELECT decidido_por FROM compliance_decisao WHERE id = NEW.decisao_id) AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.levantado_por AND role = 'super_admin')) BEGIN SELECT RAISE(ABORT, 'Só se levanta uma medida de bloqueio existente e por pessoa diferente de quem a decidiu')"
+  ],
+  [
+    "bfc6e621d7fcd0cf3e1b6b4d26b6a30432dcc8968a5fe57818182c33251021b5",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_levantamento_update BEFORE UPDATE ON compliance_bloqueio_levantamento BEGIN SELECT RAISE(ABORT, 'Os levantamentos de bloqueio não se alteram')"
+  ],
+  [
     "aabc7f957c593fc91b5e0ee788564c589fb7465882fc8908f5afcc25690a743f",
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_lista_interna_delete BEFORE DELETE ON compliance_lista_interna BEGIN SELECT RAISE(ABORT, 'As entradas da lista interna não se apagam: desactivam-se')"
   ],
@@ -1275,6 +1307,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "6f86de24009d46f1d8e039f9d9581f41e6f8d4d4524bd776304d73e364304862",
     "CREATE TRIGGER IF NOT EXISTS trg_compliance_modelo_imutavel BEFORE UPDATE ON compliance_risco_modelo WHEN NEW.configuracao <> OLD.configuracao OR NEW.versao <> OLD.versao OR NEW.nome <> OLD.nome OR NEW.criado_em <> OLD.criado_em BEGIN SELECT RAISE(ABORT, 'Uma versão do modelo de risco não se altera: cria-se uma versão nova')"
+  ],
+  [
+    "00b99c38ad2d81f311877061f7e93e57cf776aad97da7c27765ec8633844c62d",
+    "CREATE TRIGGER IF NOT EXISTS trg_compliance_perfil_delete BEFORE DELETE ON compliance_perfil BEGIN SELECT RAISE(ABORT, 'O perfil de Compliance não se apaga')"
   ],
   [
     "8c6d780140a5947616657f3731f85e82ed01703b0fb177bdfeaa942093bdbdf7",
@@ -1915,6 +1951,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "979367054fe29a7867773ec7656d14285fcf981cdeca198556a99f96810031f0",
     "INSERT INTO compliance_alerta_historico (id, alerta_id, estado_anterior, estado_novo, comentario, por, por_nome, em) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "024275a671cc59c7e3d60e3ce5d3226f6c32fb6e1728e1d4183120a1a7e094e1",
+    "INSERT INTO compliance_autorizacao (id, client_id, decisao, montante_maximo_minor, valido_ate, motivos, fundamento, autorizado_em, autorizado_por, autorizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+  ],
+  [
+    "7496b29e6702d61ae9a9740ac46ad4b2c425887973905142dcfea4e29312ec2d",
+    "INSERT INTO compliance_bloqueio_levantamento (id, decisao_id, client_id, fundamento, levantado_em, levantado_por, levantado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?)"
   ],
   [
     "d6a361c7a9b4fd937205b709165406f645ecdfdb15d402b8c8eaad8ec5d741a8",
@@ -2729,6 +2773,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT * FROM compliance_alerta_historico ORDER BY em"
   ],
   [
+    "82ab12d3da45a7fe64522eb32f4d522c40d8223a1dd7bbcc8b42d47a1e839db4",
+    "SELECT * FROM compliance_autorizacao WHERE client_id = ? ORDER BY autorizado_em DESC"
+  ],
+  [
+    "24a2716e139781e054f34a5b40639979dccb0d27b24720397e7e9d046c567eeb",
+    "SELECT * FROM compliance_bloqueio_levantamento WHERE client_id = ? ORDER BY levantado_em DESC"
+  ],
+  [
     "eb64a1948ef4ee838880cc2d1ee6e6465d36ad567e409d0bc1e7508038321392",
     "SELECT * FROM compliance_caso ORDER BY aberto_em DESC"
   ],
@@ -3309,6 +3361,14 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT COUNT(*) AS n FROM clients WHERE deletedAt IS NULL AND substr(createdAt, 1, 7) = ?"
   ],
   [
+    "b9758bb2f19763669a85d4c6018281aee422c34d35303132e025855ebaf8a33a",
+    "SELECT COUNT(*) AS n FROM compliance_caso WHERE client_id = ? AND estado <> 'encerrado'"
+  ],
+  [
+    "bf04a1b5d7168c4fad3f3cd55870e225917a82c3dd261a3d8e776a5ec1b96af4",
+    "SELECT COUNT(*) AS n FROM compliance_decisao d WHERE d.client_id = ? AND d.tipo = 'medida' AND d.decisao IN ('bloqueio_operacoes', 'encerramento_relacao') AND NOT EXISTS (SELECT 1 FROM compliance_bloqueio_levantamento l WHERE l.decisao_id = d.id)"
+  ],
+  [
     "dd033cb74e44b1fca79280e6835e4329bd1f297a494cd3b8fb5602e871595dd2",
     "SELECT COUNT(*) AS n FROM rh_reclamacao WHERE processamento_id = ? AND estado = 'pendente'"
   ],
@@ -3409,6 +3469,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT account, side, SUM(amountMinor) AS total FROM ledger_lines WHERE account IN ('cash', 'bank') GROUP BY account, side"
   ],
   [
+    "fc0edab0fbf5a82f80db82b1a476ad31d9c7cde312b26809ef13e07a51495bfe",
+    "SELECT activa, criado_em, actualizado_em FROM compliance_lista_interna"
+  ],
+  [
     "bc585e997ddd923fb32ead7bad2aa615e4e21bd002741480ae58ab8f77c33f6d",
     "SELECT agtRequestId, MAX(agtAttempts) AS tentativas FROM fiscal_documents WHERE deviceId = ? AND agtStatus IN ('enviado','em_validacao') AND agtRequestId IS NOT NULL AND (agtNextAttemptAt IS NULL OR agtNextAttemptAt <= ?) GROUP BY agtRequestId LIMIT 20"
   ],
@@ -3465,6 +3529,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT clientNumber FROM clients WHERE clientNumber IS NOT NULL"
   ],
   [
+    "3e350e54d66cc30b898f0ff24a1c2beb2f7c27b2e0d60d281a73154e94b70956",
+    "SELECT configuracao FROM compliance_risco_modelo WHERE activo = 1 ORDER BY versao DESC LIMIT 1"
+  ],
+  [
     "20b699f85dca1bf97e03bba998cd7bc3fa258804789184e26e15ca07126258ca",
     "SELECT conteudo FROM compliance_evidencia_ficheiro WHERE id = ?"
   ],
@@ -3511,6 +3579,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "598ee0b5e91f5b81590cb7d54a4dda2e1860dcf9e32ea15a424f72ae174517c6",
     "SELECT creditId,dueDate,principalMinor,interestMinor,lateInterestMinor,paidPrincipalMinor,paidInterestMinor,paidLateInterestMinor FROM credit_installments"
+  ],
+  [
+    "4914cb6c5e574f7eb9f3fb0ca18a457a13b9e437a7ac1f5d4ae1135016324dcd",
+    "SELECT criado_em, resultados FROM compliance_screening WHERE client_id = ? ORDER BY criado_em DESC LIMIT 1"
   ],
   [
     "c8de5e0d09d6295151cfd5e5d96430e9a51e920e3b538ef73f3148e3d0e842d3",
@@ -3577,6 +3649,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT estado FROM rh_processamento WHERE ano = ? AND mes = ? AND tipo = 'normal' AND estado <> 'aberto'"
   ],
   [
+    "3ba998d09b4f2e9563f4b61fed9f3f7f7c38199961458a07c2162c040254ce15",
+    "SELECT estado_kyc, pep, nivel_risco, avaliacao_id FROM compliance_perfil WHERE client_id = ?"
+  ],
+  [
     "52559f037a89b243c5b564e1925c6c6723d3255909f7105ec971ba7033ebe6c4",
     "SELECT fileName, fileData, format FROM report_history WHERE id = ?"
   ],
@@ -3595,6 +3671,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "4bd4bd0a9d5d1caf21761f9d617217f012a9b8995c0f6777f07bec985e660537",
     "SELECT fileName,mime,data,digest FROM accounting_receipts WHERE entryId = ?"
+  ],
+  [
+    "680d3b387515890e9fa4a6df907dc0f9833571d81548146cdc42d491036deaba",
+    "SELECT fonte, ref, nome_pesquisado, decisao, categoria FROM compliance_screening_decisao WHERE client_id = ?"
   ],
   [
     "080b2b8369d41243f769671bd5d10f82bfa1d7d28863bcb35c0c454361b98250",
@@ -3841,6 +3921,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
     "SELECT id, creditId, kind, fileName, mimeType, dataUrl, uploadedAt, uploadedByName FROM credit_documents WHERE creditId = ? AND deletedAt IS NULL ORDER BY uploadedAt DESC"
   ],
   [
+    "cf6a305a67e7c1b7ba84a88f6eaf019dcf51c3f2200fbe1f4ab6bbf3f6e028e9",
+    "SELECT id, decisao, montante_maximo_minor, valido_ate, motivos, autorizado_em FROM compliance_autorizacao WHERE client_id = ?"
+  ],
+  [
     "ec2b0b5aaa091084c3e3e3ba54d0755dabe0c4124fc5d37bd157e8e758500425",
     "SELECT id, deletedBy FROM clients WHERE deletedAt IS NOT NULL"
   ],
@@ -3875,6 +3959,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "c8235665d1c2ef00849d4d1bc120f5f9b3f39f126a47cdb580d8a51b6c677fb5",
     "SELECT id, fiscalYear, startDate, endDate, basis, fileName, fileSize, sha256, invoicesCount, paymentsCount, warnings, createdByName, createdAt FROM fiscal_saft_exports ORDER BY createdAt DESC LIMIT 100"
+  ],
+  [
+    "3b08ab5061c7b38b2a49754f64ec0eb5239656576c7044fb88d068f67062543d",
+    "SELECT id, fonte, activa, importada_em, data_lista, hash, total_entradas FROM compliance_lista_versao WHERE activa = 1"
   ],
   [
     "a9dcfb09eab890b703ac20b0ef371c75c8255b1340189a859405833116e26da8",
@@ -3943,6 +4031,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "bad640298ec792ac9d37a3a6726214b02f5ba61e260a28806dded3c988cebee3",
     "SELECT id, name, role, status, branchId, branchName FROM users WHERE status IS NULL OR status <> 'blocked'"
+  ],
+  [
+    "1d911006ac9062eb5d3133452fd9a308ba292ebdfbb2d5367196e4ded13e07f5",
+    "SELECT id, nif, expiryDate, documentType, clientType FROM clients WHERE id = ?"
   ],
   [
     "c21e9bfccb0c77fdd267ff98820b9d8071e6fa0ee410b247ef37853b885d702c",
@@ -4167,6 +4259,10 @@ export const RENDERER_SQL_BY_ID = new Map<string, string>([
   [
     "3eb26ad2874fa57166f7fe941ea4912c868e3b96d6d73e3a11a79ad7b92c2e56",
     "SELECT recibo_id, codigo, quantidade, valor_minor FROM rh_recibo_linha WHERE codigo IN ('HORAS_EXTRA', 'ATRASOS', 'FALTAS')"
+  ],
+  [
+    "a941b4332d8a2a163ae1da8093f67c0b2eb8c149a98759c7564d8df92eaa3448",
+    "SELECT requer_revisao, revisto_por FROM compliance_risco_avaliacao WHERE id = ?"
   ],
   [
     "4a26b62b13326bfb72bba39780bdbc7931da14e4596dd4fc986a0ba278cb7eb5",

@@ -6,7 +6,7 @@ import { db } from '@/bibliotecas/bd';
 import { lerListaSancoes, hashTexto, type EntradaLista, type FonteLista } from '@/bibliotecas/compliance/listas-xml';
 import {
     ALGORITMO_SCREENING, LIMIAR_PADRAO, ROTULO_FONTE_LISTA, ROTULO_RESULTADO, chaveCorrespondencia, estadoScreening, executarScreening, indexarLista,
-    palavrasNome, pessoasDoCliente, resultadoGlobal,
+    palavrasNome, pessoasDoCliente, resultadoGlobal, versaoInternaDe, versoesActivasDe,
     type CategoriaInterna, type Candidato, type DecisaoCorrespondencia, type FonteDisponivel, type IndiceLista, type PessoaPesquisa, type ResultadoFonte,
     type ResultadoPessoa, type VersaoFonte,
 } from '@/bibliotecas/compliance/screening';
@@ -63,25 +63,11 @@ export const lerResultados = (s: ScreeningRegisto): ResultadoPessoa[] => { try {
 // Índices em memória por versão (a lista OFAC demora a ler; só se lê uma vez por sessão).
 const indices = new Map<string, IndiceLista>();
 
-/** «Versão» da lista interna: muda sempre que se acrescenta, altera ou desactiva uma entrada. */
-export function versaoInterna(interna: EntradaInterna[]): VersaoFonte | null {
-    const activas = interna.filter(e => e.activa === 1);
-    if (!activas.length) return null;
-    const ultima = interna.reduce((m, e) => (String(e.actualizado_em || e.criado_em) > m ? String(e.actualizado_em || e.criado_em) : m), '');
-    return { id: `interna:${ultima}:${activas.length}`, dataLista: ultima.slice(0, 10), hash: null, total: activas.length, importadaEm: ultima };
-}
+/** «Versão» da lista interna (ver versaoInternaDe). */
+export const versaoInterna = (interna: EntradaInterna[]): VersaoFonte | null => versaoInternaDe(interna);
 
 /** Versões activas de cada fonte (para saber se o screening de um cliente ficou desactualizado). */
-export function versoesActivas(d: DadosScreening): Array<{ fonte: FonteLista; id: string; importadaEm: string; versao: VersaoFonte }> {
-    const r: Array<{ fonte: FonteLista; id: string; importadaEm: string; versao: VersaoFonte }> = [];
-    for (const fonte of ['ONU', 'OFAC'] as const) {
-        const v = d.versoes.find(x => x.fonte === fonte && x.activa === 1);
-        if (v) r.push({ fonte, id: v.id, importadaEm: v.importada_em, versao: { id: v.id, dataLista: v.data_lista, hash: v.hash, total: v.total_entradas, importadaEm: v.importada_em } });
-    }
-    const vi = versaoInterna(d.interna);
-    if (vi) r.push({ fonte: 'INTERNA', id: vi.id, importadaEm: vi.importadaEm, versao: vi });
-    return r;
-}
+export const versoesActivas = (d: DadosScreening): Array<{ fonte: FonteLista; id: string; importadaEm: string; versao: VersaoFonte }> => versoesActivasDe(d.versoes, d.interna);
 
 /** Estado do screening de cada cliente (último screening, decisões e versões activas). */
 export function estadosPorCliente(d: DadosScreening) {

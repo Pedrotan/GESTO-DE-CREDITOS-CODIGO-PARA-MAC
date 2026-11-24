@@ -278,6 +278,38 @@ export const COMPLIANCE_FASE4_SQL = [
         BEGIN SELECT RAISE(ABORT, 'As evidências não se apagam'); END`,
 ];
 
+// Fase 5: controlo do crédito. Autorizações de Compliance por cliente (montante máximo e validade, cobrindo os
+// motivos «requer revisão» indicados; uma recusa bloqueia) e levantamento de medidas de bloqueio decididas em
+// investigações (por pessoa diferente de quem decidiu o bloqueio). Imutáveis.
+export const COMPLIANCE_FASE5_SQL = [
+    `CREATE TABLE IF NOT EXISTS compliance_autorizacao (
+        id TEXT PRIMARY KEY, client_id TEXT NOT NULL, decisao TEXT NOT NULL CHECK(decisao IN ('autorizado', 'recusado')),
+        montante_maximo_minor INTEGER NOT NULL CHECK(montante_maximo_minor >= 0), valido_ate TEXT NOT NULL, motivos TEXT NOT NULL, fundamento TEXT NOT NULL,
+        autorizado_em TEXT NOT NULL, autorizado_por TEXT, autorizado_por_nome TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_compliance_autorizacao_cliente ON compliance_autorizacao(client_id, valido_ate)`,
+    `CREATE TABLE IF NOT EXISTS compliance_bloqueio_levantamento (
+        id TEXT PRIMARY KEY, decisao_id TEXT NOT NULL UNIQUE, client_id TEXT NOT NULL, fundamento TEXT NOT NULL,
+        levantado_em TEXT NOT NULL, levantado_por TEXT, levantado_por_nome TEXT
+    )`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_autorizacao_update BEFORE UPDATE ON compliance_autorizacao
+        BEGIN SELECT RAISE(ABORT, 'As autorizações de Compliance não se alteram: regista-se outra'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_autorizacao_delete BEFORE DELETE ON compliance_autorizacao
+        BEGIN SELECT RAISE(ABORT, 'As autorizações de Compliance não se apagam'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_levantamento_quatro_olhos BEFORE INSERT ON compliance_bloqueio_levantamento
+        WHEN NOT EXISTS (SELECT 1 FROM compliance_decisao WHERE id = NEW.decisao_id AND tipo = 'medida' AND decisao IN ('bloqueio_operacoes', 'encerramento_relacao'))
+            OR (NEW.levantado_por = (SELECT decidido_por FROM compliance_decisao WHERE id = NEW.decisao_id)
+                AND NOT EXISTS (SELECT 1 FROM users WHERE id = NEW.levantado_por AND role = 'super_admin'))
+        BEGIN SELECT RAISE(ABORT, 'Só se levanta uma medida de bloqueio existente e por pessoa diferente de quem a decidiu'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_levantamento_update BEFORE UPDATE ON compliance_bloqueio_levantamento
+        BEGIN SELECT RAISE(ABORT, 'Os levantamentos de bloqueio não se alteram'); END`,
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_levantamento_delete BEFORE DELETE ON compliance_bloqueio_levantamento
+        BEGIN SELECT RAISE(ABORT, 'Os levantamentos de bloqueio não se apagam'); END`,
+    // O perfil KYC altera-se (com auditoria), mas não se apaga.
+    `CREATE TRIGGER IF NOT EXISTS trg_compliance_perfil_delete BEFORE DELETE ON compliance_perfil
+        BEGIN SELECT RAISE(ABORT, 'O perfil de Compliance não se apaga'); END`,
+];
+
 /** Versão inicial do modelo de risco (pesos da especificação, a validar pela avaliação de risco da empresa). */
 export const COMPLIANCE_SEED_MODELO_SQL = `INSERT OR IGNORE INTO compliance_risco_modelo (id, versao, nome, configuracao, activo, notas, criado_em, criado_por, criado_por_nome)
     VALUES (?, 1, ?, ?, 1, ?, ?, 'sistema', 'Sistema')`;

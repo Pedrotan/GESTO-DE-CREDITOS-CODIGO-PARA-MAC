@@ -218,3 +218,27 @@ export function estadoScreening(input: {
     }
     return { estado, pendentes, pepConfirmado, sancaoConfirmada };
 }
+
+// ── Versões activas (partilhado pelo renderer e pelo processo principal) ───────────
+export type VersaoListaRegisto = { id: string; fonte: string; activa: number; importada_em: string; data_lista: string | null; hash: string; total_entradas: number };
+export type EntradaInternaRegisto = { activa: number; criado_em: string; actualizado_em: string | null };
+
+/** «Versão» da lista interna: muda sempre que se acrescenta, altera ou desactiva uma entrada. */
+export function versaoInternaDe(interna: EntradaInternaRegisto[]): VersaoFonte | null {
+    const activas = interna.filter(e => e.activa === 1);
+    if (!activas.length) return null;
+    const ultima = interna.reduce((m, e) => (String(e.actualizado_em || e.criado_em) > m ? String(e.actualizado_em || e.criado_em) : m), '');
+    return { id: `interna:${ultima}:${activas.length}`, dataLista: ultima.slice(0, 10), hash: null, total: activas.length, importadaEm: ultima };
+}
+
+/** Versões activas de cada fonte (ONU, OFAC e lista interna). */
+export function versoesActivasDe(versoes: VersaoListaRegisto[], interna: EntradaInternaRegisto[]): Array<{ fonte: FonteLista; id: string; importadaEm: string; versao: VersaoFonte }> {
+    const r: Array<{ fonte: FonteLista; id: string; importadaEm: string; versao: VersaoFonte }> = [];
+    for (const fonte of ['ONU', 'OFAC'] as const) {
+        const v = versoes.find(x => x.fonte === fonte && x.activa === 1);
+        if (v) r.push({ fonte, id: v.id, importadaEm: v.importada_em, versao: { id: v.id, dataLista: v.data_lista, hash: v.hash, total: v.total_entradas, importadaEm: v.importada_em } });
+    }
+    const vi = versaoInternaDe(interna);
+    if (vi) r.push({ fonte: 'INTERNA', id: vi.id, importadaEm: vi.importadaEm, versao: vi });
+    return r;
+}

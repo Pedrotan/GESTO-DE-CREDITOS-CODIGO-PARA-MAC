@@ -89,6 +89,12 @@ export const SQL_EVIDENCIA_FICHEIRO = `INSERT INTO compliance_evidencia_ficheiro
 /** Decisão (conclusão, medida ou UIF). Decisor: parâmetro 9. */
 export const SQL_DECISAO_REGISTAR = `INSERT INTO compliance_decisao (id, caso_id, client_id, tipo, decisao, fundamento, referencia, data_referencia, decidido_em, decidido_por, decidido_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
+// ── Controlo do crédito (fase 5) ────────────────────────────────────────────────
+/** Autorização (ou recusa) de Compliance para operações de crédito de um cliente. Decisor: parâmetro 8. */
+export const SQL_AUTORIZACAO_REGISTAR = `INSERT INTO compliance_autorizacao (id, client_id, decisao, montante_maximo_minor, valido_ate, motivos, fundamento, autorizado_em, autorizado_por, autorizado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+/** Levantamento de uma medida de bloqueio. Decisor: parâmetro 5. */
+export const SQL_LEVANTAMENTO_REGISTAR = `INSERT INTO compliance_bloqueio_levantamento (id, decisao_id, client_id, fundamento, levantado_em, levantado_por, levantado_por_nome) VALUES (?, ?, ?, ?, ?, ?, ?)`;
+
 type Regra = { permissao: PermissaoCompliance; autor: number | null };
 const REGRAS: Array<[string, Regra]> = [
     [SQL_PERFIL_CRIAR, { permissao: 'compliance_manage', autor: 3 }],
@@ -128,6 +134,8 @@ const REGRAS: Array<[string, Regra]> = [
     [SQL_EVIDENCIA_REGISTAR, { permissao: 'compliance_manage', autor: 10 }],
     [SQL_EVIDENCIA_FICHEIRO, { permissao: 'compliance_manage', autor: null }],
     [SQL_DECISAO_REGISTAR, { permissao: 'compliance_approve', autor: 9 }],
+    [SQL_AUTORIZACAO_REGISTAR, { permissao: 'compliance_approve', autor: 8 }],
+    [SQL_LEVANTAMENTO_REGISTAR, { permissao: 'compliance_approve', autor: 5 }],
 ];
 const normalizar = (sql: string) => sql.replace(/\s+/gu, ' ').trim().replace(/;$/u, '');
 const MAPA = new Map(REGRAS.map(([sql, regra]) => [normalizar(sql), regra]));

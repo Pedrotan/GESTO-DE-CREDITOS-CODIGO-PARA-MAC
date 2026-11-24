@@ -8,6 +8,7 @@
 // para decidir o grau de diligência e quem tem de olhar para o caso.
 
 import { PARAMETROS_MONITORIZACAO_INICIAIS, lerParametrosMonitorizacao, validarParametrosMonitorizacao, type ParametrosMonitorizacao } from './monitorizacao.ts';
+import { POLITICA_BLOQUEIO_INICIAL, lerPoliticaBloqueio, validarPoliticaBloqueio, type PoliticaBloqueio } from './politica-bloqueio.ts';
 
 export type NivelRisco = 'baixo' | 'medio' | 'elevado';
 export type DecisaoRisco = 'diligencia_normal' | 'verificacao_complementar' | 'diligencia_reforcada';
@@ -27,6 +28,8 @@ export type ConfiguracaoRisco = {
     exposicaoMesesRendimento: { atencao: number; elevada: number };
     /** Parâmetros das regras de monitorização de operações (versionados com o modelo). */
     monitorizacao: ParametrosMonitorizacao;
+    /** Controlo do crédito pelo Compliance (modo, efeitos e validação jurídica). */
+    bloqueios: PoliticaBloqueio;
 };
 
 export const ROTULO_FACTOR: Record<FactorId, string> = {
@@ -54,6 +57,7 @@ export const CONFIGURACAO_RISCO_INICIAL: ConfiguracaoRisco = {
     actividadesRiscoElevado: ['câmbio', 'cambista', 'casino', 'jogo', 'diamante', 'ouro', 'pedras preciosas', 'criptomoeda', 'remessas'],
     exposicaoMesesRendimento: { atencao: 6, elevada: 12 },
     monitorizacao: PARAMETROS_MONITORIZACAO_INICIAIS,
+    bloqueios: POLITICA_BLOQUEIO_INICIAL,
 };
 
 /** Dados de um cliente no momento da avaliação (montados a partir do cadastro, do perfil KYC e dos créditos). */
@@ -131,6 +135,7 @@ export function validarConfiguracao(c: ConfiguracaoRisco): string[] {
     if (!(atencao > 0 && elevada > atencao)) erros.push('A exposição «elevada» tem de ser maior que a de «atenção» (em meses de rendimento).');
     if (c.paisesRiscoElevado.some(p => !/^[A-Z]{2}$/u.test(p))) erros.push('Os países de risco elevado indicam-se pelo código de duas letras (ex.: KP).');
     erros.push(...validarParametrosMonitorizacao(c.monitorizacao));
+    erros.push(...validarPoliticaBloqueio(c.bloqueios));
     return erros;
 }
 
@@ -147,6 +152,7 @@ export function lerConfiguracao(texto: string | null | undefined): ConfiguracaoR
         actividadesRiscoElevado: Array.isArray(lida.actividadesRiscoElevado) ? lida.actividadesRiscoElevado : base.actividadesRiscoElevado,
         exposicaoMesesRendimento: { ...base.exposicaoMesesRendimento, ...(lida.exposicaoMesesRendimento || {}) },
         monitorizacao: lerParametrosMonitorizacao(lida.monitorizacao),
+        bloqueios: lerPoliticaBloqueio(lida.bloqueios),
     };
 }
 

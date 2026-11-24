@@ -19,6 +19,7 @@ import { buildMoraPlan, calculateLateInterest, type LateInterestSummary, type Mo
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import { actorHasFullAuthority } from '@/servicos/AutoridadeTotal';
+import { ServicoControloCredito } from '@/servicos/compliance/ServicoControloCredito';
 import {
     allocatePaymentByInstallments, allocatePaymentMinor, applyPaymentToBalances, creditBalancesFromRow, revertPaymentFromBalances,
     type AllocationMinor, type CreditBalancesAfter, type CreditBalancesMinor
@@ -536,7 +537,11 @@ export class ServicoFinanceiro {
             const blocked = newCreditBlockReason(clientCreditStanding(credit.clientId, existing), value => formatCurrency(value));
             if (blocked) throw new Error(`Não é possível registar um novo crédito para ${credit.clientName}: ${blocked}`);
         }
-        if (!actor || !['active', 'pending_approval'].includes(credit.status)) return this.persistCredit(credit, []);
+        if (!actor || !['active', 'pending_approval'].includes(credit.status)) {
+            // Compliance (secção 7.2): um crédito já concedido passa pelo controlo antes do desembolso.
+            const controlo = credit.status === 'active' ? await ServicoControloCredito.exigir(credit.clientId, credit.principalAmount, 'conceder e desembolsar o crédito', null, credit.id) : null;
+            return this.persistCredit(credit, controlo?.auditoria || []);
+        }
         const principalMinor = toMinorUnits(credit.principalAmount, 'Capital do crédito');
         const productId = context.productId || credit.productId || null;
         const plan = async (forceEscalation: string | null) => ServicoAlcadas.plan({
@@ -551,8 +556,10 @@ export class ServicoFinanceiro {
             return { status: 'pending_approval' as const, statements: result.escalation!.statements, reason: result.escalation!.reason };
         };
         const first = await decide(credit.status === 'pending_approval' ? 'Pedido sujeito a aprovação pela regra de crédito do cliente (limite disponível, estado ou permissão)' : null);
+        // Compliance (secção 7.2): só quando o crédito fica concedido (o pedido para aprovação não é desembolso).
+        const controlo = first.status === 'active' ? await ServicoControloCredito.exigir(credit.clientId, credit.principalAmount, 'conceder e desembolsar o crédito', { id: actor.id, name: actor.name }, credit.id) : null;
         try {
-            const saved = await this.persistCredit({ ...credit, productId, status: first.status as Credit['status'] }, first.statements);
+            const saved = await this.persistCredit({ ...credit, productId, status: first.status as Credit['status'] }, [...first.statements, ...(controlo?.auditoria || [])]);
             return { ...saved, escalationReason: first.reason };
         } catch (error: any) {
             // Guarda do limite: outra operação em simultâneo consumiu o volume. O crédito sobe na cadeia.
@@ -730,6 +737,8 @@ export class ServicoFinanceiro {
         const amountMinor = toMinorUnits(input.amount, 'Reforço');
         const storedCredit = await db.get<any>('SELECT * FROM credits WHERE id = ? AND deletedAt IS NULL', [input.credit.id]);
         if (!storedCredit || !['active', 'overdue'].includes(storedCredit.status)) throw new Error('Só é possível reforçar créditos activos ou em mora.');
+        // Compliance (secção 7.2): o reforço é um novo desembolso.
+        const controlo = await ServicoControloCredito.exigir(storedCredit.clientId, input.amount, 'reforçar o crédito', input.userId ? { id: input.userId, name: input.processedBy } : null, input.credit.id);
         const interestMinor = toMinorUnits(reinforcementInterest(input.amount, Number(storedCredit.interestRate), storedCredit.amortizationMethod || 'FLAT'), 'Juro do reforço');
         if (interestMinor !== toMinorUnits(input.interestAmount, 'Juro indicado')) throw new Error('Os juros do reforço divergiram da taxa do contrato. Atualize os dados.');
         await this.assertNotFrozen();
@@ -786,7 +795,8 @@ export class ServicoFinanceiro {
                 params: [auditId, timestamp.toISOString(), input.userId || null, input.processedBy,
                     `Reforço de capital registado no crédito ${input.credit.id}`,
                     JSON.stringify({ creditId: input.credit.id, idempotencyKey: input.idempotencyKey, amountMinor, interestMinor, installmentId: selected.id, dueMonth: selected.dueDate.slice(0, 7) })]
-            }
+            },
+            ...controlo.auditoria
         ]);
         return entry as AccountingEntry;
     }
@@ -807,6 +817,8 @@ export class ServicoFinanceiro {
             throw new Error('O criador do crédito não pode aprovar ou rejeitar a própria operação.');
         }
         const approved = input.decision === 'approved';
+        // Compliance (secção 7.2): aprovar é desembolsar; o controlo corre antes de qualquer registo da decisão.
+        const controlo = approved ? await ServicoControloCredito.exigir(input.credit.clientId, input.credit.principalAmount, 'aprovar e desembolsar o crédito', { id: input.actorId, name: input.actorName }, input.credit.id) : null;
         if (!approved && (input.notes || '').trim().length < 5) {
             throw new Error('Indique o motivo da rejeição (pelo menos 5 caracteres).');
         }
@@ -889,7 +901,8 @@ export class ServicoFinanceiro {
                     JSON.stringify({ decision: input.decision, notes, escalationId: limitDecision.escalation?.id, requiredLevel: limitDecision.required.name,
                         ...(actorIsOwner ? { superAdminOverride: true, selfDecision: (limitDecision.escalation?.requestedById || input.credit.requestedBy) === input.actorId } : {}) })]
             },
-            ...limitDecision.statements
+            ...limitDecision.statements,
+            ...(controlo?.auditoria || [])
         ]).catch(error => {
             if (/conflito de concorr/i.test(String(error?.message)) && limitDecision.statements.some(statement => /limit_locks/.test(statement.sql)))
                 throw new Error('O seu volume de aprovação foi consumido entretanto por outra operação. Peça a outro aprovador do mesmo nível ou superior.');

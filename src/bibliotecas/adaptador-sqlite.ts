@@ -9,7 +9,7 @@ import { RH_FASE1_SQL, RH_FASE2_SQL, RH_FASE4_SQL, RH_PONTO_V2_SQL, RH_PONTO_V3_
 import { RH_FASE3_SQL } from '@/bibliotecas/rh/esquema-rh-salarios';
 import { MODELO_DECLARACAO_SERVICO } from '@/bibliotecas/rh/modelos-rh';
 import { MODELOS_CONTRATO_INICIAIS } from '@/bibliotecas/rh/contratos-rh';
-import { COMPLIANCE_FASE1_SQL, COMPLIANCE_FASE2_SQL, COMPLIANCE_FASE3_SQL, COMPLIANCE_FASE4_SQL, COMPLIANCE_SEED_MODELO_SQL } from '@/bibliotecas/compliance/esquema-compliance';
+import { COMPLIANCE_FASE1_SQL, COMPLIANCE_FASE2_SQL, COMPLIANCE_FASE3_SQL, COMPLIANCE_FASE4_SQL, COMPLIANCE_FASE5_SQL, COMPLIANCE_SEED_MODELO_SQL } from '@/bibliotecas/compliance/esquema-compliance';
 import { CONFIGURACAO_RISCO_INICIAL } from '@/bibliotecas/compliance/motor-risco';
 
 let db: Database | null = null;
@@ -1309,6 +1309,10 @@ const createTables = async () => {
     // Compliance (fase 4): investigações, ligações, notas, evidências e decisões (conclusão, medidas e UIF).
     await applyMigration(2026112404, 'compliance-fase4-investigacoes', async () => {
         for (const statement of COMPLIANCE_FASE4_SQL) await executeSql(statement);
+    });
+    // Compliance (fase 5): autorizações de Compliance para o crédito e levantamento de medidas de bloqueio.
+    await applyMigration(2026112405, 'compliance-fase5-controlo-credito', async () => {
+        for (const statement of COMPLIANCE_FASE5_SQL) await executeSql(statement);
     });
 
     // safeAddColumns for migrations

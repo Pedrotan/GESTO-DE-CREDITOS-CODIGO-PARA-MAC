@@ -29,6 +29,7 @@ import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
 import type { Credit } from '@/tipos/credito';
 import { clienteComBI, estadoBI } from '@/bibliotecas/rh/bi-validade';
 import { luandaTodayKey } from '@/bibliotecas/fuso-angola';
+import { AvisoComplianceCredito } from '@/componentes/compliance/ControloCreditoCompliance';
 import { useParametrosBI } from '@/ganchos/usar-parametros-bi';
 
 const STEPS = ['Cliente', 'Simulação', 'Análise de risco', 'Documentos e garantias', 'Submeter'];
@@ -433,6 +434,7 @@ export function AssistenteNovoCredito({ open, onClose, rows, credits, renewal, o
                     </div>
                 )}
 
+                {step === 4 && result?.valid && client && <AvisoComplianceCredito clientId={client.id} montante={form.principal} className="mb-3" />}
                 {step === 4 && result?.valid && client && (
                     <div className="grid gap-4 md:grid-cols-2">
                         <div className="rounded-xl border p-3">

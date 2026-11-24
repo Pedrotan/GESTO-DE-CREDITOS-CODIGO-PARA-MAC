@@ -24,6 +24,7 @@ import { LEDGER_PROTECTION_SQL } from '../src/bibliotecas/esquema-ledger';
 import { feriasPortalSql, isMarcarCorreioLidoSql, isPortalPedidoSql } from '../src/bibliotecas/rh/portal-sql';
 import { carregamentoPortalPermitido, regraLeituraRH } from '../src/bibliotecas/rh/permissoes-rh';
 import { regraEscritaCompliance } from '../src/bibliotecas/compliance/permissoes-compliance';
+import { avaliarControloCredito, mensagemControlo } from '../src/bibliotecas/compliance/controlo-credito';
 import { createLedgerSealer } from './selos-contabilisticos';
 import { createAuditSealer } from './selos-auditoria';
 import { classifyIpcError, createFailureTracker, createSecurityMonitor, isSafeExternalUrl, maskIdentifier, SECURITY_EVENT_LABELS, verifyLicenseActivation, type SecurityEvent, type SecurityEventInput } from './protecao-seguranca';
@@ -1138,7 +1139,9 @@ const TABLE_WRITE_PERMISSIONS: Record<string, string> = {
   compliance_caso_nota: "compliance_manage",
   compliance_evidencia: "compliance_manage",
   compliance_evidencia_ficheiro: "compliance_manage",
-  compliance_decisao: "compliance_approve"
+  compliance_decisao: "compliance_approve",
+  compliance_autorizacao: "compliance_approve",
+  compliance_bloqueio_levantamento: "compliance_approve"
 };
 // Compliance: cada comando exige a sua permissão (registar, decidir ou alterar o modelo) e o autor/decisor gravado tem
 // de ser o utilizador autenticado — sem isto, quem regista uma verificação podia decidi-la em nome de outra pessoa.
@@ -1342,6 +1345,26 @@ const loadLimitPolicy = async (query:(type:string,sql:string,params?:unknown[])=
   const legacy = await query('query', 'SELECT * FROM user_limits').catch(() => []);
   return policyFromRows(Array.isArray(rows) ? rows : [], Array.isArray(legacy) ? legacy : []);
 };
+// Compliance (especificação, secção 7.2): conceder, aprovar (desembolsar) ou reforçar um crédito passa pela regra
+// explícita de decisão. Só impede com a política do modelo activo em modo «bloqueio» (com validação jurídica).
+const assertControloCompliance = async (statement:{sql:string;params?:unknown[]},query:(type:string,sql:string,params?:unknown[])=>Promise<any>) => {
+  const table=mutationTable(statement.sql);
+  let alvo:{clientId:string;minor:number;operacao:string}|null=null;
+  if(table==='credits' && /^\s*INSERT/i.test(statement.sql) && statement.params?.[21]==='active')
+    alvo={clientId:String(statement.params?.[1]),minor:Number(statement.params?.[4])||0,operacao:'conceder e desembolsar o crédito'};
+  else if(table==='credit_approvals' && /^\s*INSERT/i.test(statement.sql) && statement.params?.[7]==='approved'){
+    const credit=await query('get','SELECT clientId, principalAmountMinor, principalAmount FROM credits WHERE id = ?',[statement.params?.[1]]).catch(()=>null);
+    if(credit) alvo={clientId:String(credit.clientId),minor:Number(credit.principalAmountMinor ?? Math.round(Number(credit.principalAmount)*100)),operacao:'aprovar e desembolsar o crédito'};
+  }else if(table==='credit_reinforcements' && /^\s*INSERT/i.test(statement.sql)){
+    const credit=await query('get','SELECT clientId FROM credits WHERE id = ?',[statement.params?.[1]]).catch(()=>null);
+    if(credit) alvo={clientId:String(credit.clientId),minor:Number(statement.params?.[2])||0,operacao:'reforçar o crédito'};
+  }
+  if(!alvo)return;
+  const hoje=new Date().toLocaleDateString('en-CA',{timeZone:'Africa/Luanda'});
+  const leitor={ todos:(sql:string,params?:unknown[])=>query('query',sql,params), um:(sql:string,params?:unknown[])=>query('get',sql,params) };
+  const resultado=await avaliarControloCredito(leitor as any,alvo.clientId,alvo.minor/100,hoje);
+  if(resultado.impede)throw new Error(mensagemControlo(resultado,alvo.operacao));
+};
 const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:Array<{sql:string;params?:unknown[]}>,query:(type:string,sql:string,params?:unknown[])=>Promise<any>)=>{
   if(financialSchemaBootstrapOpen)return;
   for(const statement of statements){
@@ -1400,6 +1423,7 @@ const assertApprovalBatch = async (event:Electron.IpcMainInvokeEvent,statements:
       const actor:any=userAuth.assertAuthenticated(event.sender.id);
       if(statement.params?.[2]!==actor.id)throw new Error('A decisão tem de ser do aprovador autenticado.');
     }
+    await assertControloCompliance(statement,query);
     if(table==='credits' && /^\s*INSERT/i.test(statement.sql) && statement.params?.[21]==='active'){
       const actor:any=userAuth.assertAuthenticated(event.sender.id);
       const creditId=statement.params?.[0];

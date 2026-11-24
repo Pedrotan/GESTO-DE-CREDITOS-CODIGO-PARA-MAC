@@ -22,6 +22,7 @@ import { cn } from '@/bibliotecas/utils';
 import { ScreeningCliente } from '@/componentes/compliance/ScreeningCliente';
 import { AlertasCliente } from '@/componentes/compliance/AlertasCliente';
 import { InvestigacoesCliente } from '@/componentes/compliance/casos-comum';
+import { SeccaoControloCredito } from '@/componentes/compliance/ControloCreditoCompliance';
 
 function Seccao({ titulo, descricao, accao, children, icone: Icone }: { titulo: string; descricao?: string; accao?: ReactNode; children: ReactNode; icone?: typeof Gauge }) {
     return (
@@ -151,6 +152,8 @@ export default function ClienteCompliance() {
                 </div>
 
                 <div className="space-y-5">
+                    <SeccaoControloCredito cliente={{ id, nome: String(cliente.name) }} actor={actor} medidas={comp.dados.cas.decisoes.filter(d => d.client_id === id)} aoMudar={() => void comp.recarregar()} />
+
                     <ScreeningCliente linha={linha} scr={comp.dados.scr} actor={actor} registar={registar} decidir={decidir} aoMudar={() => void comp.recarregar()} />
 
                     <AlertasCliente alertas={comp.dados.alr.alertas.filter(a => a.client_id === id)} historico={comp.dados.alr.historico} nomeCliente={String(cliente.name)}

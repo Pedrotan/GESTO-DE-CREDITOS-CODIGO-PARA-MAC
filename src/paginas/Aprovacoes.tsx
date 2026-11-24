@@ -26,6 +26,7 @@ import type { InstallmentBalance } from '@/bibliotecas/liquidacao-prestacoes';
 import type { Credit } from '@/tipos/credito';
 import { ReestruturacoesPendentes } from '@/componentes/creditos/ReestruturacoesPendentes';
 import { ServicoControloAcesso } from '@/servicos/ServicoControloAcesso';
+import { AvisoComplianceCredito } from '@/componentes/compliance/ControloCreditoCompliance';
 
 // Aprovações de crédito: pedidos pendentes e histórico de decisões (quem decidiu, quando e porquê), com filtros
 // por período e estado, detalhes do pedido antes de decidir, exportação e relatórios mensais.
@@ -436,6 +437,7 @@ export default function Approvals() {
                             {decision ? `${decision.row.clientName} — ${formatCurrency(decision.row.amount)} (${decision.row.rate.toLocaleString('pt-BR')}%, ${decision.row.installments} prestações).` : ''}
                         </DialogDescription>
                     </DialogHeader>
+                    {decision?.kind === 'approve' && decision.row.clientId && <AvisoComplianceCredito clientId={decision.row.clientId} montante={decision.row.amount} />}
                     <div className="space-y-2">
                         <label className="text-sm font-semibold">{decision?.kind === 'reject' ? 'Motivo da rejeição (obrigatório)' : 'Observações (opcional)'}</label>
                         <Textarea value={reason} onChange={event => setReason(event.target.value)} rows={3}
